@@ -175,8 +175,7 @@ impl Tool for AgentCreateTool {
         invocation: &ToolInvocation,
         output: &mut ToolEmitter<&mut dyn Write>,
     ) -> ToolResult<()> {
-        let value = serde_json::from_str::<serde_json::Value>(invocation.input())
-            .map_err(|_error| ToolError::invalid("invalid json input"))?;
+        let value = invocation.json()?;
         let object = value
             .as_object()
             .ok_or_else(|| ToolError::invalid("input must be a json object"))?;

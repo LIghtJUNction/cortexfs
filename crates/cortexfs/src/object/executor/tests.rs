@@ -29,7 +29,7 @@ use super::{
     serialized_agent_messages, spawn_child_stderr_reader, split_object_args,
     token_usage_from_value, tool_call_from_text, transport_allows_unauthenticated,
     trim_tool_result, validate_agent_tsh_args, wait_for_curl_json_output,
-    write_model_text_or_tool_call,
+    write_model_text_or_tool_call, write_model_usage,
 };
 use cortexfs::{
     AgentPromptContext, AgentWindowBudget, AgentWindowSetting, DEFAULT_AGENT_PROMPT_TEMPLATE,

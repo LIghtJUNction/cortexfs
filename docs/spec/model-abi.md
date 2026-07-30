@@ -105,7 +105,7 @@ Control files:
 id       provider-native model id or runtime-internal model id
 driver   driver route table; see below
 cap      capability list, one per line
-effort   provider-neutral reasoning effort: auto, low, medium, high, or xhigh
+effort   provider-neutral reasoning effort: auto, none, low, medium, high, xhigh, or max
 default  default parameters, KEY=VALUE, one per line
 fallback ordered fallback model chain, one provider/model name per line
 limit    maximum hard context size in tokens, or unknown
@@ -493,6 +493,10 @@ Example:
 {"type":"usage","run":"r1","input_tokens":10,"output_tokens":1}
 {"type":"done","run":"r1","status":"ok"}
 ```
+
+`usage` requires `input_tokens` and `output_tokens`. When reported by a
+provider, optional `cached_tokens` and `cache_write_tokens` record cache reads
+and writes without changing those totals.
 
 Error example:
 

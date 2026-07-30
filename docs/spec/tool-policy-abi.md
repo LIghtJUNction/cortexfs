@@ -353,8 +353,93 @@ filtered memory projection instead of the raw durable directories. The
 projection must preserve object ABI shape and must not create durable files as
 an authorization side effect.
 
-stdin/stdout is the main tool interface. `schema` describes input and output.
-It does not grant permission.
+stdin/stdout is the main tool interface. `schema` is the tool's input JSON
+Schema. It does not grant permission and is not a claim about result shape.
+
+## Programmatic Tool Calling
+
+Programmatic tool calling is **not enabled** in the current ABI. CortexFS must
+not advertise an OpenAI `programmatic_tool_calling` tool, set
+`allowed_callers`, or treat `schema` as an `output_schema`. The existing
+single-call host loop remains the only executable-agent tool protocol.
+
+Before enablement, a tool needs an explicit, default-deny programmatic
+declaration. The optional `tool/<name>.d/program` control is the tool author's
+`readonly`/deterministic claim and one valid JSON Schema for a successful
+result, for example:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false
+}
+```
+
+The claim is explicit, not inferred from policy, name, or input schema. It
+does not grant permission, bypass approval, or make a tool direct-native.
+A missing, malformed, non-object, or schema-invalid control makes the tool
+ineligible.
+
+This control is accepted and validated by object install, layout inspection,
+and bootstrap, but is reserved for the future protocol. No request builder may
+consume it until the continuation and audit requirements below exist.
+
+### Enablement Contract
+
+Only a provider/model route which explicitly supports PTC may receive the
+hosted `programmatic_tool_calling` tool. Its `allowed_callers` may name only
+functions that pass all of these gates for this run:
+
+- the route and selected model declare PTC support;
+- `tool/<name>.d/program` is valid and its output Schema is bounded by the
+  normal control limits;
+- the tool is declared, resolves through `CTX_PATH`, and passes the normal
+  effective-authority checks; and
+- the effective run approval mode is `auto` (a tool that would require `Ask`
+  is ineligible), and the tool has no side effect or external write.
+
+The host must default to ordinary native tool calling when any gate is absent;
+it must never infer eligibility from a tool name, policy, input Schema, or MCP
+origin. The client-owned call interface remains host-owned: a generated
+program has no process, socket, filesystem, or direct-native authority.
+
+An enabled implementation must preserve the provider response's bounded,
+opaque continuation facts: response identity, program item identity, each
+nested `call_id`, and its exact opaque `caller` linkage. The durable audit
+chain associates those facts with the host-owned request, authorization
+decision, normalized tool result, and the continuation that consumed it. It
+uses fields on existing host-owned facts, not a new CortexFS root namespace or
+stable event type. Stateless/manual continuation retains the bounded request
+and output history needed to replay the same provider continuation; provider
+identifiers and caller values are not parsed as CortexFS authority.
+
+Every generated nested call is serial and re-enters declared-name, `CTX_PATH`,
+policy, Linux/mount, nofollow, sandbox, cancellation, and a defensive `Ask`
+check for an unexpected policy transition before execution. That check cannot
+make an otherwise ineligible tool PTC-eligible. It never executes directly.
+The host validates the normalized result against the declared program output
+Schema before returning the exact provider `call_id` and opaque `caller` in
+`function_call_output`. Only then may it issue the matching bounded
+`program_output` continuation.
+`program_output` is not the final assistant response: the final assistant
+message is separately parsed, authorized as ordinary model output, recorded,
+and evaluated.
+
+The following cases fail closed before a continuation or final success is
+accepted:
+
+| Condition | Required result |
+| --- | --- |
+| Unsupported model, missing/invalid program control, side-effecting tool, or approval-sensitive tool | Do not advertise it to PTC; use the ordinary host loop. |
+| Malformed/oversize program item, `caller`, `call_id`, or continuation identity | Reject the provider turn; do not execute a tool. |
+| Duplicate program or nested call id | Reject before authorization; do not execute twice. |
+| Cancellation before, during, or after a nested call | Stop the prepared work, record cancellation, and send no further continuation. |
+| Unexpected `Ask` requirement or `Ask` rejection, timeout, EOF, or malformed decision | Reject as PTC-ineligible, record the host-owned denial, and do not return a successful function result or continue the program. |
+| Tool failure or output that fails the program Schema | Record the normalized failure; do not emit `program_output`. |
+| Invalid `program_output` or invalid/final assistant message | Reject that artifact independently; neither artifact validates the other. |
+
+These are pre-enable requirements, not a claim that the current runtime,
+provider adapters, or audit store implement PTC.
 
 Execution visibility and permission are decided by all of:
 

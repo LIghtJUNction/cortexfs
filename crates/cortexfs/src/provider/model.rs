@@ -138,6 +138,8 @@ impl std::fmt::Display for ModelContextLimit {
 pub enum ModelEffort {
     /// Use provider/implementation default.
     Auto,
+    /// Disable optional reasoning effort.
+    None,
     /// Use low effort.
     Low,
     /// Use medium effort.
@@ -146,16 +148,20 @@ pub enum ModelEffort {
     High,
     /// Use extra-high effort.
     XHigh,
+    /// Use maximum effort when the provider supports it.
+    Max,
 }
 
 impl std::fmt::Display for ModelEffort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::Auto => write!(f, "auto"),
+            Self::None => write!(f, "none"),
             Self::Low => write!(f, "low"),
             Self::Medium => write!(f, "medium"),
             Self::High => write!(f, "high"),
             Self::XHigh => write!(f, "xhigh"),
+            Self::Max => write!(f, "max"),
         }
     }
 }
@@ -166,10 +172,12 @@ impl std::str::FromStr for ModelEffort {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(match value {
             "auto" => Self::Auto,
+            "none" => Self::None,
             "low" => Self::Low,
             "medium" => Self::Medium,
             "high" => Self::High,
             "xhigh" => Self::XHigh,
+            "max" => Self::Max,
             _ => return Err("unsupported effort"),
         })
     }
@@ -197,10 +205,12 @@ impl ModelEffort {
     pub fn as_control_value(self) -> &'static str {
         match self {
             Self::Auto => "auto\n",
+            Self::None => "none\n",
             Self::Low => "low\n",
             Self::Medium => "medium\n",
             Self::High => "high\n",
             Self::XHigh => "xhigh\n",
+            Self::Max => "max\n",
         }
     }
 }
@@ -415,10 +425,12 @@ mod tests {
     #[test]
     fn model_effort_accepts_known_values() {
         assert_eq!(ModelEffort::parse("auto"), Some(ModelEffort::Auto));
+        assert_eq!(ModelEffort::parse("none"), Some(ModelEffort::None));
         assert_eq!(ModelEffort::parse("low"), Some(ModelEffort::Low));
         assert_eq!(ModelEffort::parse("medium"), Some(ModelEffort::Medium));
         assert_eq!(ModelEffort::parse("high"), Some(ModelEffort::High));
         assert_eq!(ModelEffort::parse("xhigh"), Some(ModelEffort::XHigh));
+        assert_eq!(ModelEffort::parse("max"), Some(ModelEffort::Max));
         assert_eq!(ModelEffort::parse(""), Some(ModelEffort::Auto));
         assert_eq!(ModelEffort::parse("bad"), None);
     }

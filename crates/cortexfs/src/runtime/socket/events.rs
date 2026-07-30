@@ -179,23 +179,12 @@ enum AgentTerminal<'a> {
     },
 }
 
-struct AgentToolResult {
-    call: String,
-    name: Option<String>,
-    content: String,
-}
-
 pub(crate) struct AgentFrameBatch<'a> {
-    approvals: Vec<&'a str>,
-    tools: Vec<AgentToolResult>,
     terminal: Option<AgentTerminal<'a>>,
 }
 
 impl<'a> AgentFrameBatch<'a> {
     pub(crate) fn parse(run_id: &str, frames: &'a [String]) -> Self {
-        let mut approvals = Vec::new();
-        let mut calls = Vec::new();
-        let mut tools = Vec::new();
         let mut assistant = String::new();
         let mut error = None;
         let mut done = None;
@@ -208,17 +197,7 @@ impl<'a> AgentFrameBatch<'a> {
             if value.get("run").and_then(Value::as_str) != Some(run_id) {
                 continue;
             }
-            if event == Some("tool_call")
-                && let (Some(id), Some(name)) = (
-                    value.get("id").and_then(Value::as_str),
-                    value.get("name").and_then(Value::as_str),
-                )
-            {
-                calls.push((id.to_owned(), name.to_owned()));
-            }
-            push_tool_results(&mut tools, &value);
             match event {
-                Some("approval_request" | "approval_result") => approvals.push(frame.as_str()),
                 Some("error")
                     if value.get("recoverable").and_then(Value::as_bool) != Some(true) =>
                 {
@@ -232,14 +211,6 @@ impl<'a> AgentFrameBatch<'a> {
                 _ => push_assistant_text(&mut assistant, &value),
             }
         }
-        for tool in &mut tools {
-            if tool.name.is_none() {
-                tool.name = calls
-                    .iter()
-                    .find(|call| call.0 == tool.call)
-                    .map(|call| call.1.clone());
-            }
-        }
         let terminal = done.and_then(|(done, success)| {
             if success {
                 Some(AgentTerminal::Success {
@@ -250,35 +221,7 @@ impl<'a> AgentFrameBatch<'a> {
                 error.map(|error| AgentTerminal::Error { error, done })
             }
         });
-        Self {
-            approvals,
-            tools,
-            terminal,
-        }
-    }
-
-    pub(crate) fn record(
-        &self,
-        session_dir: &Path,
-        run_id: &str,
-    ) -> Result<(), SocketSessionRecordError> {
-        if !self.approvals.is_empty() {
-            require_socket_session_files(session_dir)?;
-            append_session_lines(session_dir, "events.jsonl", &self.approvals)?;
-        }
-        for tool in &self.tools {
-            let Some(name) = tool.name.as_deref() else {
-                continue;
-            };
-            record_tool_execution_result_to_session(
-                session_dir,
-                run_id,
-                &tool.call,
-                name,
-                &tool.content,
-            )?;
-        }
-        Ok(())
+        Self { terminal }
     }
 
     pub(crate) fn settle(
@@ -329,32 +272,16 @@ impl<'a> AgentFrameBatch<'a> {
     }
 }
 
-fn push_tool_results(tools: &mut Vec<AgentToolResult>, value: &Value) {
-    if value.get("type").and_then(Value::as_str) != Some("message")
-        || value.get("role").and_then(Value::as_str) != Some("tool")
-    {
-        return;
-    }
-    let name = value.get("name").and_then(Value::as_str).map(str::to_owned);
-    let Some(parts) = value.get("content").and_then(Value::as_array) else {
-        return;
-    };
-    for part in parts {
-        if part.get("type").and_then(Value::as_str) == Some("tool_result")
-            && let Some(call) = part.get("tool_call_id").and_then(Value::as_str)
-        {
-            let content = part.get("content").map_or_else(String::new, |content| {
-                content
-                    .as_str()
-                    .map_or_else(|| content.to_string(), str::to_owned)
-            });
-            tools.push(AgentToolResult {
-                call: call.to_owned(),
-                name: name.clone(),
-                content,
-            });
-        }
-    }
+pub(crate) fn record_tool_approval_frames(
+    session_dir: &Path,
+    frames: &[String; 2],
+) -> Result<(), SocketSessionRecordError> {
+    require_socket_session_files(session_dir)?;
+    append_session_lines(
+        session_dir,
+        "events.jsonl",
+        &[frames[0].as_str(), frames[1].as_str()],
+    )
 }
 
 fn push_assistant_text(output: &mut String, value: &Value) {

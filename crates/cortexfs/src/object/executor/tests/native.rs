@@ -1,5 +1,5 @@
 #[test]
-fn session_loaded_or_declared_native_tool_executes_without_bypassing_policy()
+fn only_declared_native_tool_executes_without_bypassing_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let (root, bash_control) = agent_tool_fixture("loaded-native-tool", "bash")?;
     let control = root.join("agent/coder.d");
@@ -42,8 +42,10 @@ fn session_loaded_or_declared_native_tool_executes_without_bypassing_policy()
     let session_state = cortexfs::tsh_context_state_path(&view.home().join("session/default"));
     cortexfs::write_tsh_context_state(&session_state, &state)?;
 
-    let after_session_load = execute_prepared_agent_tool_call(&config, &call)?;
-    assert_eq!(after_session_load, "loaded-direct");
+    let after_session_load = execute_prepared_agent_tool_call(&config, &call);
+    assert!(
+        matches!(after_session_load, Err(ref error) if error.message().contains("declare it in the agent tools control"))
+    );
 
     fs::write(control.join("tools"), "bash\n")?;
     let after_declaration = execute_prepared_agent_tool_call(&config, &call)?;

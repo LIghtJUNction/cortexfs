@@ -194,7 +194,7 @@ fn call_provider_driver(
                 effort,
             };
             stream_or_complete(
-                call_openai_chat_streaming(&route.transport, &request, run, stdout),
+                OpenAiStreamApi::Chat.call_streaming(&route.transport, &request, run, stdout),
                 || call_openai_chat(&route.transport, &request, run),
                 run,
                 stdout,
@@ -210,7 +210,7 @@ fn call_provider_driver(
                 effort,
             };
             stream_or_complete(
-                call_openai_responses_streaming(&route.transport, &request, run, stdout),
+                OpenAiStreamApi::Responses.call_streaming(&route.transport, &request, run, stdout),
                 || call_openai_responses(&route.transport, &request, run),
                 run,
                 stdout,
@@ -245,10 +245,7 @@ fn stream_or_complete(
                 ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
             })
         }
-        Err(error) => Err(ProviderCompletionError {
-            message: error.message,
-            can_fallback: error.can_fallback,
-        }),
+        Err(error) => Err(error),
     }
 }
 pub(crate) fn openai_api_key<'a>(

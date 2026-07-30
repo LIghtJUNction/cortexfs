@@ -25,7 +25,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V1: &str = "cortexfs.object/v1";
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V2: &str = "cortexfs.object/v2";
 const MAX_OBJECT_MANIFEST_BYTES: u64 = 1024 * 1024;
-const TOOL_INSTALL_CONTROLS: &[&str] = &["description", "schema", "cap", "policy", "mcp"];
+const TOOL_INSTALL_CONTROLS: &[&str] =
+    &["description", "schema", "program", "cap", "policy", "mcp"];
 const TOOL_REQUIRED_CONTROLS: &[&str] = &["description", "schema", "cap", "policy"];
 const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "owner",
@@ -995,18 +996,19 @@ mod tests {
         assert!(unknown.is_err());
 
         let (_root, executable, digest) = fixture()?;
-        let mut value: serde_json::Value =
+        let mut manifest: ObjectManifest =
             serde_json::from_str(&tool_manifest(&executable, &digest))?;
-        value
-            .get_mut("controls")
-            .and_then(serde_json::Value::as_object_mut)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing controls"))?
-            .insert(
-                "status".to_owned(),
-                serde_json::Value::String("idle".to_owned()),
-            );
-        let manifest: ObjectManifest = serde_json::from_value(value)?;
+        manifest
+            .controls
+            .insert("status".to_owned(), "idle".to_owned());
         assert!(validate_manifest(&manifest).is_err());
+        manifest.controls.remove("status");
+        for (program, valid) in [(r#"{"type":"object"}"#, true), ("{", false)] {
+            manifest
+                .controls
+                .insert("program".to_owned(), program.to_owned());
+            assert_eq!(validate_manifest(&manifest).is_ok(), valid);
+        }
 
         let mut missing: ObjectManifest =
             serde_json::from_str(&tool_manifest(&executable, &digest))?;

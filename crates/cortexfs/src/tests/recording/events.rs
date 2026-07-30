@@ -14,7 +14,7 @@ fn session(name: &str, state: &str) -> (TestDir, PathBuf) {
 }
 
 #[test]
-fn batch_filters_runs_and_resolves_late_tool_calls() {
+fn batch_filters_runs_and_ignores_approval_frames() {
     let (_root, session) = session("agent-frame-batch", "active");
     let frames = [
         r#"{"type":"tool_call","run":"other","id":"call-1","name":"bad.tool"}"#,
@@ -32,7 +32,6 @@ fn batch_filters_runs_and_resolves_late_tool_calls() {
     ]
     .map(str::to_owned);
     let batch = crate::runtime::socket::events::AgentFrameBatch::parse("run-1", &frames);
-    assert_eq!(batch.record(&session, "run-1"), Ok(()));
     assert_eq!(batch.settle(&session, "run-1"), Ok(true));
 
     let events = ok!(fs::read_to_string(session.join("events.jsonl")));
@@ -41,11 +40,8 @@ fn batch_filters_runs_and_resolves_late_tool_calls() {
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .filter_map(|value| value.get("type")?.as_str().map(str::to_owned))
         .collect::<Vec<_>>();
-    assert_eq!(
-        types,
-        ["start", "approval_request", "message", "message", "done"]
-    );
-    assert!(events.contains("\"name\":\"fs.read\""));
+    assert_eq!(types, ["start", "message", "done"]);
+    assert!(!events.contains("\"name\":\"fs.read\""));
     assert!(!events.contains("bad.tool") && !events.contains("foreign-approval"));
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     let messages = ok!(fs::read_to_string(session.join("messages.jsonl")));
@@ -53,7 +49,7 @@ fn batch_filters_runs_and_resolves_late_tool_calls() {
 }
 
 #[test]
-fn cancelled_batch_records_facts_without_settling() {
+fn cancelled_batch_does_not_settle() {
     let (_root, session) = session("agent-frame-cancel", "cancelled");
     let frames = [
         r#"{"type":"approval_request","run":"run-1","id":"approval-1","name":"tsh","args":[]}"#,
@@ -63,17 +59,16 @@ fn cancelled_batch_records_facts_without_settling() {
     ]
     .map(str::to_owned);
     let batch = crate::runtime::socket::events::AgentFrameBatch::parse("run-1", &frames);
-    assert_eq!(batch.record(&session, "run-1"), Ok(()));
-
+    assert_eq!(batch.settle(&session, "run-1"), Ok(false));
     assert_file_text(&session.join("state"), "cancelled\n");
     let events = ok!(fs::read_to_string(session.join("events.jsonl")));
-    assert!(events.contains("approval-1") && events.contains("\"name\":\"fs.read\""));
+    assert!(!events.contains("approval-1") && !events.contains("\"name\":\"fs.read\""));
     assert!(!events.contains("\"status\":\"ok\""));
     assert!(inspect_event_stream_jsonl(&events).is_ok());
 }
 
 #[test]
-fn recording_failure_stops_before_terminal() {
+fn batch_ignores_tool_and_approval_results_before_terminal_settlement() {
     let (_root, session) = session("agent-frame-error", "active");
     let frames = [
         r#"{"type":"approval_request","run":"run-1","id":"approval-1","name":"tsh","args":[]}"#,
@@ -82,14 +77,11 @@ fn recording_failure_stops_before_terminal() {
     ]
     .map(str::to_owned);
     let batch = crate::runtime::socket::events::AgentFrameBatch::parse("run-1", &frames);
-    assert_eq!(
-        batch.record(&session, "run-1"),
-        Err(SocketSessionRecordError::InvalidField("tool"))
-    );
-    assert_file_text(&session.join("state"), "active\n");
+    assert_eq!(batch.settle(&session, "run-1"), Ok(true));
+    assert_file_text(&session.join("state"), "done\n");
     let events = ok!(fs::read_to_string(session.join("events.jsonl")));
-    assert!(events.contains("approval-1"));
-    assert!(!events.contains("\"type\":\"done\""));
+    assert!(!events.contains("approval-1") && !events.contains("bad/tool"));
+    assert!(events.contains("\"type\":\"done\""));
     assert!(inspect_event_stream_jsonl(&events).is_ok());
 }
 
@@ -106,7 +98,6 @@ fn batch_uses_last_done_and_nonrecoverable_error() {
     ]
     .map(str::to_owned);
     let batch = crate::runtime::socket::events::AgentFrameBatch::parse("run-1", &frames);
-    assert_eq!(batch.record(&session, "run-1"), Ok(()));
     assert_eq!(batch.settle(&session, "run-1"), Ok(true));
 
     assert_file_text(&session.join("state"), "error\n");
