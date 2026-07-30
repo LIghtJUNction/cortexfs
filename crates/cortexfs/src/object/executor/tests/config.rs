@@ -536,23 +536,41 @@ fn provider_targets_share_effective_v1_base_normalization() {
 
 #[test]
 fn responses_function_call_becomes_canonical_tool_call() {
-    let output = serde_json::json!({"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}).to_string();
-    let value: serde_json::Value =
-        serde_json::from_str(&parse_openai_response_content(output.as_bytes()).unwrap_or_default())
-            .unwrap_or_default();
+    let output = br#"{"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}"#;
     assert_eq!(
-        value.pointer("/arguments/args/0"),
-        Some(&serde_json::json!("tools"))
+        parse_openai_response_content(output),
+        Ok(
+            r#"{"arguments":{"args":["tools"]},"id":"call_123","name":"tsh","type":"tool_call"}"#
+                .to_owned()
+        )
     );
 }
 
 #[test]
-fn provider_tool_call_parser_rejects_undeclarable_function_names() {
+fn provider_tool_call_parser_rejects_undeclarable_function_names_or_program_items() {
+    for item in [
+        r#"{"type":"program"}"#,
+        r#"{"type":"program_output"}"#,
+        r#"{"type":"function_call","caller":"prog_123"}"#,
+    ] {
+        assert_eq!(
+            parse_openai_response_content(
+                format!(r#"{{"output_text":"ignored","output":[{item}]}}"#).as_bytes(),
+            ),
+            Err("provider response requires host-owned program continuation".to_owned())
+        );
+    }
     let chat = serde_json::json!({"choices":[{"message":{"tool_calls":[{"id":"call_1","function":{"name":"shell.exec","arguments":"{\"args\":[\"date\"]}"}}]}}]}).to_string();
     let responses = serde_json::json!({"output":[{"type":"function_call","call_id":"call_1","name":"shell.exec","arguments":"{\"args\":[\"date\"]}"}]}).to_string();
     for result in [
         parse_openai_chat_content(chat.as_bytes()),
         parse_openai_response_content(responses.as_bytes()),
+        parse_openai_chat_content(br#"{"choices":[{"message":{"tool_calls":[{"function":{"name":"tsh","arguments":"{\"args\":[\"date\"]}"}}]}}]}"#),
+        parse_openai_chat_content(br#"{"choices":[{"message":{"tool_calls":[{"id":"call/invalid","function":{"name":"tsh","arguments":"{\"args\":[\"date\"]}"}}]}}]}"#),
+        parse_openai_response_content(br#"{"output":[{"type":"function_call","name":"tsh","arguments":"{\"args\":[\"date\"]}"}]}"#),
+        parse_openai_response_content(br#"{"output":[{"type":"function_call","id":"call_compat","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}"#),
+        parse_openai_response_content(br#"{"output":[{"type":"function_call","call_id":"call/invalid","id":"call_compat","name":"tsh","arguments":"{\"args\":[\"date\"]}"}]}"#),
+        parse_openai_response_content(br#"{"output":[{"type":"function_call","id":"call/invalid","name":"tsh","arguments":"{\"args\":[\"date\"]}"}]}"#),
     ] {
         assert_eq!(result, Err("provider response missing content".to_owned()));
     }

@@ -80,10 +80,7 @@ pub(crate) fn prepare_agent_tool_call(
     .is_ok();
     if tool_call.name == "tsh" {
         validate_agent_tsh_args(&tool_call.args)?;
-    } else if !view.declared_tools().contains(&tool_call.name)
-        && !cortexfs::tsh_context_contains(&context_path, &tool_call.name)
-            .map_err(|error| ExecError::new(format!("cannot read session tool context: {error}")))?
-    {
+    } else if !view.declared_tools().contains(&tool_call.name) {
         return Err(ExecError::new(format!(
             "unsupported native tool {}; declare it in the agent tools control",
             tool_call.name

@@ -3,11 +3,19 @@ use serde_json::json;
 use super::*;
 use serde_json::Value;
 
+use crate::provider::openai_response_item_requires_continuation;
 use cortexfs::is_object_name;
 
 pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
     let value = serde_json::from_slice::<Value>(output)
         .map_err(|error| format!("invalid provider json: {error}"))?;
+    openai_chat_finish_reason(&value)?;
+    if let Some(tool_call) = value
+        .pointer("/choices/0/message/tool_calls/0")
+        .and_then(openai_chat_tool_call_content)
+    {
+        return Ok(tool_call);
+    }
     if let Some(content) = value
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
@@ -16,21 +24,24 @@ pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String>
     {
         return Ok(content.to_owned());
     }
-    if let Some(tool_call) = value
-        .pointer("/choices/0/message/tool_calls/0")
-        .and_then(openai_chat_tool_call_content)
-    {
-        return Ok(tool_call);
-    }
     Err("provider response missing content".to_owned())
+}
+pub(crate) fn openai_chat_finish_reason(value: &Value) -> Result<Option<&str>, String> {
+    let reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.trim().is_empty());
+    if let Some(reason @ ("length" | "content_filter")) = reason {
+        return Err(format!("provider response finished with {reason}"));
+    }
+    Ok(reason)
 }
 pub(crate) fn openai_chat_tool_call_content(value: &Value) -> Option<String> {
     let function = value.get("function")?;
     let id = value
         .get("id")
         .and_then(Value::as_str)
-        .filter(|id| is_object_name(id))
-        .unwrap_or("call-1");
+        .filter(|id| is_object_name(id))?;
     canonical_tool_call(
         function.get("name")?.as_str()?,
         id,
@@ -53,31 +64,37 @@ pub(crate) fn openai_chat_tool_call_args(arguments: &Value) -> Option<Vec<String
 pub(crate) fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
     let value = serde_json::from_slice::<Value>(output)
         .map_err(|error| format!("invalid provider json: {error}"))?;
+    if let Some((path, status)) = match value.get("status").and_then(Value::as_str) {
+        Some(status @ ("failed" | "cancelled")) => Some(("/error/message", status)),
+        Some("incomplete") => Some(("/incomplete_details/reason", "incomplete")),
+        _ => None,
+    } {
+        return Err(value
+            .pointer(path)
+            .and_then(Value::as_str)
+            .map_or_else(|| format!("provider response {status}"), str::to_owned));
+    }
+    let items: &[Value] = value
+        .get("output")
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice);
+    if items.iter().any(openai_response_item_requires_continuation) {
+        return Err("provider response requires host-owned program continuation".to_owned());
+    }
+    if let Some(tool_call) = items.iter().find_map(openai_response_tool_call_content) {
+        return Ok(tool_call);
+    }
     if let Some(text) = value.get("output_text").and_then(Value::as_str)
         && !text.is_empty()
     {
         return Ok(text.to_owned());
     }
-    if let Some(tool_call) = value
-        .get("output")
-        .and_then(Value::as_array)
-        .and_then(|items| items.iter().find_map(openai_response_tool_call_content))
-    {
-        return Ok(tool_call);
-    }
-    let content = text_parts(
-        value
-            .get("output")
+    let content = text_parts(items.iter().flat_map(|item| {
+        item.get("content")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .flat_map(|item| {
-                item.get("content")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-            }),
-    );
+    }));
     if content.is_empty() {
         Err("provider response missing content".to_owned())
     } else {
@@ -90,10 +107,8 @@ pub(crate) fn openai_response_tool_call_content(value: &Value) -> Option<String>
     }
     let id = value
         .get("call_id")
-        .or_else(|| value.get("id"))
         .and_then(Value::as_str)
-        .filter(|id| is_object_name(id))
-        .unwrap_or("call-1");
+        .filter(|id| is_object_name(id))?;
     canonical_tool_call(value.get("name")?.as_str()?, id, value.get("arguments")?)
 }
 fn canonical_tool_call(name: &str, id: &str, arguments: &Value) -> Option<String> {
@@ -119,15 +134,13 @@ pub(crate) fn parse_anthropic_message_content(output: &[u8]) -> Result<String, S
         Ok(output)
     }
 }
-fn text_parts<'a>(parts: impl Iterator<Item = &'a Value>) -> String {
+pub(crate) fn text_parts<'a>(parts: impl Iterator<Item = &'a Value>) -> String {
     parts
-        .filter(|part| {
-            matches!(
-                part.get("type").and_then(Value::as_str),
-                Some("output_text" | "text")
-            )
+        .filter_map(|part| match part.get("type").and_then(Value::as_str) {
+            Some("output_text" | "text") => part.get("text").and_then(Value::as_str),
+            Some("refusal") => part.get("refusal").and_then(Value::as_str),
+            _ => None,
         })
-        .filter_map(|part| part.get("text").and_then(Value::as_str))
         .collect()
 }
 pub(crate) fn parse_provider_usage(output: &[u8]) -> Result<Option<TokenUsage>, String> {
@@ -153,6 +166,14 @@ pub(crate) fn token_usage_from_value(value: &Value) -> Option<TokenUsage> {
                 .get("output_tokens")
                 .or_else(|| value.get("completion_tokens"))?
                 .as_u64()?,
+            cached_tokens: value
+                .pointer("/input_tokens_details/cached_tokens")
+                .or_else(|| value.pointer("/prompt_tokens_details/cached_tokens"))
+                .and_then(Value::as_u64),
+            cache_write_tokens: value
+                .pointer("/input_tokens_details/cache_write_tokens")
+                .or_else(|| value.pointer("/prompt_tokens_details/cache_write_tokens"))
+                .and_then(Value::as_u64),
         })
     })
 }

@@ -150,62 +150,50 @@ fn agent_model_process_timeout_kills_process_group() -> Result<(), Box<dyn std::
 
 #[test]
 fn agent_model_output_rejects_oversized_frame() -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_dir("runner-agent-model-oversized-frame")?;
-    let model = root.join("model-script");
-    write_executable_script(
-        &model,
-        format!(
+    assert_model_overflow(
+        "agent_model_output_rejects_oversized_frame",
+        &format!(
             "#!/bin/sh\nhead -c {MAX_AGENT_MODEL_FRAME_BYTES} /dev/zero | tr '\\0' x\nprintf '\\n'\n"
         ),
-    )?;
-    let config = AgentModelRunConfig {
-        model_path: model,
-        ..test_agent_run_config()
-    };
-    let mut output = Vec::new();
-
-    let outcome = run_agent_model_once(&config, "hello", &mut output)?;
-
-    assert!(!outcome.success);
-    assert!(
-        outcome
-            .frames
-            .iter()
-            .any(|frame| frame.contains(r#""code":"EOVERFLOW""#))
-    );
-    let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""code":"EOVERFLOW""#));
-    let _ignored = fs::remove_dir_all(root);
-    Ok(())
+    )
 }
 
 #[test]
 fn agent_model_output_rejects_too_many_frames() -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_dir("runner-agent-model-too-many-frames")?;
-    let model = root.join("model-script");
-    write_executable_script(
-        &model,
-        format!(
+    assert_model_overflow(
+        "agent_model_output_rejects_too_many_frames",
+        &format!(
             "#!/bin/sh\ni=0\nwhile [ \"$i\" -le {MAX_AGENT_MODEL_FRAMES} ]; do printf '{{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"x\"}}\\n' \"$CTX_RUN_ID\"; i=$((i + 1)); done\n"
         ),
-    )?;
+    )
+}
+
+fn assert_model_overflow(case: &str, script: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir(case)?;
+    let model = root.join("model-script");
+    write_executable_script(&model, script)?;
     let config = AgentModelRunConfig {
         model_path: model,
         ..test_agent_run_config()
     };
     let mut output = Vec::new();
-
     let outcome = run_agent_model_once(&config, "hello", &mut output)?;
-
-    assert!(!outcome.success);
+    assert!(
+        !outcome.success,
+        "{case}: overflow run unexpectedly succeeded"
+    );
     assert!(
         outcome
             .frames
             .iter()
-            .any(|frame| frame.contains(r#""code":"EOVERFLOW""#))
+            .any(|frame| frame.contains(r#""code":"EOVERFLOW""#)),
+        "{case}: frames missing EOVERFLOW"
     );
     let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""code":"EOVERFLOW""#));
+    assert!(
+        output.contains(r#""code":"EOVERFLOW""#),
+        "{case}: output missing EOVERFLOW"
+    );
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }

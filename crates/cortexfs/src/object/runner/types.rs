@@ -60,9 +60,15 @@ impl ProviderCredential {
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "provider usage fields retain explicit token units at every call site"
+)]
 pub(crate) struct TokenUsage {
     pub(crate) input_tokens: u64,
     pub(crate) output_tokens: u64,
+    pub(crate) cached_tokens: Option<u64>,
+    pub(crate) cache_write_tokens: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ProviderTextCompletion {

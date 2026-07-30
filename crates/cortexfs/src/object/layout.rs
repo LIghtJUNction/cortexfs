@@ -280,22 +280,24 @@ pub(crate) fn inspect_tool_schema_control(
     control_dir: &Path,
     issues: &mut Vec<PathLayoutIssue>,
 ) {
-    with_object_control_file(
-        class,
-        ObjectClass::Tool,
-        control_dir,
-        "schema",
-        issues,
-        |content, issues| {
-            let path = format!("tool/{name}.d/schema");
-            let report = inspect_tool_schema_json(content);
-            let values = report
-                .issues()
-                .iter()
-                .map(|issue| issue.value().unwrap_or("").to_owned());
-            push_control_invalid_values(&path, values, issues);
-        },
-    );
+    for file in ["schema", "program"] {
+        with_object_control_file(
+            class,
+            ObjectClass::Tool,
+            control_dir,
+            file,
+            issues,
+            |content, issues| {
+                let path = format!("tool/{name}.d/{file}");
+                let report = inspect_tool_schema_json(content);
+                let values = report
+                    .issues()
+                    .iter()
+                    .map(|issue| issue.value().unwrap_or("").to_owned());
+                push_control_invalid_values(&path, values, issues);
+            },
+        );
+    }
 }
 
 pub(crate) fn inspect_agent_control_files(

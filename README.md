@@ -14,27 +14,41 @@
   <a href="https://github.com/LIghtJUNction/cortexfs/blob/main/Cargo.toml"><img alt="MIT license metadata" src="https://img.shields.io/badge/license-MIT-2A8F73"></a>
 </p>
 
-**Your agent runtime shouldn’t hide inside a database.**
+<p align="center">
+  <a href="https://lightjunction.github.io/cortexfs/">docs</a> · <a href="#quick-start">quick start</a> · <a href="docs/spec/README.md">specification</a> · <a href="docs/architecture.md">architecture</a> · <a href="docs/assets/cortexfs-demo.mp4">demo</a>
+</p>
+
+**One obvious tool path. Everything else stays inspectable.**
 
 CortexFS is a FUSE filesystem for agent runtimes. It mounts models, agents,
 tools, and durable sessions at `/ctx` — a small Unix filesystem interface you
 can `ls`, `cat`, execute, secure, and audit.
 
-CortexFS exposes exactly three executable object classes: `model` is pure
-inference, `agent` is a policy-bound orchestrator, and `tool` is an executable
-capability endpoint. Sessions are ordinary files, not a fourth executable
-object class. Raw `messages.jsonl` and `events.jsonl` history is durable; prompt
-context is disposable and rebuildable.
+- **One native tool by default.** Agents use `tsh`; it discovers only the
+  policy-permitted tools in their filesystem view.
+- **Host-owned execution.** The host serializes calls, rechecks authority, and
+  returns a canonical result before an agent can continue.
+- **Durable, inspectable facts.** Sessions keep ordinary `messages.jsonl` and
+  `events.jsonl` history; prompt context can be rebuilt.
+- **Small, explicit authority.** Static direct-native declarations never grant
+  authority, and dynamic tool context never expands it.
 
-Within one session, retrying the same client ID with the same payload replays the
-recorded run instead of executing it again; conflicting payloads are rejected.
-Session GC archives by default, and permanent deletion requires
-`--delete --yes`.
+---
 
-The runtime stays directly inspectable while it works: see which model it is
-using, which files it can access, which tools it can execute, what its terminal
-is doing, and which state survives the session. Agents wake through systemd
-socket activation, so idle agents remain reachable without a polling loop.
+## Install
+
+On a supported systemd Linux distribution, install the downloaded source
+snapshot locally, then inspect the mounted runtime:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
+ctx status
+```
+
+The installer audits prerequisites and asks for typed confirmation before each
+mutation. Continue with the [quick start](#quick-start), or read the
+[getting-started guide](docs/getting-started.md) for supported systems,
+recovery, and the full runtime model.
 
 [Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
 
@@ -139,8 +153,10 @@ input 912 / output 184
 ```
 
 That is the intended surface: direct conversation with an agent file, direct
-model calls behind it, and tools that can be discovered, loaded, pinned, and
-invoked through the same filesystem view.
+model calls behind it, and one stable tool path. The agent calls `tsh`, receives
+the host-owned result, and then chooses its next action. `tsh` discovers,
+loads, pins, and invokes dynamic tools through the same filesystem view instead
+of exposing a sprawling native tool list.
 
 <p align="center">
   <a href="docs/assets/cortexfs-demo.mp4">
@@ -460,6 +476,17 @@ pinned so it stays available
 invoked from tsh
 called directly as a CLI-style CortexFS tool when policy allows it
 ```
+
+For agent tool calls, the default remains one native entry point: `tsh`.
+An agent may statically declare a small additional direct-native set, but every
+such call still passes fresh `CTX_PATH`, agent policy, tool policy, mount, Linux
+permission, schema, and nofollow checks. Dynamically discovered, loaded, pinned,
+or cached tools remain `tsh`-only; cache state is prompt context, never
+authority.
+
+OpenAI programmatic tool calling is deliberately disabled until CortexFS has its
+own continuation and audit ABI; ordinary native calls remain the only supported
+provider tool path. See the [tool-policy ABI](docs/spec/tool-policy-abi.md#programmatic-tool-calling).
 
 Human usage:
 

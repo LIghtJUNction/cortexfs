@@ -173,9 +173,9 @@ pub(crate) fn validate_tool_control_content(
     content: &str,
 ) -> Result<(), ObjectBootstrapError> {
     match file {
-        "schema" if inspect_tool_schema_json(content).is_ok() => Ok(()),
+        "schema" | "program" if inspect_tool_schema_json(content).is_ok() => Ok(()),
         "mcp" if object::mcp::validate_locator(content) => Ok(()),
-        "schema" | "mcp" => Err(ObjectBootstrapError::InvalidControlValue),
+        "schema" | "program" | "mcp" => Err(ObjectBootstrapError::InvalidControlValue),
         _ if !content.contains('\0') => Ok(()),
         _ => Err(ObjectBootstrapError::InvalidControlValue),
     }
