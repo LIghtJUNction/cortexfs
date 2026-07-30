@@ -19,30 +19,20 @@ pub(crate) fn authorize_agent_model_use(
     .map_err(|error| ExecError::with_io("cannot read agent policy", &error))?;
     let policy =
         PolicyV0::parse(&policy_text).map_err(|_error| ExecError::new("invalid agent policy"))?;
-    if policy.allows(
-        subject,
-        PolicyObjectClass::Model,
+    match authorize_model_use(
+        requested_model,
+        primary_model,
         selected_model,
-        PolicyPermission::Use,
+        ModelUseAuthority::new(subject, &policy),
     ) {
-        return Ok(());
-    }
-    if selected_model == primary_model && requested_model != selected_model {
-        if policy.allows(
-            subject,
-            PolicyObjectClass::Model,
-            requested_model,
-            PolicyPermission::Use,
-        ) {
-            return Ok(());
-        }
-        return Err(ExecError::new(format!(
+        Ok(()) => Ok(()),
+        Err(ModelUseDenial::PrimaryFallback) => Err(ExecError::new(format!(
             "agent policy denies requested model:{requested_model} use via selected primary:{selected_model}"
-        )));
+        ))),
+        Err(ModelUseDenial::Selected) => Err(ExecError::new(format!(
+            "agent policy denies model:{selected_model} use"
+        ))),
     }
-    Err(ExecError::new(format!(
-        "agent policy denies model:{selected_model} use"
-    )))
 }
 
 pub(crate) fn agent_debug_timing_start_unix_ms() -> Option<u128> {

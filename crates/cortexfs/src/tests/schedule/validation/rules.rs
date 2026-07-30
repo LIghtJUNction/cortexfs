@@ -394,3 +394,38 @@ allow planner_t agent:executor create
     assert_eq!(ready, []);
 }
 use super::*;
+
+#[derive(Debug)]
+struct FixedSchedulePolicy(bool);
+
+impl crate::PolicyEvaluator for FixedSchedulePolicy {
+    fn evaluate(
+        &self,
+        _subject: &str,
+        _class: PolicyObjectClass,
+        _name: &str,
+        _permission: PolicyPermission,
+    ) -> bool {
+        self.0
+    }
+}
+
+#[test]
+fn schedule_permissions_accept_replaceable_policy_evaluators() {
+    let schedule = r#"{
+      "version": 1,
+      "mode": "dag-react",
+      "nodes": [{
+        "id": "read",
+        "kind": "dag",
+        "agent": "planner",
+        "requires": [
+          {"class": "tool", "name": "fs.read", "permission": "execute"}
+        ]
+      }]
+    }"#;
+    assert!(inspect_agent_schedule_json(schedule, "custom_t", &FixedSchedulePolicy(true)).is_ok());
+    assert!(
+        !inspect_agent_schedule_json(schedule, "custom_t", &FixedSchedulePolicy(false)).is_ok()
+    );
+}

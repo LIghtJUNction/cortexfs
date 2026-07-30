@@ -1029,14 +1029,18 @@ fn create_run_provider_egress(
         }
         | AgentExecutableSocketExecution::Direct => return Err(SocketRuntimeError::CannotRunAgent),
     };
-    runtime::egress::ProviderEgress::create(
-        control_dir,
+    let plan = runtime::egress::ProviderEgressPlan::from_controls(
         runtime.ctx_root,
         runtime.model.ok_or(SocketRuntimeError::CannotRunAgent)?,
         runtime.env,
+        request.run_id,
+    )
+    .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    runtime::egress::ProviderEgress::create(
+        control_dir,
+        plan,
         runtime.identity.uid(),
         runtime.identity.gid(),
-        request.run_id,
     )
     .map(Some)
     .map_err(|_error| SocketRuntimeError::CannotRunAgent)

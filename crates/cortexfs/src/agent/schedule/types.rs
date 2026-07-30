@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::PolicyV0;
+use crate::PolicyEvaluator;
 
 /// Maximum number of nodes accepted in one parent-session hybrid schedule.
 pub const MAX_AGENT_SCHEDULE_NODES: usize = 1024;
@@ -286,7 +286,7 @@ pub(crate) struct SchedulePermissionJson {
 
 pub(crate) struct ScheduleInspectContext<'a> {
     pub(crate) parent_subject: &'a str,
-    pub(crate) parent_policy: &'a PolicyV0,
+    pub(crate) parent_policy: &'a dyn PolicyEvaluator,
 }
 
 #[derive(Default)]

@@ -954,7 +954,6 @@ fn stop_child_with(
     system().map_err(|_error| child_error("EIO", "child system socket cleanup conflict"))
 }
 
-/// Rolls back partially created child resources and returns the original failure.
 fn rollback_create<T>(
     paths: crate::agent::create::AgentCreatePaths,
     error: AgentChildCreateError,
@@ -979,7 +978,8 @@ fn require_child_lifecycle_authority(
     view: &crate::AgentRuntimeView,
     name: &str,
 ) -> ChildCreateResult<()> {
-    if !view.policy().allows(
+    let policy: &dyn crate::PolicyEvaluator = view.policy();
+    if !policy.evaluate(
         view.policy_subject(),
         crate::PolicyObjectClass::Tool,
         "agent.create",
@@ -1000,7 +1000,7 @@ fn require_child_lifecycle_authority(
             "parent policy denies child start",
         ),
     ] {
-        if !view.policy().allows(
+        if !policy.evaluate(
             view.policy_subject(),
             crate::PolicyObjectClass::Agent,
             name,

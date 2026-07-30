@@ -208,6 +208,18 @@ Alternative evaluators must be injected as already-loaded, host-owned policy
 state. A positive policy decision never bypasses principal, path, Linux, or
 mount checks, and any refusal still refuses.
 
+The boundary applies beyond tool execution. Schedule `requires` validation,
+post-routing model authorization, and named network egress gates consume
+`PolicyEvaluator`; only control-file adapters parse `PolicyV0`. Provider egress
+routing produces a validated immutable plan before the runtime allocates
+directories, sockets, relay threads, or upstream HTTP processes.
+
+Large modules follow the same ownership split. For example,
+`runtime/egress/{plan,secret,target}.rs` owns egress decisions while
+`runtime/egress.rs` owns relay lifetime, and
+`runtime/record/schedule/{record,complete,advance}.rs` owns schedule state
+transitions outside the child-channel receipt mechanism.
+
 ---
 
 ## 5. Error architecture

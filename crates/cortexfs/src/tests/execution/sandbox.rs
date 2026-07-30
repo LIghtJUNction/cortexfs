@@ -413,14 +413,17 @@ fn provider_egress_is_borrowed_across_agent_steps_and_cleans_up_after_run() {
             control_dir: Some(&control_dir),
         },
     };
-    let provider_egress = ok!(crate::runtime::egress::ProviderEgress::create(
-        &control_dir,
+    let egress_plan = ok!(crate::runtime::egress::ProviderEgressPlan::from_controls(
         &root,
         "fixture/chat",
         view.env(),
+        "run-1",
+    ));
+    let provider_egress = ok!(crate::runtime::egress::ProviderEgress::create(
+        &control_dir,
+        egress_plan,
         view.identity().uid(),
         view.identity().gid(),
-        "run-1",
     ));
     let host_dir = provider_egress.host_dir().to_path_buf();
     let (client, mut socket) = ok!(UnixStream::pair());

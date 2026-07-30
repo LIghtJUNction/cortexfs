@@ -5,7 +5,7 @@ use crate::*;
 pub(crate) fn parse_valid_agent_schedule_nodes(
     content: &str,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
 ) -> (Vec<AgentScheduleNode>, Vec<AgentScheduleIssue>) {
     let mut issues = Vec::new();
     if !is_object_name(parent_subject) {
@@ -59,7 +59,7 @@ pub(crate) fn parse_valid_agent_schedule_nodes(
 pub(crate) fn inspect_schedule_nodes(
     node_values: &[Value],
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
     issues: &mut Vec<AgentScheduleIssue>,
 ) -> Vec<AgentScheduleNode> {
     let mut nodes = Vec::new();
@@ -164,7 +164,7 @@ pub(crate) fn inspect_schedule_node(
     }
     if child.is_some()
         && let Some(agent) = agent.as_ref()
-        && !context.parent_policy.allows(
+        && !context.parent_policy.evaluate(
             context.parent_subject,
             PolicyObjectClass::Agent,
             agent,

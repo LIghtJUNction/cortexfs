@@ -27,8 +27,9 @@ use std::process::ExitCode;
 
 use cortexfs::{
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, AgentStopHandler, MountTable,
-    PolicyObjectClass, PolicyPermission, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
-    derive_agent_runtime_view, serve_agent_executable_socket_listener_once_with_stop,
+    NetworkConnectAuthority, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
+    authorize_network_connect, derive_agent_runtime_view,
+    serve_agent_executable_socket_listener_once_with_stop,
 };
 use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
@@ -93,12 +94,11 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid_or_root(view.identity().uid());
     let runtime_model = runtime_model(&config.source, view.model());
-    let network_allowed = view.policy().allows(
-        view.policy_subject(),
-        PolicyObjectClass::Network,
+    let network_allowed = authorize_network_connect(
         "default",
-        PolicyPermission::Connect,
-    );
+        NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
+    )
+    .is_ok();
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
