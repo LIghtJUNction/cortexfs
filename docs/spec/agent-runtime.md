@@ -7,6 +7,39 @@ the `tsh` tool shell, prompt construction, and sandbox execution.
 It does not add a root namespace. Everything here is derived from existing stable
 objects and files.
 
+## Definition, Instance, Session, And Run
+
+The word `agent` does not name one daemon. The runtime distinguishes four
+layers:
+
+```text
+definition  /ctx/agent/<name> + /ctx/agent/<name>.d/
+instance    supervisor unit and receipt-bound invocation
+session     /ctx/home/<uid>/agent/<name>/session/<session>/
+run         one run id recorded in that session's event stream
+```
+
+An Agent definition is durable configuration and policy. Starting it may create
+more than one process role: the system Agent socket service and an optional
+per-session terminal unit. Those processes are runtime instances; their unit,
+invocation, pid, identity, socket, and session facts are bound by launch
+receipts. The latest cleanup receipt may be projected in
+`agent/<name>.d/meta.json`, while durable `agent.start` and run events preserve
+correlation facts in ordinary logs and session history.
+
+A session is not a process and survives instance exit. A run is not a session
+and cannot silently acquire authority from previous runs. Restarting a runtime
+may resume a private or shared session without preserving a process identity.
+
+There is deliberately no parallel `instances/` control plane. systemd owns live
+process truth, receipt metadata proves which generation CortexFS may stop, and
+session files own durable history. Copying those facts into another mutable
+directory would introduce conflicting lifecycle authorities.
+
+The Agent socket and terminal socket are transports for an active instance.
+Their stable `/ctx` paths may be aliases to endpoints under `/run`, and their
+absence never deletes the Agent definition or a private/shared session.
+
 ## Runtime Surfaces
 
 There are three separate surfaces:

@@ -54,6 +54,68 @@ Mechanism enforces principal, path, mount, and Linux constraints; an injected
 policy evaluator may only further restrict that authority.
 ```
 
+## Identity, lifetime, and transport
+
+CortexFS uses four different identities. They must not be collapsed into an
+"agent daemon" or duplicated in a second lifecycle tree:
+
+| Layer | Stable identity | Owner |
+| --- | --- | --- |
+| Definition | `agent/<name>` + `agent/<name>.d/` | reference tree |
+| Runtime instance | supervisor unit + invocation receipt | runtime/supervisor |
+| Session | `home/<uid>/agent/<name>/session/<session>/` | durable files |
+| Run | entropy-backed run id in session events | session recorder |
+
+The definition says how an Agent may run. A runtime instance says which
+processes currently realize that definition. A session owns durable human and
+Agent history. A run correlates one bounded execution inside that session.
+
+`agent/<name>.d/meta.json` may retain the latest receipt-bound supervisor facts
+needed for inspection and safe cleanup. `status`, `pid`, and `log` are summary
+projections. None of those files changes the Agent's definition identity, and
+none is an independent process supervisor.
+
+Do not add `instances/` merely to mirror process state already owned by systemd
+and receipt metadata. A future multi-instance feature must first define an
+identity that cannot be expressed by the existing agent/session/unit/run tuple,
+then nominate one authoritative lifecycle owner and migration path.
+
+Sockets are transports. Live sockets belong under `/run`; paths such as
+`agent/<name>.sock` and `session/<session>/terminal/main.sock` are stable ABI
+entries or aliases used to discover those transports. Socket presence does not
+define object identity, session durability, or process ownership.
+
+The compact rule is:
+
+```text
+object defines identity
+supervisor receipt defines process lifetime
+ordinary files define durable state
+socket provides optional transport
+```
+
+## Model and context boundary
+
+A model object is the stable provider/model identity. Its `driver` control
+selects replaceable adapters for each use case; `cap` and `limit` project only
+provider-neutral facts. Agents and context code consume those projections and
+must not branch on provider names, API formats, or model branding.
+
+Capability data is conservative. Hard limits use the precedence defined by the
+Model ABI: explicit per-model host configuration, then the validated catalog,
+then `unknown`. Stable `cap` words are adapter projections; unsupported or
+untrusted facts are omitted. A future per-model capability override or
+host-side probe requires a versioned Model ABI change. It must not become a
+model-call side effect, a background watcher, or a second configuration store;
+accepted evidence would enter the same validated `cap`/`limit` projection or
+remain diagnostic-only.
+
+Context construction uses the selected model's hard `limit` and the Agent's
+attenuating `window` control. Raw session history remains intact while the
+rendered prompt may use a recent tail, summaries, rules, skills, and loaded tool
+metadata. Changing models therefore rebuilds prompt context from durable facts;
+it does not rewrite history or teach each Agent a table of model-specific cases.
+
 ## Where things live
 
 The packaged host keeps versioned durable trees under

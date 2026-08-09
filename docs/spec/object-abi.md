@@ -8,6 +8,12 @@ name.sock   socket entry: stateful, multi-turn, streaming
 name.d/     control directory: config, state, permissions, logs
 ```
 
+This triple describes discoverable object surfaces, not three independent
+identities. `name` and `name.d/` identify and describe the object. `name.sock`
+is an optional transport entry for a live stateful service; it may be an alias
+to a runtime-owned socket and must not be treated as the object's lifecycle
+record or implementation ABI.
+
 If an object does not support stateful interaction, do not expose `name.sock`.
 A socket that only reports errors is bad ABI.
 
