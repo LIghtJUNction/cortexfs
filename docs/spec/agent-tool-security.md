@@ -483,8 +483,9 @@ views of those paths, but not `/home/user`, `/etc`, `/var/log`, or
 `/shared/project-b` unless a supervisor authorizes them.
 
 Owned child agents are cancelled when the parent dies. Parent death cancels
-the child runtime, not the child's session history. See `child-agents.md`
-for handoff, result, and lifecycle rules.
+the child runtime, not the child's session history. See
+[ctx-coreutils.md](ctx-coreutils.md#core-commands) for handoff, result, and
+lifecycle rules.
 
 Names should stay short:
 

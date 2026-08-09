@@ -103,6 +103,13 @@ pub(crate) fn plain_file_name(path: &Path) -> Result<&str> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))
 }
 
+fn validate_plain_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    Ok(())
+}
+
 pub(crate) fn proc_fd_path(file: &fs::File) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
@@ -148,9 +155,7 @@ pub fn create_plain_dir_exclusive(path: &Path, mode: u32) -> Result<fs::File> {
 }
 
 pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> Result<fs::File> {
-    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
+    validate_plain_name(name)?;
     nix::sys::stat::mkdirat(
         parent,
         name,
@@ -173,9 +178,7 @@ pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> R
 }
 
 pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u32) -> Result<()> {
-    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
+    validate_plain_name(name)?;
     let fd = nix::fcntl::openat(
         parent,
         name,
@@ -206,9 +209,7 @@ pub fn write_file_atomic_at(
     content: &[u8],
     mode: u32,
 ) -> Result<()> {
-    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
+    validate_plain_name(name)?;
     let temp = format!(".{name}.tmp-{}", std::process::id());
     let fd = nix::fcntl::openat(
         parent,
