@@ -750,3 +750,62 @@ fn resolve_agent_profile_directory_without_agent_yaml_errors() {
     assert_eq!(error.code, 2);
     assert!(error.message.contains("no agent.yaml"));
 }
+
+#[test]
+fn eve_project_imports_static_agent_surface_without_executing_typescript() {
+    let root = clean_test_dir("ctx-eve-project-import");
+    let project = root.join("eve-project");
+    let agent = project.join("agent");
+    assert!(fs::create_dir_all(agent.join("tools")).is_ok());
+    assert!(fs::create_dir_all(agent.join("skills")).is_ok());
+    assert!(fs::create_dir_all(agent.join("channels")).is_ok());
+    assert!(fs::create_dir_all(agent.join("subagents/researcher")).is_ok());
+    assert!(fs::write(
+        agent.join("agent.ts"),
+        "export default defineAgent({ model: \"openai/gpt-5.6\" });\n",
+    )
+    .is_ok());
+    assert!(fs::write(agent.join("instructions.md"), "Be precise.\n").is_ok());
+    assert!(fs::write(agent.join("tools/get_weather.ts"), "export default {};\n").is_ok());
+    assert!(fs::write(agent.join("skills/review.md"), "Review safely.\n").is_ok());
+    assert!(fs::write(agent.join("channels/slack.ts"), "export default {};\n").is_ok());
+    assert!(fs::write(agent.join("subagents/researcher/agent.ts"), "export default {};\n").is_ok());
+
+    let profile = load_agent_profile(&project);
+    assert!(profile.is_ok());
+    let Ok(profile) = profile else { return };
+    assert_eq!(profile.name.as_deref(), Some("eve-project"));
+    assert_eq!(profile.models, ["openai/gpt-5.6"]);
+    assert!(profile.instructions.as_deref().is_some_and(|text| text.contains("Be precise.")));
+    let description = profile.description.unwrap_or_default();
+    assert!(description.contains("tools=[get_weather]"));
+    assert!(description.contains("skills=[review]"));
+    assert!(description.contains("channels=[slack]"));
+    assert!(description.contains("subagents=[researcher]"));
+
+    let command = parse_command(vec![
+        "agent".to_owned(),
+        "new".to_owned(),
+        "--from".to_owned(),
+        project.to_string_lossy().into_owned(),
+    ]);
+    assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+    let Ok(Command::Agent(AgentArgs::New(args))) = command else { return };
+    assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
+    assert_eq!(
+        fs::read_to_string(root.join("agent/eve-project.d/model")).unwrap_or_default(),
+        "openai/gpt-5.6\n"
+    );
+}
+
+#[test]
+fn eve_project_instructions_typescript_fails_closed() {
+    let root = clean_test_dir("ctx-eve-typescript-instructions");
+    let agent = root.join("eve-project/agent");
+    assert!(fs::create_dir_all(&agent).is_ok());
+    assert!(fs::write(agent.join("instructions.ts"), "export default () => 'secret';\n").is_ok());
+    let error = load_agent_profile(&root.join("eve-project"));
+    assert!(error.is_err());
+    let Err(error) = error else { return };
+    assert!(error.message.contains("instructions.ts cannot be evaluated"));
+}

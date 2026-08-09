@@ -43,6 +43,22 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         policy: "allow architect_t tool:fs.read execute\nallow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute",
     },
     ReferenceToolSpec {
+        name: "fs.list",
+        wrapper_target: REFERENCE_OBJECT_RUNNER,
+        description: "List bounded no-follow metadata in a visible directory.",
+        schema: tool::core::tools::FS_LIST_SCHEMA,
+        cap: "fs.list",
+        policy: "allow architect_t tool:fs.list execute\nallow coder_t tool:fs.list execute\nallow reviewer_t tool:fs.list execute\nallow worker_t tool:fs.list execute",
+    },
+    ReferenceToolSpec {
+        name: "fs.stat",
+        wrapper_target: REFERENCE_OBJECT_RUNNER,
+        description: "Read bounded no-follow metadata for a visible path.",
+        schema: tool::core::tools::FS_STAT_SCHEMA,
+        cap: "fs.stat",
+        policy: "allow architect_t tool:fs.stat execute\nallow coder_t tool:fs.stat execute\nallow reviewer_t tool:fs.stat execute\nallow worker_t tool:fs.stat execute",
+    },
+    ReferenceToolSpec {
         name: "fs.write",
         wrapper_target: REFERENCE_OBJECT_RUNNER,
         description: "Atomically write UTF-8 text to a visible filesystem path.",

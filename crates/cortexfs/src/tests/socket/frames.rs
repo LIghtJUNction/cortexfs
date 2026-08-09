@@ -1,4 +1,10 @@
 #[test]
+fn socket_response_jsonl_preserves_empty_frames() {
+    let response = crate::SocketRuntimeResponse::new(vec![String::new(), "second".to_owned()]);
+    assert_eq!(response.jsonl(), "\nsecond\n");
+}
+
+#[test]
 fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let root = clean_test_dir("socket-runtime");
     let session_root = root.join("session");

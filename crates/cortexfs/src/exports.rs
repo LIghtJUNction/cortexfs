@@ -111,6 +111,7 @@ pub use support::trajectory::{
     TrajectoryStep, TrajectoryToolCall, trajectory_from_session_dir, trajectory_from_session_jsonl,
     validate_trajectory, write_trajectory_json,
 };
+pub use tool::core::tools::inspect::{FsListTool, FsStatTool};
 pub use tool::core::tools::{
     FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
     run_core_tool_cli, run_core_tool_cli_with_root,

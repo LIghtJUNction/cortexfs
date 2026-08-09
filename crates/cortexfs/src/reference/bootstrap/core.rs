@@ -319,6 +319,8 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
         "allow {policy_subject} model:{model} use\n\
          allow {policy_subject} tool:tsh execute\n\
          allow {policy_subject} tool:fs.read execute\n\
+         allow {policy_subject} tool:fs.list execute\n\
+         allow {policy_subject} tool:fs.stat execute\n\
          allow {policy_subject} tool:agent.update execute\n"
     );
     if reference_agent_can_write_source(name) {

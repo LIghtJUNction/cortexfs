@@ -168,6 +168,14 @@ fn agent_model_output_rejects_too_many_frames() -> Result<(), Box<dyn std::error
     )
 }
 
+#[test]
+fn agent_model_output_rejects_aggregate_overflow() -> Result<(), Box<dyn std::error::Error>> {
+    assert_model_overflow(
+        "agent_model_output_rejects_aggregate_overflow",
+        "#!/bin/sh\npayload=$(head -c 131072 /dev/zero | tr '\\0' x)\ni=0\nwhile [ \"$i\" -le 64 ]; do printf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"%s\"}\\n' \"$CTX_RUN_ID\" \"$payload\"; i=$((i + 1)); done\n",
+    )
+}
+
 fn assert_model_overflow(case: &str, script: &str) -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir(case)?;
     let model = root.join("model-script");

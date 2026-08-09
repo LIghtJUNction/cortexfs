@@ -870,28 +870,35 @@ fn run_agent_envelope_loop_with_control(
             }
             Err(error) => return Err(error),
         };
-        frames.extend(outcome.frames.clone());
-        if outcome.process == AgentProcessOutcome::Cancelled {
+        let process = outcome.process;
+        let new_frames = outcome.frames;
+        let call = if process == AgentProcessOutcome::Success {
+            match object::executor::call::first_tool_call(&new_frames) {
+                Ok(call) => call,
+                Err(_error) => {
+                    frames.extend(new_frames);
+                    return Ok(agent_error_outcome(
+                        frames,
+                        agent_invalid_output_frames(request.run_id),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+        frames.extend(new_frames);
+        if process == AgentProcessOutcome::Cancelled {
             return Ok(AgentRunOutcome {
                 frames,
                 process: AgentProcessOutcome::Cancelled,
             });
         }
-        if outcome.process == AgentProcessOutcome::Error {
+        if process == AgentProcessOutcome::Error {
             return Ok(agent_error_outcome(
                 frames,
                 agent_process_failed_frames(request.run_id, "agent process failed"),
             ));
         }
-        let call = match object::executor::call::first_tool_call(&outcome.frames) {
-            Ok(call) => call,
-            Err(_error) => {
-                return Ok(agent_error_outcome(
-                    frames,
-                    agent_invalid_output_frames(request.run_id),
-                ));
-            }
-        };
         let Some(call) = call else {
             let done =
                 serde_json::json!({"type":"done", "run":request.run_id, "status":"ok"}).to_string();
@@ -1142,6 +1149,7 @@ pub(crate) fn run_agent_executable_streaming(
         Ok::<(), SocketRuntimeError>(())
     });
     let mut frames = Vec::new();
+    let mut frame_bytes = 0usize;
     let session_dir = runtime.session_root.join(request.session);
     let mut cancelled = false;
     let mut saw_agent_frame = false;
@@ -1189,7 +1197,9 @@ pub(crate) fn run_agent_executable_streaming(
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
                 }
-                if yielded_tool_call.is_some() {
+                let next_frame_bytes = frame_bytes.saturating_add(line.len());
+                if yielded_tool_call.is_some() || next_frame_bytes > MAX_SOCKET_RUNTIME_OUTPUT_BYTES
+                {
                     terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
@@ -1202,6 +1212,7 @@ pub(crate) fn run_agent_executable_streaming(
                     continue;
                 }
                 write_while_connected(&mut client_connected, || write_socket_frame(stream, &line))?;
+                frame_bytes = next_frame_bytes;
                 frames.push(line);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => match reader.join() {
@@ -1625,6 +1636,58 @@ mod completion_tests {
         fs::create_dir_all(&cache)?;
         ensure_runtime_models_from(root, &providers, &cache)
             .map_err(|error| io::Error::other(format!("{error:?}")))
+    }
+
+    #[test]
+    fn direct_agent_output_rejects_aggregate_overflow() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let executable = root.path().join("agent");
+        fs::write(
+            &executable,
+            "#!/bin/sh\npayload=$(/usr/bin/head -c 131072 /dev/zero | /usr/bin/tr '\\0' x)\ni=0\nwhile [ \"$i\" -le 8 ]; do printf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"%s\"}\\n' \"$CTX_RUN_ID\" \"$payload\"; i=$((i + 1)); done\n",
+        )?;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))?;
+        let identity = AgentUnixIdentity::new(
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+            [],
+        );
+        let runtime = AgentExecutableSocketRuntime {
+            ctx_root: root.path(),
+            source_root: root.path(),
+            identity: &identity,
+            env: &[],
+            session_root: root.path(),
+            default_cwd: "/",
+            model: None,
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &executable,
+            execution: AgentExecutableSocketExecution::Direct,
+        };
+        let request = AgentExecutableRunRequest {
+            run_id: "run1",
+            cancellation_id: "run1",
+            session: "default",
+            cwd: None,
+            input: "overflow",
+            history_messages: "",
+            tool_context: "",
+            debug: None,
+        };
+        let (mut client, mut server) = UnixStream::pair()?;
+        let reader = thread::spawn(move || {
+            let _ignored = client.read_to_end(&mut Vec::new());
+        });
+        let outcome = run_agent_request(&mut server, runtime, request, None)
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        drop(server);
+        reader
+            .join()
+            .map_err(|_error| io::Error::other("socket reader panicked"))?;
+        assert_eq!(outcome.process, AgentProcessOutcome::Error);
+        assert!(outcome.frames.iter().any(|frame| frame.contains("EPROTO")));
+        Ok(())
     }
 
     #[test]

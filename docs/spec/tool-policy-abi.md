@@ -20,6 +20,30 @@ placement separate from agent identity and mount setup.
     hooks/
       pre.d/
       post.d/
+  fs.list
+  fs.list.d/
+    name
+    description
+    schema
+    cap
+    policy
+    status
+    log
+    hooks/
+      pre.d/
+      post.d/
+  fs.stat
+  fs.stat.d/
+    name
+    description
+    schema
+    cap
+    policy
+    status
+    log
+    hooks/
+      pre.d/
+      post.d/
   fs.write
   fs.write.d/
     name

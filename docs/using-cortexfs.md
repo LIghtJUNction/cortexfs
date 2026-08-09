@@ -169,6 +169,22 @@ validate and materialize them into `agent/<name>.d/*`; runtime authority
 continues to come only from the discrete control files. A short `--from NAME`
 searches `.cortexfs/agents` and `~/.config/cortexfs/agents`.
 
+An Eve project can be used as the same authoring input without installing a
+Node runtime:
+
+```bash
+ctx agent new --from ./my-eve-agent
+ctx agent apply reviewer --from ./my-eve-agent
+```
+
+The importer reads bounded static `agent/instructions.md` and a literal
+`model: "provider/model"` from `agent/agent.ts`. It records the discovered Eve
+tools, skills, channels, subagents, and schedules in the agent description, but
+does not execute TypeScript, expose secrets, start an HTTP channel, or add a
+watcher. Eve capabilities remain source data until an explicitly governed
+CortexFS tool is installed and allowed by policy; this keeps the import
+reproducible at the Git/process refresh boundary.
+
 ```yaml
 schema: cortexfs.agent.profile/v1
 name: reviewer
@@ -197,6 +213,14 @@ Non-default models and non-`owned` lifecycles are visible in `ctx agent ps`.
 `ctx agent env NAME` prints the sandbox environment derived by
 `ctx agent start`, and `ctx agent children NAME` shows parent-side child state
 plus the backing worker `parent_session`, `model`, `life`, `status`, and `pid`.
+
+AGFS-style service composition uses the existing file ABI rather than another
+root namespace: use `shared/<space>/data` for durable values, the documented
+`shared/<space>/queue/{inbox,pending,lease,claimed,done,failed}` rename protocol
+for work, and bounded `fs.read`, `fs.list`, `fs.stat`, and `fs.write` tools for
+inspection and mutation. There is no resident plugin daemon, polling worker,
+or heartbeat namespace; commit facts and ordinary session/status files remain
+the source of truth.
 
 ## Submit Images And Other Files
 
