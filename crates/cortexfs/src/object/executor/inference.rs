@@ -42,6 +42,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
     let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
     let stdout_reader = spawn_agent_model_stdout_reader(child_stdout);
     let mut frames = Vec::new();
+    let mut frame_bytes = 0usize;
     let mut streamed = false;
     let mut saw_model_frame = false;
     let deadline = Instant::now() + timeout;
@@ -56,12 +57,16 @@ pub(crate) fn run_agent_model_once_with_timeout(
                     write_agent_debug_timing(stdout, config, "first_model_frame")?;
                     saw_model_frame = true;
                 }
-                if frames.len() >= MAX_AGENT_MODEL_FRAMES {
-                    let message = "agent model output frame count exceeds limit";
+                let line = normalize_agent_model_frame(&line, &config.run);
+                let next_frame_bytes = frame_bytes.saturating_add(line.len());
+                if frames.len() >= MAX_AGENT_MODEL_FRAMES
+                    || next_frame_bytes > MAX_AGENT_MODEL_OUTPUT_BYTES
+                {
+                    let message = "agent model output exceeds configured limit";
                     terminate_process_group(&mut child);
                     let _ignored = child.wait();
                     let _stderr = collect_child_stderr(stderr_reader);
-                    let _ignored = stdout_reader.handle.join();
+                    stdout_reader.join();
                     return overflow_agent_model_outcome(
                         stdout,
                         &config.run,
@@ -69,24 +74,27 @@ pub(crate) fn run_agent_model_once_with_timeout(
                         config.suppress_model_error_events,
                     );
                 }
-                let line = normalize_agent_model_frame(&line, &config.run);
                 if should_write_streamed_model_frame(&line, config.suppress_model_error_events) {
-                    writeln!(stdout, "{line}")
+                    let write_result = writeln!(stdout, "{line}")
                         .and_then(|()| stdout.flush())
-                        .map_err(|error| {
-                            terminate_process_group(&mut child);
-                            let _ignored = child.wait();
-                            ExecError::with_io("cannot write output", &error)
-                        })?;
+                        .map_err(|error| ExecError::with_io("cannot write output", &error));
+                    if let Err(error) = write_result {
+                        terminate_process_group(&mut child);
+                        let _ignored = child.wait();
+                        let _stderr = collect_child_stderr(stderr_reader);
+                        stdout_reader.join();
+                        return Err(error);
+                    }
                     streamed = true;
                 }
+                frame_bytes = next_frame_bytes;
                 frames.push(line);
             }
             Ok(Err(error)) => {
                 terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 let _stderr = collect_child_stderr(stderr_reader);
-                let _ignored = stdout_reader.handle.join();
+                stdout_reader.join();
                 return overflow_agent_model_outcome(
                     stdout,
                     &config.run,
@@ -101,7 +109,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
                     terminate_process_group(&mut child);
                     let _ignored = child.wait();
                     let _stderr = collect_child_stderr(stderr_reader);
-                    let _ignored = stdout_reader.handle.join();
+                    stdout_reader.join();
                     return agent_model_error_outcome(
                         stdout,
                         &config.run,
@@ -116,7 +124,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
             }
         }
     }
-    let _ignored = stdout_reader.handle.join();
+    stdout_reader.join();
     let status = child
         .wait()
         .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;

@@ -212,6 +212,8 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     );
     for tool in [
         "fs.read",
+        "fs.list",
+        "fs.stat",
         "fs.write",
         "shell.exec",
         "tsh.config",

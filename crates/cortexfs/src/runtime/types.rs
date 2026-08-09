@@ -256,11 +256,18 @@ impl SocketRuntimeResponse {
     /// Returns response frames as JSONL.
     #[must_use]
     pub fn jsonl(&self) -> String {
-        if self.frames.is_empty() {
-            String::new()
-        } else {
-            format!("{}\n", self.frames.join("\n"))
+        let capacity = self.frames.iter().map(String::len).sum::<usize>() + self.frames.len();
+        let mut output = String::with_capacity(capacity);
+        for (index, frame) in self.frames.iter().enumerate() {
+            if index != 0 {
+                output.push('\n');
+            }
+            output.push_str(frame);
         }
+        if !self.frames.is_empty() {
+            output.push('\n');
+        }
+        output
     }
 }
 

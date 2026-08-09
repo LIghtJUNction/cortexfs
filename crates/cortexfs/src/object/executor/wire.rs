@@ -5,10 +5,18 @@ pub(crate) struct AgentModelStdoutReader {
     pub(crate) handle: thread::JoinHandle<()>,
 }
 
+impl AgentModelStdoutReader {
+    pub(crate) fn join(self) {
+        let Self { receiver, handle } = self;
+        drop(receiver);
+        let _ignored = handle.join();
+    }
+}
+
 pub(crate) fn spawn_agent_model_stdout_reader(
     stdout: std::process::ChildStdout,
 ) -> AgentModelStdoutReader {
-    let (sender, receiver) = std::sync::mpsc::channel();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(MAX_AGENT_MODEL_QUEUE_FRAMES);
     let handle = thread::spawn(move || {
         let mut stdout = BufReader::new(stdout);
         loop {
