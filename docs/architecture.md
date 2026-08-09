@@ -144,11 +144,9 @@ spec/fuse.md
 spec/object-abi.md
 spec/model-abi.md
 spec/session-abi.md
-spec/context-abi.md
 spec/agent-tool-security.md
 spec/agent-runtime.md
 spec/tool-policy-abi.md
-spec/child-agents.md
 spec/ctx-coreutils.md
 spec/rolling-upgrades.md
 ```

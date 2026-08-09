@@ -208,4 +208,7 @@ The chroot root is only the runtime environment:
 Rebuilding the root, cleaning it, or switching runtime environment must not
 destroy session history.
 
-See `context-abi.md` for context packs, compression, swap, and dedup rules.
+Context-window limits, rebuildable prompt working sets, and context compaction
+rules are defined in [agent-runtime.md](agent-runtime.md#context-window-control).
+Child handoff channels and their durable result files are defined in
+[ctx-coreutils.md](ctx-coreutils.md#core-commands).

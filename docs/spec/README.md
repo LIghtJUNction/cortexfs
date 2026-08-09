@@ -78,11 +78,9 @@ fuse.md                 FUSE projection shape
 object-abi.md           executable, socket, and .d object triple
 model-abi.md            one model ABI, model exec, model socket, event stream
 session-abi.md          durable history and session indexes
-context-abi.md           context pack, compression, swap, dedup, and GC
 agent-tool-security.md  agent identity, view, mount, and creation
 agent-runtime.md        end-to-end agent runtime, REPL, terminal, tsh, sandbox
 tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
-child-agents.md      child handoff, attenuation, owned lifecycle, cancellation
 ctx-coreutils.md        ctx command contract
 rolling-upgrades.md     rolling reference-tree update and storage switch rules
 ```
