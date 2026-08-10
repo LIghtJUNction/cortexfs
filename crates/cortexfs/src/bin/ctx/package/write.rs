@@ -1,5 +1,5 @@
-use super::control::agent_controls;
-use super::manifest::{Package, PackageTool};
+use super::control::{agent_controls, tool_controls};
+use super::manifest::Package;
 use super::object::write_manifest;
 use crate::*;
 use cortexfs::object::install::InstallTier;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 pub(super) fn write_manifests(package: &Package, staging: &Path) -> Result<Vec<PathBuf>, CliError> {
     let policies = tool_policies(package);
     let tools = package.document.tools.iter().map(|tool| {
-        let controls = tool_controls(tool, policies.get(&tool.name));
+        let controls = tool_controls(tool, policies.get(&tool.name))?;
         write_manifest(
             staging,
             "tool",
@@ -97,24 +97,4 @@ fn tool_policies(package: &Package) -> BTreeMap<String, String> {
             (tool.name.clone(), policy)
         })
         .collect()
-}
-
-fn tool_controls(tool: &PackageTool, policy: Option<&String>) -> BTreeMap<String, String> {
-    BTreeMap::from([
-        (
-            "description".to_owned(),
-            tool.description
-                .clone()
-                .unwrap_or_else(|| tool.name.clone()),
-        ),
-        (
-            "schema".to_owned(),
-            tool.schema.clone().unwrap_or_else(|| "{}".to_owned()),
-        ),
-        (
-            "cap".to_owned(),
-            tool.cap.clone().unwrap_or_else(|| "text".to_owned()),
-        ),
-        ("policy".to_owned(), policy.cloned().unwrap_or_default()),
-    ])
 }

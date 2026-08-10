@@ -1,4 +1,4 @@
-use super::manifest::PackageAgent;
+use super::manifest::{PackageAgent, PackageTool};
 use crate::*;
 use std::collections::BTreeMap;
 
@@ -55,5 +55,32 @@ pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, St
             "meta.json".to_owned(),
             serde_json::json!({"description": agent.description, "source": "package"}).to_string(),
         ),
+    ]))
+}
+
+pub(super) fn tool_controls(
+    tool: &PackageTool,
+    policy: Option<&String>,
+) -> Result<BTreeMap<String, String>, CliError> {
+    let schema = tool
+        .schema
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| CliError::unavailable(format!("cannot encode tool schema: {error}")))?
+        .unwrap_or_else(|| "{}".to_owned());
+    Ok(BTreeMap::from([
+        (
+            "description".to_owned(),
+            tool.description
+                .clone()
+                .unwrap_or_else(|| tool.name.clone()),
+        ),
+        ("schema".to_owned(), schema),
+        (
+            "cap".to_owned(),
+            tool.cap.clone().unwrap_or_else(|| "text".to_owned()),
+        ),
+        ("policy".to_owned(), policy.cloned().unwrap_or_default()),
     ]))
 }

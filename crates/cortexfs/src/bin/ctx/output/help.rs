@@ -626,7 +626,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "usage:",
             "  ctx install [--source PATH] [--tier user|system] PACKAGE",
             "",
-            "PACKAGE is a directory or cortexfs.yaml file.",
+            "PACKAGE is a directory or cortexfs.toml file.",
             "  tools and agents are installed through the existing atomic object ABI",
             "  agent run + model + tools + parent form one small declarative extension",
             "  default source: CTX_SOURCE, then ~/.local/share/cortexfs/root",

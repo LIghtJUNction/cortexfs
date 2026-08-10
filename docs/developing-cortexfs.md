@@ -12,7 +12,7 @@ directories or new workflow entrances.
 
 For the common case, start with the short path in [One-file Extensions](extensions.md):
 put tools and executable agents in one package directory, describe them in one
-`cortexfs.yaml`, and run `ctx install ./package`. The package is only an
+`cortexfs.toml`, and run `ctx install ./package`. The package is only an
 authoring convenience; installation still uses the same hash-bound atomic
 object publication and the same `agent/<name>.d/*` / `tool/<name>.d/*` ABI.
 

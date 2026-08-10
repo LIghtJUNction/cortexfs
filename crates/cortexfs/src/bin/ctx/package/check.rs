@@ -31,16 +31,13 @@ pub(super) fn validate_package(document: &PackageDocument) -> Result<(), CliErro
                 tool.name
             )));
         }
-        if let Some(schema) = tool.schema.as_deref() {
-            let value: serde_json::Value = serde_json::from_str(schema).map_err(|error| {
-                CliError::usage(format!("invalid schema for {}: {error}", tool.name))
-            })?;
-            if !value.is_object() {
-                return Err(CliError::usage(format!(
-                    "tool schema must be a JSON object: {}",
-                    tool.name
-                )));
-            }
+        if let Some(schema) = tool.schema.as_ref()
+            && !schema.is_object()
+        {
+            return Err(CliError::usage(format!(
+                "tool schema must be a TOML table: {}",
+                tool.name
+            )));
         }
     }
     for agent in &document.agents {

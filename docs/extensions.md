@@ -7,33 +7,33 @@ sidebar_label: One-file Extensions
 # One-file Extensions
 
 The shortest way to add behavior is one package directory. Keep the program
-logic in normal executables; keep the wiring in one `cortexfs.yaml`:
+logic in normal executables; keep the wiring in one `cortexfs.toml`:
 
 ```text
 review-kit/
-├── cortexfs.yaml
+├── cortexfs.toml
 └── bin/
     ├── review-agent
     └── git-summary
 ```
 
-```yaml
-schema: cortexfs.package/v1
-name: review-kit
+```toml
+schema = "cortexfs.package/v1"
+name = "review-kit"
 
-tools:
-  - name: git.summary
-    run: bin/git-summary
-    description: Summarize the current Git worktree
-    schema: '{"type":"object"}'
+[[tools]]
+name = "git.summary"
+run = "bin/git-summary"
+description = "Summarize the current Git worktree"
+schema = { type = "object" }
 
-agents:
-  - name: reviewer
-    run: bin/review-agent
-    model: main
-    tools: [git.summary]
-    instructions: Review changes, use the tool when useful, and cite evidence.
-    parent: agent:architect
+[[agents]]
+name = "reviewer"
+run = "bin/review-agent"
+model = "main"
+tools = ["git.summary"]
+instructions = "Review changes, use the tool when useful, and cite evidence."
+parent = "agent:architect"
 ```
 
 Install it with one command:
@@ -42,7 +42,7 @@ Install it with one command:
 ctx install ./review-kit
 ```
 
-`ctx install` finds `cortexfs.yaml`, hashes every executable, validates the
+`ctx install` finds `cortexfs.toml`, hashes every executable, validates the
 whole package, then publishes each object through the existing atomic object
 installer. Use `--source PATH` when the mounted tree is backed by a specific
 generation, and use `--tier user` for tools that should only be visible to the
@@ -64,14 +64,16 @@ Topology is just the `parent` edge. Every agent names its parent as
 `agent:NAME` (optional `session:` and `run:` qualifiers remain available), so a
 tree is visible in the same control files that enforce ownership:
 
-```yaml
-agents:
-  - name: planner
-    run: bin/planner
-    parent: agent:architect
-  - name: builder
-    run: bin/builder
-    parent: agent:planner
+```toml
+[[agents]]
+name = "planner"
+run = "bin/planner"
+parent = "agent:architect"
+
+[[agents]]
+name = "builder"
+run = "bin/builder"
+parent = "agent:planner"
 ```
 
 The package file is authoring input, not a second `/ctx` namespace. After

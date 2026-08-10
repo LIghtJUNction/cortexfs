@@ -270,7 +270,7 @@ To add your own behavior, tools, and agent tree, use one package file instead
 of hand-writing separate object manifests:
 
 ```bash
-ctx install ./review-kit       # finds review-kit/cortexfs.yaml
+ctx install ./review-kit       # finds review-kit/cortexfs.toml
 ctx agent start reviewer
 ```
 

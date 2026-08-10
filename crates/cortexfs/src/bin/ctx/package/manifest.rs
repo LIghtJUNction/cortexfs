@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub(crate) const PACKAGE_SCHEMA: &str = "cortexfs.package/v1";
-const PACKAGE_FILES: &[&str] = &["cortexfs.yaml", "cortexfs.yml", "cortexfs.json"];
+const PACKAGE_FILES: &[&str] = &["cortexfs.toml"];
 const MAX_PACKAGE_BYTES: u64 = 1024 * 1024;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,7 +27,7 @@ pub(crate) struct PackageTool {
     #[serde(default)]
     pub(crate) description: Option<String>,
     #[serde(default)]
-    pub(crate) schema: Option<String>,
+    pub(crate) schema: Option<serde_json::Value>,
     #[serde(default)]
     pub(crate) cap: Option<String>,
     #[serde(default)]
@@ -85,7 +85,7 @@ pub(crate) fn load_package(spec: &Path) -> Result<Package, CliError> {
             manifest.display()
         ))
     })?;
-    let document: PackageDocument = serde_yaml::from_str(&text)
+    let document: PackageDocument = toml::from_str(&text)
         .map_err(|error| CliError::usage(format!("invalid CortexFS package: {error}")))?;
     super::check::validate_package(&document)?;
     Ok(Package {
@@ -109,7 +109,7 @@ fn resolve_package_manifest(spec: &Path) -> Result<PathBuf, CliError> {
             }
         }
         return Err(CliError::usage(format!(
-            "no cortexfs.yaml in package directory {}",
+            "no cortexfs.toml in package directory {}",
             spec.display()
         )));
     }

@@ -22,8 +22,22 @@ fn package_installs_tool_agent_and_parent_edge() -> Result<(), Box<dyn std::erro
     let source = root.path().join("source");
     fs::create_dir_all(&package)?;
     fs::write(
-        package.join("cortexfs.yaml"),
-        "schema: cortexfs.package/v1\nname: review-kit\ntools:\n  - name: hello\n    run: bin/hello\n    schema: '{\"type\":\"object\"}'\nagents:\n  - name: kit_reviewer\n    run: bin/reviewer\n    model: debug/echo\n    tools: [hello]\n    parent: agent:architect\n",
+        package.join("cortexfs.toml"),
+        r#"schema = "cortexfs.package/v1"
+name = "review-kit"
+
+[[tools]]
+name = "hello"
+run = "bin/hello"
+schema = { type = "object" }
+
+[[agents]]
+name = "kit_reviewer"
+run = "bin/reviewer"
+model = "debug/echo"
+tools = ["hello"]
+parent = "agent:architect"
+"#,
     )?;
     fs::create_dir_all(package.join("bin"))?;
     for name in ["hello", "reviewer"] {
@@ -37,6 +51,10 @@ fn package_installs_tool_agent_and_parent_edge() -> Result<(), Box<dyn std::erro
     assert_eq!(
         fs::read_to_string(source.join("tool/hello.d/policy"))?,
         "allow kit_reviewer_t tool:hello execute\n"
+    );
+    assert_eq!(
+        fs::read_to_string(source.join("tool/hello.d/schema"))?,
+        "{\"type\":\"object\"}\n"
     );
     assert_eq!(
         fs::read_to_string(source.join("agent/kit_reviewer.d/model"))?,
