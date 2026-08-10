@@ -33,17 +33,26 @@ pub(crate) fn agent_inspect_lines(
         .map(|path| read_optional_trimmed(&path))
         .transpose()?
         .flatten()
-        .map_or_else(|| "-".to_owned(), |value| value.lines().collect::<Vec<_>>().join(","));
+        .map_or_else(
+            || "-".to_owned(),
+            |value| value.lines().collect::<Vec<_>>().join(","),
+        );
     let tools = agent_visible_tool_entries(root, name)?;
     Ok(vec![
         format!("definition={}", root.join("agent").join(name).display()),
         format!("control={}", control.display()),
-        format!("instance.status={}", inspect_value(&control.join("status"))?),
+        format!(
+            "instance.status={}",
+            inspect_value(&control.join("status"))?
+        ),
         format!("instance.pid={}", inspect_value(&control.join("pid"))?),
         format!("instance.receipt={}", if receipt { "present" } else { "-" }),
         format!("session.name={session_name}"),
         format!("session.path={}", session_dir.display()),
-        format!("session.state={}", inspect_value(&session_dir.join("state"))?),
+        format!(
+            "session.state={}",
+            inspect_value(&session_dir.join("state"))?
+        ),
         format!("session.cwd={}", inspect_value(&session_dir.join("cwd"))?),
         format!("model.name={}", view.model()),
         format!("model.limit={}", view.model_limit()),

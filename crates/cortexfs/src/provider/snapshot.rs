@@ -123,12 +123,15 @@ fn valid_model_metadata(config: &ProviderConfig) -> bool {
         .model_limits
         .iter()
         .all(|(model, limit)| *limit > 0 && declared(model))
-        && config.model_capabilities.iter().all(|(model, capabilities)| {
-            let mut seen = HashSet::<&str>::new();
-            declared(model)
-                && capabilities.iter().all(|capability| {
-                    STABLE_MODEL_CAPABILITIES.contains(&capability.as_str())
-                        && seen.insert(capability.as_str())
-                })
-        })
+        && config
+            .model_capabilities
+            .iter()
+            .all(|(model, capabilities)| {
+                let mut seen = HashSet::<&str>::new();
+                declared(model)
+                    && capabilities.iter().all(|capability| {
+                        STABLE_MODEL_CAPABILITIES.contains(&capability.as_str())
+                            && seen.insert(capability.as_str())
+                    })
+            })
 }
