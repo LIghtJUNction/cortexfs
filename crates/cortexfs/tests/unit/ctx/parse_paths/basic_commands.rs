@@ -62,7 +62,12 @@ fn parses_spec_which_command() {
 #[test]
 fn parses_top_level_agent_inspect_command() {
     for target in ["agent/coder", "/ctx/agent/coder"] {
-        let command = cmd!("inspect", target, "--session", "debug");
+        let command = parse_command(vec![
+            "inspect".to_owned(),
+            target.to_owned(),
+            "--session".to_owned(),
+            "debug".to_owned(),
+        ]);
         assert!(matches!(
             command,
             Ok(Command::Agent(AgentArgs::Inspect {
