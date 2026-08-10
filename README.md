@@ -266,6 +266,16 @@ ctx agent prompt coder
 to it for compatibility. `tsh` remains the agent-facing tool shell inside
 `ctxterm`.
 
+To add your own behavior, tools, and agent tree, use one package file instead
+of hand-writing separate object manifests:
+
+```bash
+ctx install ./review-kit       # finds review-kit/cortexfs.toml
+ctx agent start kit_reviewer
+```
+
+See [One-file Extensions](docs/extensions.md) for the complete 30-line example.
+
 Ask clear coding tasks directly:
 
 ```text

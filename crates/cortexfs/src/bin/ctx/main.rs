@@ -138,6 +138,8 @@ pub mod storage;
 
 pub(crate) mod install;
 
+pub(crate) mod package;
+
 pub(crate) mod residue;
 
 pub mod doctor;

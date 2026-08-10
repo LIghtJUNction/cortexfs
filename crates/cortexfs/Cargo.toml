@@ -36,6 +36,7 @@ signal-hook = "0.4.4"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+toml = "1.1.4"
 url = "2.5.8"
 xattr = "1.6.1"
 

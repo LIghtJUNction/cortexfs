@@ -118,7 +118,7 @@ Ask for clarification only when the target path or scope is missing, or when the
     Ok(ExitCode::SUCCESS)
 }
 
-fn current_supplementary_groups_control() -> Result<String, CliError> {
+pub(crate) fn current_supplementary_groups_control() -> Result<String, CliError> {
     let mut groups = nix::unistd::getgroups()
         .map_err(|error| {
             CliError::unavailable(format!("cannot read supplementary groups: {error}"))
