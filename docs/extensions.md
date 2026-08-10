@@ -20,6 +20,7 @@ review-kit/
 ```toml
 schema = "cortexfs.package/v1"
 name = "review-kit"
+version = "0.1.0"
 
 [[tools]]
 name = "git.summary"
@@ -28,7 +29,7 @@ description = "Summarize the current Git worktree"
 schema = { type = "object" }
 
 [[agents]]
-name = "reviewer"
+name = "kit_reviewer"
 run = "bin/review-agent"
 model = "main"
 tools = ["git.summary"]
@@ -51,6 +52,21 @@ host-owned:
 
 ```bash
 ctx install ./review-kit --source /var/lib/cortexfs/storage/current
+```
+
+When a privileged installer is targeting a different user, declare that
+runtime identity in the package instead of inheriting the installer's root
+credentials:
+
+```toml
+[[agents]]
+name = "kit_reviewer"
+run = "bin/review-agent"
+
+[agents.identity]
+uid = 1000
+gid = 1000
+groups = [1000]
 ```
 
 The `run` file is the extension point. A tool implements the Tool SDK and an

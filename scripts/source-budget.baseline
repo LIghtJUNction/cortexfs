@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=125182
-prod=79987
+all=125277
+prod=80082
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -87,13 +87,13 @@ prod=79987
 639 crates/cortexfs/src/bin/ctx/output/help.rs
 391 crates/cortexfs/src/bin/ctx/output/mount.rs
 158 crates/cortexfs/src/bin/ctx/output/status.rs
-12 crates/cortexfs/src/bin/ctx/package.rs
-93 crates/cortexfs/src/bin/ctx/package/check.rs
-86 crates/cortexfs/src/bin/ctx/package/control.rs
-113 crates/cortexfs/src/bin/ctx/package/install.rs
-120 crates/cortexfs/src/bin/ctx/package/manifest.rs
-76 crates/cortexfs/src/bin/ctx/package/object.rs
-100 crates/cortexfs/src/bin/ctx/package/write.rs
+11 crates/cortexfs/src/bin/ctx/package.rs
+113 crates/cortexfs/src/bin/ctx/package/check.rs
+105 crates/cortexfs/src/bin/ctx/package/control.rs
+121 crates/cortexfs/src/bin/ctx/package/install.rs
+151 crates/cortexfs/src/bin/ctx/package/manifest.rs
+92 crates/cortexfs/src/bin/ctx/package/object.rs
+102 crates/cortexfs/src/bin/ctx/package/write.rs
 9 crates/cortexfs/src/bin/ctx/parse.rs
 697 crates/cortexfs/src/bin/ctx/parse/agent.rs
 629 crates/cortexfs/src/bin/ctx/parse/core.rs

@@ -1,5 +1,6 @@
 use super::manifest::{PackageAgent, PackageDocument};
-use crate::*;
+use crate::{CliError, is_object_name, parse_agent_parent_ref, require_cli_name};
+use semver::Version;
 use std::path::{Component, Path};
 
 pub(super) fn validate_package(document: &PackageDocument) -> Result<(), CliError> {
@@ -16,6 +17,10 @@ pub(super) fn validate_package(document: &PackageDocument) -> Result<(), CliErro
         && !name.is_empty()
     {
         require_cli_name("package name", name)?;
+    }
+    if let Some(version) = document.version.as_deref() {
+        Version::parse(version)
+            .map_err(|error| CliError::usage(format!("invalid package version: {error}")))?;
     }
     if document.tools.is_empty() && document.agents.is_empty() {
         return Err(CliError::usage(
@@ -57,6 +62,12 @@ fn validate_agent(
             agent.name
         )));
     }
+    if !is_object_name(&format!("{}_t", agent.name)) {
+        return Err(CliError::usage(format!(
+            "agent name is too long for its policy subject: {}",
+            agent.name
+        )));
+    }
     if let Some(parent) = agent.parent.as_deref()
         && parse_agent_parent_ref(parent).is_none()
     {
@@ -68,6 +79,15 @@ fn validate_agent(
         if tool == "tsh" || !tools.insert(tool) {
             return Err(CliError::usage(format!(
                 "invalid or duplicate agent tool: {tool}"
+            )));
+        }
+    }
+    if let Some(identity) = agent.identity.as_ref() {
+        let mut groups = std::collections::BTreeSet::new();
+        if identity.groups.iter().any(|group| !groups.insert(group)) {
+            return Err(CliError::usage(format!(
+                "duplicate agent identity group: {}",
+                agent.name
             )));
         }
     }

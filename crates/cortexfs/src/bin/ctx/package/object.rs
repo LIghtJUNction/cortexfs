@@ -1,4 +1,4 @@
-use crate::*;
+use crate::CliError;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -13,18 +13,34 @@ pub(super) fn write_manifest(
     name: &str,
     executable: &Path,
     controls: &BTreeMap<String, String>,
+    version: Option<&str>,
 ) -> Result<PathBuf, CliError> {
     let sha256 = executable_sha256(executable)?;
     let manifest = staging.join(format!("{class}-{name}.json"));
-    let value = json!({
-        "schema": "cortexfs.object/v2",
-        "version": env!("CARGO_PKG_VERSION"),
-        "compatibility": {"cortexfs": format!(">={}, <0.2.0", env!("CARGO_PKG_VERSION"))},
-        "class": class,
-        "name": name,
-        "executable": {"path": executable, "sha256": sha256},
-        "controls": controls,
-    });
+    let value = version.map_or_else(
+        || {
+            json!({
+                "schema": "cortexfs.object/v1",
+                "class": class,
+                "name": name,
+                "executable": {"path": executable, "sha256": sha256},
+                "controls": controls,
+            })
+        },
+        |version| {
+            json!({
+                "schema": "cortexfs.object/v2",
+                "version": version,
+                "compatibility": {
+                    "cortexfs": format!(">={}, <0.2.0", env!("CARGO_PKG_VERSION"))
+                },
+                "class": class,
+                "name": name,
+                "executable": {"path": executable, "sha256": sha256},
+                "controls": controls,
+            })
+        },
+    );
     let text = serde_json::to_vec(&value).map_err(|error| {
         CliError::unavailable(format!("cannot encode package manifest: {error}"))
     })?;

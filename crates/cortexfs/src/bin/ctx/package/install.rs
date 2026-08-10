@@ -1,7 +1,11 @@
-use super::load_package;
+use super::manifest::load_package;
 use super::write::{ensure_targets_absent, write_manifests};
-use crate::*;
+use crate::{
+    CliError, Command, adopt_default_source_root, ensure_reference_tree, is_mount_point,
+    print_line, required_arg, terminal_safe_field,
+};
 use cortexfs::object::install::{InstallTier, install_object};
+use std::env;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn parse_package_install_command(
@@ -51,7 +55,17 @@ pub(crate) fn run_package_install(
             "package agents require --tier system; tools may use --tier user",
         ));
     }
-    let source = source.map_or_else(default_package_source, |path| Ok(path.to_path_buf()))?;
+    let requested_source = source.map(Path::to_path_buf);
+    let temp = tempfile::tempdir().map_err(|error| {
+        CliError::unavailable(format!("cannot create package staging directory: {error}"))
+    })?;
+    let manifests = write_manifests(&package, temp.path())?;
+    for manifest in &manifests {
+        cortexfs::object::install::check_object(manifest).map_err(|error| {
+            CliError::usage(format!("invalid package object: {}", error.message()))
+        })?;
+    }
+    let source = requested_source.map_or_else(default_package_source, Ok)?;
     let source = canonical_source(&source)?;
     if is_mount_point(&source).unwrap_or(false) {
         return Err(CliError::usage(format!(
@@ -62,15 +76,6 @@ pub(crate) fn run_package_install(
     ensure_reference_tree(&source).map_err(|error| {
         CliError::unavailable(format!("cannot prepare package source: {}", error.errno()))
     })?;
-    let temp = tempfile::tempdir().map_err(|error| {
-        CliError::unavailable(format!("cannot create package staging directory: {error}"))
-    })?;
-    let manifests = write_manifests(&package, temp.path())?;
-    for manifest in &manifests {
-        cortexfs::object::install::check_object(manifest).map_err(|error| {
-            CliError::usage(format!("invalid package object: {}", error.message()))
-        })?;
-    }
     ensure_targets_absent(&source, &package, tier)?;
     for manifest in manifests {
         let installed = install_object(&source, &manifest, tier).map_err(|error| {
@@ -90,6 +95,9 @@ pub(crate) fn run_package_install(
 
 fn default_package_source() -> Result<PathBuf, CliError> {
     if let Some(source) = env::var_os("CTX_SOURCE") {
+        if source.is_empty() {
+            return Err(CliError::usage("CTX_SOURCE must not be empty"));
+        }
         return Ok(PathBuf::from(source));
     }
     let parent = env::var_os("XDG_DATA_HOME")

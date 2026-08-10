@@ -271,7 +271,7 @@ of hand-writing separate object manifests:
 
 ```bash
 ctx install ./review-kit       # finds review-kit/cortexfs.toml
-ctx agent start reviewer
+ctx agent start kit_reviewer
 ```
 
 See [One-file Extensions](docs/extensions.md) for the complete 30-line example.

@@ -1,7 +1,7 @@
 use super::control::{agent_controls, tool_controls};
 use super::manifest::Package;
 use super::object::write_manifest;
-use crate::*;
+use crate::CliError;
 use cortexfs::object::install::InstallTier;
 use std::collections::BTreeMap;
 use std::fs;
@@ -18,6 +18,7 @@ pub(super) fn write_manifests(package: &Package, staging: &Path) -> Result<Vec<P
             &tool.name,
             &package.root.join(&tool.run),
             &controls,
+            package.document.version.as_deref(),
         )
     });
     let agents = package.document.agents.iter().map(|agent| {
@@ -28,6 +29,7 @@ pub(super) fn write_manifests(package: &Package, staging: &Path) -> Result<Vec<P
             &agent.name,
             &package.root.join(&agent.run),
             &controls,
+            package.document.version.as_deref(),
         )
     });
     tools.chain(agents).collect()

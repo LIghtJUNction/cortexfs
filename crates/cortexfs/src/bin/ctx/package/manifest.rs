@@ -1,4 +1,4 @@
-use crate::*;
+use crate::CliError;
 use serde::Deserialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,8 @@ const MAX_PACKAGE_BYTES: u64 = 1024 * 1024;
 pub(crate) struct PackageDocument {
     #[serde(default)]
     pub(crate) schema: Option<String>,
+    #[serde(default)]
+    pub(crate) version: Option<String>,
     #[serde(default)]
     pub(crate) name: Option<String>,
     #[serde(default)]
@@ -49,6 +51,16 @@ pub(crate) struct PackageAgent {
     pub(crate) tools: Vec<String>,
     #[serde(default)]
     pub(crate) parent: Option<String>,
+    #[serde(default)]
+    pub(crate) identity: Option<PackageIdentity>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PackageIdentity {
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    #[serde(default)]
+    pub(crate) groups: Vec<u32>,
 }
 pub(crate) struct Package {
     pub(crate) root: PathBuf,
@@ -61,7 +73,7 @@ pub(crate) struct Package {
 )]
 pub(crate) fn load_package(spec: &Path) -> Result<Package, CliError> {
     let manifest = resolve_package_manifest(spec)?;
-    let mut file = cortexfs::support::plain::open_plain_file(&manifest).map_err(|error| {
+    let file = cortexfs::support::plain::open_plain_file(&manifest).map_err(|error| {
         CliError::usage(format!(
             "cannot open package {}: {error}",
             manifest.display()
@@ -78,23 +90,42 @@ pub(crate) fn load_package(spec: &Path) -> Result<Package, CliError> {
             "package manifest must be a regular file no larger than 1 MiB",
         ));
     }
-    let mut text = String::new();
-    file.read_to_string(&mut text).map_err(|error| {
+    let mut bytes = Vec::new();
+    file.take(MAX_PACKAGE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            CliError::usage(format!(
+                "cannot read package {}: {error}",
+                manifest.display()
+            ))
+        })?;
+    let byte_count = u64::try_from(bytes.len())
+        .map_err(|error| CliError::usage(format!("package manifest size is invalid: {error}")))?;
+    if byte_count > MAX_PACKAGE_BYTES {
+        return Err(CliError::usage(
+            "package manifest must be a regular file no larger than 1 MiB",
+        ));
+    }
+    let text = String::from_utf8(bytes).map_err(|error| {
         CliError::usage(format!(
-            "cannot read package {}: {error}",
+            "invalid UTF-8 in package {}: {error}",
             manifest.display()
         ))
     })?;
     let document: PackageDocument = toml::from_str(&text)
         .map_err(|error| CliError::usage(format!("invalid CortexFS package: {error}")))?;
     super::check::validate_package(&document)?;
-    Ok(Package {
-        root: manifest
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf(),
-        document,
-    })
+    let root = manifest
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .canonicalize()
+        .map_err(|error| {
+            CliError::usage(format!(
+                "cannot resolve package directory {}: {error}",
+                manifest.display()
+            ))
+        })?;
+    Ok(Package { root, document })
 }
 
 fn resolve_package_manifest(spec: &Path) -> Result<PathBuf, CliError> {

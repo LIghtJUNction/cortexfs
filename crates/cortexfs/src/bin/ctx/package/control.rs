@@ -1,17 +1,36 @@
 use super::manifest::{PackageAgent, PackageTool};
-use crate::*;
+use crate::{
+    CliError, DEFAULT_AGENT_PROMPT_TEMPLATE, agent_new_mount_control, agent_new_policy,
+    current_supplementary_groups_control,
+};
 use std::collections::BTreeMap;
 
 pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, String>, CliError> {
-    let uid = nix::unistd::Uid::effective().as_raw().to_string();
-    let gid = nix::unistd::Gid::effective().as_raw().to_string();
+    let (uid, gid, groups) = if let Some(identity) = agent.identity.as_ref() {
+        (
+            identity.uid.to_string(),
+            identity.gid.to_string(),
+            identity
+                .groups
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    } else {
+        (
+            nix::unistd::Uid::effective().as_raw().to_string(),
+            nix::unistd::Gid::effective().as_raw().to_string(),
+            current_supplementary_groups_control()?,
+        )
+    };
     let model = agent.model.as_deref().unwrap_or("main");
     let subject = format!("{}_t", agent.name);
     Ok(BTreeMap::from([
         ("owner".to_owned(), uid.clone()),
         ("uid".to_owned(), uid.clone()),
         ("gid".to_owned(), gid),
-        ("groups".to_owned(), current_supplementary_groups_control()?),
+        ("groups".to_owned(), groups),
         ("label".to_owned(), format!("user_u:agent_r:{subject}:s0")),
         ("iso".to_owned(), "shared".to_owned()),
         (
