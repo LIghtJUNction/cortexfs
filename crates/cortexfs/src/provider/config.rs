@@ -14,6 +14,8 @@ pub struct ProviderConfig {
     pub(crate) models: Vec<String>,
     #[serde(default)]
     pub(crate) model_limits: HashMap<String, u32>,
+    #[serde(default)]
+    pub(crate) model_capabilities: HashMap<String, Vec<String>>,
     #[serde(default = "default_enabled")]
     pub(crate) enabled: bool,
     #[serde(default)]

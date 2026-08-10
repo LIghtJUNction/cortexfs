@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=124214
-prod=79199
+all=124465
+prod=79346
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -51,15 +51,16 @@ prod=79199
 646 crates/cortexfs/src/authority/helpers.rs
 53 crates/cortexfs/src/authority/model.rs
 43 crates/cortexfs/src/authority/network.rs
-33 crates/cortexfs/src/bin/ctx/agent.rs
+35 crates/cortexfs/src/bin/ctx/agent.rs
 178 crates/cortexfs/src/bin/ctx/agent/chat.rs
 237 crates/cortexfs/src/bin/ctx/agent/child.rs
 199 crates/cortexfs/src/bin/ctx/agent/context.rs
-337 crates/cortexfs/src/bin/ctx/agent/core.rs
+345 crates/cortexfs/src/bin/ctx/agent/core.rs
 108 crates/cortexfs/src/bin/ctx/agent/create.rs
 120 crates/cortexfs/src/bin/ctx/agent/eve.rs
 1360 crates/cortexfs/src/bin/ctx/agent/gc.rs
 178 crates/cortexfs/src/bin/ctx/agent/host.rs
+75 crates/cortexfs/src/bin/ctx/agent/inspect.rs
 113 crates/cortexfs/src/bin/ctx/agent/lifecycle.rs
 409 crates/cortexfs/src/bin/ctx/agent/process.rs
 796 crates/cortexfs/src/bin/ctx/agent/profile.rs
@@ -83,12 +84,12 @@ prod=79199
 191 crates/cortexfs/src/bin/ctx/objects/paths.rs
 86 crates/cortexfs/src/bin/ctx/objects/stream.rs
 7 crates/cortexfs/src/bin/ctx/output.rs
-609 crates/cortexfs/src/bin/ctx/output/help.rs
+628 crates/cortexfs/src/bin/ctx/output/help.rs
 391 crates/cortexfs/src/bin/ctx/output/mount.rs
 158 crates/cortexfs/src/bin/ctx/output/status.rs
 9 crates/cortexfs/src/bin/ctx/parse.rs
-693 crates/cortexfs/src/bin/ctx/parse/agent.rs
-602 crates/cortexfs/src/bin/ctx/parse/core.rs
+697 crates/cortexfs/src/bin/ctx/parse/agent.rs
+613 crates/cortexfs/src/bin/ctx/parse/core.rs
 130 crates/cortexfs/src/bin/ctx/parse/files.rs
 197 crates/cortexfs/src/bin/ctx/parse/provider.rs
 42 crates/cortexfs/src/bin/ctx/provider.rs
@@ -226,7 +227,7 @@ prod=79199
 42 crates/cortexfs/src/provider.rs
 97 crates/cortexfs/src/provider/alias.rs
 336 crates/cortexfs/src/provider/catalog.rs
-44 crates/cortexfs/src/provider/config.rs
+46 crates/cortexfs/src/provider/config.rs
 314 crates/cortexfs/src/provider/discovery.rs
 64 crates/cortexfs/src/provider/link.rs
 473 crates/cortexfs/src/provider/model.rs
@@ -237,8 +238,8 @@ prod=79199
 156 crates/cortexfs/src/provider/name/secrets.rs
 89 crates/cortexfs/src/provider/name/selection.rs
 631 crates/cortexfs/src/provider/oauth.rs
-119 crates/cortexfs/src/provider/project.rs
-120 crates/cortexfs/src/provider/snapshot.rs
+131 crates/cortexfs/src/provider/project.rs
+134 crates/cortexfs/src/provider/snapshot.rs
 15 crates/cortexfs/src/reference.rs
 9 crates/cortexfs/src/reference/bootstrap.rs
 632 crates/cortexfs/src/reference/bootstrap/core.rs

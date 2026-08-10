@@ -5,7 +5,7 @@ use std::path::Path;
 use super::catalog::cached_model_limits;
 use super::config::{ProjectedProviderModel, ProviderConfig};
 use super::discovery::provider_cached_models;
-use crate::{ModelContextLimit, is_object_name};
+use crate::{ModelContextLimit, STABLE_MODEL_CAPABILITIES, is_object_name};
 
 pub(super) fn project_models(
     provider: &str,
@@ -15,7 +15,6 @@ pub(super) fn project_models(
 ) {
     let limits = cached_model_limits(cache_dir);
     let driver = driver_text(&config.formats);
-    let cap = capability_text(&config.formats);
     for model in model_names(config, cache_dir, provider) {
         if projected
             .iter()
@@ -30,12 +29,16 @@ pub(super) fn project_models(
             .copied()
             .and_then(ModelContextLimit::known)
             .unwrap_or(ModelContextLimit::Unknown);
+        let cap = capability_text(
+            &config.formats,
+            config.model_capabilities.get(&model).map(Vec::as_slice),
+        );
         projected.push(ProjectedProviderModel {
             provider: provider.to_owned(),
             model,
             base_url: config.base_url.trim().to_owned(),
             driver: driver.clone(),
-            cap: cap.clone(),
+            cap,
             effort: "auto".to_owned(),
             fallback: fallback(provider, config.default_model.as_deref()),
             limit,
@@ -80,7 +83,16 @@ fn driver_text(formats: &[String]) -> String {
     format!("default={default}\nexec={default}\nagent={agent}\n")
 }
 
-fn capability_text(formats: &[String]) -> String {
+fn capability_text(formats: &[String], configured: Option<&[String]>) -> String {
+    if let Some(configured) = configured {
+        return STABLE_MODEL_CAPABILITIES
+            .iter()
+            .filter(|capability| configured.iter().any(|value| value == **capability))
+            .fold(String::new(), |mut output, capability| {
+                let _ignored = writeln!(output, "{capability}");
+                output
+            });
+    }
     let tools = formats
         .iter()
         .any(|value| value.trim() == "openai.responses");

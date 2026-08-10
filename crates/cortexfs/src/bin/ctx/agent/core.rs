@@ -14,6 +14,10 @@ pub(crate) enum AgentArgs {
     Status {
         name: String,
     },
+    Inspect {
+        name: String,
+        session: Option<String>,
+    },
     Env {
         name: String,
     },
@@ -166,6 +170,10 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             require_cli_name("agent name", name)?;
             success(agent_status(root, name))
         }
+        AgentArgs::Inspect {
+            ref name,
+            ref session,
+        } => success(agent_inspect(root, name, session.as_deref())),
         AgentArgs::Env { ref name } => {
             require_cli_name("agent name", name)?;
             success(agent_env(root, name))

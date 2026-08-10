@@ -67,6 +67,15 @@ fn parses_agent_lifecycle_commands() {
         Ok(Command::Agent(AgentArgs::Status { ref name })) if name == "reviewer"
     ));
 
+    let inspect = cmd!("agent", "inspect", "reviewer", "--session", "test");
+    assert!(matches!(
+        inspect,
+        Ok(Command::Agent(AgentArgs::Inspect {
+            ref name,
+            session: Some(ref session)
+        })) if name == "reviewer" && session == "test"
+    ));
+
     let ps = cmd!("agent", "ps");
     assert!(matches!(ps, Ok(Command::Agent(AgentArgs::Ps))));
 
@@ -87,6 +96,27 @@ fn parses_agent_lifecycle_commands() {
             session: None
         })) if name == "coder"
     ));
+}
+
+#[test]
+fn agent_inspect_projects_definition_instance_session_and_model() {
+    let root = clean_test_dir("ctx-agent-inspect");
+    assert!(ensure_reference_tree(&root).is_ok());
+    let session = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent/coder/session/default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    write_text_file(&session.join("state"), "idle\n");
+    write_text_file(&session.join("cwd"), "/workspace\n");
+
+    let lines = agent_inspect_lines(&root, "coder", Some("default"));
+    assert!(lines.is_ok());
+    let lines = lines.unwrap_or_default();
+    assert!(lines.iter().any(|line| line.ends_with("/agent/coder")));
+    assert!(lines.iter().any(|line| line == "session.state=idle"));
+    assert!(lines.iter().any(|line| line == "model.name=main"));
+    assert!(lines.iter().any(|line| line.starts_with("model.cap=")));
+    assert!(lines.iter().any(|line| line.starts_with("tools=")));
 }
 
 #[test]

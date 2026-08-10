@@ -497,6 +497,16 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
                 input,
             })
         }
+        "inspect" => {
+            let (target, session) = parse_agent_session_option_args(values, "inspect")?;
+            let target = target.strip_prefix("/ctx/").unwrap_or(&target);
+            let name = target
+                .strip_prefix("agent/")
+                .filter(|name| is_object_name(name))
+                .ok_or_else(|| CliError::usage("inspect expects agent/NAME"))?
+                .to_owned();
+            Ok(Command::Agent(AgentArgs::Inspect { name, session }))
+        }
         "agent" => parse_agent_command(values.collect()),
         "object" => install::parse_object_command(values),
         "provider" => parse_provider_command(values.collect()),
@@ -587,6 +597,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "history"
             | "resume"
             | "send"
+            | "inspect"
             | "agent"
             | "object"
             | "provider"

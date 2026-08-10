@@ -277,6 +277,35 @@ fn fuse_projection_uses_the_explicit_custom_model_context_limit() {
 }
 
 #[test]
+fn fuse_projection_uses_per_model_capability_overrides() {
+    let root = reference_tree("fuse-provider-model-capabilities");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["text", "vision"],
+  "model_capabilities": {
+    "text": ["chat", "stream"],
+    "vision": ["vision", "chat", "stream"]
+  },
+  "formats": ["openai.chat", "openai.responses"]
+}"#,
+    );
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
+
+    assert_eq!(
+        projection.read_to_string("model/local/text.d/cap"),
+        Ok("chat\nstream\n".to_owned())
+    );
+    assert_eq!(
+        projection.read_to_string("model/local/vision.d/cap"),
+        Ok("chat\nstream\nvision\n".to_owned())
+    );
+}
+
+#[test]
 fn fuse_projection_prefers_local_limit_over_catalog_cache() {
     let root = reference_tree("fuse-provider-local-limit-priority");
     let providers = root.join("providers.d");
@@ -347,6 +376,30 @@ fn fuse_projection_rejects_provider_with_invalid_local_limits() {
             &providers.join("local.json"),
             &format!(
                 r#"{{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"],"model_limits":{limits}}}"#
+            ),
+        );
+        let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
+
+        assert_eq!(
+            projection.getattr("model/local"),
+            Err(FuseError::InvalidContent)
+        );
+    }
+}
+
+#[test]
+fn fuse_projection_rejects_invalid_model_capability_overrides() {
+    for (case, capabilities) in [
+        ("foreign-model", r#"{"other":["chat"]}"#),
+        ("private-word", r#"{"chat":["openai_responses"]}"#),
+        ("duplicate", r#"{"chat":["stream","stream"]}"#),
+    ] {
+        let root = reference_tree(&format!("fuse-provider-invalid-capability-{case}"));
+        let providers = root.join("providers.d");
+        write_text_file(
+            &providers.join("local.json"),
+            &format!(
+                r#"{{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"],"model_capabilities":{capabilities}}}"#
             ),
         );
         let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);

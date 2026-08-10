@@ -60,6 +60,26 @@ fn parses_spec_which_command() {
 }
 
 #[test]
+fn parses_top_level_agent_inspect_command() {
+    for target in ["agent/coder", "/ctx/agent/coder"] {
+        let command = cmd!("inspect", target, "--session", "debug");
+        assert!(matches!(
+            command,
+            Ok(Command::Agent(AgentArgs::Inspect {
+                ref name,
+                session: Some(ref session)
+            })) if name == "coder" && session == "debug"
+        ));
+    }
+
+    let model = cmd!("inspect", "model/main");
+    assert!(matches!(
+        model,
+        Err(ref error) if error.message == "inspect expects agent/NAME"
+    ));
+}
+
+#[test]
 fn parses_man_command() {
     let index = cmd!("man");
     assert!(matches!(index, Ok(Command::Man { topic: None })));

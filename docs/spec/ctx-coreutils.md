@@ -131,6 +131,15 @@ level socket commands and explicit raw agent modes.
 terminal and does not enter `tsh`; humans use `ctx agent watch` or
 `ctx agent attach` for the persistent terminal.
 
+`ctx inspect agent/AGENT [--session SESSION]` is the consolidated read-only
+debug view. It prints the Agent definition and control paths, current instance
+summary and receipt presence, selected durable session, model hard limit and
+capabilities, policy and mount paths, and visible-tool count. It derives every
+field from existing controls, supervisor receipts, and session files; it does
+not create an instance, socket, session, or capability cache.
+`ctx agent inspect AGENT [--session SESSION]` is the equivalent agent-domain
+spelling.
+
 `ctx agent send` and `ctx agent chat` accept repeatable
 `--approve TOOL`. In non-raw mode the client answers a hosted SDK
 `approval_request` with `allow_once` only when its exact tool name is in this

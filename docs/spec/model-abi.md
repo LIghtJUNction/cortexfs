@@ -173,6 +173,27 @@ and each value must be in `1..=4294967295`. Invalid local limit declarations
 make that provider config invalid; they are not silently ignored. A local
 entry overrides catalog data for the same projected model.
 
+Provider configuration may also override stable semantic capabilities for
+individual declared models:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["text-model", "vision-model"],
+  "model_capabilities": {
+    "text-model": ["chat", "stream"],
+    "vision-model": ["chat", "stream", "vision"]
+  }
+}
+```
+
+Each key must name `default_model` or an entry in `models`. Values must be
+unique stable capability words from the list below. Provider-private, unknown,
+or duplicate words make the provider configuration invalid. An explicit empty
+list is valid and projects an empty `cap` file. Models without an override use
+the adapter-derived capability projection.
+
 CortexFS obtains catalog limits through the external `models-dev` library.
 Catalog provider and model map keys are matched exactly to the projected
 `<provider>/<model>` identity; transport hosts and aggregator names are not

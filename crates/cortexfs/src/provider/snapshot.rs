@@ -5,7 +5,10 @@ use std::{collections::HashSet, fs, path::Path};
 use super::config::{ProjectedProviderModel, ProviderConfig};
 use super::name::provider_name_from_config;
 use super::project::project_models;
-use crate::support::plain::{open_plain_directory, proc_fd_path, read_small_text_file_at};
+use crate::{
+    STABLE_MODEL_CAPABILITIES,
+    support::plain::{open_plain_directory, proc_fd_path, read_small_text_file_at},
+};
 
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 #[cfg(test)]
@@ -104,7 +107,7 @@ fn read_configs(config_dir: &Path) -> Result<Vec<ProviderConfig>, ProviderError>
             .map_err(|_error| ProviderError::Invalid)?;
         let config = serde_json::from_str::<ProviderConfig>(&content)
             .map_err(|_error| ProviderError::Invalid)?;
-        if !valid_limits(&config) {
+        if !valid_model_metadata(&config) {
             return Err(ProviderError::Invalid);
         }
         configs.push(config);
@@ -112,9 +115,20 @@ fn read_configs(config_dir: &Path) -> Result<Vec<ProviderConfig>, ProviderError>
     Ok(configs)
 }
 
-fn valid_limits(config: &ProviderConfig) -> bool {
-    config.model_limits.iter().all(|(model, limit)| {
-        *limit > 0
-            && (config.default_model.as_ref() == Some(model) || config.models.contains(model))
-    })
+fn valid_model_metadata(config: &ProviderConfig) -> bool {
+    let declared = |model: &String| {
+        config.default_model.as_ref() == Some(model) || config.models.contains(model)
+    };
+    config
+        .model_limits
+        .iter()
+        .all(|(model, limit)| *limit > 0 && declared(model))
+        && config.model_capabilities.iter().all(|(model, capabilities)| {
+            let mut seen = HashSet::<&str>::new();
+            declared(model)
+                && capabilities.iter().all(|capability| {
+                    STABLE_MODEL_CAPABILITIES.contains(&capability.as_str())
+                        && seen.insert(capability.as_str())
+                })
+        })
 }
