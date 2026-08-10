@@ -4,6 +4,7 @@ const sidebars: SidebarsConfig = {
   docs: [
     'getting-started',
     'using-cortexfs',
+    'extensions',
     'developing-cortexfs',
     {
       type: 'category',

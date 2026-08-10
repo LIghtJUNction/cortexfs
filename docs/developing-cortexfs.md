@@ -10,6 +10,12 @@ Start with one rule: CortexFS extension points are the current spec's objects,
 sockets, control files, and tool commit semantics. They are not new root
 directories or new workflow entrances.
 
+For the common case, start with the short path in [One-file Extensions](extensions.md):
+put tools and executable agents in one package directory, describe them in one
+`cortexfs.yaml`, and run `ctx install ./package`. The package is only an
+authoring convenience; installation still uses the same hash-bound atomic
+object publication and the same `agent/<name>.d/*` / `tool/<name>.d/*` ABI.
+
 ## Read The Boundary First
 
 Suggested order:
