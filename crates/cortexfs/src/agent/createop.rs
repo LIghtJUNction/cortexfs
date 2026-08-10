@@ -2302,20 +2302,21 @@ allow coder_t agent:window-child start\n",
 
     #[test]
     fn startup_stub_accepts_valid_retry_and_rejects_hardlink() -> io::Result<()> {
-        let root = std::env::temp_dir().join(format!("cfs-startup-stub-{}", std::process::id()));
-        let _ignored = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root)?;
-        let parent = crate::support::plain::open_plain_directory(&root)?;
+        let root = tempfile::tempdir()?;
+        let parent = crate::support::plain::open_plain_directory(root.path())?;
         let uid = nix::unistd::geteuid().as_raw();
         let gid = nix::unistd::getegid().as_raw();
         let created = prepare_startup_stub(&parent, uid, gid)?;
         assert!(created.created);
         let retry = prepare_startup_stub(&parent, uid, gid)?;
         assert!(!retry.created);
-        fs::hard_link(root.join(".empty-shell-startup"), root.join("alias"))?;
+        fs::hard_link(
+            root.path().join(".empty-shell-startup"),
+            root.path().join("alias"),
+        )?;
         assert!(prepare_startup_stub(&parent, uid, gid).is_err());
         assert!(cleanup_created_startup_stub(&parent, created).is_err());
-        assert!(root.join(".empty-shell-startup").exists());
+        assert!(root.path().join(".empty-shell-startup").exists());
         Ok(())
     }
 }

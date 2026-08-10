@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=125277
-prod=80082
+all=125311
+prod=80094
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -24,8 +24,8 @@ prod=80082
 296 crates/cortexfs/src/agent/child.rs
 225 crates/cortexfs/src/agent/control.rs
 527 crates/cortexfs/src/agent/create.rs
-2321 crates/cortexfs/src/agent/createop.rs
-1927 crates/cortexfs/src/agent/launch.rs
+2322 crates/cortexfs/src/agent/createop.rs
+1930 crates/cortexfs/src/agent/launch.rs
 70 crates/cortexfs/src/agent/launch/directory.rs
 76 crates/cortexfs/src/agent/launch/meta.rs
 22 crates/cortexfs/src/agent/prompt.rs
@@ -289,7 +289,7 @@ prod=80082
 377 crates/cortexfs/src/runtime/socket.rs
 304 crates/cortexfs/src/runtime/socket/bwrap.rs
 316 crates/cortexfs/src/runtime/socket/events.rs
-2027 crates/cortexfs/src/runtime/socket/exec.rs
+2035 crates/cortexfs/src/runtime/socket/exec.rs
 91 crates/cortexfs/src/runtime/socket/exec/approval.rs
 53 crates/cortexfs/src/runtime/socket/exec/delivery.rs
 157 crates/cortexfs/src/runtime/socket/session.rs

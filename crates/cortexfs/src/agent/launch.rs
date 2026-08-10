@@ -184,43 +184,46 @@ mod user_manager_tests {
     };
     use crate::AgentUnixIdentity;
     use std::fs;
+    use std::io;
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
 
-    fn runtime_fixture(name: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()));
-        let _ignored = fs::remove_dir_all(&path);
-        assert!(fs::create_dir_all(&path).is_ok());
-        assert!(fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).is_ok());
-        path
+    fn runtime_fixture(name: &str) -> io::Result<tempfile::TempDir> {
+        let path = tempfile::Builder::new()
+            .prefix(&format!("cfs-{name}-"))
+            .tempdir()?;
+        fs::set_permissions(path.path(), fs::Permissions::from_mode(0o700))?;
+        Ok(path)
     }
 
     #[test]
-    fn terminal_runtime_chain_is_target_owned_and_reusable() {
-        let root = runtime_fixture("terminal-runtime-owner");
+    fn terminal_runtime_chain_is_target_owned_and_reusable() -> io::Result<()> {
+        let root = runtime_fixture("terminal-runtime-owner")?;
         let uid = nix::unistd::geteuid().as_raw();
         let gid = nix::unistd::getegid().as_raw();
         let identity = AgentUnixIdentity::new(uid, gid, []);
-        let first = ensure_terminal_runtime_dir(&root, "worker", "default", &identity);
+        let first = ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity);
         assert!(first.is_ok());
         let metadata = first.and_then(|file| file.metadata());
         assert!(
             matches!(metadata, Ok(ref metadata) if metadata.uid() == uid && metadata.gid() == gid && metadata.permissions().mode() & 0o7777 == 0o700)
         );
-        assert!(ensure_terminal_runtime_dir(&root, "worker", "default", &identity).is_ok());
+        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_ok());
+        Ok(())
     }
 
     #[test]
-    fn terminal_runtime_chain_rejects_symlink_component() {
-        let root = runtime_fixture("terminal-runtime-symlink");
-        let outside = runtime_fixture("terminal-runtime-outside");
-        assert!(std::os::unix::fs::symlink(&outside, root.join("cortexfs")).is_ok());
+    fn terminal_runtime_chain_rejects_symlink_component() -> io::Result<()> {
+        let root = runtime_fixture("terminal-runtime-symlink")?;
+        let outside = runtime_fixture("terminal-runtime-outside")?;
+        std::os::unix::fs::symlink(outside.path(), root.path().join("cortexfs"))?;
         let identity = AgentUnixIdentity::new(
             nix::unistd::geteuid().as_raw(),
             nix::unistd::getegid().as_raw(),
             [],
         );
-        assert!(ensure_terminal_runtime_dir(&root, "worker", "default", &identity).is_err());
+        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_err());
+        Ok(())
     }
 
     #[test]
@@ -243,7 +246,7 @@ mod user_manager_tests {
     fn nonroot_wrong_self_groups_fails_closed() {
         assert!(matches!(
             select_user_manager_caller(1000, 100, &[20], 1000, 100, &[20, 30]),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied
         ));
     }
 

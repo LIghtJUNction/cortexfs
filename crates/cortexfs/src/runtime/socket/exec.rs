@@ -1533,8 +1533,10 @@ mod completion_tests {
         Ok(())
     }
 
-    fn completion_root(name: &str) -> PathBuf {
-        env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()))
+    fn completion_root(name: &str) -> io::Result<tempfile::TempDir> {
+        tempfile::Builder::new()
+            .prefix(&format!("cfs-{name}-"))
+            .tempdir()
     }
 
     fn test_object_runner() -> Option<PathBuf> {
@@ -1791,40 +1793,45 @@ mod completion_tests {
     }
 
     #[test]
-    fn owned_child_channel_uses_canonical_parent_home() {
-        let root = completion_root("canonical-child-channel");
-        let _ignored = fs::remove_dir_all(&root);
-        assert!(prepare_empty_reference_fixture(&root).is_ok());
-        let parent = derive_agent_runtime_view(&root, "coder");
+    fn owned_child_channel_uses_canonical_parent_home() -> io::Result<()> {
+        let root = completion_root("canonical-child-channel")?;
+        assert!(prepare_empty_reference_fixture(root.path()).is_ok());
+        let parent = derive_agent_runtime_view(root.path(), "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
-            return;
+            return Ok(());
         };
-        let channel =
-            canonical_owned_child_channel(&root, parent.owner(), "coder", "default", "worker-1");
+        let channel = canonical_owned_child_channel(
+            root.path(),
+            parent.owner(),
+            "coder",
+            "default",
+            "worker-1",
+        );
         assert_eq!(
             channel,
             Ok(parent.home().join("session/default/context/child/worker-1"))
         );
         assert_ne!(
             channel.unwrap_or_default(),
-            root.join("agent/coder.d/session/default/context/child/worker-1")
+            root.path()
+                .join("agent/coder.d/session/default/context/child/worker-1")
         );
+        Ok(())
     }
 
     #[test]
-    fn owned_child_channel_rejects_parent_owner_mismatch() {
-        let root = completion_root("child-channel-owner-mismatch");
-        let _ignored = fs::remove_dir_all(&root);
-        assert!(prepare_empty_reference_fixture(&root).is_ok());
-        let parent = derive_agent_runtime_view(&root, "coder");
+    fn owned_child_channel_rejects_parent_owner_mismatch() -> io::Result<()> {
+        let root = completion_root("child-channel-owner-mismatch")?;
+        assert!(prepare_empty_reference_fixture(root.path()).is_ok());
+        let parent = derive_agent_runtime_view(root.path(), "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
-            return;
+            return Ok(());
         };
         assert_eq!(
             canonical_owned_child_channel(
-                &root,
+                root.path(),
                 parent.owner().saturating_add(1),
                 "coder",
                 "default",
@@ -1832,6 +1839,7 @@ mod completion_tests {
             ),
             Err(SocketRuntimeError::CannotRunAgent)
         );
+        Ok(())
     }
 
     #[test]
