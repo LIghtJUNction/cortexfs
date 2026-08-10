@@ -101,7 +101,9 @@ fn parses_agent_lifecycle_commands() {
 #[test]
 fn agent_inspect_projects_definition_instance_session_and_model() {
     let root = clean_test_dir("ctx-agent-inspect");
-    assert!(ensure_reference_tree(&root).is_ok());
+    let ensured = ensure_reference_tree(&root);
+    assert!(ensured.is_ok(), "reference tree: {ensured:?}");
+    ensure_runtime_model_fixture(&root);
     let session = ctx_home(&root)
         .unwrap_or_default()
         .join("agent/coder/session/default");
@@ -110,7 +112,7 @@ fn agent_inspect_projects_definition_instance_session_and_model() {
     write_text_file(&session.join("cwd"), "/workspace\n");
 
     let lines = agent_inspect_lines(&root, "coder", Some("default"));
-    assert!(lines.is_ok());
+    assert!(lines.is_ok(), "agent inspect: {lines:?}");
     let lines = lines.unwrap_or_default();
     assert!(lines.iter().any(|line| line.ends_with("/agent/coder")));
     assert!(lines.iter().any(|line| line == "session.state=idle"));
