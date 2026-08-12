@@ -1,7 +1,7 @@
 use crate::*;
 
 use crate::provider::auth::AuthMethod;
-use crate::provider::auth::{AuthResponse, Credential, configured_registry};
+use crate::provider::auth::{AuthProvider, AuthResponse, Credential, configured_registry};
 use crate::provider::name::is_reserved_provider_name;
 use crate::support::command::CURL;
 use crate::support::plain::{create_plain_dir, open_plain_directory, read_small_text_file};
@@ -23,9 +23,6 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         if !config.enabled {
             continue;
         }
-        let Some(credential) = provider_credential(config, provider) else {
-            continue;
-        };
         let Some(registry) = configured_registry(
             provider,
             &config.base_url,
@@ -35,6 +32,9 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
             continue;
         };
         let Some(adapter) = registry.get(provider) else {
+            continue;
+        };
+        let Some(credential) = provider_credential(config, provider, adapter) else {
             continue;
         };
         let Ok(headers) = adapter.model_headers(&credential) else {
@@ -152,7 +152,11 @@ pub(crate) fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> Pat
     cache_dir.join(format!("{provider}.models.json"))
 }
 
-fn provider_credential(config: &ProviderConfig, provider: &str) -> Option<Credential> {
+fn provider_credential(
+    config: &ProviderConfig,
+    provider: &str,
+    adapter: &dyn AuthProvider,
+) -> Option<Credential> {
     let methods = config.auth_methods();
     let api_key = methods
         .iter()
@@ -179,16 +183,18 @@ fn provider_credential(config: &ProviderConfig, provider: &str) -> Option<Creden
         return None;
     }
     let oauth = config.oauth.as_ref()?;
-    resolve_oauth_access_token(provider, oauth)
-        .ok()
-        .flatten()
-        .map(|access_token| Credential::OAuth {
-            provider: provider.to_owned(),
-            access_token,
-            refresh_token: None,
-            expires_at: None,
-            scopes: Vec::new(),
-        })
+    resolve_oauth_credential_with(provider, oauth, |request| {
+        refresh_oauth_result(provider, request, adapter)
+    })
+    .ok()
+    .flatten()
+    .map(|(access_token, _account)| Credential::OAuth {
+        provider: provider.to_owned(),
+        access_token,
+        refresh_token: None,
+        expires_at: None,
+        scopes: Vec::new(),
+    })
 }
 
 pub(crate) fn run_curl_json(url: &str, headers: &[(String, String)]) -> Result<Vec<u8>, FuseError> {

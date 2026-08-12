@@ -288,7 +288,12 @@ declare OAuth Authorization Code + PKCE metadata:
     "auth_url": "https://auth.example.com/oauth/authorize",
     "token_url": "https://auth.example.com/oauth/token",
     "redirect_uri": "http://127.0.0.1:8765/callback",
-    "scopes": ["model.read", "offline_access"]
+    "scopes": ["model.read", "offline_access"],
+    "device": {
+      "request_url": "https://auth.example.com/device/code",
+      "token_url": "https://auth.example.com/device/token",
+      "verification_uri": "https://auth.example.com/device"
+    }
   }
 }
 ```
@@ -321,7 +326,12 @@ coupling a model to a provider-specific login command:
     "auth_url": "https://auth.example.com/authorize",
     "token_url": "https://auth.example.com/token",
     "redirect_uri": "http://127.0.0.1:8765/callback",
-    "scopes": ["model.read", "offline_access"]
+    "scopes": ["model.read", "offline_access"],
+    "device": {
+      "request_url": "https://auth.example.com/device/code",
+      "token_url": "https://auth.example.com/device/token",
+      "verification_uri": "https://auth.example.com/device"
+    }
   }
 }
 ```
@@ -368,11 +378,12 @@ Model listing remains provider-neutral and feeds the existing model projection
 and bounded host caches; it does not create an `/ctx/identity` namespace. The
 existing hardened host discovery request is parsed through the selected
 adapter, so provider-specific model envelopes do not leak into the model ABI.
-`device_code` is part of the shared declaration grammar. The built-in GitHub
-Copilot adapter implements the standard device challenge, bounded polling, and
-normalized credential persistence; other adapters only advertise device flow
-when their host metadata supplies a matching implementation. The CLI prints
-the verification URI and user code but never stores the device code in `/ctx`.
+`device_code` is part of the shared declaration grammar. An OAuth `device`
+block supplies standard device-code endpoints for host-configured adapters.
+The built-in GitHub Copilot adapter supplies its documented defaults when that
+block is omitted. Adapters implement the standard device challenge, bounded
+polling, and normalized credential persistence. The CLI prints the
+verification URI and user code but never stores the device code in `/ctx`.
 
 ## Provider Presets
 

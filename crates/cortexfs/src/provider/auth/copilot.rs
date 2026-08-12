@@ -1,6 +1,6 @@
 use super::adapter::{
     AuthProvider, AuthProviderError, AuthRequest, AuthTransport, DeviceChallenge, default_login,
-    default_models, default_refresh,
+    default_models, default_refresh, device_request,
 };
 use super::common::AdapterCore;
 use super::device::DeviceConfig;
@@ -26,6 +26,7 @@ impl GitHubCopilotAdapter {
             token_url: "https://github.com/login/oauth/access_token".to_owned(),
             redirect_uri: redirect_uri.into(),
             scopes: vec!["read:user".to_owned()],
+            device: None,
             access_token_account: None,
             refresh_token_account: None,
         }
@@ -39,6 +40,14 @@ impl GitHubCopilotAdapter {
     /// Builds a Copilot adapter using the configured provider base URL.
     #[must_use]
     pub fn with_base(oauth: OAuthProviderConfig, base_url: &str) -> Self {
+        let device = oauth.device.clone().map_or_else(
+            || DeviceConfig {
+                request_url: "https://github.com/login/device/code".to_owned(),
+                token_url: "https://github.com/login/oauth/access_token".to_owned(),
+                verification_uri: "https://github.com/login/device".to_owned(),
+            },
+            DeviceConfig::from,
+        );
         Self {
             core: AdapterCore {
                 id: "github-copilot".to_owned(),
@@ -49,11 +58,7 @@ impl GitHubCopilotAdapter {
                     ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
                 ],
                 oauth: Some(oauth),
-                device: Some(DeviceConfig {
-                    request_url: "https://github.com/login/device/code".to_owned(),
-                    token_url: "https://github.com/login/oauth/access_token".to_owned(),
-                    verification_uri: "https://github.com/login/device".to_owned(),
-                }),
+                device: Some(device),
             },
         }
     }
@@ -89,6 +94,9 @@ impl AuthProvider for GitHubCopilotAdapter {
         transport: &mut dyn AuthTransport,
         now: u64,
     ) -> Result<Credential, AuthProviderError> {
+        if let Some(credential) = device_request(self, &request, transport, now)? {
+            return Ok(credential);
+        }
         self.core.login(request, transport, now)
     }
 

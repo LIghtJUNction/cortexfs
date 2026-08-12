@@ -1,5 +1,5 @@
 use super::{Credential, ProviderAuthConfig};
-use crate::provider::oauth::OAuthPkce;
+use crate::provider::oauth::{OAuthError, OAuthPkce, OAuthRefreshRequest, OAuthRefreshResult};
 
 pub use super::device::DeviceChallenge;
 use super::protocol::unix_time;
@@ -150,6 +150,60 @@ pub fn default_login(
 ) -> Result<Credential, AuthProviderError> {
     let mut transport = http_transport()?;
     provider.login_with(request, &mut transport, unix_time())
+}
+
+/// Handles a device request when callers use the compact login API.
+pub fn device_request(
+    provider: &dyn AuthProvider,
+    request: &AuthRequest,
+    transport: &mut dyn AuthTransport,
+    now: u64,
+) -> Result<Option<Credential>, AuthProviderError> {
+    let &AuthRequest::DeviceCode { timeout_secs } = request else {
+        return Ok(None);
+    };
+    let mut notify = |_challenge: &DeviceChallenge| {};
+    let mut pause = |seconds| std::thread::sleep(std::time::Duration::from_secs(seconds));
+    provider
+        .device_login_with(timeout_secs, transport, now, &mut notify, &mut pause)
+        .map(Some)
+}
+
+/// Refreshes through an adapter while retaining the provider-neutral envelope.
+pub fn refresh_oauth_result(
+    provider: &str,
+    request: &OAuthRefreshRequest,
+    adapter: &dyn AuthProvider,
+) -> Result<OAuthRefreshResult, OAuthError> {
+    let credential = Credential::OAuth {
+        provider: provider.to_owned(),
+        access_token: request.access_token.clone(),
+        refresh_token: Some(request.refresh_token.clone()),
+        expires_at: request.expires_at,
+        scopes: Vec::new(),
+    };
+    let refreshed = adapter
+        .refresh(&credential)
+        .map_err(|_error| OAuthError::Transport)?;
+    let Credential::OAuth {
+        provider: refreshed_provider,
+        access_token,
+        refresh_token,
+        expires_at,
+        scopes,
+    } = refreshed
+    else {
+        return Err(OAuthError::InvalidToken);
+    };
+    if refreshed_provider != provider {
+        return Err(OAuthError::InvalidToken);
+    }
+    Ok(OAuthRefreshResult {
+        access_token,
+        refresh_token,
+        expires_at,
+        scopes,
+    })
 }
 
 /// Runs a device login through the default transport and a real-time notifier.

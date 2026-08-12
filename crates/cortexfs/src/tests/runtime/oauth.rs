@@ -14,6 +14,7 @@ fn config() -> OAuthProviderConfig {
         token_url: "https://auth.example/token".to_owned(),
         redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
         scopes: vec!["model.read".to_owned(), "offline_access".to_owned()],
+        device: None,
         access_token_account: None,
         refresh_token_account: None,
     }

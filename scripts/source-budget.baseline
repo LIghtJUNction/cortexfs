@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=128286
-prod=82639
+all=128662
+prod=82912
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -155,7 +155,7 @@ prod=82639
 263 crates/cortexfs/src/context/jsonl.rs
 87 crates/cortexfs/src/context/pack.rs
 140 crates/cortexfs/src/context/source.rs
-122 crates/cortexfs/src/exports.rs
+123 crates/cortexfs/src/exports.rs
 6 crates/cortexfs/src/fuse.rs
 206 crates/cortexfs/src/fuse/alias.rs
 119 crates/cortexfs/src/fuse/path.rs
@@ -214,7 +214,7 @@ prod=82639
 405 crates/cortexfs/src/object/runner/completion.rs
 102 crates/cortexfs/src/object/runner/config.rs
 14 crates/cortexfs/src/object/runner/context.rs
-197 crates/cortexfs/src/object/runner/credentials.rs
+216 crates/cortexfs/src/object/runner/credentials.rs
 213 crates/cortexfs/src/object/runner/curl.rs
 396 crates/cortexfs/src/object/runner/requests.rs
 257 crates/cortexfs/src/object/runner/responses.rs
@@ -238,24 +238,24 @@ prod=82639
 43 crates/cortexfs/src/provider.rs
 97 crates/cortexfs/src/provider/alias.rs
 114 crates/cortexfs/src/provider/auth.rs
-187 crates/cortexfs/src/provider/auth/adapter.rs
-119 crates/cortexfs/src/provider/auth/anthropic.rs
+241 crates/cortexfs/src/provider/auth/adapter.rs
+127 crates/cortexfs/src/provider/auth/anthropic.rs
 63 crates/cortexfs/src/provider/auth/codexdevice.rs
-159 crates/cortexfs/src/provider/auth/common.rs
-142 crates/cortexfs/src/provider/auth/copilot.rs
+165 crates/cortexfs/src/provider/auth/common.rs
+150 crates/cortexfs/src/provider/auth/copilot.rs
 63 crates/cortexfs/src/provider/auth/credential.rs
-84 crates/cortexfs/src/provider/auth/device.rs
+107 crates/cortexfs/src/provider/auth/device.rs
 68 crates/cortexfs/src/provider/auth/deviceparse.rs
 41 crates/cortexfs/src/provider/auth/factory.rs
-55 crates/cortexfs/src/provider/auth/model.rs
-142 crates/cortexfs/src/provider/auth/openai.rs
+65 crates/cortexfs/src/provider/auth/model.rs
+149 crates/cortexfs/src/provider/auth/openai.rs
 68 crates/cortexfs/src/provider/auth/persist.rs
 92 crates/cortexfs/src/provider/auth/protocol.rs
 121 crates/cortexfs/src/provider/auth/registry.rs
 73 crates/cortexfs/src/provider/auth/transport.rs
 336 crates/cortexfs/src/provider/catalog.rs
 55 crates/cortexfs/src/provider/config.rs
-345 crates/cortexfs/src/provider/discovery.rs
+351 crates/cortexfs/src/provider/discovery.rs
 64 crates/cortexfs/src/provider/link.rs
 473 crates/cortexfs/src/provider/model.rs
 182 crates/cortexfs/src/provider/model/routes.rs
@@ -264,9 +264,9 @@ prod=82639
 107 crates/cortexfs/src/provider/name/names.rs
 156 crates/cortexfs/src/provider/name/secrets.rs
 89 crates/cortexfs/src/provider/name/selection.rs
-705 crates/cortexfs/src/provider/oauth.rs
+831 crates/cortexfs/src/provider/oauth.rs
 131 crates/cortexfs/src/provider/project.rs
-143 crates/cortexfs/src/provider/snapshot.rs
+148 crates/cortexfs/src/provider/snapshot.rs
 15 crates/cortexfs/src/reference.rs
 9 crates/cortexfs/src/reference/bootstrap.rs
 632 crates/cortexfs/src/reference/bootstrap/core.rs

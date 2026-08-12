@@ -128,6 +128,9 @@ configuration. Login, device login, refresh, persistence, and model discovery
 return the same normalized credential/model shapes; the Agent does not branch
 on OAuth endpoints or API-key headers. Copilot's `--device` login displays its
 verification URI and user code, then polls with a bounded timeout.
+Host-configured providers can declare an OAuth `device` block with request,
+token, and verification endpoints; this keeps device-code flow provider-neutral
+without adding another `/ctx` namespace.
 
 Canonical provider names are `openai`, `anthropic`, and `google`. `codex` is
 an alias for the `openai` preset; `gemini` is an alias for the `google` preset.

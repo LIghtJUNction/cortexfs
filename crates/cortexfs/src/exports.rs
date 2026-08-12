@@ -65,15 +65,16 @@ pub use provider::name::{
 };
 pub use provider::oauth::{
     CODEX_CLIENT_ID, CODEX_DEVICE_REDIRECT_URI, CODEX_DEVICE_TOKEN_URL, CODEX_DEVICE_USER_URL,
-    CODEX_DEVICE_VERIFY_URL, DeviceCode, OAuthCredential, OAuthCredentialMaterial, OAuthError,
-    OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, OAuthTokenState, codex_oauth_config,
+    CODEX_DEVICE_VERIFY_URL, DeviceCode, OAuthCredential, OAuthCredentialMaterial,
+    OAuthDeviceConfig, OAuthError, OAuthPkce, OAuthProviderConfig, OAuthRefreshRequest,
+    OAuthRefreshResult, OAuthTokenResponse, OAuthTokenState, codex_oauth_config,
     exchange_oauth_token, exchange_oauth_token_with, oauth_account_id,
     oauth_authorization_code_form, oauth_authorization_url, oauth_keychain_secret,
     oauth_needs_refresh, oauth_post, oauth_refresh_token_form, oauth_token_state,
     parse_oauth_token_response, poll_device_code_with, read_codex_system, request_device_code_with,
     resolve_codex_system, resolve_codex_with, resolve_oauth_access_token,
-    resolve_oauth_access_token_with, resolve_oauth_credential, store_codex_system,
-    store_codex_with, store_oauth_credential, store_oauth_tokens,
+    resolve_oauth_access_token_with, resolve_oauth_credential, resolve_oauth_credential_with,
+    store_codex_system, store_codex_with, store_oauth_credential, store_oauth_tokens,
 };
 pub use reference::storage::{
     SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR, StorageUpdateError, pin_storage_source,

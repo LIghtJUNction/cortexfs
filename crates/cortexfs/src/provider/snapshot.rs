@@ -6,6 +6,7 @@ use super::config::{ProjectedProviderModel, ProviderConfig};
 use super::name::provider_name_from_config;
 use super::project::project_models;
 use crate::provider::auth::{AuthMethod, ProviderAuthConfig};
+use crate::provider::oauth::OAuthProviderConfig;
 use crate::{
     STABLE_MODEL_CAPABILITIES,
     support::plain::{open_plain_directory, proc_fd_path, read_small_text_file_at},
@@ -125,6 +126,10 @@ fn valid_model_metadata(config: &ProviderConfig) -> bool {
             .auth
             .iter()
             .all(|method| method.method != AuthMethod::OAuth || config.oauth.is_some())
+        && config
+            .oauth
+            .as_ref()
+            .is_none_or(OAuthProviderConfig::is_valid)
         && config
             .model_limits
             .iter()

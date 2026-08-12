@@ -1,8 +1,9 @@
 use super::adapter::{
     AuthProvider, AuthProviderError, AuthRequest, AuthTransport, default_login, default_models,
-    default_refresh,
+    default_refresh, device_request,
 };
 use super::common::AdapterCore;
+use super::device::DeviceConfig;
 use super::model::model_url;
 use super::{Credential, ProviderAuthConfig};
 use crate::provider::oauth::{OAuthPkce, OAuthProviderConfig};
@@ -34,6 +35,10 @@ impl AnthropicAdapter {
         oauth: Option<OAuthProviderConfig>,
     ) -> Self {
         let id = id.into();
+        let device = oauth
+            .as_ref()
+            .and_then(|config| config.device.clone())
+            .map(DeviceConfig::from);
         Self {
             core: AdapterCore {
                 aliases: vec!["claude".to_owned()],
@@ -41,7 +46,7 @@ impl AnthropicAdapter {
                 id,
                 methods,
                 oauth,
-                device: None,
+                device,
             },
         }
     }
@@ -78,6 +83,9 @@ impl AuthProvider for AnthropicAdapter {
         transport: &mut dyn AuthTransport,
         now: u64,
     ) -> Result<Credential, AuthProviderError> {
+        if let Some(credential) = device_request(self, &request, transport, now)? {
+            return Ok(credential);
+        }
         self.core.login(request, transport, now)
     }
 

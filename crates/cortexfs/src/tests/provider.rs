@@ -1,7 +1,8 @@
 use crate::{
     AnthropicAdapter, AuthMethod, AuthProvider, AuthProviderError, AuthRequest, AuthResponse,
-    AuthTransport, Credential, CredentialKind, GitHubCopilotAdapter, OAuthFlow, OpenAiAdapter,
-    ProviderAuthConfig, ProviderRegistry, effective_auth_methods,
+    AuthTransport, Credential, CredentialKind, GitHubCopilotAdapter, OAuthDeviceConfig, OAuthFlow,
+    OAuthPkce, OAuthProviderConfig, OpenAiAdapter, ProviderAuthConfig, ProviderRegistry,
+    effective_auth_methods,
 };
 
 #[derive(Default)]
@@ -280,4 +281,105 @@ fn registry_resolves_concrete_provider_aliases() -> Result<(), Box<dyn std::erro
         Some("github-copilot")
     );
     Ok(())
+}
+
+#[test]
+fn host_device_endpoints_feed_generic_adapter() -> Result<(), AuthProviderError> {
+    let oauth = OAuthProviderConfig {
+        client_id: "client".to_owned(),
+        auth_url: "https://auth.example/authorize".to_owned(),
+        token_url: "https://auth.example/token".to_owned(),
+        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
+        scopes: vec!["model.read".to_owned()],
+        device: Some(OAuthDeviceConfig {
+            request_url: "https://auth.example/device".to_owned(),
+            token_url: "https://auth.example/device/token".to_owned(),
+            verification_uri: "https://auth.example/verify".to_owned(),
+        }),
+        access_token_account: None,
+        refresh_token_account: None,
+    };
+    let adapter = OpenAiAdapter::new(
+        "example",
+        "https://api.example/v1",
+        vec![ProviderAuthConfig::oauth(
+            OAuthFlow::DeviceCode,
+            "subscription",
+        )],
+        Some(oauth),
+    );
+    let mut transport = ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","token_type":"bearer"}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body:
+                    br#"{"device_code":"device","user_code":"ABCD","expires_in":30,"interval":1}"#
+                        .to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    };
+    let credential = adapter.login_with(
+        AuthRequest::DeviceCode { timeout_secs: 10 },
+        &mut transport,
+        100,
+    )?;
+    assert_eq!(credential.provider(), "example");
+    assert_eq!(
+        transport.posts.first().map(|post| post.0.as_str()),
+        Some("https://auth.example/device")
+    );
+    assert_eq!(
+        transport.posts.get(1).map(|post| post.0.as_str()),
+        Some("https://auth.example/device/token")
+    );
+    Ok(())
+}
+
+#[test]
+fn authorization_url_requires_authorization_code_method() -> Result<(), AuthProviderError> {
+    let oauth = OAuthProviderConfig {
+        client_id: "client".to_owned(),
+        auth_url: "https://auth.example/authorize".to_owned(),
+        token_url: "https://auth.example/token".to_owned(),
+        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
+        scopes: Vec::new(),
+        device: None,
+        access_token_account: None,
+        refresh_token_account: None,
+    };
+    let adapter = OpenAiAdapter::new(
+        "example",
+        "https://api.example/v1",
+        vec![ProviderAuthConfig::oauth(
+            OAuthFlow::DeviceCode,
+            "subscription",
+        )],
+        Some(oauth),
+    );
+    let pkce = OAuthPkce::from_verifier(&"a".repeat(43))
+        .map_err(|_error| AuthProviderError::InvalidConfig)?;
+    assert_eq!(
+        adapter.authorization_url("state", &pkce),
+        Err(AuthProviderError::UnsupportedMethod)
+    );
+    Ok(())
+}
+
+#[test]
+fn model_headers_reject_control_character_credentials() {
+    let adapter = AnthropicAdapter::claude();
+    let credential = Credential::ApiKey {
+        provider: "anthropic".to_owned(),
+        key: "bad\nkey".to_owned(),
+        slot: Some("default".to_owned()),
+    };
+    assert_eq!(
+        adapter.model_headers(&credential),
+        Err(AuthProviderError::InvalidCredential)
+    );
 }

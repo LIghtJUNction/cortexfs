@@ -16,7 +16,7 @@ mod transport;
 
 pub use adapter::{
     AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport, DeviceChallenge,
-    default_device_login, http_transport,
+    default_device_login, device_request, http_transport, refresh_oauth_result,
 };
 pub use credential::{Credential, CredentialKind};
 pub use factory::{configured_adapter, configured_registry};

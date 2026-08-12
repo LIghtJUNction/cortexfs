@@ -1,5 +1,5 @@
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::env;
 
@@ -20,8 +20,27 @@ pub struct OAuthProviderConfig {
     pub redirect_uri: String,
     #[serde(default)]
     pub scopes: Vec<String>,
+    #[serde(default)]
+    pub device: Option<OAuthDeviceConfig>,
     pub access_token_account: Option<String>,
     pub refresh_token_account: Option<String>,
+}
+
+/// Provider endpoints for the standard OAuth device authorization grant.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct OAuthDeviceConfig {
+    pub request_url: String,
+    pub token_url: String,
+    pub verification_uri: String,
+}
+
+impl OAuthDeviceConfig {
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        [&self.request_url, &self.token_url, &self.verification_uri]
+            .into_iter()
+            .all(|value| !value.is_empty() && !controls(value))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +93,23 @@ pub struct OAuthCredentialMaterial<'a> {
     pub scopes: &'a [String],
 }
 
+/// Credential material supplied to a provider-specific refresh callback.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OAuthRefreshRequest {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: Option<u64>,
+}
+
+/// Normalized result returned by a provider-specific refresh callback.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OAuthRefreshResult {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<u64>,
+    pub scopes: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OAuthError {
     InvalidConfig,
@@ -85,6 +121,11 @@ pub enum OAuthError {
 }
 
 impl OAuthProviderConfig {
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        valid_config(self)
+    }
+
     #[must_use]
     pub fn access_account(&self) -> &str {
         self.access_token_account
@@ -116,6 +157,7 @@ pub fn codex_oauth_config() -> OAuthProviderConfig {
             "openid profile email offline_access api.connectors.read api.connectors.invoke"
                 .to_owned(),
         ],
+        device: None,
         access_token_account: None,
         refresh_token_account: None,
     }
@@ -535,8 +577,18 @@ pub fn resolve_oauth_credential(
     provider: &str,
     config: &OAuthProviderConfig,
 ) -> Result<Option<OAuthCredential>, OAuthError> {
+    resolve_oauth_credential_with(provider, config, |request| {
+        standard_refresh(config, request)
+    })
+}
+
+pub fn resolve_oauth_credential_with(
+    provider: &str,
+    config: &OAuthProviderConfig,
+    refresh: impl FnOnce(&OAuthRefreshRequest) -> Result<OAuthRefreshResult, OAuthError>,
+) -> Result<Option<OAuthCredential>, OAuthError> {
     if !config.is_codex() {
-        return resolve_generic_oauth(provider, config);
+        return resolve_generic_oauth_with(provider, config, refresh);
     }
     let service = crate::provider::name::provider_keychain_service(provider);
     let slots = user_slots(config);
@@ -552,6 +604,16 @@ fn resolve_generic_oauth(
     provider: &str,
     config: &OAuthProviderConfig,
 ) -> Result<Option<OAuthCredential>, OAuthError> {
+    resolve_generic_oauth_with(provider, config, |request| {
+        standard_refresh(config, request)
+    })
+}
+
+fn resolve_generic_oauth_with(
+    provider: &str,
+    config: &OAuthProviderConfig,
+    refresh: impl FnOnce(&OAuthRefreshRequest) -> Result<OAuthRefreshResult, OAuthError>,
+) -> Result<Option<OAuthCredential>, OAuthError> {
     if provider.is_empty() || controls(provider) || !valid_config(config) {
         return Err(OAuthError::InvalidConfig);
     }
@@ -563,7 +625,9 @@ fn resolve_generic_oauth(
     }
     let service = crate::provider::name::provider_keychain_service(provider);
     let access = oauth_keychain_secret(&service, config.access_account())?;
-    let refresh = oauth_keychain_secret(&service, config.refresh_account())?;
+    let Some(refresh_value) = refresh_token(provider, config, &service)? else {
+        return Ok(access.map(|value| (value, String::new())));
+    };
     let expires = oauth_keychain_secret(&service, OAUTH_EXPIRES_ACCOUNT)?
         .and_then(|value| value.parse::<u64>().ok());
     let now = std::time::SystemTime::now()
@@ -574,13 +638,71 @@ fn resolve_generic_oauth(
     if !stale && let Some(access) = access.as_ref() {
         return Ok(Some((access.clone(), String::new())));
     }
-    let Some(refresh) = refresh.filter(|value| !value.trim().is_empty()) else {
-        return Ok(access.map(|value| (value, String::new())));
+    let request = OAuthRefreshRequest {
+        access_token: access.unwrap_or_default(),
+        refresh_token: refresh_value.clone(),
+        expires_at: expires,
     };
-    let form = oauth_refresh_token_form(config, &refresh)?;
+    let result = refresh(&request)?;
+    if result.access_token.trim().is_empty()
+        || controls(&result.access_token)
+        || result.refresh_token.as_deref().is_some_and(controls)
+    {
+        return Err(OAuthError::InvalidToken);
+    }
+    let retained_refresh = result
+        .refresh_token
+        .as_deref()
+        .or(Some(refresh_value.as_str()));
+    store_oauth_credential(
+        provider,
+        config,
+        &OAuthCredentialMaterial {
+            access_token: &result.access_token,
+            refresh_token: retained_refresh,
+            expires_at: result.expires_at,
+            scopes: &result.scopes,
+        },
+        now,
+    )?;
+    Ok(Some((result.access_token, String::new())))
+}
+
+fn refresh_token(
+    provider: &str,
+    config: &OAuthProviderConfig,
+    service: &str,
+) -> Result<Option<String>, OAuthError> {
+    let name = crate::provider_oauth_refresh_token_env_name(provider);
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(env::VarError::NotPresent) => {
+            oauth_keychain_secret(service, config.refresh_account())
+                .map(|value| value.filter(|value| !value.trim().is_empty()))
+        }
+        Err(env::VarError::NotUnicode(_)) => Err(OAuthError::InvalidConfig),
+    }
+}
+
+fn standard_refresh(
+    config: &OAuthProviderConfig,
+    request: &OAuthRefreshRequest,
+) -> Result<OAuthRefreshResult, OAuthError> {
+    let form = oauth_refresh_token_form(config, &request.refresh_token)?;
     let token = exchange_oauth_token(config, &form)?;
-    store_oauth_tokens(provider, config, &token, now)?;
-    Ok(Some((token.access_token, String::new())))
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_error| OAuthError::Transport)?
+        .as_secs();
+    Ok(OAuthRefreshResult {
+        access_token: token.access_token,
+        refresh_token: token.refresh_token,
+        expires_at: token.expires_in.and_then(|value| now.checked_add(value)),
+        scopes: token
+            .scope
+            .map(|scope| scope.split_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default(),
+    })
 }
 
 fn resolve_stored_codex(
@@ -683,6 +805,10 @@ fn valid_config(config: &OAuthProviderConfig) -> bool {
             .scopes
             .iter()
             .any(|scope| scope.trim().is_empty() || controls(scope))
+        && config
+            .device
+            .as_ref()
+            .is_none_or(OAuthDeviceConfig::is_valid)
 }
 
 fn controls(value: &str) -> bool {

@@ -14,6 +14,9 @@ impl AdapterCore {
                 ref key,
                 ..
             } if provider == &self.id => {
+                if invalid_header_value(key) {
+                    return Err(AuthProviderError::InvalidCredential);
+                }
                 let value = if api_key_header == "Authorization" {
                     format!("Bearer {key}")
                 } else {
@@ -26,6 +29,9 @@ impl AdapterCore {
                 ref access_token,
                 ..
             } if provider == &self.id => {
+                if invalid_header_value(access_token) {
+                    return Err(AuthProviderError::InvalidCredential);
+                }
                 ("Authorization".to_owned(), format!("Bearer {access_token}"))
             }
             _ => return Err(AuthProviderError::InvalidCredential),
@@ -48,6 +54,10 @@ impl AdapterCore {
         let response = transport.get(&self.model_url, &headers)?;
         parse_models(&response)
     }
+}
+
+fn invalid_header_value(value: &str) -> bool {
+    value.trim().is_empty() || value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 pub fn model_url(base_url: &str) -> String {

@@ -1,6 +1,6 @@
 use super::deviceparse::{form, parse_challenge, parse_error};
 use super::{AuthProviderError, AuthTransport};
-use crate::provider::oauth::{OAuthProviderConfig, parse_oauth_token_response};
+use crate::provider::oauth::{OAuthDeviceConfig, OAuthProviderConfig, parse_oauth_token_response};
 
 /// User-visible challenge emitted by a device authorization flow.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +19,16 @@ pub struct DeviceConfig {
     pub verification_uri: String,
 }
 
+impl From<OAuthDeviceConfig> for DeviceConfig {
+    fn from(config: OAuthDeviceConfig) -> Self {
+        Self {
+            request_url: config.request_url,
+            token_url: config.token_url,
+            verification_uri: config.verification_uri,
+        }
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "device flow injects transport, clock, notifier, and sleep for hermetic hosts"
@@ -33,7 +43,20 @@ pub fn login(
     notify: &mut dyn FnMut(&DeviceChallenge),
     pause: &mut dyn FnMut(u64),
 ) -> Result<super::Credential, AuthProviderError> {
-    if oauth.client_id.trim().is_empty() || timeout_secs == 0 {
+    if oauth.client_id.trim().is_empty()
+        || timeout_secs == 0
+        || !oauth
+            .device
+            .as_ref()
+            .is_none_or(OAuthDeviceConfig::is_valid)
+        || [
+            &device.request_url,
+            &device.token_url,
+            &device.verification_uri,
+        ]
+        .into_iter()
+        .any(|value| value.is_empty() || value.bytes().any(|byte| byte.is_ascii_control()))
+    {
         return Err(AuthProviderError::InvalidConfig);
     }
     let response = transport.post_with_headers(

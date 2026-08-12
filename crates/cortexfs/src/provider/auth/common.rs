@@ -20,6 +20,12 @@ impl AdapterCore {
         state: &str,
         pkce: &OAuthPkce,
     ) -> Result<String, AuthProviderError> {
+        if !self.methods.iter().any(|method| {
+            method.method == super::AuthMethod::OAuth
+                && method.flow == Some(super::OAuthFlow::AuthorizationCode)
+        }) {
+            return Err(AuthProviderError::UnsupportedMethod);
+        }
         let config = self
             .oauth
             .as_ref()

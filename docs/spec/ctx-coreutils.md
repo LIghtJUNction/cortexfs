@@ -727,15 +727,17 @@ detached create bash supervisor; those require a versioned terminal ABI revision
 `/ctx/provider` namespace and does not expose tokens through model files.
 
 ```text
-ctx provider oauth login PROVIDER [--timeout SECONDS]
+ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]
 ctx provider oauth status PROVIDER
 ctx provider oauth refresh PROVIDER
 ```
 
-`login` reads `/etc/cortexfs/providers.d/*.json`, uses the provider `oauth`
-block, creates a PKCE `S256` authorization request, waits on the configured
-localhost `redirect_uri`, exchanges the authorization code for tokens, and
-stores tokens in the system keychain:
+`login` reads `/etc/cortexfs/providers.d/*.json` and uses the provider `oauth`
+block. The default browser flow creates a PKCE `S256` authorization request,
+waits on the configured localhost `redirect_uri`, and exchanges the code. With
+`--device`, it prints the provider's verification URI and code, then performs
+bounded device polling. Both flows store normalized tokens in the system
+keychain:
 
 ```text
 service=cortexfs:<provider> account=oauth:access

@@ -94,7 +94,7 @@ pub use provider::auth::{
     AuthMethod, AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport,
     Credential, CredentialKind, DeviceChallenge, OAuthFlow, ProviderAuthConfig, ProviderRegistry,
     ProviderRegistryError, configured_adapter, configured_registry, default_device_login,
-    effective_auth_methods, http_transport,
+    device_request, effective_auth_methods, http_transport, refresh_oauth_result,
 };
 pub use provider::discovery::*;
 pub(crate) use provider::{
