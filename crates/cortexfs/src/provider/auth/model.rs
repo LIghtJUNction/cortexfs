@@ -12,6 +12,7 @@ impl AdapterCore {
             Credential::ApiKey {
                 ref provider,
                 ref key,
+                ..
             } if provider == &self.id => {
                 let value = if api_key_header == "Authorization" {
                     format!("Bearer {key}")

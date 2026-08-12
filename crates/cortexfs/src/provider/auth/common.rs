@@ -124,6 +124,7 @@ impl AdapterCore {
         Ok(Credential::ApiKey {
             provider: self.id.clone(),
             key,
+            slot: Some(slot.to_owned()),
         })
     }
     fn exchange(

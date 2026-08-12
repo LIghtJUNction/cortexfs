@@ -10,7 +10,9 @@ pub fn store(
         return Err(AuthProviderError::InvalidCredential);
     }
     match *credential {
-        Credential::ApiKey { ref key, .. } => store_key(core, key),
+        Credential::ApiKey {
+            ref key, ref slot, ..
+        } => store_key(core, key, slot.as_deref()),
         Credential::OAuth {
             ref access_token,
             ref refresh_token,
@@ -38,16 +40,29 @@ pub fn store(
     }
 }
 
-fn store_key(core: &AdapterCore, key: &str) -> Result<(), AuthProviderError> {
+fn store_key(
+    core: &AdapterCore,
+    key: &str,
+    requested_slot: Option<&str>,
+) -> Result<(), AuthProviderError> {
     if key.trim().is_empty() || key.bytes().any(|byte| byte.is_ascii_control()) {
         return Err(AuthProviderError::InvalidCredential);
     }
-    let slot = core
+    let slot = requested_slot
+        .or_else(|| {
+            core.methods
+                .iter()
+                .find(|method| method.method == AuthMethod::ApiKey)
+                .map(|method| method.slot.as_str())
+        })
+        .ok_or(AuthProviderError::UnsupportedMethod)?;
+    if !core
         .methods
         .iter()
-        .find(|method| method.method == AuthMethod::ApiKey)
-        .map(|method| method.slot.as_str())
-        .ok_or(AuthProviderError::UnsupportedMethod)?;
+        .any(|method| method.method == AuthMethod::ApiKey && method.slot == slot)
+    {
+        return Err(AuthProviderError::InvalidCredential);
+    }
     crate::provider::name::store_provider_system_secret(&core.id, slot, key)
         .map_err(|_error| AuthProviderError::Unavailable)
 }

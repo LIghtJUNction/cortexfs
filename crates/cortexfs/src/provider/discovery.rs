@@ -166,6 +166,10 @@ fn provider_credential(config: &ProviderConfig, provider: &str) -> Option<Creden
         return Some(Credential::ApiKey {
             provider: provider.to_owned(),
             key,
+            slot: methods
+                .iter()
+                .find(|method| method.method == AuthMethod::ApiKey)
+                .map(|method| method.slot.clone()),
         });
     }
     if !methods

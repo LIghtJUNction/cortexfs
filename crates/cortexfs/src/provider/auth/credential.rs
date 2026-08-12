@@ -18,7 +18,12 @@ pub enum CredentialKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Credential {
     /// API-key credential.
-    ApiKey { provider: String, key: String },
+    ApiKey {
+        provider: String,
+        key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<String>,
+    },
     /// OAuth credential with optional refresh and expiry metadata.
     OAuth {
         provider: String,

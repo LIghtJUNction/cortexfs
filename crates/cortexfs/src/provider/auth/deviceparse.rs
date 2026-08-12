@@ -32,6 +32,9 @@ pub(super) fn parse_challenge(
         || value.user_code.trim().is_empty()
         || uri.trim().is_empty()
         || value.expires_in == 0
+        || controls(&value.device_code)
+        || controls(&value.user_code)
+        || controls(&uri)
     {
         return Err(AuthProviderError::InvalidResponse);
     }
@@ -44,6 +47,10 @@ pub(super) fn parse_challenge(
         },
         value.device_code,
     ))
+}
+
+fn controls(value: &str) -> bool {
+    value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 pub(super) fn parse_error(response: &AuthResponse) -> Option<String> {

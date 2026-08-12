@@ -75,6 +75,13 @@ fn credential_envelope_round_trips_without_provider_specific_shape()
     assert_eq!(restored, credential);
     assert_eq!(restored.kind(), CredentialKind::OAuth);
     assert!(restored.is_expired(100));
+    let key = Credential::ApiKey {
+        provider: "anthropic".to_owned(),
+        key: "sk-test".to_owned(),
+        slot: Some("secondary".to_owned()),
+    };
+    let restored_key: Credential = serde_json::from_str(&serde_json::to_string(&key)?)?;
+    assert_eq!(restored_key, key);
     Ok(())
 }
 
