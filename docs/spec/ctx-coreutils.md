@@ -52,6 +52,12 @@ ctx agent ps
 ctx agent chat reviewer
 ctx agent send reviewer --approve example.echo "run the declared echo tool"
 
+ctx terminal create coder [--session default] [--cwd /workspace]
+ctx terminal list
+ctx terminal status terminal-coder-default
+ctx terminal watch terminal-coder-default
+ctx terminal attach terminal-coder-default
+
 ctx cat agent/coder.d/policy
 ctx set agent/coder.d/cwd /work
 ctx append agent/coder.d/path /ctx/tool
@@ -701,6 +707,17 @@ actionable issue locations (step/result/call id), capped at 16 entries with the
 remaining count reported. Session-derived source/call identifiers are escaped
 for terminal output, field-bounded, and each rendered issue is capped at 256
 characters.
+
+## Terminals
+
+ctx terminal addresses a durable terminal resource rather than an Agent
+definition. list and status inspect session-local metadata, watch joins the PTY
+read-only, and attach joins it with input enabled. PTY bytes and process exit
+facts are appended to the resource events.jsonl stream for replay and debugging.
+
+The current create form is agent-backed so it reuses the existing supervised
+launch path. It does not yet claim a new root /ctx/terminal namespace or a
+detached create bash supervisor; those require a versioned terminal ABI revision.
 
 ## Provider OAuth
 

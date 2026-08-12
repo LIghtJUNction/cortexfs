@@ -7,6 +7,11 @@ the `tsh` tool shell, prompt construction, and sandbox execution.
 It does not add a root namespace. Everything here is derived from existing stable
 objects and files.
 
+The durable terminal resource used by this runtime is specified in
+[terminal-abi.md](terminal-abi.md). In this first slice an Agent start
+materializes one terminal resource below its session; the resource id and event
+history remain after the live PTY socket exits.
+
 ## Definition, Instance, Session, And Run
 
 The word `agent` does not name one daemon. The runtime distinguishes four
@@ -41,6 +46,12 @@ Their stable `/ctx` paths may be aliases to endpoints under `/run`, and their
 absence never deletes the Agent definition or a private/shared session.
 
 ## Runtime Surfaces
+
+The equivalent resource commands are ctx terminal status, ctx terminal watch,
+and ctx terminal attach. ctx terminal create AGENT is currently an agent-backed
+compatibility create: it starts the Agent session and records the terminal
+resource. A detached command supervisor is reserved for a later terminal ABI
+revision.
 
 There are three separate surfaces:
 

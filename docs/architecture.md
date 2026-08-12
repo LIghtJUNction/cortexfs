@@ -85,6 +85,19 @@ Sockets are transports. Live sockets belong under `/run`; paths such as
 entries or aliases used to discover those transports. Socket presence does not
 define object identity, session durability, or process ownership.
 
+A terminal is a durable resource below a session. Its resource directory owns
+metadata and replayable events; a runtime PTY and socket are replaceable
+mechanisms for the process and attachments. The first terminal resource slice
+uses:
+
+~~~text
+home/<uid>/agent/<agent>/session/<session>/terminal/<terminal-id>/
+  meta.json  state  status  owner  cwd  events.jsonl
+~~~
+
+The root remains frozen: this session-local path does not add /ctx/terminal.
+A top-level terminal class requires a separately versioned root ABI decision.
+
 The compact rule is:
 
 ```text
@@ -92,6 +105,7 @@ object defines identity
 supervisor receipt defines process lifetime
 ordinary files define durable state
 socket provides optional transport
+terminal resource owns PTY history; socket is only a live transport
 ```
 
 ## Model and context boundary

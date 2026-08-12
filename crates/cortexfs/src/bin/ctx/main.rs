@@ -85,7 +85,7 @@ pub(crate) use basic::*;
 pub(crate) use check::*;
 pub(crate) use cortexfs::cli::json;
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use cortexfs::cli::terminal;
+pub(crate) use cortexfs::cli::terminal::*;
 pub(crate) use cortexfs::cli::uid;
 pub(crate) use cortexfs::support::plain::open_plain_directory;
 pub(crate) use create::*;
@@ -155,6 +155,7 @@ pub mod format;
 
 pub mod util;
 
+pub mod terminal;
 #[cfg(test)]
 #[expect(unused_qualifications, reason = "tests use qualified paths")]
 mod tests {

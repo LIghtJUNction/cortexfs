@@ -68,15 +68,8 @@ pub(crate) fn agent_start_host(
             args.name
         ))
     })?;
-    let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
-    let session_workspace = agent_start_workspace_source(&cli_mounts);
-    ensure_agent_start_session(
-        root,
-        args,
-        &view,
-        &session_cwd,
-        session_workspace.as_deref(),
-    )?;
+    let (session_cwd, session_workspace, services) =
+        prepare_agent_start(root, args, &view, &cli_mounts)?;
     let AgentStartServices {
         visible_socket,
         socket,
@@ -84,7 +77,7 @@ pub(crate) fn agent_start_host(
         output,
         system,
         terminal_alias_created,
-    } = start_agent_runtime_services(root, args, &cli_mounts, &view)?;
+    } = services;
     let invocation = invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
     let role = agent_role_for_display(view.agent_name());
@@ -135,22 +128,19 @@ pub(crate) fn agent_start_host(
             "cannot persist agent launch receipt: {error:?}"
         )));
     }
-    let start_facts = [
-        ("model", view.model()),
-        ("life", life),
-        ("role", role),
-        ("uid", uid.as_str()),
-        ("gid", gid.as_str()),
-        ("groups", groups.as_str()),
-    ];
-    record_agent_start_state(
-        root,
-        args,
-        view.identity(),
-        &unit,
-        &start_facts,
-        invocation.as_deref(),
-    )?;
+    if let Err(error) =
+        write_agent_terminal_record(root, args, &view, &session_cwd, "running", Some(&socket))
+    {
+        rollback_receipted_agent_start(
+            &system,
+            &terminal,
+            &visible_socket,
+            &socket,
+            terminal_alias_created,
+        )?;
+        return Err(error);
+    }
+    record_agent_start_facts(root, args, &view, &unit, invocation.as_deref())?;
     let current_uid = current_uid_for_ctx(root)?;
     let pid = agent_unit_main_pid(view.identity(), &unit).unwrap_or_default();
     Ok(AgentStartHostReceipt {
@@ -177,6 +167,46 @@ struct AgentStartServices {
     output: std::process::Output,
     system: cortexfs::agent::launch::SystemAgentSocketReceipt,
     terminal_alias_created: bool,
+}
+
+fn prepare_agent_start(
+    root: &Path,
+    args: &AgentStartArgs,
+    view: &AgentRuntimeView,
+    cli_mounts: &[AgentMount],
+) -> Result<(String, Option<String>, AgentStartServices), CliError> {
+    let cwd = agent_start_sandbox_cwd(args, cli_mounts);
+    let workspace = agent_start_workspace_source(cli_mounts);
+    ensure_agent_start_session(root, args, view, &cwd, workspace.as_deref())?;
+    let services = start_agent_runtime_services(root, args, cli_mounts, view)?;
+    Ok((cwd, workspace, services))
+}
+
+fn record_agent_start_facts(
+    root: &Path,
+    args: &AgentStartArgs,
+    view: &AgentRuntimeView,
+    unit: &str,
+    invocation: Option<&str>,
+) -> Result<(), CliError> {
+    let groups = view
+        .identity()
+        .groups()
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let uid = view.identity().uid().to_string();
+    let gid = view.identity().gid().to_string();
+    let facts = [
+        ("model", view.model()),
+        ("life", agent_lifecycle_name(view.lifecycle())),
+        ("role", agent_role_for_display(view.agent_name())),
+        ("uid", uid.as_str()),
+        ("gid", gid.as_str()),
+        ("groups", groups.as_str()),
+    ];
+    record_agent_start_state(root, args, view.identity(), unit, &facts, invocation)
 }
 
 fn start_agent_runtime_services(
@@ -342,6 +372,40 @@ pub(crate) fn ensure_agent_start_session(
             &format!("{workspace}\n"),
         )?;
     }
+    write_agent_terminal_record(root, args, view, cwd, "created", None)?;
+    Ok(())
+}
+
+fn write_agent_terminal_record(
+    root: &Path,
+    args: &AgentStartArgs,
+    view: &AgentRuntimeView,
+    cwd: &str,
+    state: &str,
+    socket: Option<&Path>,
+) -> Result<(), CliError> {
+    let session_dir = ctx_home(root)?
+        .join("agent")
+        .join(&args.name)
+        .join("session")
+        .join(&args.session);
+    let record = cortexfs::runtime::terminal::TerminalRecord {
+        id: cortexfs::runtime::terminal::terminal_id(&args.name, &args.session),
+        agent: args.name.clone(),
+        session: args.session.clone(),
+        owner: view.owner().to_string(),
+        cwd: cwd.to_owned(),
+        command: vec!["/ctx/bin/tsh".to_owned()],
+        state: state.to_owned(),
+        socket: socket.map(|path| path.display().to_string()),
+        created_at: current_time_unix(),
+    };
+    cortexfs::runtime::terminal::ensure_layout(&session_dir, &record).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot persist terminal resource {}: {error}",
+            record.id
+        ))
+    })?;
     Ok(())
 }
 

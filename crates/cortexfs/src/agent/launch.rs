@@ -1681,9 +1681,20 @@ pub fn terminal_command(
             "/etc/bash.bashrc".to_owned(),
         ]);
     }
+    command
+        .args
+        .extend(["--chdir".to_owned(), request.cwd.clone()]);
+    if let Some((host, guest)) = terminal_resource_mount(request, view) {
+        command.args.extend([
+            "--bind".to_owned(),
+            host.display().to_string(),
+            guest.clone(),
+            "--setenv".to_owned(),
+            "CTX_TERMINAL_EVENTS".to_owned(),
+            format!("{guest}/events.jsonl"),
+        ]);
+    }
     command.args.extend([
-        "--chdir".to_owned(),
-        request.cwd.clone(),
         crate::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
@@ -1692,6 +1703,30 @@ pub fn terminal_command(
         "/ctx/bin/tsh".to_owned(),
     ]);
     command
+}
+
+fn terminal_resource_mount(
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+) -> Option<(PathBuf, String)> {
+    let id = crate::runtime::terminal::terminal_id(&request.agent, &request.session);
+    let host = view
+        .ctx_home()
+        .join("agent")
+        .join(&request.agent)
+        .join("session")
+        .join(&request.session)
+        .join("terminal")
+        .join(&id);
+    if crate::support::plain::open_plain_directory(&host).is_err() {
+        return None;
+    }
+    let owner = view.ctx_home().file_name()?.to_str()?;
+    let guest = format!(
+        "/ctx/home/{owner}/agent/{}/session/{}/terminal/{}",
+        request.agent, request.session, id,
+    );
+    Some((host, guest))
 }
 
 fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {

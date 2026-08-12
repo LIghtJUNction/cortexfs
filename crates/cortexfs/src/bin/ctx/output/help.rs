@@ -42,6 +42,11 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+        "  ctx [--root PATH] terminal list",
+        "  ctx [--root PATH] terminal status TERMINAL",
+        "  ctx [--root PATH] terminal watch TERMINAL",
+        "  ctx [--root PATH] terminal attach TERMINAL",
         "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
         "  ctx provider oauth status PROVIDER",
         "  ctx provider oauth refresh PROVIDER",
@@ -486,6 +491,38 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "usage:",
             "  ctx [--root PATH] agent attach NAME [--session SESSION]",
         ]),
+        "terminal" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+            "  ctx [--root PATH] terminal list",
+            "  ctx [--root PATH] terminal status TERMINAL",
+            "  ctx [--root PATH] terminal watch TERMINAL",
+            "  ctx [--root PATH] terminal attach TERMINAL",
+            "",
+            "create is currently an Agent-backed terminal resource",
+            "watch is read-only; attach forwards input to the PTY",
+        ]),
+        "terminal create" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+            "",
+            "creates the session-local terminal resource and starts the Agent terminal",
+        ]),
+        "terminal list" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal list",
+            "",
+            "prints TERMINAL<TAB>STATE<TAB>AGENT<TAB>SESSION<TAB>PATH",
+        ]),
+        "terminal status" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal status TERMINAL"])
+        }
+        "terminal watch" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal watch TERMINAL"])
+        }
+        "terminal attach" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal attach TERMINAL"])
+        }
         "provider" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
