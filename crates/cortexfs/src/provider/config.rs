@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::ModelContextLimit;
+use crate::provider::auth::{ProviderAuthConfig, effective_auth_methods};
 use crate::provider::oauth::OAuthProviderConfig;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -20,7 +21,15 @@ pub struct ProviderConfig {
     pub(crate) enabled: bool,
     #[serde(default)]
     pub(crate) formats: Vec<String>,
+    #[serde(default)]
+    pub(crate) auth: Vec<ProviderAuthConfig>,
     pub(crate) oauth: Option<OAuthProviderConfig>,
+}
+
+impl ProviderConfig {
+    pub(crate) fn auth_methods(&self) -> Vec<ProviderAuthConfig> {
+        effective_auth_methods(&self.auth, self.oauth.is_some())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

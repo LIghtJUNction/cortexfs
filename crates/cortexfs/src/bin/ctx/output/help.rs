@@ -50,6 +50,7 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
         "  ctx provider oauth status PROVIDER",
         "  ctx provider oauth refresh PROVIDER",
+        "  ctx provider auth methods PROVIDER",
         "  ctx provider secret set PROVIDER [--slot SLOT]",
         "  ctx provider secret status PROVIDER [--slot SLOT]",
         "  ctx provider preset list",
@@ -528,6 +529,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
+            "  ctx provider auth methods PROVIDER",
             "  ctx provider secret set PROVIDER [--slot SLOT]",
             "  ctx provider secret status PROVIDER [--slot SLOT]",
             "  ctx provider preset list",
@@ -546,6 +548,15 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
         ]),
+        "provider auth" => print_help_lines(&[
+            "usage:",
+            "  ctx provider auth methods PROVIDER",
+            "",
+            "prints provider-neutral auth method, flow, and logical slot",
+        ]),
+        "provider auth methods" => {
+            print_help_lines(&["usage:", "  ctx provider auth methods PROVIDER"])
+        }
         "provider oauth login" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",

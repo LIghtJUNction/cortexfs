@@ -4,6 +4,7 @@
 )]
 
 mod alias;
+pub mod auth;
 pub mod catalog;
 mod config;
 pub mod discovery;

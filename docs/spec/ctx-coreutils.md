@@ -58,6 +58,8 @@ ctx terminal status terminal-coder-default
 ctx terminal watch terminal-coder-default
 ctx terminal attach terminal-coder-default
 
+ctx provider auth methods PROVIDER
+
 ctx cat agent/coder.d/policy
 ctx set agent/coder.d/cwd /work
 ctx append agent/coder.d/path /ctx/tool
@@ -739,6 +741,16 @@ stores tokens in the system keychain:
 service=cortexfs:<provider> account=oauth:access
 service=cortexfs:<provider> account=oauth:refresh
 ```
+
+Provider authentication is declared in provider JSON rather than hardcoded in
+the model executable. Inspect the normalized declarations with:
+
+```text
+ctx provider auth methods PROVIDER
+```
+
+The output is `method<TAB>flow<TAB>slot`; it is a host-side projection and does
+not expose credential values or add an `/ctx/identity` namespace.
 
 ## Non-Goals
 

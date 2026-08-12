@@ -27,6 +27,7 @@ pub(crate) fn provider_config_from_model_control(
     Some(RunnerProviderConfig {
         name: Some(provider.to_owned()),
         base_url,
+        auth: Vec::new(),
         oauth: None,
         formats: model_driver_formats(&driver),
     })

@@ -326,6 +326,19 @@ fn parses_provider_oauth_help_commands() {
 }
 
 #[test]
+fn parses_provider_auth_methods_command() {
+    assert!(matches!(
+        cmd!("provider", "auth", "methods", "openai"),
+        Ok(Command::Provider(ProviderArgs::AuthMethods { ref provider }))
+            if provider == "openai"
+    ));
+    assert!(matches!(
+        cmd!("provider", "auth", "methods", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider auth methods"
+    ));
+}
+
+#[test]
 fn parses_provider_preset_commands() {
     assert!(matches!(
         cmd!("provider", "preset", "list"),

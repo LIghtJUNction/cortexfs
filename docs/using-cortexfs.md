@@ -111,6 +111,16 @@ ctx provider preset install anthropic
 ctx provider preset install google
 ```
 
+Provider authentication methods are declared alongside those presets. Inspect
+the methods without exposing credentials:
+
+```bash
+ctx provider auth methods codex
+```
+
+The output lists the method, OAuth flow, and logical slot. Credentials remain in
+the root-owned secret store; no identity tree is added to `/ctx`.
+
 Canonical provider names are `openai`, `anthropic`, and `google`. `codex` is
 an alias for the `openai` preset; `gemini` is an alias for the `google` preset.
 After installing `codex`, models are still projected under the canonical

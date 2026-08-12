@@ -87,6 +87,10 @@ pub mod support;
 
 pub use abi::authority::*;
 pub use abi::request::*;
+pub use provider::auth::{
+    AuthMethod, AuthProvider, AuthProviderError, AuthRequest, Credential, CredentialKind,
+    OAuthFlow, ProviderAuthConfig, effective_auth_methods,
+};
 pub use provider::discovery::*;
 pub(crate) use provider::{
     ProjectedProviderModel, ProviderConfig, ProviderModelCache, ProviderSnapshot,

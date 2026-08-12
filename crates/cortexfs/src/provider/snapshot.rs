@@ -5,6 +5,7 @@ use std::{collections::HashSet, fs, path::Path};
 use super::config::{ProjectedProviderModel, ProviderConfig};
 use super::name::provider_name_from_config;
 use super::project::project_models;
+use crate::provider::auth::{AuthMethod, ProviderAuthConfig};
 use crate::{
     STABLE_MODEL_CAPABILITIES,
     support::plain::{open_plain_directory, proc_fd_path, read_small_text_file_at},
@@ -119,10 +120,15 @@ fn valid_model_metadata(config: &ProviderConfig) -> bool {
     let declared = |model: &String| {
         config.default_model.as_ref() == Some(model) || config.models.contains(model)
     };
-    config
-        .model_limits
-        .iter()
-        .all(|(model, limit)| *limit > 0 && declared(model))
+    config.auth.iter().all(ProviderAuthConfig::is_valid)
+        && config
+            .auth
+            .iter()
+            .all(|method| method.method != AuthMethod::OAuth || config.oauth.is_some())
+        && config
+            .model_limits
+            .iter()
+            .all(|(model, limit)| *limit > 0 && declared(model))
         && config
             .model_capabilities
             .iter()

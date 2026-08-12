@@ -1,5 +1,6 @@
 use crate::*;
 
+use crate::provider::auth::AuthMethod;
 use crate::provider::name::is_reserved_provider_name;
 use crate::support::command::CURL;
 use crate::support::plain::{create_plain_dir, open_plain_directory, read_small_text_file};
@@ -134,11 +135,23 @@ pub(crate) fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> Pat
 }
 
 pub(crate) fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> Option<String> {
-    let api_key = read_provider_system_secret(provider, "default")
-        .ok()
-        .flatten();
+    let methods = config.auth_methods();
+    let api_key = methods
+        .iter()
+        .find(|method| method.method == AuthMethod::ApiKey)
+        .and_then(|method| {
+            read_provider_system_secret(provider, &method.slot)
+                .ok()
+                .flatten()
+        });
     if api_key.is_some() {
         return api_key;
+    }
+    if !methods
+        .iter()
+        .any(|method| method.method == AuthMethod::OAuth)
+    {
+        return None;
     }
     let oauth = config.oauth.as_ref()?;
     resolve_oauth_access_token(provider, oauth).ok().flatten()

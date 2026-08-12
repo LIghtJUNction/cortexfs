@@ -94,6 +94,7 @@ mod execution;
 mod layout;
 mod projection;
 mod prompt;
+mod provider;
 mod recording;
 mod reference;
 mod runtime;

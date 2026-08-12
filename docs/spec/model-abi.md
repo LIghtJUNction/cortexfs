@@ -304,6 +304,62 @@ and must not be written into `/ctx/model`.
 `ctx provider oauth login PROVIDER` is the host-side helper that performs this
 PKCE login flow and writes tokens to the system keychain.
 
+## Provider Authentication Framework
+
+Provider JSON may advertise more than one authentication method without
+coupling a model to a provider-specific login command:
+
+```json
+{
+  "base_url": "https://api.example.com/v1",
+  "auth": [
+    {"type": "api_key", "slot": "default"},
+    {"type": "oauth", "flow": "authorization_code", "slot": "subscription"}
+  ],
+  "oauth": {
+    "client_id": "cortexfs-example",
+    "auth_url": "https://auth.example.com/authorize",
+    "token_url": "https://auth.example.com/token",
+    "redirect_uri": "http://127.0.0.1:8765/callback",
+    "scopes": ["model.read", "offline_access"]
+  }
+}
+```
+
+`type` is `api_key` or `oauth`; OAuth `flow` is `authorization_code` or
+`device_code`. `slot` is a logical credential slot and is not a keychain
+account name. When `auth` is absent, CortexFS retains the compatibility
+defaults of an API-key `default` slot plus an authorization-code OAuth method
+when the legacy `oauth` block is present. Invalid slots or an OAuth method
+without OAuth metadata fail closed during provider snapshot loading.
+
+Adapters implement one provider-neutral boundary (`id`, supported methods,
+login, refresh, and model listing) and return the normalized credential shape:
+
+```json
+{
+  "type": "oauth",
+  "provider": "example",
+  "access_token": "…",
+  "refresh_token": "…",
+  "expires_at": 123456789,
+  "scopes": ["model.read"]
+}
+```
+
+API-key credentials use `type: "api_key"`, `provider`, and `key`. These are
+in-memory adapter envelopes only. Raw credentials never enter `/ctx`, model
+objects, `.d/` controls, or model history; the existing root-owned secret
+store remains the persistence boundary. Inspect the declared methods with:
+
+```text
+ctx provider auth methods PROVIDER
+```
+
+The command prints `method<TAB>flow<TAB>slot` and never prints secret material.
+Model listing remains provider-neutral and feeds the existing model projection
+and bounded host caches; it does not create an `/ctx/identity` namespace.
+
 ## Provider Presets
 
 Provider presets are host-side JSON file templates. They install under
