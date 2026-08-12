@@ -1,6 +1,7 @@
 use crate::*;
 
 use crate::provider::auth::AuthMethod;
+use crate::provider::auth::{AuthResponse, Credential, configured_adapter};
 use crate::provider::name::is_reserved_provider_name;
 use crate::support::command::CURL;
 use crate::support::plain::{create_plain_dir, open_plain_directory, read_small_text_file};
@@ -22,10 +23,24 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         if !config.enabled {
             continue;
         }
-        let Some(api_key) = provider_bearer_token(config, provider) else {
+        let Some(credential) = provider_credential(config, provider) else {
             continue;
         };
-        let Ok(models) = fetch_provider_models(&config.base_url, &api_key) else {
+        let Some(adapter) = configured_adapter(
+            provider,
+            &config.base_url,
+            config.auth_methods(),
+            config.oauth.clone(),
+        ) else {
+            continue;
+        };
+        let Ok(headers) = adapter.model_headers(&credential) else {
+            continue;
+        };
+        let Ok(body) = run_curl_json(&provider_models_url(&config.base_url), &headers) else {
+            continue;
+        };
+        let Ok(models) = adapter.parse_models(AuthResponse { status: 200, body }) else {
             continue;
         };
         let models = provider_model_names(models);
@@ -134,7 +149,7 @@ pub(crate) fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> Pat
     cache_dir.join(format!("{provider}.models.json"))
 }
 
-pub(crate) fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> Option<String> {
+fn provider_credential(config: &ProviderConfig, provider: &str) -> Option<Credential> {
     let methods = config.auth_methods();
     let api_key = methods
         .iter()
@@ -144,8 +159,11 @@ pub(crate) fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> 
                 .ok()
                 .flatten()
         });
-    if api_key.is_some() {
-        return api_key;
+    if let Some(key) = api_key {
+        return Some(Credential::ApiKey {
+            provider: provider.to_owned(),
+            key,
+        });
     }
     if !methods
         .iter()
@@ -154,30 +172,19 @@ pub(crate) fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> 
         return None;
     }
     let oauth = config.oauth.as_ref()?;
-    resolve_oauth_access_token(provider, oauth).ok().flatten()
+    resolve_oauth_access_token(provider, oauth)
+        .ok()
+        .flatten()
+        .map(|access_token| Credential::OAuth {
+            provider: provider.to_owned(),
+            access_token,
+            refresh_token: None,
+            expires_at: None,
+            scopes: Vec::new(),
+        })
 }
 
-#[derive(Deserialize)]
-struct ProviderModelList {
-    data: Vec<ProviderModelListItem>,
-}
-
-#[derive(Deserialize)]
-struct ProviderModelListItem {
-    id: String,
-}
-
-pub(crate) fn fetch_provider_models(
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<String>, FuseError> {
-    let output = run_curl_json(&provider_models_url(base_url), api_key)?;
-    let list =
-        serde_json::from_slice::<ProviderModelList>(&output).map_err(|_error| FuseError::Io)?;
-    Ok(list.data.into_iter().map(|model| model.id).collect())
-}
-
-pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseError> {
+pub(crate) fn run_curl_json(url: &str, headers: &[(String, String)]) -> Result<Vec<u8>, FuseError> {
     let mut child = curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -187,11 +194,15 @@ pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseErr
     let Some(mut stdin) = child.stdin.take() else {
         return Err(FuseError::Io);
     };
-    let config = format!(
-        "fail\nsilent\nshow-error\nmax-time = 20\nurl = {}\nheader = {}\n",
-        curl_config_quote(url)?,
-        curl_config_quote(&format!("Authorization: Bearer {api_key}"))?
+    let mut config = format!(
+        "fail\nsilent\nshow-error\nmax-time = 20\nurl = {}\n",
+        curl_config_quote(url)?
     );
+    for header in headers {
+        config.push_str("header = ");
+        config.push_str(&curl_config_quote(&format!("{}: {}", header.0, header.1))?);
+        config.push('\n');
+    }
     stdin
         .write_all(config.as_bytes())
         .map_err(|_error| FuseError::Io)?;

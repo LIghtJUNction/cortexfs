@@ -52,8 +52,8 @@ pub(crate) fn provider_credential(
             .filter(|_| key_slot.is_none())
             .ok_or_else(|| format!("provider OAuth is not configured: {provider}"))
             .and_then(|oauth| {
-                cortexfs::resolve_oauth_access_token(provider, oauth)
-                    .map(|token| token.map(ProviderCredential::Bearer))
+                cortexfs::resolve_oauth_credential(provider, oauth)
+                    .map(|token| token.map(|(access, _account)| ProviderCredential::Bearer(access)))
                     .map_err(|_error| format!("oauth credential unavailable: {provider}"))
             });
     }
@@ -92,8 +92,8 @@ pub(crate) fn provider_credential(
         return Ok(None);
     };
     if key_slot.is_none() {
-        return cortexfs::resolve_oauth_access_token(provider, oauth)
-            .map(|token| token.map(ProviderCredential::Bearer))
+        return cortexfs::resolve_oauth_credential(provider, oauth)
+            .map(|token| token.map(|(access, _account)| ProviderCredential::Bearer(access)))
             .map_err(|_error| format!("oauth credential unavailable: {provider}"));
     }
     Ok(None)

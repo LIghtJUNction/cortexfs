@@ -87,9 +87,13 @@ pub mod support;
 
 pub use abi::authority::*;
 pub use abi::request::*;
+pub use provider::auth::anthropic::AnthropicAdapter;
+pub use provider::auth::copilot::GitHubCopilotAdapter;
+pub use provider::auth::openai::OpenAiAdapter;
 pub use provider::auth::{
-    AuthMethod, AuthProvider, AuthProviderError, AuthRequest, Credential, CredentialKind,
-    OAuthFlow, ProviderAuthConfig, effective_auth_methods,
+    AuthMethod, AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport,
+    Credential, CredentialKind, OAuthFlow, ProviderAuthConfig, ProviderRegistry,
+    ProviderRegistryError, configured_adapter, effective_auth_methods, http_transport,
 };
 pub use provider::discovery::*;
 pub(crate) use provider::{

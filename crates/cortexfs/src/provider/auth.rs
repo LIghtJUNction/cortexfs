@@ -1,8 +1,21 @@
 mod adapter;
+pub mod anthropic;
+mod common;
+pub mod copilot;
 mod credential;
+mod factory;
+mod model;
+pub mod openai;
+mod protocol;
+mod registry;
+mod transport;
 
-pub use adapter::{AuthProvider, AuthProviderError, AuthRequest};
+pub use adapter::{
+    AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport, http_transport,
+};
 pub use credential::{Credential, CredentialKind};
+pub use factory::configured_adapter;
+pub use registry::{ProviderRegistry, ProviderRegistryError};
 use serde::{Deserialize, Serialize};
 
 /// Authentication mechanism advertised by a provider.

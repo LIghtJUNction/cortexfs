@@ -10,6 +10,7 @@ pub const CODEX_DEVICE_VERIFY_URL: &str = "https://auth.openai.com/codex/device"
 pub const CODEX_DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 const CODEX_SYSTEM_SLOTS: [&str; 4] =
     ["default", "oauth-refresh", "oauth-account", "oauth-expires"];
+const OAUTH_EXPIRES_ACCOUNT: &str = "oauth:expires";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct OAuthProviderConfig {
@@ -463,6 +464,9 @@ pub fn store_oauth_tokens(
     {
         oauth_keychain_set(&service, config.refresh_account(), refresh)?;
     }
+    if let Some(expires_at) = token.expires_in.and_then(|value| now.checked_add(value)) {
+        oauth_keychain_set(&service, OAUTH_EXPIRES_ACCOUNT, &expires_at.to_string())?;
+    }
     Ok(())
 }
 
@@ -503,6 +507,9 @@ pub fn resolve_oauth_credential(
     provider: &str,
     config: &OAuthProviderConfig,
 ) -> Result<Option<OAuthCredential>, OAuthError> {
+    if !config.is_codex() {
+        return resolve_generic_oauth(provider, config);
+    }
     let service = crate::provider::name::provider_keychain_service(provider);
     let slots = user_slots(config);
     let stored = read_state(slots, |slot| oauth_keychain_secret(&service, slot))?;
@@ -511,6 +518,41 @@ pub fn resolve_oauth_credential(
             oauth_keychain_set(&service, slot, value)
         })
     })
+}
+
+fn resolve_generic_oauth(
+    provider: &str,
+    config: &OAuthProviderConfig,
+) -> Result<Option<OAuthCredential>, OAuthError> {
+    if provider.is_empty() || controls(provider) || !valid_config(config) {
+        return Err(OAuthError::InvalidConfig);
+    }
+    let access = crate::provider_oauth_access_token_env_name(provider);
+    match env::var(&access) {
+        Ok(value) if !value.trim().is_empty() => return Ok(Some((value, String::new()))),
+        Ok(_) | Err(env::VarError::NotPresent) => {}
+        Err(env::VarError::NotUnicode(_)) => return Err(OAuthError::InvalidConfig),
+    }
+    let service = crate::provider::name::provider_keychain_service(provider);
+    let access = oauth_keychain_secret(&service, config.access_account())?;
+    let refresh = oauth_keychain_secret(&service, config.refresh_account())?;
+    let expires = oauth_keychain_secret(&service, OAUTH_EXPIRES_ACCOUNT)?
+        .and_then(|value| value.parse::<u64>().ok());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_error| OAuthError::Transport)?
+        .as_secs();
+    let stale = expires.is_some_and(|value| oauth_needs_refresh(value, now));
+    if !stale && let Some(access) = access.as_ref() {
+        return Ok(Some((access.clone(), String::new())));
+    }
+    let Some(refresh) = refresh.filter(|value| !value.trim().is_empty()) else {
+        return Ok(access.map(|value| (value, String::new())));
+    };
+    let form = oauth_refresh_token_form(config, &refresh)?;
+    let token = exchange_oauth_token(config, &form)?;
+    store_oauth_tokens(provider, config, &token, now)?;
+    Ok(Some((token.access_token, String::new())))
 }
 
 fn resolve_stored_codex(
@@ -549,6 +591,10 @@ pub fn resolve_oauth_access_token(
     provider: &str,
     config: &OAuthProviderConfig,
 ) -> Result<Option<String>, OAuthError> {
+    if !config.is_codex() {
+        return resolve_generic_oauth(provider, config)
+            .map(|value| value.map(|(token, _account)| token));
+    }
     resolve_oauth_access_token_with(
         provider,
         config,
