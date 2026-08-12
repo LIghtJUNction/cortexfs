@@ -72,6 +72,17 @@ impl ProviderRegistry {
                 return Err(ProviderRegistryError::DuplicateName);
             }
         }
+        let mut names = std::collections::HashSet::new();
+        for name in provider
+            .aliases()
+            .iter()
+            .map(String::as_str)
+            .filter(|name| *name != provider.id())
+        {
+            if !names.insert(name) {
+                return Err(ProviderRegistryError::DuplicateName);
+            }
+        }
         self.providers.push(provider);
         Ok(())
     }

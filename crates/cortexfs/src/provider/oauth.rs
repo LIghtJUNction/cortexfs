@@ -39,7 +39,7 @@ impl OAuthDeviceConfig {
     pub fn is_valid(&self) -> bool {
         [&self.request_url, &self.token_url, &self.verification_uri]
             .into_iter()
-            .all(|value| !value.is_empty() && !controls(value))
+            .all(|value| !value.trim().is_empty() && !controls(value))
     }
 }
 
@@ -800,7 +800,7 @@ fn valid_config(config: &OAuthProviderConfig) -> bool {
         &config.redirect_uri,
     ]
     .into_iter()
-    .all(|value| !value.is_empty() && !controls(value))
+    .all(|value| !value.trim().is_empty() && !controls(value))
         && !config
             .scopes
             .iter()

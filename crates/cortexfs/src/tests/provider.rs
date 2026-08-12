@@ -2,7 +2,7 @@ use crate::{
     AnthropicAdapter, AuthMethod, AuthProvider, AuthProviderError, AuthRequest, AuthResponse,
     AuthTransport, Credential, CredentialKind, GitHubCopilotAdapter, OAuthDeviceConfig, OAuthFlow,
     OAuthPkce, OAuthProviderConfig, OpenAiAdapter, ProviderAuthConfig, ProviderRegistry,
-    effective_auth_methods,
+    configured_adapter, effective_auth_methods,
 };
 
 #[derive(Default)]
@@ -220,6 +220,118 @@ fn anthropic_adapter_uses_api_key_header() -> Result<(), AuthProviderError> {
 }
 
 #[test]
+fn anthropic_oauth_adapter_exchanges_refreshes_and_discovers_models()
+-> Result<(), AuthProviderError> {
+    let oauth = OAuthProviderConfig {
+        client_id: "claude-client".to_owned(),
+        auth_url: "https://auth.example/authorize".to_owned(),
+        token_url: "https://auth.example/token".to_owned(),
+        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
+        scopes: vec!["model.read".to_owned()],
+        device: None,
+        access_token_account: None,
+        refresh_token_account: None,
+    };
+    let adapter = AnthropicAdapter::new(
+        "anthropic",
+        "https://api.example/v1",
+        vec![ProviderAuthConfig::oauth(
+            OAuthFlow::AuthorizationCode,
+            "subscription",
+        )],
+        Some(oauth),
+    );
+    let mut transport = ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"data":[{"id":"claude-sonnet"}]}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600}"#
+                    .to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    };
+    let credential = adapter.login_with(
+        AuthRequest::AuthorizationCodePkce {
+            code: "code".to_owned(),
+            verifier: "a".repeat(43),
+        },
+        &mut transport,
+        100,
+    )?;
+    let refreshed = adapter.refresh_with(&credential, &mut transport, 200)?;
+    assert!(
+        matches!(refreshed, Credential::OAuth { ref access_token, .. } if access_token == "new")
+    );
+    assert_eq!(
+        adapter.models_with(Some(&refreshed), &mut transport)?,
+        ["claude-sonnet"]
+    );
+    assert_eq!(
+        transport.gets.first().map(|get| &get.1),
+        Some(&vec![("Authorization".to_owned(), "Bearer new".to_owned())])
+    );
+    Ok(())
+}
+
+#[test]
+fn anthropic_host_device_flow_uses_shared_adapter_contract() -> Result<(), AuthProviderError> {
+    let oauth = OAuthProviderConfig {
+        client_id: "claude-client".to_owned(),
+        auth_url: "https://auth.example/authorize".to_owned(),
+        token_url: "https://auth.example/token".to_owned(),
+        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
+        scopes: vec!["model.read".to_owned()],
+        device: Some(OAuthDeviceConfig {
+            request_url: "https://auth.example/device".to_owned(),
+            token_url: "https://auth.example/device/token".to_owned(),
+            verification_uri: "https://auth.example/verify".to_owned(),
+        }),
+        access_token_account: None,
+        refresh_token_account: None,
+    };
+    let adapter = AnthropicAdapter::new(
+        "claude",
+        "https://api.example/v1",
+        vec![ProviderAuthConfig::oauth(
+            OAuthFlow::DeviceCode,
+            "subscription",
+        )],
+        Some(oauth),
+    );
+    let mut transport = ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","token_type":"bearer"}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body:
+                    br#"{"device_code":"device","user_code":"ABCD","expires_in":30,"interval":1}"#
+                        .to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    };
+    let credential = adapter.login_with(
+        AuthRequest::DeviceCode { timeout_secs: 10 },
+        &mut transport,
+        100,
+    )?;
+    assert_eq!(credential.provider(), "claude");
+    Ok(())
+}
+
+#[test]
 fn copilot_device_flow_reports_challenge_and_refreshes_poll_interval()
 -> Result<(), AuthProviderError> {
     let adapter = GitHubCopilotAdapter::new(GitHubCopilotAdapter::oauth_config(
@@ -264,6 +376,62 @@ fn copilot_device_flow_reports_challenge_and_refreshes_poll_interval()
     );
     assert_eq!(pauses, [1]);
     assert_eq!(transport.posts.len(), 3);
+    Ok(())
+}
+
+#[test]
+fn copilot_factory_preserves_host_identity_methods_and_oauth_runtime()
+-> Result<(), AuthProviderError> {
+    let oauth = GitHubCopilotAdapter::oauth_config("client", "http://localhost/callback");
+    let methods = vec![ProviderAuthConfig::oauth(
+        OAuthFlow::AuthorizationCode,
+        "subscription",
+    )];
+    let adapter = configured_adapter(
+        "copilot",
+        "https://api.example/v1",
+        methods.clone(),
+        Some(oauth),
+    )
+    .ok_or(AuthProviderError::Unavailable)?;
+    assert_eq!(adapter.id(), "copilot");
+    assert_eq!(adapter.aliases(), &["github-copilot".to_owned()]);
+    assert_eq!(adapter.methods(), methods.as_slice());
+    let mut transport = ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"data":[{"id":"copilot-chat"}]}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600}"#
+                    .to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    };
+    let credential = adapter.login_with(
+        AuthRequest::AuthorizationCodePkce {
+            code: "code".to_owned(),
+            verifier: "a".repeat(43),
+        },
+        &mut transport,
+        100,
+    )?;
+    assert_eq!(credential.provider(), "copilot");
+    let refreshed = adapter.refresh_with(&credential, &mut transport, 200)?;
+    assert!(
+        matches!(refreshed, Credential::OAuth { ref access_token, .. } if access_token == "new")
+    );
+    assert_eq!(
+        adapter.models_with(Some(&refreshed), &mut transport)?,
+        ["copilot-chat"]
+    );
     Ok(())
 }
 
@@ -381,5 +549,21 @@ fn model_headers_reject_control_character_credentials() {
     assert_eq!(
         adapter.model_headers(&credential),
         Err(AuthProviderError::InvalidCredential)
+    );
+}
+
+#[test]
+fn api_key_only_adapter_does_not_refresh_oauth_credentials() {
+    let adapter = AnthropicAdapter::claude();
+    let credential = Credential::OAuth {
+        provider: "anthropic".to_owned(),
+        access_token: "access".to_owned(),
+        refresh_token: Some("refresh".to_owned()),
+        expires_at: None,
+        scopes: Vec::new(),
+    };
+    assert_eq!(
+        adapter.refresh(&credential),
+        Err(AuthProviderError::UnsupportedMethod)
     );
 }

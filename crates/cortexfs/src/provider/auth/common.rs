@@ -94,6 +94,13 @@ impl AdapterCore {
         transport: &mut dyn AuthTransport,
         now: u64,
     ) -> Result<Credential, AuthProviderError> {
+        if !self
+            .methods
+            .iter()
+            .any(|method| method.method == super::AuthMethod::OAuth)
+        {
+            return Err(AuthProviderError::UnsupportedMethod);
+        }
         let Credential::OAuth {
             ref provider,
             refresh_token: Some(ref refresh),
@@ -111,10 +118,11 @@ impl AdapterCore {
             .ok_or(AuthProviderError::UnsupportedMethod)?;
         let form = oauth_refresh_token_form(config, refresh)
             .map_err(|_error| AuthProviderError::InvalidConfig)?;
-        let response = transport.post(
+        let response = transport.post_with_headers(
             &config.token_url,
             "application/x-www-form-urlencoded",
             &form,
+            &[("Accept", "application/json")],
         )?;
         let token = parse_token(&response)?;
         credential_from_token(&self.id, token, Some(credential), now)
@@ -155,10 +163,11 @@ impl AdapterCore {
             .map_err(|_error| AuthProviderError::InvalidCredential)?;
         let form = oauth_authorization_code_form(config, code, &pkce)
             .map_err(|_error| AuthProviderError::InvalidConfig)?;
-        let response = transport.post(
+        let response = transport.post_with_headers(
             &config.token_url,
             "application/x-www-form-urlencoded",
             &form,
+            &[("Accept", "application/json")],
         )?;
         credential_from_token(&self.id, parse_token(&response)?, None, now)
     }

@@ -1,6 +1,6 @@
 use super::adapter::{
-    AuthProvider, AuthProviderError, AuthRequest, AuthTransport, default_login, default_models,
-    default_refresh, device_request,
+    AuthProvider, AuthProviderError, AuthRequest, AuthTransport, DeviceChallenge, default_login,
+    default_models, default_refresh, device_request,
 };
 use super::common::AdapterCore;
 use super::device::DeviceConfig;
@@ -35,13 +35,18 @@ impl AnthropicAdapter {
         oauth: Option<OAuthProviderConfig>,
     ) -> Self {
         let id = id.into();
+        let aliases = match id.as_str() {
+            "anthropic" => vec!["claude".to_owned()],
+            "claude" => vec!["anthropic".to_owned()],
+            _ => Vec::new(),
+        };
         let device = oauth
             .as_ref()
             .and_then(|config| config.device.clone())
             .map(DeviceConfig::from);
         Self {
             core: AdapterCore {
-                aliases: vec!["claude".to_owned()],
+                aliases,
                 model_url: model_url(base_url),
                 id,
                 methods,
@@ -91,6 +96,18 @@ impl AuthProvider for AnthropicAdapter {
 
     fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
         self.core.persist(credential, now)
+    }
+
+    fn device_login_with(
+        &self,
+        timeout_secs: u64,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+        notify: &mut dyn FnMut(&DeviceChallenge),
+        pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        self.core
+            .device_login(timeout_secs, transport, now, notify, pause)
     }
 
     fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {

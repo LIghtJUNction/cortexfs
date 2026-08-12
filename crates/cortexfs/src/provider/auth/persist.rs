@@ -20,6 +20,13 @@ pub fn store(
             ref scopes,
             ..
         } => {
+            if !core
+                .methods
+                .iter()
+                .any(|method| method.method == AuthMethod::OAuth)
+            {
+                return Err(AuthProviderError::UnsupportedMethod);
+            }
             let config = core
                 .oauth
                 .as_ref()

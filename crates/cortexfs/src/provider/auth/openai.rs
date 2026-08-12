@@ -108,7 +108,12 @@ impl AuthProvider for OpenAiAdapter {
         notify: &mut dyn FnMut(&DeviceChallenge),
         pause: &mut dyn FnMut(u64),
     ) -> Result<Credential, AuthProviderError> {
-        if self.core.id == "codex" {
+        if self
+            .core
+            .oauth
+            .as_ref()
+            .is_some_and(OAuthProviderConfig::is_codex)
+        {
             return codexdevice::login(&self.core.id, timeout_secs, transport, now, notify, pause);
         }
         self.core

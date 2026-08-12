@@ -16,7 +16,7 @@ pub fn configured_adapter(
         ))),
         "github-copilot" | "copilot" => oauth.map(|config| {
             let adapter: Box<dyn AuthProvider> = Box::new(
-                super::copilot::GitHubCopilotAdapter::with_base(config, base_url),
+                super::copilot::GitHubCopilotAdapter::with_config(id, base_url, methods, config),
             );
             adapter
         }),

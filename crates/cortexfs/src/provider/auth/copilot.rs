@@ -40,6 +40,23 @@ impl GitHubCopilotAdapter {
     /// Builds a Copilot adapter using the configured provider base URL.
     #[must_use]
     pub fn with_base(oauth: OAuthProviderConfig, base_url: &str) -> Self {
+        Self::with_config("github-copilot", base_url, default_methods(), oauth)
+    }
+
+    /// Builds a Copilot adapter from host identity and authentication metadata.
+    #[must_use]
+    pub fn with_config(
+        id: impl Into<String>,
+        base_url: &str,
+        methods: Vec<ProviderAuthConfig>,
+        oauth: OAuthProviderConfig,
+    ) -> Self {
+        let id = id.into();
+        let aliases = match id.as_str() {
+            "github-copilot" => vec!["copilot".to_owned()],
+            "copilot" => vec!["github-copilot".to_owned()],
+            _ => Vec::new(),
+        };
         let device = oauth.device.clone().map_or_else(
             || DeviceConfig {
                 request_url: "https://github.com/login/device/code".to_owned(),
@@ -50,18 +67,26 @@ impl GitHubCopilotAdapter {
         );
         Self {
             core: AdapterCore {
-                id: "github-copilot".to_owned(),
-                aliases: vec!["copilot".to_owned()],
+                id,
+                aliases,
                 model_url: format!("{}/models", base_url.trim_end_matches('/')),
-                methods: vec![
-                    ProviderAuthConfig::oauth(super::OAuthFlow::AuthorizationCode, "subscription"),
-                    ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
-                ],
+                methods: if methods.is_empty() {
+                    default_methods()
+                } else {
+                    methods
+                },
                 oauth: Some(oauth),
                 device: Some(device),
             },
         }
     }
+}
+
+fn default_methods() -> Vec<ProviderAuthConfig> {
+    vec![
+        ProviderAuthConfig::oauth(super::OAuthFlow::AuthorizationCode, "subscription"),
+        ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
+    ]
 }
 impl AuthProvider for GitHubCopilotAdapter {
     fn id(&self) -> &str {
