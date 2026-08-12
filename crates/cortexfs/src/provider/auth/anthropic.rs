@@ -41,6 +41,7 @@ impl AnthropicAdapter {
                 id,
                 methods,
                 oauth,
+                device: None,
             },
         }
     }
@@ -78,6 +79,10 @@ impl AuthProvider for AnthropicAdapter {
         now: u64,
     ) -> Result<Credential, AuthProviderError> {
         self.core.login(request, transport, now)
+    }
+
+    fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
+        self.core.persist(credential, now)
     }
 
     fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {

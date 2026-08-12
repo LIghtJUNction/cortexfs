@@ -1,6 +1,7 @@
 use super::{Credential, ProviderAuthConfig};
 use crate::provider::oauth::OAuthPkce;
 
+pub use super::device::DeviceChallenge;
 use super::protocol::unix_time;
 use super::transport::HttpTransport;
 
@@ -57,6 +58,21 @@ pub trait AuthProvider: Send + Sync {
         transport: &mut dyn AuthTransport,
         now: u64,
     ) -> Result<Credential, AuthProviderError>;
+    /// Completes a device authorization flow and reports its user challenge.
+    fn device_login_with(
+        &self,
+        _timeout_secs: u64,
+        _transport: &mut dyn AuthTransport,
+        _now: u64,
+        _notify: &mut dyn FnMut(&DeviceChallenge),
+        _pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        Err(AuthProviderError::UnsupportedMethod)
+    }
+    /// Persists a normalized credential through the host-owned secret store.
+    fn persist(&self, _credential: &Credential, _now: u64) -> Result<(), AuthProviderError> {
+        Err(AuthProviderError::UnsupportedMethod)
+    }
     /// Refreshes a normalized OAuth credential when supported.
     fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError>;
     /// Refreshes a credential with an injected transport and clock.
@@ -103,6 +119,17 @@ pub trait AuthTransport {
         content_type: &str,
         body: &str,
     ) -> Result<AuthResponse, AuthProviderError>;
+    /// Sends a POST with optional headers; basic transports remain compatible.
+    fn post_with_headers(
+        &mut self,
+        url: &str,
+        content_type: &str,
+        body: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<AuthResponse, AuthProviderError> {
+        let _ = headers;
+        self.post(url, content_type, body)
+    }
     /// Sends a GET request with provider-specific headers.
     fn get(
         &mut self,
@@ -123,6 +150,22 @@ pub fn default_login(
 ) -> Result<Credential, AuthProviderError> {
     let mut transport = http_transport()?;
     provider.login_with(request, &mut transport, unix_time())
+}
+
+/// Runs a device login through the default transport and a real-time notifier.
+pub fn default_device_login(
+    provider: &dyn AuthProvider,
+    timeout_secs: u64,
+    mut notify: impl FnMut(&DeviceChallenge),
+) -> Result<Credential, AuthProviderError> {
+    let mut transport = http_transport()?;
+    provider.device_login_with(
+        timeout_secs,
+        &mut transport,
+        unix_time(),
+        &mut notify,
+        &mut |seconds| std::thread::sleep(std::time::Duration::from_secs(seconds)),
+    )
 }
 
 /// Runs a refresh through the default transport and current Unix time.

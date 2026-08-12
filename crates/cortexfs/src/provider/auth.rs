@@ -1,20 +1,25 @@
 mod adapter;
 pub mod anthropic;
+mod codexdevice;
 mod common;
 pub mod copilot;
 mod credential;
+mod device;
+mod deviceparse;
 mod factory;
 mod model;
 pub mod openai;
+mod persist;
 mod protocol;
 mod registry;
 mod transport;
 
 pub use adapter::{
-    AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport, http_transport,
+    AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport, DeviceChallenge,
+    default_device_login, http_transport,
 };
 pub use credential::{Credential, CredentialKind};
-pub use factory::configured_adapter;
+pub use factory::{configured_adapter, configured_registry};
 pub use registry::{ProviderRegistry, ProviderRegistryError};
 use serde::{Deserialize, Serialize};
 

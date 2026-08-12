@@ -1,8 +1,9 @@
 use super::adapter::{
-    AuthProvider, AuthProviderError, AuthRequest, AuthTransport, default_login, default_models,
-    default_refresh,
+    AuthProvider, AuthProviderError, AuthRequest, AuthTransport, DeviceChallenge, default_login,
+    default_models, default_refresh,
 };
 use super::common::AdapterCore;
+use super::device::DeviceConfig;
 use super::{Credential, ProviderAuthConfig};
 use crate::provider::oauth::{OAuthPkce, OAuthProviderConfig};
 
@@ -43,11 +44,16 @@ impl GitHubCopilotAdapter {
                 id: "github-copilot".to_owned(),
                 aliases: vec!["copilot".to_owned()],
                 model_url: format!("{}/models", base_url.trim_end_matches('/')),
-                methods: vec![ProviderAuthConfig::oauth(
-                    super::OAuthFlow::AuthorizationCode,
-                    "subscription",
-                )],
+                methods: vec![
+                    ProviderAuthConfig::oauth(super::OAuthFlow::AuthorizationCode, "subscription"),
+                    ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
+                ],
                 oauth: Some(oauth),
+                device: Some(DeviceConfig {
+                    request_url: "https://github.com/login/device/code".to_owned(),
+                    token_url: "https://github.com/login/oauth/access_token".to_owned(),
+                    verification_uri: "https://github.com/login/device".to_owned(),
+                }),
             },
         }
     }
@@ -84,6 +90,22 @@ impl AuthProvider for GitHubCopilotAdapter {
         now: u64,
     ) -> Result<Credential, AuthProviderError> {
         self.core.login(request, transport, now)
+    }
+
+    fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
+        self.core.persist(credential, now)
+    }
+
+    fn device_login_with(
+        &self,
+        timeout_secs: u64,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+        notify: &mut dyn FnMut(&DeviceChallenge),
+        pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        self.core
+            .device_login(timeout_secs, transport, now, notify, pause)
     }
 
     fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {

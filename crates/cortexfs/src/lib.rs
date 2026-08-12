@@ -92,8 +92,9 @@ pub use provider::auth::copilot::GitHubCopilotAdapter;
 pub use provider::auth::openai::OpenAiAdapter;
 pub use provider::auth::{
     AuthMethod, AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport,
-    Credential, CredentialKind, OAuthFlow, ProviderAuthConfig, ProviderRegistry,
-    ProviderRegistryError, configured_adapter, effective_auth_methods, http_transport,
+    Credential, CredentialKind, DeviceChallenge, OAuthFlow, ProviderAuthConfig, ProviderRegistry,
+    ProviderRegistryError, configured_adapter, configured_registry, default_device_login,
+    effective_auth_methods, http_transport,
 };
 pub use provider::discovery::*;
 pub(crate) use provider::{

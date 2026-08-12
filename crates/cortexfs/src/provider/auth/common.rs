@@ -1,3 +1,4 @@
+use super::device::{self, DeviceChallenge, DeviceConfig};
 use super::protocol::{credential_from_token, parse_token};
 use super::{AuthProviderError, AuthRequest, AuthTransport, Credential, ProviderAuthConfig};
 use crate::provider::oauth::{
@@ -11,6 +12,7 @@ pub struct AdapterCore {
     pub(crate) model_url: String,
     pub(crate) methods: Vec<ProviderAuthConfig>,
     pub(crate) oauth: Option<OAuthProviderConfig>,
+    pub(crate) device: Option<DeviceConfig>,
 }
 impl AdapterCore {
     pub(crate) fn authorization(
@@ -39,6 +41,46 @@ impl AdapterCore {
             AuthRequest::AuthorizationCode { .. } => Err(AuthProviderError::InvalidCredential),
             AuthRequest::DeviceCode { .. } => Err(AuthProviderError::UnsupportedMethod),
         }
+    }
+    pub(crate) fn device_login(
+        &self,
+        timeout_secs: u64,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+        notify: &mut dyn FnMut(&DeviceChallenge),
+        pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        if !self.methods.iter().any(|method| {
+            method.method == super::AuthMethod::OAuth
+                && method.flow == Some(super::OAuthFlow::DeviceCode)
+        }) {
+            return Err(AuthProviderError::UnsupportedMethod);
+        }
+        let oauth = self
+            .oauth
+            .as_ref()
+            .ok_or(AuthProviderError::InvalidConfig)?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or(AuthProviderError::UnsupportedMethod)?;
+        device::login(
+            &self.id,
+            oauth,
+            device,
+            timeout_secs,
+            transport,
+            now,
+            notify,
+            pause,
+        )
+    }
+    pub(crate) fn persist(
+        &self,
+        credential: &Credential,
+        now: u64,
+    ) -> Result<(), AuthProviderError> {
+        super::persist::store(self, credential, now)
     }
     pub(crate) fn refresh(
         &self,

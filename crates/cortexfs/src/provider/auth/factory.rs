@@ -1,3 +1,4 @@
+use super::registry::ProviderRegistry;
 use super::{AuthProvider, ProviderAuthConfig};
 use crate::provider::oauth::OAuthProviderConfig;
 
@@ -23,4 +24,18 @@ pub fn configured_adapter(
             id, base_url, methods, oauth,
         ))),
     }
+}
+
+/// Builds a registry containing the adapter selected by host metadata.
+#[must_use]
+pub fn configured_registry(
+    id: &str,
+    base_url: &str,
+    methods: Vec<ProviderAuthConfig>,
+    oauth: Option<OAuthProviderConfig>,
+) -> Option<ProviderRegistry> {
+    let adapter = configured_adapter(id, base_url, methods, oauth)?;
+    let mut registry = ProviderRegistry::new();
+    registry.register_boxed(adapter).ok()?;
+    Some(registry)
 }

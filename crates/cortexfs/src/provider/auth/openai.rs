@@ -2,7 +2,9 @@ use super::adapter::{
     AuthProvider, AuthProviderError, AuthRequest, AuthTransport, default_login, default_models,
     default_refresh,
 };
+use super::codexdevice;
 use super::common::AdapterCore;
+use super::device::DeviceChallenge;
 use super::model::model_url;
 use super::{Credential, ProviderAuthConfig};
 use crate::provider::oauth::{OAuthPkce, OAuthProviderConfig, codex_oauth_config};
@@ -20,10 +22,10 @@ impl OpenAiAdapter {
         Self::new(
             "codex",
             "https://chatgpt.com/backend-api/codex",
-            vec![ProviderAuthConfig::oauth(
-                super::OAuthFlow::AuthorizationCode,
-                "subscription",
-            )],
+            vec![
+                ProviderAuthConfig::oauth(super::OAuthFlow::AuthorizationCode, "subscription"),
+                ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
+            ],
             Some(oauth),
         )
     }
@@ -48,6 +50,7 @@ impl OpenAiAdapter {
                 id,
                 methods,
                 oauth,
+                device: None,
             },
         }
     }
@@ -84,6 +87,25 @@ impl AuthProvider for OpenAiAdapter {
         now: u64,
     ) -> Result<Credential, AuthProviderError> {
         self.core.login(request, transport, now)
+    }
+
+    fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
+        self.core.persist(credential, now)
+    }
+
+    fn device_login_with(
+        &self,
+        timeout_secs: u64,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+        notify: &mut dyn FnMut(&DeviceChallenge),
+        pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        if self.core.id == "codex" {
+            return codexdevice::login(&self.core.id, timeout_secs, transport, now, notify, pause);
+        }
+        self.core
+            .device_login(timeout_secs, transport, now, notify, pause)
     }
 
     fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {

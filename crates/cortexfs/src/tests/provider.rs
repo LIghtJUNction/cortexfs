@@ -132,6 +132,57 @@ fn openai_adapter_exchanges_refreshes_and_discovers_models() -> Result<(), AuthP
 }
 
 #[test]
+fn codex_device_flow_keeps_legacy_challenge_contract() -> Result<(), AuthProviderError> {
+    let adapter = OpenAiAdapter::codex();
+    let verifier = "a".repeat(43);
+    let challenge = serde_json::json!({
+        "device_auth_id": "device",
+        "user_code": "ABCD-1234",
+        "interval": "1"
+    });
+    let grant = serde_json::json!({
+        "authorization_code": "code",
+        "code_verifier": verifier
+    });
+    let mut transport = ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","token_type":"bearer"}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: grant.to_string().into_bytes(),
+            },
+            AuthResponse {
+                status: 200,
+                body: challenge.to_string().into_bytes(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    };
+    let mut challenges = Vec::new();
+    let mut pauses = Vec::new();
+    let credential = adapter.device_login_with(
+        30,
+        &mut transport,
+        100,
+        &mut |value| challenges.push(value.clone()),
+        &mut |seconds| pauses.push(seconds),
+    )?;
+    assert!(
+        matches!(credential, Credential::OAuth { ref access_token, .. } if access_token == "access")
+    );
+    assert_eq!(
+        challenges.first().map(|value| value.user_code.as_str()),
+        Some("ABCD-1234")
+    );
+    assert!(pauses.is_empty());
+    assert_eq!(transport.posts.len(), 3);
+    Ok(())
+}
+
+#[test]
 fn anthropic_adapter_uses_api_key_header() -> Result<(), AuthProviderError> {
     let adapter = AnthropicAdapter::claude();
     let mut transport = ScriptedTransport {
@@ -157,6 +208,54 @@ fn anthropic_adapter_uses_api_key_header() -> Result<(), AuthProviderError> {
         transport.gets.first().map(|get| &get.1),
         Some(&vec![("x-api-key".to_owned(), "sk-test".to_owned())])
     );
+    Ok(())
+}
+
+#[test]
+fn copilot_device_flow_reports_challenge_and_refreshes_poll_interval()
+-> Result<(), AuthProviderError> {
+    let adapter = GitHubCopilotAdapter::new(GitHubCopilotAdapter::oauth_config(
+        "client",
+        "http://localhost/callback",
+    ));
+    let mut transport = ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","token_type":"bearer","expires_in":60}"#
+                    .to_vec(),
+            },
+            AuthResponse {
+                status: 400,
+                body: br#"{"error":"authorization_pending"}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"device_code":"device","user_code":"ABCD-1234","verification_uri":"https://github.com/login/device","expires_in":30,"interval":1}"#.to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    };
+    let mut challenges = Vec::new();
+    let mut pauses = Vec::new();
+    let credential = adapter.device_login_with(
+        10,
+        &mut transport,
+        100,
+        &mut |challenge| challenges.push(challenge.clone()),
+        &mut |seconds| pauses.push(seconds),
+    )?;
+    assert!(
+        matches!(credential, Credential::OAuth { ref access_token, .. } if access_token == "access")
+    );
+    assert_eq!(
+        challenges
+            .first()
+            .map(|challenge| challenge.user_code.as_str()),
+        Some("ABCD-1234")
+    );
+    assert_eq!(pauses, [1]);
+    assert_eq!(transport.posts.len(), 3);
     Ok(())
 }
 

@@ -1,7 +1,7 @@
 use crate::*;
 
 use crate::provider::auth::AuthMethod;
-use crate::provider::auth::{AuthResponse, Credential, configured_adapter};
+use crate::provider::auth::{AuthResponse, Credential, configured_registry};
 use crate::provider::name::is_reserved_provider_name;
 use crate::support::command::CURL;
 use crate::support::plain::{create_plain_dir, open_plain_directory, read_small_text_file};
@@ -26,12 +26,15 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         let Some(credential) = provider_credential(config, provider) else {
             continue;
         };
-        let Some(adapter) = configured_adapter(
+        let Some(registry) = configured_registry(
             provider,
             &config.base_url,
             config.auth_methods(),
             config.oauth.clone(),
         ) else {
+            continue;
+        };
+        let Some(adapter) = registry.get(provider) else {
             continue;
         };
         let Ok(headers) = adapter.model_headers(&credential) else {

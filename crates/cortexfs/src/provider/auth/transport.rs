@@ -38,12 +38,23 @@ impl AuthTransport for HttpTransport {
         content_type: &str,
         body: &str,
     ) -> Result<AuthResponse, AuthProviderError> {
-        Self::send(
+        self.post_with_headers(url, content_type, body, &[])
+    }
+
+    fn post_with_headers(
+        &mut self,
+        url: &str,
+        content_type: &str,
+        body: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<AuthResponse, AuthProviderError> {
+        let request = headers.iter().fold(
             self.client
                 .post(url)
-                .header(reqwest::header::CONTENT_TYPE, content_type)
-                .body(body.to_owned()),
-        )
+                .header(reqwest::header::CONTENT_TYPE, content_type),
+            |request, &(name, value)| request.header(name, value),
+        );
+        Self::send(request.body(body.to_owned()))
     }
 
     fn get(

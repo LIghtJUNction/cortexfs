@@ -334,8 +334,9 @@ when the legacy `oauth` block is present. Invalid slots or an OAuth method
 without OAuth metadata fail closed during provider snapshot loading.
 
 Adapters implement one provider-neutral boundary (`id`, supported methods,
-authorization URL, login, refresh, and model listing) and return the normalized
-credential shape. The host can inject the HTTP transport for deterministic
+authorization URL, login, device challenge, refresh, persistence, and model
+listing) and return the normalized credential shape. The host can inject the
+HTTP transport, clock, challenge notifier, and sleep callback for deterministic
 tests; Agents never receive that transport or provider-native response types.
 The built-in registry provides concrete OpenAI/Codex and Anthropic/Claude
 adapters, plus a GitHub Copilot adapter when the host supplies its OAuth app
@@ -367,10 +368,11 @@ Model listing remains provider-neutral and feeds the existing model projection
 and bounded host caches; it does not create an `/ctx/identity` namespace. The
 existing hardened host discovery request is parsed through the selected
 adapter, so provider-specific model envelopes do not leak into the model ABI.
-`device_code` is part of the shared declaration grammar; the first concrete
-adapter slice implements Authorization Code + PKCE, refresh, API keys, and
-model discovery. Device-code prompting/polling remains the next adapter slice
-because it also needs a CLI challenge-display contract.
+`device_code` is part of the shared declaration grammar. The built-in GitHub
+Copilot adapter implements the standard device challenge, bounded polling, and
+normalized credential persistence; other adapters only advertise device flow
+when their host metadata supplies a matching implementation. The CLI prints
+the verification URI and user code but never stores the device code in `/ctx`.
 
 ## Provider Presets
 

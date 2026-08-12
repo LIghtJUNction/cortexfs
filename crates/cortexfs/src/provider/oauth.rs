@@ -66,7 +66,15 @@ struct DeviceGrant {
 
 pub type OAuthCredential = (String, String);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
+pub struct OAuthCredentialMaterial<'a> {
+    pub access_token: &'a str,
+    pub refresh_token: Option<&'a str>,
+    pub expires_at: Option<u64>,
+    pub scopes: &'a [String],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OAuthError {
     InvalidConfig,
     InvalidVerifier,
@@ -468,6 +476,26 @@ pub fn store_oauth_tokens(
         oauth_keychain_set(&service, OAUTH_EXPIRES_ACCOUNT, &expires_at.to_string())?;
     }
     Ok(())
+}
+
+pub fn store_oauth_credential(
+    provider: &str,
+    config: &OAuthProviderConfig,
+    material: &OAuthCredentialMaterial<'_>,
+    now: u64,
+) -> Result<(), OAuthError> {
+    if material.access_token.trim().is_empty() || provider.trim().is_empty() {
+        return Err(OAuthError::InvalidToken);
+    }
+    let token = OAuthTokenResponse {
+        access_token: material.access_token.to_owned(),
+        token_type: Some("Bearer".to_owned()),
+        expires_in: material.expires_at.and_then(|value| value.checked_sub(now)),
+        refresh_token: material.refresh_token.map(str::to_owned),
+        scope: (!material.scopes.is_empty()).then(|| material.scopes.join(" ")),
+        id_token: None,
+    };
+    store_oauth_tokens(provider, config, &token, now)
 }
 
 pub fn resolve_codex_with(

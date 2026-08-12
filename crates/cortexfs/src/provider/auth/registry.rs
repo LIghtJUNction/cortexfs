@@ -46,6 +46,14 @@ impl ProviderRegistry {
         &mut self,
         provider: P,
     ) -> Result<(), ProviderRegistryError> {
+        self.register_boxed(Box::new(provider))
+    }
+
+    /// Registers a dynamically selected adapter from host provider metadata.
+    pub fn register_boxed(
+        &mut self,
+        provider: Box<dyn AuthProvider>,
+    ) -> Result<(), ProviderRegistryError> {
         if !crate::is_object_name(provider.id()) || self.find(provider.id()).is_some() {
             return Err(if crate::is_object_name(provider.id()) {
                 ProviderRegistryError::DuplicateName
@@ -64,7 +72,7 @@ impl ProviderRegistry {
                 return Err(ProviderRegistryError::DuplicateName);
             }
         }
-        self.providers.push(Box::new(provider));
+        self.providers.push(provider);
         Ok(())
     }
 
