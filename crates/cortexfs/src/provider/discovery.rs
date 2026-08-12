@@ -1,7 +1,9 @@
 use crate::*;
 
 use crate::provider::auth::AuthMethod;
-use crate::provider::auth::{AuthProvider, AuthResponse, Credential, configured_registry};
+use crate::provider::auth::{
+    AuthProvider, AuthProviderError, AuthResponse, AuthTransport, Credential, configured_registry,
+};
 use crate::provider::name::is_reserved_provider_name;
 use crate::support::command::CURL;
 use crate::support::plain::{create_plain_dir, open_plain_directory, read_small_text_file};
@@ -37,13 +39,8 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         let Some(credential) = provider_credential(config, provider, adapter) else {
             continue;
         };
-        let Ok(headers) = adapter.model_headers(&credential) else {
-            continue;
-        };
-        let Ok(body) = run_curl_json(&provider_models_url(&config.base_url), &headers) else {
-            continue;
-        };
-        let Ok(models) = adapter.parse_models(AuthResponse { status: 200, body }) else {
+        let mut transport = ModelDiscoveryTransport;
+        let Ok(models) = adapter.models_with(Some(&credential), &mut transport) else {
             continue;
         };
         let models = provider_model_names(models);
@@ -59,6 +56,37 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         support::plain::sync_plain_dir(cache_dir).map_err(|_error| FuseError::Io)?;
     }
     Ok(())
+}
+
+struct ModelDiscoveryTransport;
+
+impl AuthTransport for ModelDiscoveryTransport {
+    fn post(
+        &mut self,
+        _url: &str,
+        _content_type: &str,
+        _body: &str,
+    ) -> Result<AuthResponse, AuthProviderError> {
+        Err(AuthProviderError::UnsupportedMethod)
+    }
+
+    fn get(
+        &mut self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<AuthResponse, AuthProviderError> {
+        let headers = headers
+            .iter()
+            .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        run_curl_json(url, &headers)
+            .map(|body| AuthResponse { status: 200, body })
+            .map_err(|error| match error {
+                FuseError::TooLarge => AuthProviderError::InvalidResponse,
+                FuseError::InvalidContent => AuthProviderError::InvalidConfig,
+                _ => AuthProviderError::Unavailable,
+            })
+    }
 }
 
 fn prune_inactive_provider_model_caches(
@@ -270,10 +298,6 @@ pub(crate) fn curl_config_quote(value: &str) -> Result<String, FuseError> {
     }
     quoted.push('"');
     Ok(quoted)
-}
-
-pub(crate) fn provider_models_url(base_url: &str) -> String {
-    format!("{}/models", super::effective_base_url(base_url))
 }
 
 #[cfg(test)]

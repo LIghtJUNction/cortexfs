@@ -214,7 +214,10 @@ fn anthropic_adapter_uses_api_key_header() -> Result<(), AuthProviderError> {
     );
     assert_eq!(
         transport.gets.first().map(|get| &get.1),
-        Some(&vec![("x-api-key".to_owned(), "sk-test".to_owned())])
+        Some(&vec![
+            ("x-api-key".to_owned(), "sk-test".to_owned()),
+            ("anthropic-version".to_owned(), "2023-06-01".to_owned()),
+        ])
     );
     Ok(())
 }
@@ -277,7 +280,10 @@ fn anthropic_oauth_adapter_exchanges_refreshes_and_discovers_models()
     );
     assert_eq!(
         transport.gets.first().map(|get| &get.1),
-        Some(&vec![("Authorization".to_owned(), "Bearer new".to_owned())])
+        Some(&vec![
+            ("Authorization".to_owned(), "Bearer new".to_owned()),
+            ("anthropic-version".to_owned(), "2023-06-01".to_owned()),
+        ])
     );
     Ok(())
 }

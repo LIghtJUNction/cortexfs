@@ -376,12 +376,15 @@ ctx provider auth methods PROVIDER
 The command prints `method<TAB>flow<TAB>slot` and never prints secret material.
 Model listing remains provider-neutral and feeds the existing model projection
 and bounded host caches; it does not create an `/ctx/identity` namespace. The
-existing hardened host discovery request is parsed through the selected
-adapter, so provider-specific model envelopes do not leak into the model ABI.
+existing hardened host discovery request is issued through the selected
+adapter's model transport and parser, so provider-specific model envelopes do
+not leak into the model ABI.
 `device_code` is part of the shared declaration grammar. An OAuth `device`
 block supplies standard device-code endpoints for host-configured adapters.
 The built-in GitHub Copilot adapter supplies its documented defaults when that
-block is omitted. Adapters implement the standard device challenge, bounded
+block is omitted; `api.githubcopilot.com` also maps to the stable
+`github-copilot` provider name when no explicit host name is supplied. Adapters
+implement the standard device challenge, bounded
 polling, and normalized credential persistence. The CLI prints the
 verification URI and user code but never stores the device code in `/ctx`.
 

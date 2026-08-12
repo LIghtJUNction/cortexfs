@@ -132,13 +132,18 @@ impl AuthProvider for AnthropicAdapter {
         credential: Option<&Credential>,
         transport: &mut dyn AuthTransport,
     ) -> Result<Vec<String>, AuthProviderError> {
-        self.core.models(credential, transport, "x-api-key")
+        let credential = credential.ok_or(AuthProviderError::InvalidCredential)?;
+        let headers = self.model_headers(credential)?;
+        let response = self.core.model_response_with_headers(transport, &headers)?;
+        self.parse_models(response)
     }
 
     fn model_headers(
         &self,
         credential: &Credential,
     ) -> Result<Vec<(String, String)>, AuthProviderError> {
-        self.core.model_headers(credential, "x-api-key")
+        let mut headers = self.core.model_headers(credential, "x-api-key")?;
+        headers.push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
+        Ok(headers)
     }
 }

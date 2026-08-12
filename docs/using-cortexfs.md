@@ -125,8 +125,9 @@ The provider library resolves those declarations through one registry. OpenAI
 and Codex use the OpenAI-compatible adapter, Claude uses the Anthropic adapter,
 and a GitHub Copilot adapter can be registered with a host-owned OAuth client
 configuration. Login, device login, refresh, persistence, and model discovery
-return the same normalized credential/model shapes; the Agent does not branch
-on OAuth endpoints or API-key headers. Copilot's `--device` login displays its
+run through the same adapter boundary and normalized credential/model shapes;
+the Agent does not branch on OAuth endpoints or API-key headers. Copilot's
+`--device` login displays its
 verification URI and user code, then polls with a bounded timeout.
 Host-configured providers can declare an OAuth `device` block with request,
 token, and verification endpoints; this keeps device-code flow provider-neutral
@@ -134,6 +135,8 @@ without adding another `/ctx` namespace.
 
 Canonical provider names are `openai`, `anthropic`, and `google`. `codex` is
 an alias for the `openai` preset; `gemini` is an alias for the `google` preset.
+The host-configured GitHub Copilot endpoint uses `github-copilot` as its
+canonical provider name and accepts `copilot` as an adapter alias.
 After installing `codex`, models are still projected under the canonical
 `/ctx/model/openai/<model>` path. CortexFS does not add a
 `/ctx/model/codex` namespace.

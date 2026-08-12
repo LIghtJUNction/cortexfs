@@ -1,5 +1,4 @@
 use super::common::AdapterCore;
-use super::protocol::parse_models;
 use super::{AuthProviderError, AuthTransport, Credential};
 
 impl AdapterCore {
@@ -39,20 +38,16 @@ impl AdapterCore {
         Ok(vec![(name, value)])
     }
 
-    pub fn models(
+    pub fn model_response_with_headers(
         &self,
-        credential: Option<&Credential>,
         transport: &mut dyn AuthTransport,
-        api_key_header: &str,
-    ) -> Result<Vec<String>, AuthProviderError> {
-        let credential = credential.ok_or(AuthProviderError::InvalidCredential)?;
-        let headers = self.model_headers(credential, api_key_header)?;
+        headers: &[(String, String)],
+    ) -> Result<super::AuthResponse, AuthProviderError> {
         let headers = headers
             .iter()
             .map(|header| (header.0.as_str(), header.1.as_str()))
             .collect::<Vec<_>>();
-        let response = transport.get(&self.model_url, &headers)?;
-        parse_models(&response)
+        transport.get(&self.model_url, &headers)
     }
 }
 

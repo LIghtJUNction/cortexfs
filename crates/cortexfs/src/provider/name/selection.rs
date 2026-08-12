@@ -6,6 +6,7 @@ pub(crate) fn canonical_provider_name_from_host(host: &str) -> &str {
     match host {
         "api.openai.com" => "openai",
         "api.anthropic.com" => "anthropic",
+        "api.githubcopilot.com" => "github-copilot",
         "generativelanguage.googleapis.com" => "google",
         _ => host,
     }

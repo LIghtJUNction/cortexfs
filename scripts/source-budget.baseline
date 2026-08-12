@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=128920
-prod=82986
+all=129019
+prod=83060
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -239,23 +239,23 @@ prod=82986
 97 crates/cortexfs/src/provider/alias.rs
 114 crates/cortexfs/src/provider/auth.rs
 241 crates/cortexfs/src/provider/auth/adapter.rs
-144 crates/cortexfs/src/provider/auth/anthropic.rs
+149 crates/cortexfs/src/provider/auth/anthropic.rs
 63 crates/cortexfs/src/provider/auth/codexdevice.rs
 174 crates/cortexfs/src/provider/auth/common.rs
-175 crates/cortexfs/src/provider/auth/copilot.rs
+178 crates/cortexfs/src/provider/auth/copilot.rs
 63 crates/cortexfs/src/provider/auth/credential.rs
 107 crates/cortexfs/src/provider/auth/device.rs
 68 crates/cortexfs/src/provider/auth/deviceparse.rs
 41 crates/cortexfs/src/provider/auth/factory.rs
-65 crates/cortexfs/src/provider/auth/model.rs
-154 crates/cortexfs/src/provider/auth/openai.rs
+60 crates/cortexfs/src/provider/auth/model.rs
+157 crates/cortexfs/src/provider/auth/openai.rs
 75 crates/cortexfs/src/provider/auth/persist.rs
 92 crates/cortexfs/src/provider/auth/protocol.rs
 132 crates/cortexfs/src/provider/auth/registry.rs
 73 crates/cortexfs/src/provider/auth/transport.rs
 336 crates/cortexfs/src/provider/catalog.rs
 55 crates/cortexfs/src/provider/config.rs
-351 crates/cortexfs/src/provider/discovery.rs
+375 crates/cortexfs/src/provider/discovery.rs
 64 crates/cortexfs/src/provider/link.rs
 473 crates/cortexfs/src/provider/model.rs
 182 crates/cortexfs/src/provider/model/routes.rs
@@ -263,8 +263,8 @@ prod=82986
 154 crates/cortexfs/src/provider/name/files.rs
 107 crates/cortexfs/src/provider/name/names.rs
 156 crates/cortexfs/src/provider/name/secrets.rs
-89 crates/cortexfs/src/provider/name/selection.rs
-831 crates/cortexfs/src/provider/oauth.rs
+90 crates/cortexfs/src/provider/name/selection.rs
+874 crates/cortexfs/src/provider/oauth.rs
 131 crates/cortexfs/src/provider/project.rs
 148 crates/cortexfs/src/provider/snapshot.rs
 15 crates/cortexfs/src/reference.rs

@@ -163,7 +163,10 @@ impl AuthProvider for GitHubCopilotAdapter {
         credential: Option<&Credential>,
         transport: &mut dyn AuthTransport,
     ) -> Result<Vec<String>, AuthProviderError> {
-        self.core.models(credential, transport, "Authorization")
+        let credential = credential.ok_or(AuthProviderError::InvalidCredential)?;
+        let headers = self.model_headers(credential)?;
+        let response = self.core.model_response_with_headers(transport, &headers)?;
+        self.parse_models(response)
     }
 
     fn model_headers(

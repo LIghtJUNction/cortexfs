@@ -58,6 +58,21 @@ fn oauth_token_exchange_is_hermetic_and_validates_bearer() {
 }
 
 #[test]
+fn oauth_token_parser_rejects_control_character_credentials() {
+    assert_eq!(
+        parse_oauth_token_response(br#"{"access_token":"access\n"}"#),
+        Err(OAuthError::InvalidToken)
+    );
+}
+
+#[test]
+fn oauth_config_rejects_control_character_secret_accounts() {
+    let mut oauth = config();
+    oauth.access_token_account = Some("oauth\naccess".to_owned());
+    assert!(!oauth.is_valid());
+}
+
+#[test]
 fn oauth_access_resolution_prefers_environment() {
     let resolved = resolve_oauth_access_token_with(
         "openai",
