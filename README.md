@@ -33,6 +33,12 @@ can `ls`, `cat`, execute, secure, and audit.
 - **Small, explicit authority.** Static direct-native declarations never grant
   authority, and dynamic tool context never expands it.
 
+## OpenAI-Compatible Model Access
+
+CortexFS supports custom provider base URLs, so an OpenAI-compatible gateway can be used without changing the `/ctx` model ABI. [LMM API Gateway](https://api.lmm.best) is one available multi-model endpoint maintained by the CortexFS author. Configure it through host-side provider JSON and the system secret store as described in the [model ABI](docs/spec/model-abi.md#provider-presets).
+
+API purchases help cover the model usage behind CortexFS development. Substantive issues, pull requests, and testing may also receive API credits; using LMM is optional and CortexFS remains provider-neutral.
+
 ---
 
 ## Install
