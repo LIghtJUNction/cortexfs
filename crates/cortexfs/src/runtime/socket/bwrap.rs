@@ -189,9 +189,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
     ]);
     bwrap.extend(support::process::bwrap_system_layout_args());
-    if !request.runtime.network_allowed {
-        bwrap.push("--unshare-net".to_owned());
-    }
+    // Policy-based egress must not grant the sandbox access to the host network namespace.
+    let _ = request.runtime.network_allowed;
+    bwrap.push("--unshare-net".to_owned());
     if let Some(host_dir) = request.provider_egress {
         bwrap.extend([
             "--dir".to_owned(),

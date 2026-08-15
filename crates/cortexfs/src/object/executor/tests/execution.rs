@@ -114,7 +114,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         mount_table: &mount_table,
         cwd: Path::new("/workspace"),
         sandbox: Some(&sandbox),
-        network_allowed: false,
+        network_allowed: true,
         home_fd: 10,
         home_alias_fd: 11,
         home_target: Path::new("/ctx/home/1000/agent/coder"),

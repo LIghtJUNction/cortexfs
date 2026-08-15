@@ -489,9 +489,9 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
     ];
     args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
     args.extend(bwrap_system_layout_args().into_iter().map(OsString::from));
-    if !request.network_allowed {
-        args.push(OsString::from("--unshare-net"));
-    }
+    // Policy-based egress must not grant the sandbox access to the host network namespace.
+    let _ = request.network_allowed;
+    args.push(OsString::from("--unshare-net"));
     args.extend(optional_dev_toolchain_bind_args());
     args.extend(agent_tool_env_bwrap_args(request));
     if let Some(control) = request.control {

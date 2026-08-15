@@ -569,7 +569,7 @@ printf '{"type":"delta","run":"%s","text":"%s-%s-%s"}\n' "$CTX_RUN_ID" "$workspa
 }
 
 #[test]
-fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
+fn agent_executable_socket_bwrap_args_isolate_network_when_policy_allows() {
     let root = reference_tree("bwrap-network");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -609,7 +609,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         provider_egress: None,
     });
 
-    assert!(!args.contains(&"--unshare-net".to_owned()));
+    assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
     assert!(
         !args
