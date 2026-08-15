@@ -1,7 +1,6 @@
 use super::*;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
-
 pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) agent: &'a str,
     pub(crate) source: &'a Path,
@@ -38,14 +37,12 @@ impl AgentToolControl {
             .map_err(|_error| ExecError::new("cannot create run control launch gate"))
     }
 }
-
 pub(crate) fn execute_agent_tool_call_with(
     config: &AgentToolExecutionConfig<'_>,
     tool_call: &AgentToolCall,
 ) -> Result<String, ExecError> {
     prepare_agent_tool_call(config, tool_call)?.execute(config)
 }
-
 pub(crate) struct PreparedAgentToolCall {
     command: Command,
     home_dir: fs::File,
@@ -56,7 +53,6 @@ pub(crate) struct PreparedAgentToolCall {
     working_set: Option<(PathBuf, cortexfs::TshLoadedToolState, usize)>,
     control_gate: Option<crate::runtime::control::LaunchGate>,
 }
-
 pub(crate) fn prepare_agent_tool_call(
     config: &AgentToolExecutionConfig<'_>,
     tool_call: &AgentToolCall,
@@ -128,7 +124,11 @@ pub(crate) fn prepare_agent_tool_call(
     let (home_dir, home_alias_dir) = open_agent_home_fds(&home_source)?;
     let mut command =
         crate::runtime::socket::command_for_agent_identity(BWRAP_PROGRAM, view.identity());
-    let control = config.control.as_ref();
+    let name = tool_call.name.as_str();
+    let control = config
+        .control
+        .as_ref()
+        .filter(|_| matches!(name, "agent.create" | "tsh"));
     let control_gate = control.map(AgentToolControl::launch_gate).transpose()?;
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,
