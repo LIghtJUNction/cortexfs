@@ -466,7 +466,7 @@ fn curl_config(target: &ProviderTarget, request: &Request) -> io::Result<String>
         )?);
         config.push('\n');
     }
-    config.push_str("data-binary = ");
+    config.push_str("data-raw = ");
     config.push_str(&curl_quote(&request.body)?);
     config.push('\n');
     Ok(config)

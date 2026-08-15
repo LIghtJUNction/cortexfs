@@ -243,6 +243,19 @@ fn curl_config_preserves_utf8_and_keeps_secrets_out_of_process_arguments() -> io
 }
 
 #[test]
+fn curl_config_treats_leading_at_in_body_as_data() -> io::Result<()> {
+    let request = Request {
+        endpoint: "responses",
+        headers: Vec::new(),
+        body: b"@/etc/shadow".to_vec(),
+    };
+    let config = curl_config(&target("/v1"), &request)?;
+    assert!(config.contains("data-raw = \"@/etc/shadow\""));
+    assert!(!config.contains("data-binary"));
+    Ok(())
+}
+
+#[test]
 fn silent_upstream_is_killed_when_client_disconnects() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let address = listener.local_addr()?;
