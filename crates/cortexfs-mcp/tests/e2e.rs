@@ -291,6 +291,13 @@ fn exercise_remote_tool(root: &Path, source: &Path) -> Result<(), Box<dyn std::e
             .and_then(Value::as_str),
         Some("ok")
     );
+    fs::write(root.join("mcp.json"), b"{}")?;
+    let (changed, _) = call_tool(source, "demo.echo").map_err(io::Error::other)?;
+    assert!(!changed.status.success(), "changed MCP config was accepted");
+    assert!(
+        String::from_utf8_lossy(&changed.stdout).contains("MCP config digest mismatch"),
+        "unexpected changed-config output: {changed:?}",
+    );
     Ok(())
 }
 

@@ -116,6 +116,7 @@ fn prepare(input: &ProjectInput<'_>) -> io::Result<Vec<PreparedManifest>> {
         Some(path) => cortexfs::support::plain::read_small_text_file(path, 64 * 1024)?,
         None => String::new(),
     };
+    let config_digest = crate::config::file_digest(input.runtime)?;
     let digest = digest(input.executable)?;
     let mut names = BTreeSet::new();
     let mut prepared = Vec::with_capacity(input.tools.len());
@@ -139,7 +140,7 @@ fn prepare(input: &ProjectInput<'_>) -> io::Result<Vec<PreparedManifest>> {
                 format!("unsupported MCP task execution required by tool: {name}"),
             ));
         }
-        let locator = json!({"transport":"stdio","config":input.runtime,"server":input.server,"tool":tool.name});
+        let locator = json!({"transport":"stdio","config":input.runtime,"sha256":config_digest,"server":input.server,"tool":tool.name});
         let manifest = json!({"schema":"cortexfs.object/v2","version":env!("CARGO_PKG_VERSION"),"compatibility":{"cortexfs":">=0.1.7, <0.2.0"},"class":"tool","name":name,"executable":{"path":input.executable,"sha256":digest},"controls":{"description":tool.description,"schema":serde_json::to_string(&tool.schema).map_err(io::Error::other)?,"cap":"mcp","policy":policy,"mcp":serde_json::to_string(&locator).map_err(io::Error::other)?}});
         prepared.push(PreparedManifest {
             file: format!("{name}.manifest.json"),
@@ -306,49 +307,51 @@ mod tests {
         Ok(path)
     }
 
+    fn runtime(root: &Path) -> io::Result<PathBuf> {
+        let path = root.join("mcp.json");
+        fs::write(&path, b"{}")?;
+        Ok(path)
+    }
+
+    fn tool(name: &str) -> RemoteTool {
+        RemoteTool {
+            name: name.to_owned(),
+            description: String::new(),
+            schema: json!({"type":"object"}),
+            execution: ToolExecution::default(),
+        }
+    }
+
     #[test]
     fn project_writes_strict_manifest_and_refuses_overwrite() -> io::Result<()> {
         let root = tempfile::tempdir()?;
         let out = root.path().join("out");
-        let tools = [RemoteTool {
-            name: "echo".to_owned(),
-            description: "Echo".to_owned(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        }];
+        let mut echo = tool("echo");
+        echo.description = "Echo".to_owned();
+        let tools = [echo];
         let executable = executable(root.path())?;
         let paths = write(
             &out,
             &executable,
-            Path::new("/visible/mcp.json"),
+            &runtime(root.path())?,
             "demo",
             &tools,
             None,
         )?;
-        let value: serde_json::Value = serde_json::from_slice(&fs::read(
-            paths
-                .first()
-                .ok_or_else(|| io::Error::other("missing manifest"))?,
-        )?)?;
+        let manifest = paths
+            .first()
+            .ok_or_else(|| io::Error::other("missing manifest"))?;
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(manifest)?)?;
         assert_eq!(
             value.get("name").and_then(serde_json::Value::as_str),
             Some("demo.echo")
         );
-        assert!(
-            cortexfs::object::install::check_object(
-                paths
-                    .first()
-                    .ok_or_else(|| io::Error::other("missing manifest"))?
-            )
-            .is_ok()
-        );
+        assert!(cortexfs::object::install::check_object(manifest).is_ok());
         let source = root.path().join("source");
         fs::create_dir_all(source.join("tool"))?;
         cortexfs::object::install::install_object(
             &source,
-            paths
-                .first()
-                .ok_or_else(|| io::Error::other("missing manifest"))?,
+            manifest,
             cortexfs::object::install::InstallTier::System,
         )
         .map_err(|error| io::Error::other(error.message()))?;
@@ -358,19 +361,15 @@ mod tests {
         assert!(found.is_some());
         assert!(source.join("tool/demo.echo.d/mcp").is_file());
         assert!(
-            !String::from_utf8(fs::read(
-                paths
-                    .first()
-                    .ok_or_else(|| io::Error::other("missing manifest"))?
-            )?)
-            .map_err(io::Error::other)?
-            .contains("secret-value")
+            !String::from_utf8(fs::read(manifest)?)
+                .map_err(io::Error::other)?
+                .contains("secret-value")
         );
         assert!(
             write(
                 &out,
                 &executable,
-                Path::new("/visible/mcp.json"),
+                &runtime(root.path())?,
                 "demo",
                 &tools,
                 None
@@ -383,17 +382,12 @@ mod tests {
     #[test]
     fn project_rejects_invalid_combined_name() -> io::Result<()> {
         let root = tempfile::tempdir()?;
-        let tools = [RemoteTool {
-            name: "bad/name".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        }];
+        let tools = [tool("bad/name")];
         assert!(
             write(
                 &root.path().join("out"),
                 &std::env::current_exe()?,
-                Path::new("/visible/mcp.json"),
+                &runtime(root.path())?,
                 "demo",
                 &tools,
                 None
@@ -411,17 +405,12 @@ mod tests {
         let out = root.path().join("out");
         std::os::unix::fs::symlink(&target, &out)?;
         let executable = executable(root.path())?;
-        let tools = [RemoteTool {
-            name: "echo".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        }];
+        let tools = [tool("echo")];
         assert!(
             write(
                 &out,
                 &executable,
-                Path::new("/visible/mcp.json"),
+                &runtime(root.path())?,
                 "demo",
                 &tools,
                 None,
@@ -440,17 +429,12 @@ mod tests {
         let out = parent.join("out");
         let displaced = root.path().join("displaced");
         let executable = executable(root.path())?;
-        let tools = [RemoteTool {
-            name: "echo".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        }];
+        let tools = [tool("echo")];
         let result = write_inner(
             &ProjectInput {
                 out: &out,
                 executable: &executable,
-                runtime: Path::new("/visible/mcp.json"),
+                runtime: &runtime(root.path())?,
                 server: "demo",
                 tools: &tools,
                 policy_file: None,
@@ -474,17 +458,12 @@ mod tests {
         let external = root.path().join("external");
         fs::write(&external, "unchanged")?;
         let executable = executable(root.path())?;
-        let tools = [RemoteTool {
-            name: "echo".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        }];
+        let tools = [tool("echo")];
         let result = write_inner(
             &ProjectInput {
                 out: &out,
                 executable: &executable,
-                runtime: Path::new("/visible/mcp.json"),
+                runtime: &runtime(root.path())?,
                 server: "demo",
                 tools: &tools,
                 policy_file: None,
@@ -502,24 +481,11 @@ mod tests {
         let root = tempfile::tempdir()?;
         let out = root.path().join("out");
         let executable = executable(root.path())?;
-        let tools = [
-            RemoteTool {
-                name: "echo".to_owned(),
-                description: String::new(),
-                schema: json!({"type":"object"}),
-                execution: ToolExecution::default(),
-            },
-            RemoteTool {
-                name: "sum".to_owned(),
-                description: String::new(),
-                schema: json!({"type":"object"}),
-                execution: ToolExecution::default(),
-            },
-        ];
+        let tools = [tool("echo"), tool("sum")];
         let input = ProjectInput {
             out: &out,
             executable: &executable,
-            runtime: Path::new("/visible/mcp.json"),
+            runtime: &runtime(root.path())?,
             server: "demo",
             tools: &tools,
             policy_file: None,
@@ -539,7 +505,7 @@ mod tests {
         let paths = write(
             &out,
             &executable,
-            Path::new("/visible/mcp.json"),
+            &runtime(root.path())?,
             "demo",
             &tools,
             None,
@@ -554,17 +520,12 @@ mod tests {
         let root = tempfile::tempdir()?;
         let out = root.path().join("out");
         let executable = executable(root.path())?;
-        let mut required = RemoteTool {
-            name: "required".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        };
+        let mut required = tool("required");
         required.execution.task_support = TaskSupport::Required;
         let error = write(
             &out,
             &executable,
-            Path::new("/visible/mcp.json"),
+            &runtime(root.path())?,
             "demo",
             &[required],
             None,
@@ -581,24 +542,14 @@ mod tests {
         let root = tempfile::tempdir()?;
         let out = root.path().join("out");
         let executable = executable(root.path())?;
-        let forbidden = RemoteTool {
-            name: "forbidden".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        };
-        let mut optional = RemoteTool {
-            name: "optional".to_owned(),
-            description: String::new(),
-            schema: json!({"type":"object"}),
-            execution: ToolExecution::default(),
-        };
+        let forbidden = tool("forbidden");
+        let mut optional = tool("optional");
         optional.execution.task_support = TaskSupport::Optional;
 
         let paths = write(
             &out,
             &executable,
-            Path::new("/visible/mcp.json"),
+            &runtime(root.path())?,
             "demo",
             &[forbidden, optional],
             None,
