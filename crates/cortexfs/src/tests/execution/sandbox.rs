@@ -82,7 +82,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
         root.to_str().unwrap_or_default(),
         "/ctx"
     ));
-    assert!(contains_arg_triplet(
+    assert!(!contains_arg_triplet(
         args,
         "--ro-bind",
         root.to_str().unwrap_or_default(),

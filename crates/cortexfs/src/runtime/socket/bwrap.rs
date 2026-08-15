@@ -205,7 +205,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         ]);
     }
     append_bwrap_agent_environment(&mut bwrap, request.environment, request.control_environment);
-    bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(socket) = request.control_socket {
         bwrap.extend([
             "--bind".to_owned(),
@@ -287,18 +286,4 @@ pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str)
         return source_root.join(relative).display().to_string();
     }
     source.to_owned()
-}
-
-pub(crate) fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
-    let Some(source_root) = source_root.to_str() else {
-        return Vec::new();
-    };
-    if !source_root.starts_with('/') || source_root == "/" {
-        return Vec::new();
-    }
-    let mut args = support::bwrap::dir_args_for_parent(source_root);
-    args.push("--ro-bind".to_owned());
-    args.push(source_root.to_owned());
-    args.push(source_root.to_owned());
-    args
 }
