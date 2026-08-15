@@ -51,7 +51,9 @@ pub(crate) fn agent_start_host(
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
     require_sandbox_cwd(&args.cwd)?;
-    let cli_mounts = agent_start_mounts(args)?;
+    let default_source = env::current_dir()
+        .map_err(|error| CliError::unavailable(format!("current directory: {error}")))?;
+    let cli_mounts = agent_start_mounts_with_default_source(args, &default_source);
     for mount in &cli_mounts {
         require_agent_mount(mount)?;
     }
@@ -68,6 +70,15 @@ pub(crate) fn agent_start_host(
             args.name
         ))
     })?;
+    for mount in &cli_mounts {
+        if !view.mount_table().entries().iter().any(|entry| {
+            entry.source() == mount.source
+                && entry.target() == mount.target
+                && (entry.mode() == cortexfs::MountMode::ReadWrite || mount.mode == "ro")
+        }) {
+            return Err(CliError::usage("mount exceeds agent mount policy"));
+        }
+    }
     let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
     let session_workspace = agent_start_workspace_source(&cli_mounts);
     ensure_agent_start_session(

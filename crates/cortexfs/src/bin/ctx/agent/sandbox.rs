@@ -326,16 +326,6 @@ pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMoun
     args.cwd.clone()
 }
 
-pub(crate) fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
-    let default_source = env::current_dir().map_err(|error| {
-        CliError::unavailable(format!("cannot read current directory: {error}"))
-    })?;
-    Ok(agent_start_mounts_with_default_source(
-        args,
-        &default_source,
-    ))
-}
-
 pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
@@ -469,13 +459,12 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
-    if Path::new(cwd).is_absolute() {
-        Ok(())
-    } else {
-        Err(CliError::usage(
+    if !Path::new(cwd).is_absolute() {
+        return Err(CliError::usage(
             "agent cwd must be absolute inside the sandbox",
-        ))
+        ));
     }
+    Ok(())
 }
 
 pub(crate) fn ensure_agent_terminal_socket(
