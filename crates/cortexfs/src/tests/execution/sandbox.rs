@@ -1,17 +1,14 @@
-fn assert_provider_egress_args(args: &[String], host_dir: &str) {
-    assert!(args.contains(&"--unshare-net".to_owned()));
-    assert!(contains_arg_triplet(
-        args,
-        "--ro-bind",
-        host_dir,
-        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
-    ));
-    assert!(contains_arg_triplet(
-        args,
-        "--setenv",
-        crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
-        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
-    ));
+fn assert_provider_egress_absent(args: &[String]) {
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg == crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH)
+    );
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg == crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV)
+    );
 }
 
 fn assert_control_environment(args: &[String]) {
@@ -63,7 +60,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
         "CTX_PROVIDER_CONFIG_DIR",
         &root.join("shared/providers.d").display().to_string()
     ));
-    assert_provider_egress_args(args, "/run/cortexfs/egress-run-1");
+    assert_provider_egress_absent(args);
     assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
     for secret in [
         "CTX_PROVIDER_SECRET_FD",
@@ -399,7 +396,7 @@ fn agent_executable_socket_bwrap_does_not_inherit_provider_secret_env()
 }
 
 #[test]
-fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
+fn network_denied_provider_does_not_create_egress() {
     let root = reference_tree("agent-bwrap-egress-spawn-failure");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -452,7 +449,10 @@ fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
         None,
     );
 
-    assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
+    assert_eq!(
+        result.map(|outcome| outcome.process),
+        Ok(crate::AgentProcessOutcome::Error)
+    );
     assert!(!control_dir.join("egress-run-1").exists());
 }
 
@@ -606,16 +606,23 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         control_socket: None,
         control_environment: None,
         control_gate: None,
-        provider_egress: None,
+        provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
     });
 
     assert!(!args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
-    assert!(
-        !args
-            .iter()
-            .any(|arg| arg == crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV)
-    );
+    assert!(contains_arg_triplet(
+        &args,
+        "--ro-bind",
+        "/run/cortexfs/egress-run-1",
+        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+    ));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
+        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+    ));
 }
 
 #[test]
