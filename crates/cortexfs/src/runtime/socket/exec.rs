@@ -413,12 +413,7 @@ fn handle_agent_tsh_request(
         }
         SocketSendOutcome::Recorded(response) => response,
     };
-    let run = recorder
-        .frames()
-        .first()
-        .and_then(|frame| serde_json::from_str::<Value>(frame).ok())
-        .and_then(|frame| frame.get("run").and_then(Value::as_str).map(str::to_owned))
-        .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let run = response_run(&recorder).ok_or(SocketRuntimeError::CannotRunAgent)?;
     let call = object::executor::AgentToolCall {
         id: "tsh".to_owned(),
         name: "tsh".to_owned(),
@@ -438,11 +433,18 @@ fn handle_agent_tsh_request(
     let mut bytes = Vec::new();
     object::executor::output::write_tool_call_event(&mut bytes, &run, &call)
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    let result = object::executor::exec::execute_agent_tool_call_with(&config, &call);
-    control
-        .server
-        .finish()
-        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let prepared = object::executor::exec::prepare_agent_tool_call(&config, &call);
+    let approval = prepared
+        .as_ref()
+        .ok()
+        .filter(|call| call.approval() == AgentApprovalMode::Ask)
+        .map(|_| request_tool_approval(stream, &run, &call))
+        .transpose()?;
+    let result = prepared.and_then(|call| match &approval {
+        Some(entry) if !entry.allowed => Err(object::executor::ExecError::new(entry.reason)),
+        _ => call.execute(&config),
+    });
+    control.finish()?;
     let content = result
         .as_ref()
         .map_or_else(|error| error.message(), String::as_str);
@@ -453,6 +455,9 @@ fn handle_agent_tsh_request(
         .lines()
         .map(str::to_owned)
         .collect::<Vec<_>>();
+    if let Some(approval) = approval {
+        frames.extend(approval.frames);
+    }
     if result.is_err() {
         frames.extend(agent_process_failed_frames(&run, content));
     } else {
@@ -482,11 +487,7 @@ fn replayed_run_response(
     session_dir: &Path,
     response: &SocketRuntimeResponse,
 ) -> SocketRuntimeResponse {
-    let Some(run) = response.frames().first().and_then(|frame| {
-        serde_json::from_str::<Value>(frame)
-            .ok()
-            .and_then(|value| value.get("run").and_then(Value::as_str).map(str::to_owned))
-    }) else {
+    let Some(run) = response_run(response) else {
         return response.clone();
     };
     let Ok(events) = columnar::read_text(
@@ -509,6 +510,11 @@ fn replayed_run_response(
     } else {
         SocketRuntimeResponse::new(frames)
     }
+}
+
+fn response_run(response: &SocketRuntimeResponse) -> Option<String> {
+    let value = serde_json::from_str::<Value>(response.frames().first()?).ok()?;
+    value.get("run")?.as_str().map(str::to_owned)
 }
 
 fn run_agent_request(
