@@ -112,6 +112,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "uid",
     "gid",
     "groups",
+    "perm",
     "label",
     "iso",
     "parent",

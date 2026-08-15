@@ -112,6 +112,7 @@ pub(crate) fn prepare_agent_tool_call(
             view.policy_subject(),
             view.policy(),
             &tool_policy,
+            view.permissions(),
         ),
     )
     .map_err(|denial| ExecError::new(tool_denial_message(&tool_call.name, denial)))?;

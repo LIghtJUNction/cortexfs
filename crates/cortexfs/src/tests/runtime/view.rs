@@ -184,6 +184,7 @@ fn agent_runtime_view_prefers_current_user_agent_control() {
         ("uid", uid.as_str()),
         ("gid", uid.as_str()),
         ("groups", uid.as_str()),
+        ("perm", "rwx"),
         ("label", "user_u:agent_r:usercoder_t:s0"),
         ("iso", "shared"),
         ("parent", "agent:base"),
@@ -529,6 +530,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
             view.policy_subject(),
             view.policy(),
             &tool_policy,
+            view.permissions(),
         ),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));

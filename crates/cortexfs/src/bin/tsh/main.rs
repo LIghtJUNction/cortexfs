@@ -595,6 +595,7 @@ pub(crate) fn validate_tsh_runtime_context(
     }
     require_same!("owner", projected.owner(), backing.owner());
     require_same!("identity", projected.identity(), backing.identity());
+    require_same!("perm", projected.permissions(), backing.permissions());
     require_same!("label", projected.label(), backing.label());
     require_same!("iso", projected.iso(), backing.iso());
     require_same!("model", projected.model(), backing.model());
@@ -694,6 +695,7 @@ pub(crate) fn authorize_tsh_tool_execution(
             view.policy_subject(),
             view.policy(),
             &tool_policy,
+            view.permissions(),
         ),
     )
     .map_err(|denial| tool_execution_denial_to_tsh(name, denial))?;

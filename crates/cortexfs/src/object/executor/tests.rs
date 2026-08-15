@@ -139,6 +139,7 @@ pub(crate) fn agent_tool_fixture(name: &str, tool: &str) -> std::io::Result<(Pat
         ("uid", "1000\n"),
         ("gid", "1000\n"),
         ("groups", "1000\n"),
+        ("perm", "rwx\n"),
         ("label", "user_u:agent_r:coder_t:s0\n"),
         ("iso", "shared\n"),
         ("parent", "\n"),

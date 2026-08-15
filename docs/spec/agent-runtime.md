@@ -80,6 +80,11 @@ the same PTY used by the agent-facing shell.
 it is not a host shell. It resolves commands through `CTX_PATH`, never through
 host `PATH`.
 
+Every tool execution also intersects `agent/<name>.d/perm`: `r` admits the
+built-in read/list/stat family, `w` admits write/replace, and `x` admits shell
+and host-like terminal tools. `tsh` remains the routing shell and does not by
+itself consume `x`; the selected capability does.
+
 ## Default Human Entry
 
 `agent.sh` is a small defaults frontend over the Rust-owned `ctx agent`
@@ -298,6 +303,7 @@ agent/<name>.d/policy
 agent/<name>.d/uid
 agent/<name>.d/gid
 agent/<name>.d/groups
+agent/<name>.d/perm
 agent/<name>.d/label
 ```
 
@@ -309,6 +315,7 @@ Actual authority is the intersection of:
 ```text
 mount/chroot visibility
 Linux uid/gid/groups and mode bits
+agent `perm` capability ceiling
 CortexFS label and policy
 CTX_PATH tool visibility
 tool executable metadata and noexec placement
@@ -396,6 +403,10 @@ policy, tool policy, mount, Linux permission, schema, and nofollow checks on
 every call. Other tools are dynamically discovered, loaded, pinned, and
 invoked through `tsh`; dynamic tsh cache state never expands the direct-native
 set.
+
+The permission control is re-read into the runtime view together with identity,
+mount, path, and policy controls. Changing it affects subsequent executions;
+it never expands policy, mount, or Linux authority.
 
 `tsh` resolves tools by `CTX_PATH`. For standalone human sessions, it reads the
 data-only startup file before inherited process `CTX_PATH` when the file exists:

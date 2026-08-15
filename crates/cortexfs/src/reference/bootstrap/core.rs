@@ -185,6 +185,15 @@ pub(crate) fn ensure_reference_agent(
         ("uid", "1000\n".to_owned()),
         ("gid", "1000\n".to_owned()),
         ("groups", groups.to_owned()),
+        (
+            "perm",
+            if reference_agent_can_write_source(name) {
+                "rwx\n"
+            } else {
+                "r--\n"
+            }
+            .to_owned(),
+        ),
         ("label", label),
         ("iso", "shared\n".to_owned()),
         (

@@ -409,6 +409,10 @@ pub(crate) fn create_child_context(
         ("uid".to_owned(), uid.clone()),
         ("gid".to_owned(), view.identity().gid().to_string()),
         ("groups".to_owned(), groups),
+        (
+            "perm".to_owned(),
+            view.permissions().control().trim_end().to_owned(),
+        ),
         ("label".to_owned(), label),
         ("parent".to_owned(), parent_ref),
         ("life".to_owned(), life.to_owned()),

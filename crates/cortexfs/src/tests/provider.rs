@@ -4,16 +4,13 @@ use crate::{
     OAuthPkce, OAuthProviderConfig, OpenAiAdapter, ProviderAuthConfig, ProviderRegistry,
     configured_adapter, effective_auth_methods,
 };
-
 #[derive(Default)]
 struct ScriptedTransport {
     responses: Vec<AuthResponse>,
     posts: Vec<(String, String, String)>,
     gets: Vec<(String, Headers)>,
 }
-
 type Headers = Vec<(String, String)>;
-
 impl AuthTransport for ScriptedTransport {
     fn post(
         &mut self,
@@ -25,7 +22,6 @@ impl AuthTransport for ScriptedTransport {
             .push((url.to_owned(), content_type.to_owned(), body.to_owned()));
         self.responses.pop().ok_or(AuthProviderError::Unavailable)
     }
-
     fn get(
         &mut self,
         url: &str,
@@ -41,7 +37,49 @@ impl AuthTransport for ScriptedTransport {
         self.responses.pop().ok_or(AuthProviderError::Unavailable)
     }
 }
-
+fn authorization_transport(models: &[u8]) -> ScriptedTransport {
+    ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: models.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600,"scope":"model.read"}"#.to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    }
+}
+fn device_config() -> OAuthDeviceConfig {
+    OAuthDeviceConfig {
+        request_url: "https://auth.example/device".to_owned(),
+        token_url: "https://auth.example/device/token".to_owned(),
+        verification_uri: "https://auth.example/verify".to_owned(),
+    }
+}
+fn device_transport() -> ScriptedTransport {
+    ScriptedTransport {
+        responses: vec![
+            AuthResponse {
+                status: 200,
+                body: br#"{"access_token":"access","token_type":"bearer"}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 200,
+                body:
+                    br#"{"device_code":"device","user_code":"ABCD","expires_in":30,"interval":1}"#
+                        .to_vec(),
+            },
+        ],
+        ..ScriptedTransport::default()
+    }
+}
 #[test]
 fn explicit_auth_methods_replace_legacy_defaults() {
     let methods = vec![ProviderAuthConfig::oauth(
@@ -51,7 +89,6 @@ fn explicit_auth_methods_replace_legacy_defaults() {
     let effective = effective_auth_methods(&methods, true);
     assert_eq!(effective, methods);
 }
-
 #[test]
 fn legacy_oauth_keeps_api_key_and_oauth_compatibility() {
     let methods = effective_auth_methods(&[], true);
@@ -60,7 +97,6 @@ fn legacy_oauth_keeps_api_key_and_oauth_compatibility() {
         matches!(methods.get(1), Some(method) if method.flow == Some(OAuthFlow::AuthorizationCode))
     );
 }
-
 #[test]
 fn credential_envelope_round_trips_without_provider_specific_shape()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -85,34 +121,17 @@ fn credential_envelope_round_trips_without_provider_specific_shape()
     assert_eq!(restored_key, key);
     Ok(())
 }
-
 #[test]
 fn auth_config_rejects_unsafe_slot_names() {
     let config = ProviderAuthConfig::api_key("../secret");
     assert!(!config.is_valid());
 }
-
 #[test]
 fn openai_adapter_exchanges_refreshes_and_discovers_models() -> Result<(), AuthProviderError> {
     let adapter = OpenAiAdapter::codex();
     let verifier = "a".repeat(43);
-    let mut transport = ScriptedTransport {
-        responses: vec![
-            AuthResponse {
-                status: 200,
-                body: br#"{"data":[{"id":"gpt-5-codex"},{"id":"gpt-5-codex"}]}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600,"scope":"model.read"}"#.to_vec(),
-            },
-        ],
-        ..ScriptedTransport::default()
-    };
+    let mut transport =
+        authorization_transport(br#"{"data":[{"id":"gpt-5-codex"},{"id":"gpt-5-codex"}]}"#);
     let credential = adapter.login_with(
         AuthRequest::AuthorizationCodePkce {
             code: "code".to_owned(),
@@ -244,24 +263,7 @@ fn anthropic_oauth_adapter_exchanges_refreshes_and_discovers_models()
         )],
         Some(oauth),
     );
-    let mut transport = ScriptedTransport {
-        responses: vec![
-            AuthResponse {
-                status: 200,
-                body: br#"{"data":[{"id":"claude-sonnet"}]}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600}"#
-                    .to_vec(),
-            },
-        ],
-        ..ScriptedTransport::default()
-    };
+    let mut transport = authorization_transport(br#"{"data":[{"id":"claude-sonnet"}]}"#);
     let credential = adapter.login_with(
         AuthRequest::AuthorizationCodePkce {
             code: "code".to_owned(),
@@ -296,11 +298,7 @@ fn anthropic_host_device_flow_uses_shared_adapter_contract() -> Result<(), AuthP
         token_url: "https://auth.example/token".to_owned(),
         redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
         scopes: vec!["model.read".to_owned()],
-        device: Some(OAuthDeviceConfig {
-            request_url: "https://auth.example/device".to_owned(),
-            token_url: "https://auth.example/device/token".to_owned(),
-            verification_uri: "https://auth.example/verify".to_owned(),
-        }),
+        device: Some(device_config()),
         access_token_account: None,
         refresh_token_account: None,
     };
@@ -313,21 +311,7 @@ fn anthropic_host_device_flow_uses_shared_adapter_contract() -> Result<(), AuthP
         )],
         Some(oauth),
     );
-    let mut transport = ScriptedTransport {
-        responses: vec![
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"access","token_type":"bearer"}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body:
-                    br#"{"device_code":"device","user_code":"ABCD","expires_in":30,"interval":1}"#
-                        .to_vec(),
-            },
-        ],
-        ..ScriptedTransport::default()
-    };
+    let mut transport = device_transport();
     let credential = adapter.login_with(
         AuthRequest::DeviceCode { timeout_secs: 10 },
         &mut transport,
@@ -403,24 +387,7 @@ fn copilot_factory_preserves_host_identity_methods_and_oauth_runtime()
     assert_eq!(adapter.id(), "copilot");
     assert_eq!(adapter.aliases(), &["github-copilot".to_owned()]);
     assert_eq!(adapter.methods(), methods.as_slice());
-    let mut transport = ScriptedTransport {
-        responses: vec![
-            AuthResponse {
-                status: 200,
-                body: br#"{"data":[{"id":"copilot-chat"}]}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600}"#
-                    .to_vec(),
-            },
-        ],
-        ..ScriptedTransport::default()
-    };
+    let mut transport = authorization_transport(br#"{"data":[{"id":"copilot-chat"}]}"#);
     let credential = adapter.login_with(
         AuthRequest::AuthorizationCodePkce {
             code: "code".to_owned(),
@@ -465,11 +432,7 @@ fn host_device_endpoints_feed_generic_adapter() -> Result<(), AuthProviderError>
         token_url: "https://auth.example/token".to_owned(),
         redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
         scopes: vec!["model.read".to_owned()],
-        device: Some(OAuthDeviceConfig {
-            request_url: "https://auth.example/device".to_owned(),
-            token_url: "https://auth.example/device/token".to_owned(),
-            verification_uri: "https://auth.example/verify".to_owned(),
-        }),
+        device: Some(device_config()),
         access_token_account: None,
         refresh_token_account: None,
     };
@@ -482,21 +445,7 @@ fn host_device_endpoints_feed_generic_adapter() -> Result<(), AuthProviderError>
         )],
         Some(oauth),
     );
-    let mut transport = ScriptedTransport {
-        responses: vec![
-            AuthResponse {
-                status: 200,
-                body: br#"{"access_token":"access","token_type":"bearer"}"#.to_vec(),
-            },
-            AuthResponse {
-                status: 200,
-                body:
-                    br#"{"device_code":"device","user_code":"ABCD","expires_in":30,"interval":1}"#
-                        .to_vec(),
-            },
-        ],
-        ..ScriptedTransport::default()
-    };
+    let mut transport = device_transport();
     let credential = adapter.login_with(
         AuthRequest::DeviceCode { timeout_secs: 10 },
         &mut transport,

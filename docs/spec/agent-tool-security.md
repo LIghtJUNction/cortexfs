@@ -45,6 +45,7 @@ agent policy decides whether execution is allowed
     uid
     gid
     groups
+    perm
     label
     iso
     parent
@@ -76,6 +77,7 @@ owner   owning Linux user uid
 uid     runtime uid; defaults to owner
 gid     runtime gid
 groups  supplementary groups, one gid per line
+perm    coarse file/shell ceiling: r=fs.read/list/stat, w=fs.write/replace, x=shell.exec/bash/tmux/zellij
 label   CortexFS agent label, for example user_u:agent_r:coder_t:s0
 iso     isolation profile: shared, uid, or userns
 parent  parent agent, session, or run that created this agent
@@ -96,7 +98,7 @@ name per line with a final newline. Blank, whitespace-padded, duplicate,
 invalid, and reserved `tsh` entries are rejected. Declaration is not authority:
 
 ```text
-direct execution = declared name AND CTX_PATH hit AND agent policy AND tool policy AND Linux/mount permission
+direct execution = declared name AND matching agent perm bit AND CTX_PATH hit AND agent policy AND tool policy AND Linux/mount permission
 ```
 
 Every call re-derives this intersection and opens the selected executable
@@ -159,6 +161,7 @@ cwd
 mount
 path
 model
+perm
 policy
 Linux uid/gid/groups/mode bits
 CortexFS label
@@ -344,6 +347,7 @@ The child appears as ordinary agent ABI:
   uid
   gid
   groups
+  perm
   label
   iso
   parent
@@ -382,6 +386,7 @@ owner  = parent owner
 uid    = parent uid
 gid    = parent gid
 groups = subset of parent groups
+perm   = parent perm
 iso    = shared
 life   = owned | temp
 ```
@@ -419,6 +424,7 @@ CortexFS security context is derived from stable agent controls:
 
 ```text
 agent label subject, for example coder_t
+agent/<name>.d/perm
 agent/<name>.d/policy
 tool/<tool>.d/policy
 shared/session/mount policy where relevant
@@ -429,6 +435,14 @@ allowed by policy is invisible for execution. A tool allowed by policy but not
 visible to the agent uid/gid/groups or blocked by `noexec` is also invisible.
 Prompts, skills, MCP config files, schemas, and model output never expand this
 set.
+
+`perm` is a coarse ceiling, not a replacement for the other checks. Its
+canonical values are the eight Unix-style triplets from `---` through `rwx`.
+The `r` bit gates `fs.read`, `fs.list`, and `fs.stat`; `w` gates `fs.write` and
+`fs.replace`; `x` gates `shell.exec` and host-like shell/terminal tool objects.
+Unknown domain tools remain governed by their normal declaration and policy.
+A permitted shell can still perform any operation allowed by its sandbox,
+mounts, and Linux identity, so `x` must not be treated as a read/write sandbox.
 
 The agent terminal path is:
 

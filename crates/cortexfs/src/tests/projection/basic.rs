@@ -199,13 +199,18 @@ fn fuse_projection_empty_history_write_preserves_offset_semantics() {
 }
 
 #[test]
-fn fuse_projection_first_history_marker_survives_mode_change() {
+fn fuse_projection_permission_and_history_modes_round_trip() {
     let root = reference_tree("fuse-first-history-marker-mode");
     let projection =
         FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
     let uid = nix::unistd::Uid::current().as_raw();
     let gid = nix::unistd::Gid::current().as_raw();
     assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let perm = "agent/coder.d/perm";
+    assert!(matches!(projection.getattr(perm), Ok(ref attr) if attr.mode() & 0o777 == 0o700));
+    assert_eq!(projection.set_layout_mode(perm, 0o500, uid), Ok(()));
+    assert_eq!(projection.read_to_string(perm).as_deref(), Ok("r-x\n"));
+    assert!(matches!(projection.getattr(perm), Ok(ref attr) if attr.mode() & 0o777 == 0o500));
 
     for (session_name, marker, peer) in [
         ("messages-first", "messages.jsonl", "events.jsonl"),

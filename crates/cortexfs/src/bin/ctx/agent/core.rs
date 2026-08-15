@@ -315,7 +315,7 @@ pub(crate) fn agent_runtime_context_matches_values(
     let projected_control = root.join("agent").join(format!("{agent}.d"));
     for file in [
         "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path", "mount",
-        "model", "policy", "parent", "life",
+        "model", "policy", "parent", "life", "perm",
     ] {
         let source_value = fs::read_to_string(source_control.join(file));
         let projected_value = fs::read_to_string(projected_control.join(file));

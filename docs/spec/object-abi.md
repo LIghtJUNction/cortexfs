@@ -107,6 +107,12 @@ Executable agents use the required `agent/<name>.d/abi` control. Its accepted
 value is `sdk-envelope-v1`; the runtime supplies the typed invocation described
 by the [Agent Runtime specification](agent-runtime.md).
 
+The executable mode of `agent/<name>` continues to mean that the agent object
+can be invoked. It MUST NOT be overloaded to mean shell permission, because
+clearing that bit would also make the agent ABI itself non-executable. The
+separate `agent/<name>.d/perm` marker carries the inspectable `rwx` capability
+ceiling.
+
 `model/<provider>/<model>` and `tool/<name>` are executable files that accept
 argv or stdin input. Agent executables are host-launched through the SDK
 envelope rather than called with user argv:

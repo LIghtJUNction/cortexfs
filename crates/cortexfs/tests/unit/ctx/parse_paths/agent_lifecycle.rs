@@ -598,8 +598,8 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
     let projected_control = projection.join("agent/coder.d");
     assert!(fs::create_dir_all(&projected_control).is_ok());
     for file in [
-        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path",
-        "mount", "model", "policy", "parent", "life",
+        "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
+        "path", "mount", "model", "policy", "parent", "life",
     ] {
         assert!(fs::copy(source_control.join(file), projected_control.join(file)).is_ok());
     }
@@ -701,8 +701,8 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
     let projected_control = projection.join("agent/coder.d");
     fs::create_dir_all(&projected_control)?;
     for file in [
-        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path",
-        "mount", "model", "policy", "parent", "life",
+        "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
+        "path", "mount", "model", "policy", "parent", "life",
     ] {
         fs::copy(source.join("agent/coder.d").join(file), projected_control.join(file))?;
     }

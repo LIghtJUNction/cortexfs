@@ -10,9 +10,9 @@ pub use network::*;
 /// Decides whether an agent may execute a tool through `CTX_PATH`.
 ///
 /// This is a pure effective-authority check for the stable tool boundary:
-/// the selected tool must be executable for the agent's Linux identity, visible
-/// through a mount that is not `noexec`, and allowed by both the agent policy
-/// and the tool object's own policy. Tool schemas, prompts, skills, and MCP
+/// the coarse agent permission must admit the selected tool, which must also be
+/// executable for the Linux identity, visible on a non-`noexec` mount, and
+/// allowed by both agent and tool policy. Tool schemas, prompts, skills, and MCP
 /// config files are intentionally not inputs because they never grant
 /// authority. Model principals are refused before policy is considered.
 pub fn authorize_tool_execution(
@@ -25,6 +25,9 @@ pub fn authorize_tool_execution(
     }
     if authority.principal == ToolExecutionPrincipal::Model {
         return Err(ToolExecutionDenial::ModelCannotExecute);
+    }
+    if !authority.permissions.allows_tool(tool_name) {
+        return Err(ToolExecutionDenial::AgentPermission);
     }
     let hit = tool_path
         .find(tool_name)

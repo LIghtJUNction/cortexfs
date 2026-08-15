@@ -26,11 +26,16 @@ pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, St
     };
     let model = agent.model.as_deref().unwrap_or("main");
     let subject = format!("{}_t", agent.name);
+    let permissions = cortexfs::AgentPermissions::for_tools(agent.tools.iter().map(String::as_str));
     Ok(BTreeMap::from([
         ("owner".to_owned(), uid.clone()),
         ("uid".to_owned(), uid.clone()),
         ("gid".to_owned(), gid),
         ("groups".to_owned(), groups),
+        (
+            "perm".to_owned(),
+            permissions.control().trim_end().to_owned(),
+        ),
         ("label".to_owned(), format!("user_u:agent_r:{subject}:s0")),
         ("iso".to_owned(), "shared".to_owned()),
         (

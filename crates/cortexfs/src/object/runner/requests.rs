@@ -325,6 +325,7 @@ mod requests_tests {
         fs::write(control.join("uid"), "1000\n").expect("uid");
         fs::write(control.join("gid"), "1000\n").expect("gid");
         fs::write(control.join("groups"), "1000\n").expect("groups");
+        fs::write(control.join("perm"), "rwx\n").expect("perm");
         fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").expect("label");
         fs::write(control.join("iso"), "shared\n").expect("iso");
         fs::write(control.join("parent"), "\n").expect("parent");

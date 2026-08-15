@@ -29,6 +29,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "uid",
     "gid",
     "groups",
+    "perm",
     "label",
     "iso",
     "parent",
@@ -435,7 +436,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
             )));
         }
         let validated_value = if class == ObjectClass::Agent
-            && matches!(name.as_str(), "tools" | "window")
+            && matches!(name.as_str(), "tools" | "window" | "perm")
             && !value.ends_with('\n')
         {
             format!("{value}\n")
@@ -620,10 +621,16 @@ fn write_manifest_controls(
             InstallError::unavailable(format!("cannot write object control {name}: {error}"))
         })?;
     }
-    if class == ObjectClass::Agent && !manifest.controls.contains_key("window") {
-        write_text_file_at(control, "window", "auto\n", 0o644).map_err(|error| {
-            InstallError::unavailable(format!("cannot write object control window: {error}"))
-        })?;
+    if class == ObjectClass::Agent {
+        for (name, content) in [("window", "auto\n"), ("perm", "rwx\n")] {
+            if !manifest.controls.contains_key(name) {
+                write_text_file_at(control, name, content, 0o644).map_err(|error| {
+                    InstallError::unavailable(format!(
+                        "cannot write object control {name}: {error}"
+                    ))
+                })?;
+            }
+        }
     }
     let runtime: &[(&str, &str)] = if class == ObjectClass::Tool {
         &[("status", "idle\n"), ("log", "")]

@@ -210,6 +210,7 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
     match file {
         "abi" => AGENT_LAUNCH_ABI.to_owned(),
         "owner" | "uid" | "gid" => "0".to_owned(),
+        "perm" => AgentPermissions::ALL.control().to_owned(),
         "label" => format!("user_u:agent_r:{object_name}_t:s0"),
         "iso" => "shared".to_owned(),
         "life" => "owned".to_owned(),

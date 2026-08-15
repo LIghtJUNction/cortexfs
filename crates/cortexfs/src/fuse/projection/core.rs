@@ -75,7 +75,7 @@ impl FuseProjection {
         }
         let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
-        let mode = projected_metadata_mode(&normalized, &metadata);
+        let mode = projected_metadata_mode(&normalized, &path, &metadata)?;
         let size = if metadata.is_file() {
             if let Some(stream) = columnar::Stream::from_abi_path(&normalized) {
                 let session = path.parent().ok_or(FuseError::InvalidPath)?;
@@ -760,6 +760,15 @@ impl FuseProjection {
             return Err(FuseError::NotControlFile);
         }
         self.authorize_layout_path(&normalized, uid)?;
+        if Self::agent_control_target(&normalized).is_some_and(|(_, file)| file == "perm") {
+            let bits =
+                u8::try_from((mode >> 6) & 0o7).map_err(|_error| FuseError::InvalidContent)?;
+            return atomic_replace_text_preserving_metadata(
+                &path,
+                AgentPermissions(bits).control(),
+            )
+            .map_err(|_error| FuseError::Io);
+        }
         Self::set_plain_mode(&path, mode)
     }
 
@@ -1037,7 +1046,7 @@ impl FuseProjection {
         Self::agent_wrapper_name(normalized).is_some()
     }
 
-    fn agent_control_target(normalized: &str) -> Option<(&str, &str)> {
+    pub(crate) fn agent_control_target(normalized: &str) -> Option<(&str, &str)> {
         let mut parts = normalized.split('/');
         let (Some("agent"), Some(control), Some(file), None) =
             (parts.next(), parts.next(), parts.next(), parts.next())

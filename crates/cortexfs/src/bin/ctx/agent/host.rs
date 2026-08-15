@@ -35,6 +35,7 @@ pub(crate) fn agent_new_host_fallback(
     let agent_home = format!("/ctx/home/{uid}/agent/{}", args.name);
     let mount = agent_new_mount_control(&uid, &args.name, &args.mounts);
     let policy = agent_new_policy(&subject, &model, &args.tools);
+    let permissions = cortexfs::AgentPermissions::for_tools(args.tools.iter().map(String::as_str));
     let system = args.instructions.clone().unwrap_or_else(|| {
         format!(
             "\
@@ -54,6 +55,7 @@ Ask for clarification only when the target path or scope is missing, or when the
         ("uid", uid.clone()),
         ("gid", uid.clone()),
         ("groups", groups),
+        ("perm", permissions.control().trim_end().to_owned()),
         ("label", label),
         ("iso", "shared".to_owned()),
         ("parent", parent),

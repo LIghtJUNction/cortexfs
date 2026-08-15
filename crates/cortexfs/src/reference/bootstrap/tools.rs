@@ -22,7 +22,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   "additionalProperties": true
 }"#,
         cap: "tsh",
-        policy: "allow architect_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute",
+        policy: "allow architect_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute\nallow worker_t tool:tsh execute",
     },
     ReferenceToolSpec {
         name: "fs.read",
@@ -40,7 +40,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.read",
-        policy: "allow architect_t tool:fs.read execute\nallow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute",
+        policy: "allow architect_t tool:fs.read execute\nallow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute\nallow worker_t tool:fs.read execute",
     },
     ReferenceToolSpec {
         name: "fs.list",
@@ -75,7 +75,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.write",
-        policy: "allow coder_t tool:fs.write execute",
+        policy: "allow coder_t tool:fs.write execute\nallow worker_t tool:fs.write execute",
     },
     ReferenceToolSpec {
         name: "fs.replace",
@@ -95,7 +95,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.replace",
-        policy: "allow coder_t tool:fs.replace execute",
+        policy: "allow coder_t tool:fs.replace execute\nallow worker_t tool:fs.replace execute",
     },
     ReferenceToolSpec {
         name: "shell.exec",
@@ -113,7 +113,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "shell.exec",
-        policy: "allow coder_t tool:shell.exec execute",
+        policy: "allow coder_t tool:shell.exec execute\nallow worker_t tool:shell.exec execute",
     },
     ReferenceToolSpec {
         name: "tsh.config",

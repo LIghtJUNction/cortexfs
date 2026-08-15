@@ -187,6 +187,17 @@ ctx agent ps
 ctx agent stop reviewer
 ```
 
+Inspect or change the agent's coarse file/shell ceiling with normal Unix tools:
+
+```bash
+ls -l /ctx/agent/reviewer.d/perm
+chmod 400 /ctx/agent/reviewer.d/perm  # read tools only
+chmod 700 /ctx/agent/reviewer.d/perm  # read, write, and shell families
+```
+
+The marker adds a ceiling to existing mount, Linux, agent-policy, and
+tool-policy checks; it does not replace them.
+
 Host-side `agent.yaml` files (also `agent.yml` and `agent.json`) are
 authoring inputs. `ctx agent new --from` and `ctx agent apply --from`
 validate and materialize them into `agent/<name>.d/*`; runtime authority

@@ -22,6 +22,7 @@ pub struct AgentRuntimeView {
     pub(crate) home: PathBuf,
     pub(crate) owner: u32,
     pub(crate) identity: AgentUnixIdentity,
+    pub(crate) permissions: AgentPermissions,
     pub(crate) label: String,
     pub(crate) policy_subject: String,
     pub(crate) iso: String,
@@ -140,6 +141,12 @@ impl AgentRuntimeView {
     #[must_use]
     pub const fn identity(&self) -> &AgentUnixIdentity {
         &self.identity
+    }
+
+    /// Returns the coarse `r/w/x` file and shell permission ceiling.
+    #[must_use]
+    pub const fn permissions(&self) -> AgentPermissions {
+        self.permissions
     }
 
     /// Returns the full label control value.

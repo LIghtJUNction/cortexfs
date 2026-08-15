@@ -390,6 +390,7 @@ Agents live under `/ctx/agent`:
   uid
   gid
   groups
+  perm
   label
   root
   cwd
@@ -462,10 +463,24 @@ agent.d/cwd
 agent.d/mount
 agent.d/path
 agent.d/model
+agent.d/perm
 agent.d/policy
 uid/gid/groups
 mode bits
 ```
+
+The coarse agent ceiling is visible like a Unix permission marker:
+
+```bash
+ls -l /ctx/agent/coder.d/perm
+chmod 500 /ctx/agent/coder.d/perm   # r-x: read tools plus shell execution
+```
+
+Its owner triplet maps `r` to `fs.read`/`fs.list`/`fs.stat`, `w` to
+`fs.write`/`fs.replace`, and `x` to shell or host-like terminal tools. It is an
+additional ceiling; Linux mode bits, mounts, agent policy, and tool policy must
+still allow every operation. The executable bit on `/ctx/agent/coder` remains
+reserved for invoking the agent object itself.
 
 CLI `--mount` arguments are validated, but runtime execution uses the derived
 agent view. Terminal startup cannot bypass the policy and mount files that
@@ -699,6 +714,7 @@ The security stack is layered:
 ```text
 Linux uid/gid/groups
 file mode bits
+agent permission ceiling
 chroot + bind mounts
 CortexFS label
 agent policy

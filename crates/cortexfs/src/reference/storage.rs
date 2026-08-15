@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn version_five_current_stages_version_seven_once() -> Result<(), Box<dyn std::error::Error>> {
+    fn version_five_current_stages_version_eight_once() -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let storage = directory.path().join("storage");
         let version_five = update_storage_generation(&storage)?;
@@ -330,23 +330,24 @@ mod tests {
             format!("{}\n", serde_json::to_string_pretty(&state)?),
         )?;
 
-        let version_seven = update_storage_generation(&storage)?;
-        assert_ne!(version_seven, version_five);
+        let version_eight = update_storage_generation(&storage)?;
+        assert_ne!(version_eight, version_five);
         assert_eq!(
             fs::read_link(storage.join("current"))?,
-            version_seven.strip_prefix(&storage)?
+            version_eight.strip_prefix(&storage)?
         );
         assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 2);
         assert!(matches!(
-            read_bootstrap_state(&version_seven),
+            read_bootstrap_state(&version_eight),
             Some(state)
-                if state.tree_version == 7
+                if state.tree_version == 8
                     && state.applied_migrations
                         == [
                             crate::MIGRATION_RETIRED_AGENTS,
                             crate::MIGRATION_ROLLING_TREE,
                             crate::reference::bootstrap::MIGRATION_AGENT_UPDATE,
-                            crate::MIGRATION_CURRENT_MODELS
+                            crate::MIGRATION_CURRENT_MODELS,
+                            crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS
                         ]
         ));
         for path in [
@@ -355,14 +356,14 @@ mod tests {
             "tool/agent.update.d/cap",
             "tool/agent.update.d/policy",
         ] {
-            assert!(version_seven.join(path).is_file(), "{path}");
+            assert!(version_eight.join(path).is_file(), "{path}");
         }
         assert_eq!(
-            fs::read_to_string(version_seven.join("tool/agent.update.d/cap"))?,
+            fs::read_to_string(version_eight.join("tool/agent.update.d/cap"))?,
             "agent.update\n"
         );
 
-        assert_eq!(update_storage_generation(&storage)?, version_seven);
+        assert_eq!(update_storage_generation(&storage)?, version_eight);
         assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 2);
         Ok(())
     }

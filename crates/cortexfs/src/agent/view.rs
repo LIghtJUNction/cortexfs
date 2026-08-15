@@ -37,6 +37,9 @@ pub fn derive_agent_runtime_view(
     let gid = parse_agent_number_control(&control_dir, AgentControlKind::Gid, "gid")?;
     let groups = parse_agent_groups_control(&control_dir)?;
     let identity = AgentUnixIdentity::new(uid, gid, groups);
+    let permissions =
+        AgentPermissions::parse_control(&read_required_agent_control(&control_dir, "perm")?)
+            .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("perm".to_owned()))?;
 
     let label = read_required_agent_control_value(&control_dir, "label")?;
     let policy_subject = policy_subject_from_label(&label)
@@ -100,6 +103,7 @@ pub fn derive_agent_runtime_view(
         home,
         owner,
         identity,
+        permissions,
         label,
         policy_subject,
         iso,
