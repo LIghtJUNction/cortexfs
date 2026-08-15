@@ -172,6 +172,9 @@ fn pass_provider_egress_env(command: &mut Command) {
             cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
             cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
         );
+        if let Some(token) = env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_TOKEN_ENV) {
+            command.env(cortexfs::runtime::egress::PROVIDER_EGRESS_TOKEN_ENV, token);
+        }
     }
 }
 

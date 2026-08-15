@@ -63,6 +63,13 @@ pub(crate) fn start_curl_json_with_headers(
     );
     if let Some(socket_path) = target.unix_socket.as_deref() {
         let _ignored = writeln!(config, "unix-socket = {}", curl_config_quote(socket_path)?);
+        let token = std::env::var(cortexfs::runtime::egress::PROVIDER_EGRESS_TOKEN_ENV)
+            .map_err(|_error| "missing provider egress capability".to_owned())?;
+        if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("invalid provider egress capability".to_owned());
+        }
+        let header = format!("X-CortexFS-Egress-Token: {token}");
+        let _ignored = writeln!(config, "header = {}", curl_config_quote(&header)?);
     }
     for header in headers {
         let _ignored = writeln!(config, "header = {}", curl_config_quote(header)?);

@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::object::executor::{
     MAX_RUNNER_CONTROL_BYTES, model_candidates, model_default_base_url, read_small_plain_text_file,
 };
-use crate::support::receipt::{EmptyDirReceipt, SocketReceipt};
+use crate::support::receipt::{EmptyDirReceipt, SocketReceipt, random_hex};
 use crate::{is_object_name, peer_credentials};
 
 const ACCEPT_PAUSE: Duration = Duration::from_millis(10);
@@ -20,6 +20,10 @@ const ACCEPT_PAUSE: Duration = Duration::from_millis(10);
 pub const PROVIDER_EGRESS_SANDBOX_PATH: &str = "/run/cortexfs/provider-egress";
 /// Environment variable advertising the fixed provider relay directory.
 pub const PROVIDER_EGRESS_DIR_ENV: &str = "CTX_PROVIDER_EGRESS_DIR";
+/// Environment variable carrying the unguessable capability for a run-scoped relay.
+pub const PROVIDER_EGRESS_TOKEN_ENV: &str = "CTX_PROVIDER_EGRESS_TOKEN";
+
+const TOKEN_BYTES: usize = 32;
 
 pub(crate) fn is_provider_model(ctx_root: &Path, model: &str) -> Result<bool, ProviderEgressError> {
     let candidates =
@@ -60,12 +64,14 @@ struct ProviderTarget {
     authority: String,
     base_path: String,
     credential: Option<ProviderEgressCredential>,
+    token: String,
 }
 
 /// Run-scoped Unix sockets that relay only to pre-resolved provider authorities.
 pub struct ProviderEgress {
     directory: EmptyDirReceipt,
     sockets: BTreeMap<String, SocketReceipt>,
+    token: String,
     shutdown: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
@@ -97,8 +103,11 @@ impl ProviderEgress {
             return Err(ProviderEgressError::InvalidRun);
         }
         let mut targets = plan_targets(ctx_root, model)?;
+        let token =
+            random_hex::<TOKEN_BYTES>().map_err(|_error| ProviderEgressError::CannotCreate)?;
         for target in &mut targets {
             target.credential = provider_egress_credential(runtime_env, &target.provider, run)?;
+            target.token.clone_from(&token);
         }
         let runtime_owner = (
             nix::unistd::geteuid().as_raw(),
@@ -148,6 +157,7 @@ impl ProviderEgress {
         Ok(Self {
             directory,
             sockets,
+            token,
             shutdown,
             threads,
         })
@@ -161,6 +171,11 @@ impl ProviderEgress {
     #[must_use]
     pub fn socket(&self, provider: &str) -> Option<&Path> {
         self.sockets.get(provider).map(SocketReceipt::path)
+    }
+
+    #[must_use]
+    pub fn token(&self) -> &str {
+        &self.token
     }
 }
 
@@ -233,6 +248,7 @@ fn plan_targets(ctx_root: &Path, model: &str) -> Result<Vec<ProviderTarget>, Pro
                         authority,
                         base_path,
                         credential: None,
+                        token: String::new(),
                     },
                 );
             }

@@ -292,6 +292,7 @@ fn root_agent_uid_can_use_http_adapter() -> Result<(), Box<dyn std::error::Error
             "CORTEXFS_EGRESS_CROSS_UID_SOCKET",
             egress.socket("fixture").ok_or("missing socket")?,
         )
+        .env("CORTEXFS_EGRESS_CROSS_UID_TOKEN", egress.token())
         .status()?;
     assert!(status.success());
     upstream.join().map_err(|_panic| "upstream panicked")??;
@@ -308,7 +309,11 @@ fn cross_uid_http_helper() -> Result<(), Box<dyn std::error::Error>> {
     nix::unistd::setgid(nix::unistd::Gid::from_raw(65_534))?;
     nix::unistd::setuid(nix::unistd::Uid::from_raw(65_534))?;
     let mut stream = UnixStream::connect(socket)?;
-    stream.write_all(b"POST /v1/responses HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")?;
+    let token = std::env::var("CORTEXFS_EGRESS_CROSS_UID_TOKEN")?;
+    write!(
+        stream,
+        "POST /v1/responses HTTP/1.1\r\nX-CortexFS-Egress-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}"
+    )?;
     let mut response = Vec::new();
     stream.read_to_end(&mut response)?;
     assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
@@ -328,6 +333,7 @@ fn listener_rejects_wrong_peer_without_reaching_upstream() -> Result<(), Box<dyn
         authority: format!("http://{}", tcp.local_addr()?),
         base_path: String::new(),
         credential: None,
+        token: String::new(),
     };
     let socket = root.path().join("egress.sock");
     let listener = UnixListener::bind(&socket)?;
@@ -340,6 +346,44 @@ fn listener_rejects_wrong_peer_without_reaching_upstream() -> Result<(), Box<dyn
     thread::sleep(Duration::from_millis(150));
     shutdown.store(true, Ordering::Release);
     server.join().map_err(|_panic| "server panicked")?;
+    assert!(matches!(tcp.accept(), Err(error) if error.kind() == io::ErrorKind::WouldBlock));
+    Ok(())
+}
+
+#[test]
+fn listener_rejects_same_uid_without_run_capability() -> Result<(), Box<dyn std::error::Error>> {
+    let (root, control) = fixture()?;
+    let tcp = TcpListener::bind("127.0.0.1:0")?;
+    tcp.set_nonblocking(true)?;
+    write_model(
+        root.path(),
+        "fixture/chat",
+        &format!("http://{}/v1", tcp.local_addr()?),
+    )?;
+    let egress = ProviderEgress::create(
+        &control,
+        root.path(),
+        "fixture/chat",
+        &[
+            (
+                "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+                "fixture".to_owned(),
+            ),
+            (
+                "CTX_PROVIDER_SECRET_VALUE".to_owned(),
+                "host-secret".to_owned(),
+            ),
+        ],
+        nix::unistd::geteuid().as_raw(),
+        nix::unistd::getegid().as_raw(),
+        "run1",
+    )?;
+    let mut client = UnixStream::connect(egress.socket("fixture").ok_or("missing socket")?)?;
+    client.write_all(b"POST /v1/responses HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")?;
+    let mut response = Vec::new();
+    client.read_to_end(&mut response)?;
+    assert!(response.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
+    thread::sleep(Duration::from_millis(100));
     assert!(matches!(tcp.accept(), Err(error) if error.kind() == io::ErrorKind::WouldBlock));
     Ok(())
 }
@@ -414,7 +458,11 @@ fn drop_stops_continuous_curl_within_one_second() -> Result<(), Box<dyn std::err
         "run1",
     )?;
     let mut client = UnixStream::connect(egress.socket("fixture").ok_or("missing socket")?)?;
-    client.write_all(b"POST /v1/chat/completions HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")?;
+    write!(
+        client,
+        "POST /v1/chat/completions HTTP/1.1\r\nX-CortexFS-Egress-Token: {}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}",
+        egress.token()
+    )?;
     let mut response = [0; 32];
     client.read_exact(&mut response)?;
     let started = Instant::now();

@@ -20,6 +20,7 @@ fn provider_target(provider: &str, base: &str) -> ProviderTarget {
         authority: "http://example.test".to_owned(),
         base_path: base.to_owned(),
         credential: None,
+        token: String::new(),
     }
 }
 
@@ -171,6 +172,7 @@ fn monitor_error_reaps_curl_group_and_closes_upstream_within_one_second()
         authority: format!("http://{address}"),
         base_path: "/v1".to_owned(),
         credential: None,
+        token: String::new(),
     };
     let (_client, server) = UnixStream::pair()?;
     let monitor_fd = server.as_raw_fd();
@@ -259,6 +261,7 @@ fn silent_upstream_is_killed_when_client_disconnects() -> Result<(), Box<dyn std
         authority: format!("http://{address}"),
         base_path: "/v1".to_owned(),
         credential: None,
+        token: String::new(),
     };
     let (client, server) = UnixStream::pair()?;
     let request = Request {
@@ -315,6 +318,7 @@ fn curl_raw_response_preserves_chunked_sse_and_non_success_status()
             authority: format!("http://{address}"),
             base_path: "/v1".to_owned(),
             credential: None,
+            token: String::new(),
         };
         let (mut client, server) = UnixStream::pair()?;
         let request = Request {

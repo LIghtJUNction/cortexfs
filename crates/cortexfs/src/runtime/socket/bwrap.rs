@@ -15,6 +15,7 @@ pub(crate) fn agent_executable_socket_command(
     step: u8,
     control: Option<RunControlCommand<'_>>,
     provider_egress: Option<&Path>,
+    provider_egress_token: Option<&str>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
     let environment = agent_executable_socket_env(runtime, request, step);
     let (control_socket, control_environment) = match control {
@@ -65,6 +66,7 @@ pub(crate) fn agent_executable_socket_command(
                     control_socket,
                     control_environment,
                     provider_egress,
+                    provider_egress_token,
                 },
             ));
             apply_agent_executable_socket_env(&mut command, &environment);
@@ -100,6 +102,7 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub control_socket: Option<&'a Path>,
     pub control_environment: Option<&'a [(String, String)]>,
     pub provider_egress: Option<&'a Path>,
+    pub provider_egress_token: Option<&'a str>,
 }
 
 pub(crate) struct InheritedFd(RawFd);
@@ -201,6 +204,13 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             runtime::egress::PROVIDER_EGRESS_DIR_ENV.to_owned(),
             runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
         ]);
+        if let Some(token) = request.provider_egress_token {
+            bwrap.extend([
+                "--setenv".to_owned(),
+                runtime::egress::PROVIDER_EGRESS_TOKEN_ENV.to_owned(),
+                token.to_owned(),
+            ]);
+        }
     }
     append_bwrap_agent_environment(&mut bwrap, request.environment, request.control_environment);
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));

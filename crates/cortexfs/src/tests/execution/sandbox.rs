@@ -219,6 +219,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         control_socket: Some(Path::new("/run/cortexfs/control/source.sock")),
         control_environment: Some(&control_environment),
         provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
+        provider_egress_token: None,
     });
 
     assert_agent_sandbox_args(&args, &root, &session_root);
@@ -259,6 +260,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         0,
         None,
         Some(Path::new("/run/cortexfs/egress-run-1")),
+        Some("egress-token"),
     ));
     drop(agent_executable_fd);
     let command_env: Vec<_> = command
@@ -322,7 +324,7 @@ fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
         debug: None,
     };
     let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
+        agent_executable_socket_command(runtime, &opened, request, 0, None, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let replacement = root.join("agent").join("replacement");
     write_text_file(&replacement, "#!/bin/sh\nprintf B\n");
@@ -385,7 +387,7 @@ fn agent_executable_socket_bwrap_does_not_inherit_provider_secret_env()
     };
 
     let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
+        agent_executable_socket_command(runtime, &opened, request, 0, None, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let output = command.output()?;
     drop(agent_executable_fd);
@@ -600,6 +602,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         control_socket: None,
         control_environment: None,
         provider_egress: None,
+        provider_egress_token: None,
     });
 
     assert!(!args.contains(&"--unshare-net".to_owned()));
@@ -654,6 +657,7 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         control_socket: None,
         control_environment: None,
         provider_egress: None,
+        provider_egress_token: None,
     });
 
     assert!(contains_arg_triplet(
@@ -742,6 +746,7 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
         0,
         Some((capability.socket(), environment.as_slice())),
         None,
+        None,
     ));
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = std::sync::Arc::clone(&shutdown);
@@ -767,7 +772,7 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
     assert!(fs::remove_dir(&control_dir).is_ok());
 
     let (mut command, _fds) = ok!(agent_executable_socket_command(
-        runtime, &opened, request, 0, None, None
+        runtime, &opened, request, 0, None, None, None
     ));
     assert!(ok!(command.output()).status.success());
 }

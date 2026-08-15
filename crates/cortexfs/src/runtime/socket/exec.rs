@@ -1128,6 +1128,9 @@ pub(crate) fn run_agent_executable_streaming(
         provider_egress
             .as_ref()
             .map(runtime::egress::ProviderEgress::host_dir),
+        provider_egress
+            .as_ref()
+            .map(runtime::egress::ProviderEgress::token),
     );
     let (mut command, agent_executable_fd) = match command_result {
         Ok(command) => command,

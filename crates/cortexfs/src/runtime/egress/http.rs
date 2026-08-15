@@ -67,6 +67,7 @@ fn parse_request(
     let mut count = 0;
     let mut content_length = None;
     let mut expect_continue = false;
+    let mut authorized = target.token.is_empty();
     let mut headers: Vec<(String, String)> = Vec::new();
     loop {
         let line = read_line(input, HEADER_LINE_MAX)?;
@@ -90,6 +91,12 @@ fn parse_request(
         let name = raw_name.to_ascii_lowercase();
         let value = raw_value.trim_matches([' ', '\t']);
         match name.as_str() {
+            "x-cortexfs-egress-token" => {
+                if authorized || value != target.token {
+                    return Err(invalid("invalid provider egress capability"));
+                }
+                authorized = true;
+            }
             "content-length" => {
                 if content_length.is_some() || value.is_empty() {
                     return Err(invalid("duplicate provider HTTP content length"));
@@ -133,6 +140,9 @@ fn parse_request(
             }
             _ => return Err(invalid("unsupported provider HTTP header")),
         }
+    }
+    if !authorized {
+        return Err(invalid("missing provider egress capability"));
     }
     let length = content_length.ok_or_else(|| invalid("missing provider HTTP content length"))?;
     if expect_continue {
