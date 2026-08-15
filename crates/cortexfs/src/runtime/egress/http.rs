@@ -45,6 +45,22 @@ pub(super) fn relay(
             return Err(error);
         }
     };
+    if let Some(credential) = target.credential.as_ref() {
+        let bearer = format!("Bearer {}", credential.token);
+        let authorized = request.headers.iter().any(|header| {
+            (header.0 == "authorization" && header.1 == bearer)
+                || (header.0 == "x-api-key" && header.1 == credential.token)
+        });
+        if !authorized {
+            let _ignored = local.write_all(
+                b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "invalid provider egress credential",
+            ));
+        }
+    }
     let request = inject_provider_credential(request, target);
     run_curl(local, target, &request, shutdown)
 }
@@ -231,26 +247,9 @@ fn read_line(input: &mut impl BufRead, limit: usize) -> io::Result<String> {
 
 fn valid_header_name(name: &str) -> bool {
     !name.is_empty()
-        && name.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(
-                    byte,
-                    b'!' | b'#'
-                        | b'$'
-                        | b'%'
-                        | b'&'
-                        | b'\''
-                        | b'*'
-                        | b'+'
-                        | b'-'
-                        | b'.'
-                        | b'^'
-                        | b'_'
-                        | b'`'
-                        | b'|'
-                        | b'~'
-                )
-        })
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
 fn has_controls(value: &str) -> bool {

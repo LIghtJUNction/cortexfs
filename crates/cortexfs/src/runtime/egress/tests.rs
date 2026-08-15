@@ -354,28 +354,42 @@ fn connection_headers_never_reach_curl_or_upstream() -> Result<(), Box<dyn std::
         "fixture/chat",
         &format!("http://{}/v1", tcp.local_addr()?),
     )?;
+    let environment = [
+        (
+            "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+            "fixture".to_owned(),
+        ),
+        ("CTX_PROVIDER_SECRET_VALUE".to_owned(), "secret".to_owned()),
+    ];
     let egress = ProviderEgress::create(
         &control,
         root.path(),
         "fixture/chat",
-        &[],
+        &environment,
         nix::unistd::geteuid().as_raw(),
         nix::unistd::getegid().as_raw(),
         "run1",
     )?;
-    for connection in [
-        "Connection: authorization\r\nAuthorization: Bearer secret\r\n",
-        "Connection: keep-alive, authorization\r\nAuthorization: Bearer secret\r\n",
-        "cOnNeCtIoN: keep-alive\r\n",
+    for (headers, status) in [
+        (
+            "Connection: authorization\r\nAuthorization: Bearer secret\r\n",
+            "400 Bad Request",
+        ),
+        (
+            "Connection: keep-alive, authorization\r\nAuthorization: Bearer secret\r\n",
+            "400 Bad Request",
+        ),
+        ("cOnNeCtIoN: keep-alive\r\n", "400 Bad Request"),
+        ("Authorization: Bearer attacker\r\n", "403 Forbidden"),
     ] {
         let mut client = UnixStream::connect(egress.socket("fixture").ok_or("missing socket")?)?;
         write!(
             client,
-            "POST /v1/responses HTTP/1.1\r\n{connection}Content-Length: 2\r\n\r\n{{}}"
+            "POST /v1/responses HTTP/1.1\r\n{headers}Content-Length: 2\r\n\r\n{{}}"
         )?;
         let mut response = Vec::new();
         client.read_to_end(&mut response)?;
-        assert!(response.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
+        assert!(response.starts_with(format!("HTTP/1.1 {status}\r\n").as_bytes()));
     }
     thread::sleep(Duration::from_millis(100));
     assert!(matches!(
