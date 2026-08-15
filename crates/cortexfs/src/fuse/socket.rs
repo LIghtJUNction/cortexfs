@@ -15,13 +15,16 @@ impl FuseProjection {
         };
         self.authorize_agent_owner(agent, uid)?;
         let path = self.resolve(&normalized)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
+        let name = plain_file_name(&path).map_err(|_error| FuseError::InvalidPath)?;
         let created = support::plain::ensure_socket_placeholder(&path, mode)
             .map_err(|_error| FuseError::Io)?;
-        if let Err(error) = Self::chown_fuse_plain_path(&path, uid, gid) {
+        if chown_socket_entry(&parent_dir, name, uid, gid).is_err() {
             if created {
                 let _ignored = self.remove_socket_alias(&normalized, uid);
             }
-            return Err(error);
+            return Err(FuseError::Io);
         }
         match self.node_for_path(&normalized) {
             Ok(node) => Ok(node),
@@ -96,15 +99,7 @@ impl FuseProjection {
             Err(nix::errno::Errno::EINVAL) => return Err(FuseError::InvalidPath),
             Err(_error) => return Err(FuseError::Io),
         };
-        if nix::unistd::fchownat(
-            &parent_dir,
-            name,
-            Some(nix::unistd::Uid::from_raw(uid)),
-            Some(nix::unistd::Gid::from_raw(gid)),
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        )
-        .is_err()
-        {
+        if chown_socket_entry(&parent_dir, name, uid, gid).is_err() {
             remove_created_socket_entry(&parent_dir, name, created);
             return Err(FuseError::Io);
         }
@@ -226,6 +221,16 @@ impl FuseProjection {
             .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
         parent_dir.sync_all().map_err(|_error| FuseError::Io)
     }
+}
+
+fn chown_socket_entry(parent: &fs::File, name: &str, uid: u32, gid: u32) -> nix::Result<()> {
+    nix::unistd::fchownat(
+        parent,
+        name,
+        Some(nix::unistd::Uid::from_raw(uid)),
+        Some(nix::unistd::Gid::from_raw(gid)),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
 }
 
 /// Returns a `(alias, claim)` pair when paths and generated sibling marker match.
