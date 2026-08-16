@@ -30,6 +30,7 @@
 .codegraph
 /.tokensave/
 /.omo/
+/.codensity/
 SWAP.md
 scripts/__pycache__/
 
