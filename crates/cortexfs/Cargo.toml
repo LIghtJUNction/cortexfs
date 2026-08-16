@@ -14,6 +14,7 @@ categories.workspace = true
 arrow-array = "59.1.0"
 arrow-schema = "59.1.0"
 base64 = "0.22.1"
+cortexfs-channels = { version = "0.1.0", path = "../cortexfs-channels" }
 cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
 cortexfs-tool-sdk = { version = "0.1.0", path = "../cortexfs-tool-sdk" }
 fuser = "0.17.0"
@@ -70,3 +71,7 @@ path = "src/bin/runner/main.rs"
 [[bin]]
 name = "cortexfs-agent-runtime"
 path = "src/bin/runtime/main.rs"
+
+[[bin]]
+name = "cortexfs-channel"
+path = "src/bin/channel/main.rs"

@@ -1,4 +1,6 @@
 pub mod agent;
+pub mod session;
+pub use session::SessionSendRequest;
 
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -9,13 +11,21 @@ use std::time::Duration;
 
 const MAX_FRAME_BYTES: u64 = 16 * 1024;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum RuntimeClientError {
+    #[error("invalid runtime environment")]
     InvalidEnvironment,
+    #[error("invalid runtime request")]
+    InvalidRequest,
+    #[error("cannot connect to runtime socket")]
     CannotConnect,
+    #[error("cannot write runtime request")]
     CannotWrite,
+    #[error("cannot read runtime response")]
     CannotRead,
+    #[error("invalid runtime frame")]
     InvalidFrame,
+    #[error("runtime rejected request: {0}")]
     Rejected(String),
 }
 

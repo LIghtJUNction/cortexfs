@@ -406,7 +406,7 @@ build_cortexfs() {
 
 expected_binaries() {
     printf '%s\n' ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-        cortexfs-agent-runtime ctxmcp
+        cortexfs-agent-runtime cortexfs-channel ctxmcp
 }
 
 verify_build() {
@@ -446,8 +446,8 @@ ensure_mountpoint() {
 deploy() {
     local source=$1 binary unit
     card "$( [[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment' )"
-    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,ctxmcp}" \
-        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,ctxmcp}"
+    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,ctxmcp}" \
+        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,ctxmcp}"
     say "Units: /usr/lib/systemd/system/cortexfs*.{service,socket}" \
         "单元：/usr/lib/systemd/system/cortexfs*.{service,socket}"
     say "Preserved: /var/lib/cortexfs/{storage,secrets}, /etc/cortexfs/providers.d, existing *.env, and /ctx user state." \
@@ -457,7 +457,7 @@ deploy() {
         "输入 DEPLOY CORTEXFS，原子安装构建并重启 cortexfs.service。"
     # shellcheck disable=SC2024 # Force sudo's prompt onto the controlling terminal.
     sudo -v <"$TTY_PATH"
-    sudo install -d -m 0755 /usr/lib/systemd/system /usr/share/doc/cortexfs-git \
+    sudo install -d -m 0755 /usr/lib/systemd/system /usr/share/doc/cortexfs \
         /etc/cortexfs /etc/cortexfs/providers.d /var/lib/cortexfs \
         /var/lib/cortexfs/storage /var/lib/cortexfs/storage/generations
     sudo install -d -m 0700 /var/lib/cortexfs/secrets
@@ -468,7 +468,7 @@ deploy() {
     for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket; do
         atomic_install "$source/packaging/systemd/$unit" "/usr/lib/systemd/system/$unit" 0644
     done
-    atomic_install "$source/README.md" /usr/share/doc/cortexfs-git/README.md 0644
+    atomic_install "$source/README.md" /usr/share/doc/cortexfs/README.md 0644
     info "Reloading systemd and enabling the CortexFS mount..." "正在重载 systemd 并启用 CortexFS 挂载..."
     sudo systemctl daemon-reload
     sudo systemctl enable cortexfs.service

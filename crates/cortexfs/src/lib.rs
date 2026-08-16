@@ -63,6 +63,8 @@ pub mod abi;
 pub mod agent;
 /// L2 — identity and authority helpers.
 pub mod authority;
+/// L5 — channel adapters bridged into existing durable agent sessions.
+pub mod channel;
 /// L2 — context packs and working-set construction.
 pub mod context;
 /// L4 — mount table types and parsing.

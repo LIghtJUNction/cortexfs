@@ -1,0 +1,99 @@
+pkgname=cortexfs
+pkgver="${CORTEXFS_PKGVER:-0.1.7}"
+pkgrel=1
+pkgdesc='FUSE filesystem interface for agent runtimes'
+arch=('x86_64' 'aarch64')
+url='https://github.com/LIghtJUNction/cortexfs'
+license=('MIT')
+depends=('bubblewrap>=0.10.0' 'ca-certificates' 'curl' 'fuse3' 'libsecret' 'systemd' 'util-linux')
+makedepends=('pkgconf' 'rust')
+provides=('cortexfs')
+conflicts=('cortexfs-git' 'cortex-cli')
+install=cortexfs.install
+source=()
+sha256sums=()
+
+_source_root() {
+    if [[ -n ${CORTEXFS_SOURCE_DIR:-} ]]; then
+        printf '%s\n' "$CORTEXFS_SOURCE_DIR"
+    elif [[ -f "$startdir/../../Cargo.toml" ]]; then
+        printf '%s\n' "$(cd "$startdir/../.." && pwd)"
+    else
+        die 'set CORTEXFS_SOURCE_DIR to a CortexFS source checkout'
+    fi
+}
+
+prepare() {
+    local source_root
+    source_root=$(_source_root)
+    rm -rf -- "$srcdir/cortexfs-$pkgver"
+    mkdir -p "$srcdir/cortexfs-$pkgver"
+    tar -C "$source_root" \
+        --exclude=./.git \
+        --exclude=./.agents \
+        --exclude=./.codensity \
+        --exclude=./.codegraph \
+        --exclude=./.cache \
+        --exclude=./.config \
+        --exclude=./.env \
+        --exclude='./.env.*' \
+        --exclude=./.omo \
+        --exclude=./.tokensave \
+        --exclude=./.bash_history \
+        --exclude=./agent.sh \
+        --exclude=./dist \
+        --exclude=./inspect_benchmark \
+        --exclude=./node_modules \
+        --exclude=./docs-site \
+        --exclude=./docs/assets \
+        --exclude=./target \
+        --exclude=./tmp \
+        --exclude=./video \
+        -cf - . | tar -C "$srcdir/cortexfs-$pkgver" -xf -
+}
+
+build() {
+    [[ -n ${CORTEXFS_PREBUILT_DIR:-} ]] && return
+    cd "$srcdir/cortexfs-$pkgver"
+    cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp
+}
+
+install_payload() {
+    local root=$1 release=$2 binary unit
+    install -d -m 0755 \
+        "$root/usr/bin" \
+        "$root/usr/share/doc/cortexfs" \
+        "$root/usr/lib/systemd/system" \
+        "$root/usr/share/doc/cortexfs/docs/spec" \
+        "$root/usr/share/licenses/cortexfs" \
+        "$root/etc/cortexfs/providers.d" \
+        "$root/var/lib/cortexfs/storage/generations"
+    install -d -m 0700 "$root/var/lib/cortexfs/secrets"
+    for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
+        cortexfs-agent-runtime cortexfs-channel ctxmcp; do
+        install -m 0755 "$release/$binary" "$root/usr/bin/$binary"
+    done
+    for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket; do
+        install -m 0644 "$srcdir/cortexfs-$pkgver/packaging/systemd/$unit" \
+            "$root/usr/lib/systemd/system/$unit"
+    done
+    install -m 0644 "$srcdir/cortexfs-$pkgver/README.md" \
+        "$root/usr/share/doc/cortexfs/README.md"
+    install -m 0644 "$srcdir/cortexfs-$pkgver/docs/channels.md" \
+        "$root/usr/share/doc/cortexfs/docs/channels.md"
+    install -m 0644 "$srcdir/cortexfs-$pkgver/LICENSE" \
+        "$root/usr/share/licenses/cortexfs/LICENSE"
+    install -m 0644 "$srcdir/cortexfs-$pkgver"/docs/spec/*.md \
+        "$root/usr/share/doc/cortexfs/docs/spec/"
+}
+
+package() {
+    local payload=${CORTEXFS_PREBUILT_DIR:-$srcdir/cortexfs-$pkgver/package-stage}
+    if [[ -n ${CORTEXFS_PREBUILT_DIR:-} ]]; then
+        cp -a "$payload"/. "$pkgdir/"
+        return
+    fi
+    rm -rf -- "$payload"
+    install_payload "$payload" "$srcdir/cortexfs-$pkgver/target/release"
+    cp -a "$payload"/. "$pkgdir/"
+}

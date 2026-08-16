@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+    /usr/bin/install -d -m 0755 \
+        /etc/cortexfs/providers.d \
+        /var/lib/cortexfs/storage/generations
+    /usr/bin/install -d -m 0700 /var/lib/cortexfs/secrets
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+        if command -v deb-systemd-helper >/dev/null 2>&1; then
+            deb-systemd-helper enable cortexfs.service >/dev/null || true
+        else
+            systemctl enable cortexfs.service >/dev/null 2>&1 || true
+        fi
+        if [ -n "${2:-}" ] && systemctl is-active --quiet cortexfs.service; then
+            systemctl try-restart cortexfs.service >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
+exit 0

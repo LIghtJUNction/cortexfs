@@ -34,7 +34,21 @@ jobs:
 
       - name: Check Linux installer
         run: |
-          shellcheck scripts/install.sh scripts/install-linux.sh scripts/install-test.sh
+          shellcheck \
+            scripts/install.sh \
+            scripts/install-linux.sh \
+            scripts/install-test.sh \
+            packaging/build.sh \
+            packaging/debian/postinst \
+            packaging/debian/prerm \
+            packaging/debian/postrm
+          bash -n \
+            packaging/build.sh \
+            packaging/debian/postinst \
+            packaging/debian/prerm \
+            packaging/debian/postrm \
+            packaging/arch/PKGBUILD \
+            packaging/arch/cortexfs.install
           bash scripts/install-test.sh
 
   rust:

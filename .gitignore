@@ -23,6 +23,7 @@
 !/.env.example
 /tmp/
 /ctx
+/dist/
 /inspect_benchmark/tmp/
 *.log
 *.pid

@@ -1,0 +1,13 @@
+Package: cortexfs
+Version: @VERSION@
+Architecture: @ARCH@
+Section: admin
+Priority: optional
+Maintainer: LIghtJUNction <lightjunction.me@gmail.com>
+Depends: bubblewrap (>= 0.10.0), ca-certificates, curl, fuse3, libsecret-1-0, systemd, util-linux
+Conflicts: cortexfs-git, cortex-cli
+Replaces: cortexfs-git, cortex-cli
+Homepage: https://github.com/LIghtJUNction/cortexfs
+Description: FUSE filesystem interface for agent runtimes
+ CortexFS exposes models, agents, tools, and durable sessions through a small
+ Linux filesystem interface mounted at /ctx.

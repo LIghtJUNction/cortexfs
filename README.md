@@ -56,6 +56,13 @@ mutation. Continue with the [quick start](#quick-start), or read the
 [getting-started guide](docs/getting-started.md) for supported systems,
 recovery, and the full runtime model.
 
+For native packages, see the [multi-distribution packaging guide](https://github.com/LIghtJUNction/cortexfs/blob/main/docs/packaging.md)
+for `.deb`, `.rpm`, Arch Linux packages, and portable tarballs.
+
+For Telegram, Discord, Slack, and Feishu/Lark integration, see the
+[multi-IM channel guide](docs/channels.md) and the normative
+[channel ABI](docs/spec/channel-abi.md).
+
 [Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
 
 ## Project Introduction
