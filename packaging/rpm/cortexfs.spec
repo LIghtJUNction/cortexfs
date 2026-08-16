@@ -41,13 +41,15 @@ install -d -m 0755 \
     %{buildroot}%{_datadir}/doc/cortexfs/docs/spec \
     %{buildroot}%{_datadir}/licenses/cortexfs \
     %{buildroot}%{_sysconfdir}/cortexfs/providers.d \
+    %{buildroot}%{_sysconfdir}/cortexfs/channels \
     %{buildroot}%{_sharedstatedir}/cortexfs/storage/generations
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/cortexfs/secrets
 for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
     cortexfs-agent-runtime cortexfs-channel ctxmcp; do
     install -m 0755 "target/release/$binary" "%{buildroot}%{_bindir}/$binary"
 done
-for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket; do
+for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
+    cortexfs-channel@.service; do
     install -m 0644 "packaging/systemd/$unit" \
         "%{buildroot}%{_prefix}/lib/systemd/system/$unit"
 done
@@ -92,8 +94,10 @@ fi
 %{_prefix}/lib/systemd/system/cortexfs.service
 %{_prefix}/lib/systemd/system/cortexfs-agent@.service
 %{_prefix}/lib/systemd/system/cortexfs-agent@.socket
+%{_prefix}/lib/systemd/system/cortexfs-channel@.service
 %dir %{_sysconfdir}/cortexfs
 %dir %{_sysconfdir}/cortexfs/providers.d
+%attr(0700,root,root) %dir %{_sysconfdir}/cortexfs/channels
 %dir %{_sharedstatedir}/cortexfs
 %dir %{_sharedstatedir}/cortexfs/storage
 %dir %{_sharedstatedir}/cortexfs/storage/generations

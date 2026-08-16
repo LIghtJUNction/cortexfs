@@ -26,6 +26,8 @@ exports:
 An adapter owns authentication, rate limiting, reconnect policy, and the
 platform transport. The shared layer only owns the semantic contract. A host
 may implement a new adapter without changing any agent or filesystem ABI.
+The packaged Discord host reads its credentials and routing values from one
+owner-only TOML file; it does not write channel state into `/ctx`.
 
 ## Message and session semantics
 
@@ -37,7 +39,7 @@ through the existing request:
 {"op":"send","id":"im-<prefix>-<message-hash>","session":"im-<prefix>-<conversation-hash>","scope":"private","input":"hello"}
 ```
 
-The socket runtime remains the source of truth for idempotency, durable
+The existing agent socket file remains the source of truth for idempotency, durable
 `messages.jsonl`/`events.jsonl`, tool authorization, model execution, and
 assistant event framing. Re-delivering the same platform message therefore
 replays the existing session result instead of executing the agent twice.
@@ -50,16 +52,14 @@ exposed as assistant text.
 
 `cortexfs-channel` is an explicit foreground process. It is not a `ctx`
 subcommand, does not create a new root namespace, and does not watch files.
-Its two modes are:
+Discord is configured with `/etc/cortexfs/channels/discord.toml` and runs over
+the Gateway; webhook modes remain available for the other stateless hosts:
 
 ```bash
-# Telegram Bot API long polling
-export CORTEXFS_AGENT_SOCKET=/run/cortexfs/agent/coder.sock
-export CORTEXFS_AGENT=coder
-export CORTEXFS_TELEGRAM_TOKEN='read-from-a-secret-store'
-cortexfs-channel telegram
+# Discord Gateway
+sudo systemctl enable --now cortexfs-channel@discord.service
 
-# Discord, Slack Events API, or Feishu/Lark webhook
+# Slack Events API or Feishu/Lark webhook
 export CORTEXFS_CHANNEL_PLATFORM=slack
 export CORTEXFS_CHANNEL_BIND=127.0.0.1:8765
 export CORTEXFS_CHANNEL_OUTBOUND_URL=https://slack.com/api/chat.postMessage

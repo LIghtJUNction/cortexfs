@@ -12,7 +12,10 @@ readonly BINARIES=(
     ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner
     cortexfs-agent-runtime cortexfs-channel ctxmcp
 )
-readonly UNITS=(cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket)
+readonly UNITS=(
+    cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket
+    cortexfs-channel@.service
+)
 
 fail() {
     printf 'packaging: %s\n' "$1" >&2
@@ -116,6 +119,7 @@ copy_payload() {
         "$destination/etc/cortexfs/providers.d" \
         "$destination/var/lib/cortexfs/storage/generations"
     install -d -m 0700 "$destination/var/lib/cortexfs/secrets"
+    install -d -m 0700 "$destination/etc/cortexfs/channels"
     for binary in "${BINARIES[@]}"; do
         install -m 0755 "$release/$binary" "$destination/usr/bin/$binary"
     done

@@ -22,6 +22,12 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     match config::load()? {
+        CommandConfig::Discord { config } => {
+            let route = ChannelSessionRoute::new(&config.agent, &config.session_prefix)?;
+            let bridge =
+                AgentChannelBridge::new(config.agent_socket.clone(), route, config.cwd.clone());
+            cortexfs::channel::discord::run(&config, &bridge)?;
+        }
         CommandConfig::Telegram {
             common,
             token,

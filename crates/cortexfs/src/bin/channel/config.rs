@@ -1,15 +1,19 @@
 use std::{env, net::SocketAddr, path::PathBuf};
+mod disk;
+pub use cortexfs::channel::discord::DiscordConfig;
+pub use disk::DiscordConfigError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("usage: cortexfs-channel <telegram|webhook>")]
+    #[error("usage: cortexfs-channel <discord [--config PATH]|telegram|webhook>")]
     Usage,
     #[error("missing environment variable {0}")]
     Missing(&'static str),
     #[error("invalid environment variable {0}: {1}")]
     Invalid(&'static str, String),
+    #[error(transparent)]
+    Discord(#[from] DiscordConfigError),
 }
-
 #[derive(Clone, Debug)]
 pub struct CommonConfig {
     pub socket: PathBuf,
@@ -17,9 +21,11 @@ pub struct CommonConfig {
     pub prefix: String,
     pub cwd: Option<String>,
 }
-
 #[derive(Debug)]
 pub enum CommandConfig {
+    Discord {
+        config: DiscordConfig,
+    },
     Telegram {
         common: CommonConfig,
         token: String,
@@ -35,7 +41,6 @@ pub enum CommandConfig {
         token: Option<String>,
     },
 }
-
 #[derive(Clone, Copy, Debug)]
 pub enum Platform {
     Discord,
@@ -44,8 +49,12 @@ pub enum Platform {
 }
 
 pub fn load() -> Result<CommandConfig, ConfigError> {
-    let command = env::args().nth(1).ok_or(ConfigError::Usage)?;
-    if env::args().nth(2).is_some() {
+    let mut args = env::args().skip(1);
+    let command = args.next().ok_or(ConfigError::Usage)?;
+    if command == "discord" {
+        return disk::load_command(args);
+    }
+    if args.next().is_some() {
         return Err(ConfigError::Usage);
     }
     let common = common()?;

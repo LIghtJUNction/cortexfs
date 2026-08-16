@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=131397
-prod=84890
+all=131924
+prod=85417
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -66,8 +66,10 @@ prod=84890
 646 crates/cortexfs/src/authority/helpers.rs
 53 crates/cortexfs/src/authority/model.rs
 43 crates/cortexfs/src/authority/network.rs
-111 crates/cortexfs/src/bin/channel/config.rs
-58 crates/cortexfs/src/bin/channel/main.rs
+120 crates/cortexfs/src/bin/channel/config.rs
+88 crates/cortexfs/src/bin/channel/config/disk.rs
+56 crates/cortexfs/src/bin/channel/config/disk/value.rs
+64 crates/cortexfs/src/bin/channel/main.rs
 104 crates/cortexfs/src/bin/channel/webhook.rs
 33 crates/cortexfs/src/bin/channel/webhook/outbound.rs
 35 crates/cortexfs/src/bin/ctx/agent.rs
@@ -154,8 +156,13 @@ prod=84890
 503 crates/cortexfs/src/bin/tsh/repl.rs
 274 crates/cortexfs/src/bin/tsh/search.rs
 243 crates/cortexfs/src/bin/tsh/terminal.rs
-9 crates/cortexfs/src/channel.rs
+10 crates/cortexfs/src/channel.rs
 80 crates/cortexfs/src/channel/bridge.rs
+80 crates/cortexfs/src/channel/discord.rs
+87 crates/cortexfs/src/channel/discord/api.rs
+84 crates/cortexfs/src/channel/discord/gateway.rs
+51 crates/cortexfs/src/channel/discord/parse.rs
+65 crates/cortexfs/src/channel/discord/transport.rs
 57 crates/cortexfs/src/channel/event.rs
 83 crates/cortexfs/src/channel/http.rs
 91 crates/cortexfs/src/channel/http/parse.rs

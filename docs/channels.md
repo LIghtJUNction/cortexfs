@@ -12,14 +12,38 @@ and its API is browsable on [docs.rs](https://docs.rs/cortexfs-channels).
 
 ## Install and start
 
-After installing the normal CortexFS package, start an agent and point the
-channel host at its visible runtime socket:
+After installing the normal CortexFS package, start an agent and write the
+Discord adapter configuration to one owner-only file:
 
 ```bash
 ctx agent start coder --session default
-export CORTEXFS_AGENT_SOCKET=/run/cortexfs/agent/coder.sock
-export CORTEXFS_AGENT=coder
+sudo install -d -m 0700 /etc/cortexfs/channels
+sudoedit /etc/cortexfs/channels/discord.toml
+sudo chmod 600 /etc/cortexfs/channels/discord.toml
 ```
+
+The file contains the application id, bot token, agent socket path, and agent
+name. The token is read only from this file and is redacted from diagnostics:
+
+```toml
+application_id = "DISCORD_APPLICATION_ID"
+bot_token = "DISCORD_BOT_TOKEN"
+agent_socket = "/run/cortexfs/agent/coder.sock"
+agent = "coder"
+session_prefix = "discord"
+```
+
+Start the low-memory synchronous Gateway adapter after enabling the Discord
+`MESSAGE_CONTENT` privileged intent in the Discord Developer Portal:
+
+```bash
+sudo systemctl enable --now cortexfs-channel@discord.service
+sudo journalctl -u cortexfs-channel@discord.service -f
+```
+
+The adapter keeps one bounded WebSocket connection and uses the configured
+agent socket file for the existing durable session ABI. It does not add a
+`/ctx/channel` namespace, watcher, or polling worker.
 
 Telegram uses long polling:
 
@@ -28,12 +52,11 @@ export CORTEXFS_TELEGRAM_TOKEN='...'
 cortexfs-channel telegram
 ```
 
-Discord, Slack and Feishu/Lark use webhook ingress plus their normal HTTP send
-API:
+Slack and Feishu/Lark retain the explicit webhook ingress mode:
 
 ```bash
-export CORTEXFS_CHANNEL_PLATFORM=discord
-export CORTEXFS_CHANNEL_OUTBOUND_URL='https://discord.com/api/webhooks/<id>/<token>'
+export CORTEXFS_CHANNEL_PLATFORM=slack
+export CORTEXFS_CHANNEL_OUTBOUND_URL='https://slack.com/api/chat.postMessage'
 export CORTEXFS_CHANNEL_BIND=127.0.0.1:8765
 cortexfs-channel webhook
 ```
@@ -44,9 +67,9 @@ set `CORTEXFS_CHANNEL_TOKEN` to a bot token. For Feishu/Lark, use the tenant
 `{path}` in `CORTEXFS_CHANNEL_OUTBOUND_URL` is replaced with the codec's
 relative API path when a deployment wants one URL template for a codec.
 
-Keep credentials in the service manager's environment or secret store. Do not
-put tokens in `/ctx`, a repository, command-line arguments, or durable session
-metadata.
+Keep non-Discord credentials in the service manager's environment or secret
+store. Do not put tokens in `/ctx`, a repository, command-line arguments, or
+durable session metadata.
 
 ## Multi-turn and agent capability
 
