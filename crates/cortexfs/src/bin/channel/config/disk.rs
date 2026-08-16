@@ -59,6 +59,7 @@ fn validate(config: &DiscordConfig) -> Result<(), DiscordConfigError> {
     if fields
         .iter()
         .any(|&(_, value)| value.is_empty() || value.contains('\0'))
+        || !cortexfs::is_object_name(&config.agent)
         || !config
             .application_id
             .bytes()
@@ -68,6 +69,13 @@ fn validate(config: &DiscordConfig) -> Result<(), DiscordConfigError> {
         return Err(DiscordConfigError::Parse(
             "required values are invalid".to_owned(),
         ));
+    }
+    let expected = cortexfs_paths::agent_client_socket(&config.agent);
+    if config.agent_socket != expected {
+        return Err(DiscordConfigError::Parse(format!(
+            "agent_socket must be {}",
+            expected.display()
+        )));
     }
     Ok(())
 }

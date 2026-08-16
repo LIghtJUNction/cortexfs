@@ -7,11 +7,12 @@ use cortexfs_channels::{ChannelCodec, platform::discord::DiscordCodec};
 use reqwest::blocking::Client;
 use tungstenite::{Message, connect, error::Error as WebSocketError};
 
-use super::super::bridge::AgentChannelBridge;
+use super::super::bridge::{AgentChannelBridge, ChannelProgressSink};
 use super::transport;
 use super::{
     DiscordConfig, DiscordError, api,
     parse::{self, GatewayEvent},
+    progress,
 };
 
 const MAX_GATEWAY_MESSAGE_BYTES: usize = 256 * 1024;
@@ -74,11 +75,14 @@ fn dispatch(
     let Some(inbound) = inbound else {
         return Ok(());
     };
-    let outbound = bridge.handle(inbound)?;
-    api::send_reply(
-        client,
-        config,
-        outbound.target.conversation.as_str(),
-        &outbound.body.text,
-    )
+    let mut sink = progress::Progress::new(client, config, &inbound);
+    match bridge.handle_with_progress(inbound, &mut sink) {
+        Ok(outbound) if !sink.completed() => api::send_reply(
+            client,
+            config,
+            outbound.target.conversation.as_str(),
+            &outbound.body.text,
+        ),
+        Ok(_) | Err(_) => Ok(()),
+    }
 }

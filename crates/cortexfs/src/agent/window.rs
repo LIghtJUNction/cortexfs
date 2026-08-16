@@ -15,59 +15,15 @@ pub enum AgentWindowSetting {
 /// Effective Agent context window after resolving the selected model limit.
 pub type AgentEffectiveWindow = ModelContextLimit;
 
-/// Prompt budgeting derived from a known effective token window.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AgentWindowBudget {
-    tokens: u32,
-    total_chars: usize,
-    output_tokens: u32,
-    input_chars: usize,
-}
+/// Prompt budgeting now lives in the publishable context crate.
+pub use cortexfs_context::ContextBudget as AgentWindowBudget;
 
-impl AgentWindowBudget {
-    /// Derives conservative character and output-reservation budgets.
-    #[must_use]
-    pub fn from_effective(window: AgentEffectiveWindow) -> Option<Self> {
-        let ModelContextLimit::Known(tokens) = window else {
-            return None;
-        };
-        let tokens = tokens.get();
-        let token_chars = usize::try_from(tokens).unwrap_or(usize::MAX);
-        let total_chars = token_chars.saturating_mul(4);
-        let output_tokens = tokens.saturating_div(4).clamp(1, 4096);
-        let output_chars = usize::try_from(output_tokens)
-            .unwrap_or(usize::MAX)
-            .saturating_mul(4);
-        Some(Self {
-            tokens,
-            total_chars,
-            output_tokens,
-            input_chars: total_chars.saturating_sub(output_chars),
-        })
-    }
-
-    #[must_use]
-    /// Returns the effective token count.
-    pub const fn tokens(self) -> u32 {
-        self.tokens
-    }
-
-    #[must_use]
-    /// Returns the conservative total character estimate.
-    pub const fn total_chars(self) -> usize {
-        self.total_chars
-    }
-
-    #[must_use]
-    /// Returns the reserved output token count.
-    pub const fn output_tokens(self) -> u32 {
-        self.output_tokens
-    }
-
-    #[must_use]
-    /// Returns the character budget available to serialized input messages.
-    pub const fn input_chars(self) -> usize {
-        self.input_chars
+/// Converts the ABI model limit into the shared context budget.
+#[must_use]
+pub fn budget_from_effective(window: AgentEffectiveWindow) -> Option<AgentWindowBudget> {
+    match window {
+        ModelContextLimit::Known(tokens) => AgentWindowBudget::from_tokens(tokens.get()),
+        ModelContextLimit::Unknown => None,
     }
 }
 
@@ -230,23 +186,15 @@ mod tests {
 
     #[test]
     fn known_window_budget_reserves_one_quarter_up_to_cap() {
-        let budget = AgentWindowBudget::from_effective(
+        let budget = budget_from_effective(
             ModelContextLimit::known(16_384).unwrap_or(ModelContextLimit::Unknown),
         );
-        assert_eq!(
-            budget,
-            Some(AgentWindowBudget {
-                tokens: 16_384,
-                total_chars: 65_536,
-                output_tokens: 4_096,
-                input_chars: 49_152,
-            })
-        );
+        assert_eq!(budget, AgentWindowBudget::from_tokens(16_384));
     }
 
     #[test]
     fn maximum_window_conversion_saturates_at_usize() {
-        let budget = AgentWindowBudget::from_effective(
+        let budget = budget_from_effective(
             ModelContextLimit::known(u32::MAX).unwrap_or(ModelContextLimit::Unknown),
         );
         assert!(
@@ -256,10 +204,7 @@ mod tests {
 
     #[test]
     fn unknown_window_has_no_budget() {
-        assert_eq!(
-            AgentWindowBudget::from_effective(ModelContextLimit::Unknown),
-            None
-        );
+        assert_eq!(budget_from_effective(ModelContextLimit::Unknown), None);
     }
 
     #[test]

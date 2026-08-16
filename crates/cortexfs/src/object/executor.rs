@@ -28,6 +28,7 @@ use std::process::{Child, Command, ExitCode, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) use crate::budget_from_effective;
 use crate::{
     AgentPromptContext, AgentWindowBudget, AgentWindowSetting, DEFAULT_AGENT_PROMPT_TEMPLATE,
     MAX_SKILL_METADATA_CHARS, ModelContextLimit, ModelUseAuthority, ModelUseDenial,

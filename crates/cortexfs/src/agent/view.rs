@@ -346,7 +346,7 @@ pub(crate) fn derive_agent_runtime_env(
         ("PATH".to_owned(), support::command::TRUSTED_PATH.to_owned()),
         ("CTX_PATH".to_owned(), ctx_path.to_owned()),
     ];
-    if let Some(budget) = AgentWindowBudget::from_effective(effective_window) {
+    if let Some(budget) = budget_from_effective(effective_window) {
         env.push((
             "CTX_CONTEXT_WINDOW_TOKENS".to_owned(),
             budget.tokens().to_string(),

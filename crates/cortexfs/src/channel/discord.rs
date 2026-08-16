@@ -34,8 +34,11 @@ impl std::fmt::Debug for DiscordConfig {
 }
 
 mod api;
+mod effect;
 mod gateway;
+mod message;
 mod parse;
+mod progress;
 mod transport;
 
 #[derive(Debug, thiserror::Error)]

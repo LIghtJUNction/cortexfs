@@ -53,7 +53,7 @@ fn api_result(value: &Value) -> Result<Vec<Value>, TelegramError> {
         .ok_or_else(|| TelegramError::Api("Telegram result is not an array".to_owned()))
 }
 
-fn api_url(config: &TelegramConfig, method: &str) -> String {
+pub(super) fn api_url(config: &TelegramConfig, method: &str) -> String {
     format!(
         "{}/bot{}/{}",
         config.api_base.trim_end_matches('/'),

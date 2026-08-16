@@ -78,6 +78,14 @@ fn run() -> io::Result<()> {
             "/help" => {
                 banner(&options, &workspace);
             }
+            command if command.split_whitespace().next() == Some("/raw") => {
+                options.raw = raw_mode(command, options.raw)?;
+                writeln!(
+                    io::stderr().lock(),
+                    "ctxchat: raw={}",
+                    if options.raw { "on" } else { "off" }
+                )?;
+            }
             "/clear" => {
                 render::clear()?;
             }
@@ -299,11 +307,38 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
 fn banner(options: &Options, workspace: &Path) {
     let _ignored = writeln!(
         io::stderr().lock(),
-        "ctxchat {}/{}  workspace={}\n/help /new /history /output /tools /status /paste /copy /clear /exit | :load :pin :loads | @path @history:N",
+        "ctxchat {}/{}  workspace={}  raw={}\n/help /raw [on|off] /new /history /output /tools /status /paste /copy /clear /exit | :load :pin :loads | @path @history:N",
         options.agent,
         options.session,
-        workspace.display()
+        workspace.display(),
+        if options.raw { "on" } else { "off" }
     );
+}
+
+fn raw_mode(command: &str, current: bool) -> io::Result<bool> {
+    let mut parts = command.split_whitespace();
+    if parts.next() != Some("/raw") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid /raw command",
+        ));
+    }
+    let next = parts.next();
+    if parts.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: /raw [on|off]",
+        ));
+    }
+    match next {
+        None | Some("toggle") => Ok(!current),
+        Some("on") => Ok(true),
+        Some("off") => Ok(false),
+        Some(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: /raw [on|off]",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -326,6 +361,16 @@ mod tests {
             .map(str::to_owned),
         )?;
         assert_eq!(options.approvals, ["example.echo", "fs.read"]);
+        Ok(())
+    }
+
+    #[test]
+    fn raw_command_toggles_or_selects_mode() -> io::Result<()> {
+        assert!(raw_mode("/raw", false)?);
+        assert!(!raw_mode("/raw", true)?);
+        assert!(raw_mode("/raw on", false)?);
+        assert!(!raw_mode("/raw off", true)?);
+        assert!(raw_mode("/raw nope", false).is_err());
         Ok(())
     }
 }

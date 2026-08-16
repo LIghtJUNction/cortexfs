@@ -28,7 +28,7 @@ name. The token is read only from this file and is redacted from diagnostics:
 ```toml
 application_id = "DISCORD_APPLICATION_ID"
 bot_token = "DISCORD_BOT_TOKEN"
-agent_socket = "/run/cortexfs/agent/coder.sock"
+agent_socket = "/ctx/agent/coder.sock"
 agent = "coder"
 session_prefix = "discord"
 ```
@@ -41,9 +41,25 @@ sudo systemctl enable --now cortexfs-channel@discord.service
 sudo journalctl -u cortexfs-channel@discord.service -f
 ```
 
-The adapter keeps one bounded WebSocket connection and uses the configured
-agent socket file for the existing durable session ABI. It does not add a
+The adapter keeps one bounded WebSocket connection and uses the canonical
+public `/ctx/agent/<agent>.sock` endpoint for the existing durable session ABI.
+It validates that the endpoint is a live Unix socket before connecting. It does not add a
 `/ctx/channel` namespace, watcher, or polling worker.
+
+After changing a provider or model, refresh the durable backing generation
+before starting the channel:
+
+```bash
+sudo ctx storage update --prune /var/lib/cortexfs/storage
+sudo systemctl restart cortexfs.service
+sudo systemctl restart cortexfs-agent@coder.socket
+sudo systemctl restart cortexfs-channel@discord.service
+sudo ctx doctor
+```
+
+The generation refresh is required because `/ctx` is a projection while the
+agent runtime reads the selected backing generation directly. A projected
+model entry alone is not proof that the runtime can resolve it.
 
 Telegram uses long polling:
 
@@ -77,7 +93,14 @@ The bridge derives one stable session from channel, conversation, and thread.
 It submits text to the existing `agent/<name>.sock` with `scope=private`, so
 the agent retains history, context snapshots, tool calls, approvals, child
 agent handoffs, cancellation, and provider routing exactly as a local `ctx
-agent send` does. Only the final assistant text is sent back to the platform.
+agent send` does.
+
+Discord and Telegram foreground hosts immediately acknowledge an inbound
+message, create a bounded “thinking” placeholder, and coalesce streamed delta
+events into platform edits. They remove the acknowledgement on completion and
+show a failure reaction plus a visible error when the agent or provider fails.
+If a platform operation is unavailable, the host falls back to one final
+message; progress effects never become durable conversation facts.
 
 The same inbound message produces the same idempotency key. The socket runtime
 therefore handles retries through its existing replay rules and remains the

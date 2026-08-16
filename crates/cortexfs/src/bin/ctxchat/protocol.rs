@@ -19,6 +19,7 @@ pub(crate) fn request(
     stream.flush()?;
     let mut frames = Vec::new();
     let mut response_bytes = 0usize;
+    let mut saw_error = false;
     let mut reader = BufReader::new(stream.try_clone()?);
     while let Some(line) = read_frame(&mut reader)? {
         response_bytes = response_bytes
@@ -35,11 +36,15 @@ pub(crate) fn request(
         if frame.get("type").and_then(Value::as_str) == Some("approval_request") {
             respond_approval(&mut stream, &frame, approvals)?;
         }
+        saw_error |= frame.get("type").and_then(Value::as_str) == Some("error");
         let done = frame.get("type").and_then(Value::as_str) == Some("done");
         frames.push(frame);
         if done {
             return Ok(frames);
         }
+    }
+    if saw_error {
+        return Ok(frames);
     }
     Err(io::Error::new(
         io::ErrorKind::UnexpectedEof,
@@ -194,6 +199,32 @@ mod tests {
             .err()
             .ok_or_else(|| io::Error::other("missing EOF error"))?;
         assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        server
+            .join()
+            .map_err(|_panic| io::Error::other("server panicked"))??;
+        Ok(())
+    }
+
+    #[test]
+    fn eof_after_error_preserves_error_frames() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let socket = root.path().join("agent.sock");
+        let listener = UnixListener::bind(&socket)?;
+        let server = thread::spawn(move || -> io::Result<()> {
+            let (mut stream, _) = listener.accept()?;
+            let mut line = String::new();
+            BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+            stream.write_all(b"{\"type\":\"error\",\"code\":\"EIO\"}\n")
+        });
+        let frames = request(&socket, &json!({"op":"send"}), &[])?;
+        assert_eq!(frames.len(), 1);
+        assert_eq!(
+            frames
+                .first()
+                .and_then(|frame| frame.get("type"))
+                .and_then(Value::as_str),
+            Some("error")
+        );
         server
             .join()
             .map_err(|_panic| io::Error::other("server panicked"))??;

@@ -3,6 +3,7 @@ use serde_json::json;
 use super::curl::run_curl_json_with_headers;
 use super::*;
 use cortexfs::{derive_agent_runtime_view, is_object_name};
+use cortexfs_protocol::{Content, ContentPart, ModelRequest, ToolChoice, ToolDefinition};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -45,12 +46,8 @@ pub(crate) fn call_anthropic_messages(
     credential: &ProviderCredential,
 ) -> Result<ProviderTextCompletion, String> {
     let target = provider_target(transport, "messages");
-    let body = json!({
-        "model": model,
-        "max_tokens": 4096,
-        "messages": [{"role": "user", "content": input}]
-    })
-    .to_string();
+    let request = model_request(model, input, false, cortexfs::ModelEffort::Auto, false);
+    let body = anthropic_body(&request);
     let headers = anthropic_headers(credential);
     let output = run_curl_json_with_headers(&target, &headers, &body)?;
     Ok(ProviderTextCompletion {
@@ -132,10 +129,15 @@ fn openai_body(
     agent_tools: bool,
     endpoint: OpenAiEndpoint,
 ) -> String {
-    let messages = provider_messages(input);
+    let request = model_request(model, input, stream, effort, agent_tools);
+    let messages = openai_messages(&request);
     let mut body = match endpoint {
-        OpenAiEndpoint::Chat => json!({ "model": model, "messages": messages, "stream": stream }),
-        OpenAiEndpoint::Responses => json!({ "model": model, "input": messages, "stream": stream }),
+        OpenAiEndpoint::Chat => {
+            json!({ "model": request.model, "messages": messages, "stream": request.stream })
+        }
+        OpenAiEndpoint::Responses => {
+            json!({ "model": request.model, "input": messages, "stream": request.stream })
+        }
     };
     let Some(fields) = body.as_object_mut() else {
         return body.to_string();
@@ -146,38 +148,36 @@ fn openai_body(
             json!({ "include_usage": true }),
         );
     }
-    if agent_tools {
-        let tools = current_agent_openai_tools()
-            .into_iter()
-            .map(|name| openai_direct_function_spec(&name, endpoint))
+    if !request.tools.is_empty() {
+        let tools = request
+            .tools
+            .iter()
+            .map(|tool| openai_tool(tool, endpoint))
             .collect();
         fields.insert("tools".to_owned(), Value::Array(tools));
         fields.insert("tool_choice".to_owned(), json!("auto"));
         fields.insert("parallel_tool_calls".to_owned(), json!(false));
     }
-    if effort != cortexfs::ModelEffort::Auto {
+    if let Some(value) = request.options.get("reasoning_effort") {
         match endpoint {
             OpenAiEndpoint::Chat => {
-                fields.insert("reasoning_effort".to_owned(), json!(effort.to_string()));
+                fields.insert("reasoning_effort".to_owned(), value.clone());
             }
             OpenAiEndpoint::Responses => {
-                fields.insert(
-                    "reasoning".to_owned(),
-                    json!({ "effort": effort.to_string() }),
-                );
+                fields.insert("reasoning".to_owned(), json!({ "effort": value }));
             }
         }
     }
     body.to_string()
 }
-fn openai_direct_function_spec(name: &str, endpoint: OpenAiEndpoint) -> Value {
+fn openai_tool(tool: &ToolDefinition, endpoint: OpenAiEndpoint) -> Value {
     let mut function = Map::from_iter([
-        ("name".to_owned(), json!(name)),
+        ("name".to_owned(), json!(tool.name)),
         (
             "description".to_owned(),
-            json!(openai_tool_description(name)),
+            json!(tool.description.as_deref().unwrap_or_default()),
         ),
-        ("parameters".to_owned(), tsh_tool_parameters_schema()),
+        ("parameters".to_owned(), tool.parameters.clone()),
         ("strict".to_owned(), json!(true)),
     ]);
     match endpoint {
@@ -187,6 +187,108 @@ fn openai_direct_function_spec(name: &str, endpoint: OpenAiEndpoint) -> Value {
             Value::Object(function)
         }
     }
+}
+
+fn model_request(
+    model: &str,
+    input: &str,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+    agent_tools: bool,
+) -> ModelRequest {
+    let agent = env::var("CTX_AGENT")
+        .ok()
+        .filter(|value| is_object_name(value));
+    let agent_system = env::var("CTX_AGENT_SYSTEM").unwrap_or_default();
+    let prompt_context = cortexfs::AgentPromptContext::from_env();
+    let mut request = ModelRequest::new(
+        model,
+        cortexfs::agent_prompt_messages(input, agent.as_deref(), &agent_system, &prompt_context),
+    );
+    request.stream = stream;
+    if agent_tools {
+        request.tools = current_agent_openai_tools()
+            .into_iter()
+            .map(protocol_tool)
+            .collect();
+        request.tool_choice = Some(ToolChoice::Auto);
+    }
+    if effort != cortexfs::ModelEffort::Auto {
+        request.option("reasoning_effort", json!(effort.to_string()));
+    }
+    request
+}
+
+fn protocol_tool(name: String) -> ToolDefinition {
+    let description = openai_tool_description(&name);
+    ToolDefinition {
+        name,
+        description: Some(description),
+        parameters: tsh_tool_parameters_schema(),
+    }
+}
+
+fn openai_messages(request: &ModelRequest) -> Value {
+    Value::Array(
+        request
+            .messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "role": message.role.as_str(),
+                    "content": openai_content(&message.content)
+                })
+            })
+            .collect(),
+    )
+}
+
+fn openai_content(content: &Content) -> Value {
+    match *content {
+        Content::Text(ref value) => json!(value),
+        Content::Parts(ref parts) => Value::Array(parts.iter().map(openai_part).collect()),
+    }
+}
+
+fn openai_part(part: &ContentPart) -> Value {
+    match *part {
+        ContentPart::Text { ref text } => json!({"type":"text", "text":text}),
+        ContentPart::Image { ref uri, .. } => {
+            json!({"type":"image_url", "image_url":{"url":uri}})
+        }
+        ContentPart::Audio { ref uri, .. } => {
+            json!({"type":"audio", "audio_url":{"url":uri}})
+        }
+        ContentPart::Data {
+            ref name,
+            ref value,
+        } => json!({"type":name, "data":value}),
+    }
+}
+
+fn anthropic_body(request: &ModelRequest) -> String {
+    let system = request
+        .messages
+        .iter()
+        .filter(|message| matches!(message.role.as_str(), "system" | "developer"))
+        .map(|message| message.content.text_value())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let messages = request
+        .messages
+        .iter()
+        .filter(|message| !matches!(message.role.as_str(), "system" | "developer"))
+        .map(
+            |message| json!({"role":message.role.as_str(), "content":message.content.text_value()}),
+        )
+        .collect::<Vec<_>>();
+    let mut body = json!({"model":request.model, "max_tokens":4096, "messages":messages});
+    if !system.is_empty()
+        && let Some(fields) = body.as_object_mut()
+    {
+        fields.insert("system".to_owned(), json!(system));
+    }
+    body.to_string()
 }
 pub(crate) fn current_agent_openai_tools() -> Vec<String> {
     let agent = env::var("CTX_AGENT").ok();
@@ -241,14 +343,7 @@ pub(crate) fn tsh_tool_parameters_schema() -> Value {
         "required": ["args"]
     })
 }
-pub(crate) fn provider_messages(input: &str) -> Value {
-    let agent = env::var("CTX_AGENT")
-        .ok()
-        .filter(|value| is_object_name(value));
-    let agent_system = env::var("CTX_AGENT_SYSTEM").unwrap_or_default();
-    let prompt_context = cortexfs::AgentPromptContext::from_env();
-    provider_messages_for_agent(input, agent.as_deref(), &agent_system, &prompt_context)
-}
+#[cfg(test)]
 pub(crate) fn provider_messages_for_agent(
     input: &str,
     agent: Option<&str>,

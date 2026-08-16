@@ -210,9 +210,8 @@ fn assert_model_overflow(case: &str, script: &str) -> Result<(), Box<dyn std::er
 fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), ExecError> {
     let mut config = test_agent_run_config();
     config.model_path = PathBuf::from("/definitely/not/a/model");
-    config.context_budget = AgentWindowBudget::from_effective(
-        ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown),
-    );
+    config.context_budget =
+        budget_from_effective(ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown));
     config.suppress_model_error_events = true;
     let mut output = Vec::new();
 
@@ -249,7 +248,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         model_path: model,
         ..test_agent_run_config()
     };
-    config.context_budget = AgentWindowBudget::from_effective(
+    config.context_budget = budget_from_effective(
         ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
     );
     let mut output = Vec::new();

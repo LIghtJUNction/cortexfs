@@ -26,6 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let route = ChannelSessionRoute::new(&config.agent, &config.session_prefix)?;
             let bridge =
                 AgentChannelBridge::new(config.agent_socket.clone(), route, config.cwd.clone());
+            bridge.check_socket()?;
             cortexfs::channel::discord::run(&config, &bridge)?;
         }
         CommandConfig::Telegram {
@@ -36,6 +37,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let route = ChannelSessionRoute::new(&common.agent, &common.prefix)?;
             let bridge = AgentChannelBridge::new(common.socket, route, common.cwd);
+            bridge.check_socket()?;
             let config = cortexfs::channel::telegram::TelegramConfig::new(token, api_base)?
                 .with_poll_seconds(poll_seconds);
             cortexfs::channel::telegram::run(&config, &bridge)?;
@@ -50,6 +52,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let route = ChannelSessionRoute::new(&common.agent, &common.prefix)?;
             let bridge = AgentChannelBridge::new(common.socket, route, common.cwd);
+            bridge.check_socket()?;
             let config = webhook::WebhookConfig {
                 bind,
                 path,

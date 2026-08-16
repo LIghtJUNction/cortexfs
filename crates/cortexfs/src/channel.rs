@@ -4,6 +4,7 @@ pub mod bridge;
 pub mod discord;
 pub mod event;
 pub mod http;
+pub(crate) mod progress;
 pub mod telegram;
 
 #[cfg(test)]

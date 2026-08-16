@@ -1,0 +1,17 @@
+[package]
+name = "cortexfs-metadatas"
+description = "Provider-neutral model metadata, capability catalog, and alias mapping for CortexFS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["ai", "llm", "model-metadata", "function-calling", "cortexfs"]
+categories = ["api-bindings", "data-structures"]
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }

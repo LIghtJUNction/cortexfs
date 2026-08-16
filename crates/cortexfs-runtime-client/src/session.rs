@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -26,7 +26,25 @@ pub fn send(
     socket: &Path,
     request: SessionSendRequest<'_>,
 ) -> Result<Vec<String>, RuntimeClientError> {
-    validate(&request)?;
+    let mut frames = Vec::new();
+    send_stream(socket, request, |frame| {
+        frames.push(frame.to_owned());
+        Ok::<(), RuntimeClientError>(())
+    })?;
+    Ok(frames)
+}
+
+/// Sends one session request and invokes the callback for each event frame.
+pub fn send_stream<F, E>(
+    socket: &Path,
+    request: SessionSendRequest<'_>,
+    mut on_frame: F,
+) -> Result<(), E>
+where
+    F: FnMut(&str) -> Result<(), E>,
+    E: From<RuntimeClientError>,
+{
+    validate(&request).map_err(E::from)?;
     let frame = json!({
         "op": "send",
         "id": request.request_id,
@@ -38,31 +56,44 @@ pub fn send(
     })
     .to_string();
     if frame.len() > MAX_SESSION_FRAME_BYTES {
-        return Err(RuntimeClientError::InvalidRequest);
+        return Err(E::from(RuntimeClientError::InvalidRequest));
     }
     let mut stream =
-        UnixStream::connect(socket).map_err(|_error| RuntimeClientError::CannotConnect)?;
+        UnixStream::connect(socket).map_err(|_error| E::from(RuntimeClientError::CannotConnect))?;
     stream
         .write_all(frame.as_bytes())
         .and_then(|()| stream.write_all(b"\n"))
-        .map_err(|_error| RuntimeClientError::CannotWrite)?;
+        .map_err(|_error| E::from(RuntimeClientError::CannotWrite))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
-        .map_err(|_error| RuntimeClientError::CannotRead)?;
-    let mut bytes = Vec::new();
-    stream
-        .take(MAX_SESSION_RESPONSE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_error| RuntimeClientError::CannotRead)?;
-    if bytes.is_empty()
-        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SESSION_RESPONSE_BYTES
-        || bytes.last() != Some(&b'\n')
-    {
-        return Err(RuntimeClientError::InvalidFrame);
+        .map_err(|_error| E::from(RuntimeClientError::CannotRead))?;
+    let mut reader = BufReader::new(stream).take(MAX_SESSION_RESPONSE_BYTES + 1);
+    let mut line = Vec::new();
+    let mut total = 0_u64;
+    let mut frames = 0_u64;
+    loop {
+        line.clear();
+        let read = reader
+            .read_until(b'\n', &mut line)
+            .map_err(|_error| E::from(RuntimeClientError::CannotRead))?;
+        if read == 0 {
+            break;
+        }
+        total = total.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+        if total > MAX_SESSION_RESPONSE_BYTES || line.last() != Some(&b'\n') {
+            return Err(E::from(RuntimeClientError::InvalidFrame));
+        }
+        line.pop();
+        let text = String::from_utf8(std::mem::take(&mut line))
+            .map_err(|_error| E::from(RuntimeClientError::InvalidFrame))?;
+        let text = text.strip_suffix('\r').unwrap_or(&text);
+        on_frame(text)?;
+        frames = frames.saturating_add(1);
     }
-    String::from_utf8(bytes)
-        .map(|text| text.lines().map(str::to_owned).collect())
-        .map_err(|_error| RuntimeClientError::InvalidFrame)
+    if frames == 0 {
+        return Err(E::from(RuntimeClientError::InvalidFrame));
+    }
+    Ok(())
 }
 
 fn validate(request: &SessionSendRequest<'_>) -> Result<(), RuntimeClientError> {

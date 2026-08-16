@@ -2,42 +2,54 @@ use serde_json::Value;
 
 use super::bridge::ChannelBridgeError;
 
-pub(crate) fn assistant_text(frames: &[String]) -> Result<String, ChannelBridgeError> {
-    let mut final_text = None;
-    let mut deltas = String::new();
-    for frame in frames {
+#[derive(Default)]
+pub(crate) struct AssistantEvents {
+    final_text: Option<String>,
+    deltas: String,
+    error: Option<String>,
+}
+
+impl AssistantEvents {
+    pub(crate) fn push(&mut self, frame: &str) -> Option<String> {
         let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
+            return None;
         };
         match value.get("type").and_then(Value::as_str) {
             Some("message") if value.get("role").and_then(Value::as_str) == Some("assistant") => {
                 if let Some(text) = message_text(&value) {
-                    final_text = Some(text);
+                    self.final_text = Some(text);
                 }
             }
             Some("delta") => {
-                if let Some(text) = value.get("text").and_then(Value::as_str) {
-                    deltas.push_str(text);
-                }
+                let text = value.get("text").and_then(Value::as_str)?;
+                self.deltas.push_str(text);
+                return Some(text.to_owned());
             }
-            Some("error") => {
-                if value.get("recoverable").and_then(Value::as_bool) != Some(true) {
-                    let text = value
+            Some("error") if value.get("recoverable").and_then(Value::as_bool) != Some(true) => {
+                self.error = Some(
+                    value
                         .get("message")
                         .and_then(Value::as_str)
-                        .unwrap_or("agent error");
-                    return Err(ChannelBridgeError::Agent(text.to_owned()));
-                }
+                        .unwrap_or("agent error")
+                        .to_owned(),
+                );
             }
             Some("done") if value.get("status").and_then(Value::as_str) == Some("error") => {
-                return Err(ChannelBridgeError::Agent("agent run failed".to_owned()));
+                self.error = Some("agent run failed".to_owned());
             }
             _ => {}
         }
+        None
     }
-    final_text
-        .or_else(|| (!deltas.is_empty()).then_some(deltas))
-        .ok_or(ChannelBridgeError::EmptyReply)
+
+    pub(crate) fn finish(self) -> Result<String, ChannelBridgeError> {
+        if let Some(error) = self.error {
+            return Err(ChannelBridgeError::Agent(error));
+        }
+        self.final_text
+            .or_else(|| (!self.deltas.is_empty()).then_some(self.deltas))
+            .ok_or(ChannelBridgeError::EmptyReply)
+    }
 }
 
 fn message_text(value: &Value) -> Option<String> {

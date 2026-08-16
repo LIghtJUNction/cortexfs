@@ -3,9 +3,12 @@ use std::{fmt, time::Duration};
 use cortexfs_channels::{ChannelCodec, ChannelError, platform::telegram::TelegramCodec};
 use serde_json::Value;
 
-use super::bridge::{AgentChannelBridge, ChannelBridgeError};
+use super::bridge::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink};
 
 mod api;
+mod message;
+mod progress;
+mod request;
 
 /// Foreground Telegram long-poll configuration.
 pub struct TelegramConfig {
@@ -86,8 +89,13 @@ pub fn run(config: &TelegramConfig, bridge: &AgentChannelBridge) -> Result<(), T
                 }
                 continue;
             };
-            let outbound = bridge.handle(inbound)?;
-            api::send_message(&client, config, codec.encode(&outbound)?)?;
+            let mut sink = progress::Progress::new(&client, config, &inbound);
+            match bridge.handle_with_progress(inbound, &mut sink) {
+                Ok(outbound) if !sink.completed() => {
+                    api::send_message(&client, config, codec.encode(&outbound)?)?;
+                }
+                Ok(_) | Err(_) => {}
+            }
             if let Some(update_id) = update_id {
                 offset = offset.max(update_id.saturating_add(1));
             }

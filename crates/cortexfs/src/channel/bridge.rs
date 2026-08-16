@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use cortexfs_channels::{
-    ChannelError, ChannelSessionRoute, InboundMessage, MessageBody, MessageTarget, OutboundMessage,
-};
-use cortexfs_runtime_client::{RuntimeClientError, SessionSendRequest, session};
+use cortexfs_channels::{ChannelError, ChannelSessionRoute, InboundMessage, MessageTarget};
+use cortexfs_runtime_client::RuntimeClientError;
 
-use super::event::assistant_text;
+mod handle;
+mod safe;
+mod socket;
 
 /// Errors at the boundary between a channel adapter and an agent socket.
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +19,18 @@ pub enum ChannelBridgeError {
     #[error("agent run failed: {0}")]
     Agent(String),
 }
+
+pub(crate) trait ChannelProgressSink {
+    fn begin(&mut self, _inbound: &InboundMessage) {}
+    fn delta(&mut self, _text: &str) {}
+    fn complete(&mut self, _text: &str) {}
+    fn error(&mut self, _message: &str) {}
+    fn completed(&self) -> bool {
+        false
+    }
+}
+
+impl ChannelProgressSink for () {}
 
 /// Routes every conversation to one durable `CortexFS` agent session.
 #[derive(Clone, Debug)]
@@ -51,30 +63,7 @@ impl AgentChannelBridge {
         self.route.session_for(target)
     }
 
-    pub fn handle(&self, inbound: InboundMessage) -> Result<OutboundMessage, ChannelBridgeError> {
-        inbound.body.validate()?;
-        let session_name = self.route.session_for(&inbound.target);
-        let frames = session::send(
-            &self.socket,
-            SessionSendRequest {
-                request_id: &self.route.request_id_for(&inbound),
-                session: &session_name,
-                scope: "private",
-                cwd: self.cwd.as_deref(),
-                workspace: None,
-                input: &inbound.body.text,
-            },
-        )?;
-        let reply = assistant_text(&frames)?;
-        Ok(OutboundMessage {
-            target: MessageTarget {
-                channel: inbound.target.channel,
-                conversation: inbound.target.conversation,
-                thread: inbound.target.thread,
-                reply_to: Some(inbound.id),
-            },
-            body: MessageBody::text(reply)?,
-            metadata: inbound.metadata,
-        })
+    pub fn check_socket(&self) -> Result<(), ChannelBridgeError> {
+        socket::check(&self.socket)
     }
 }

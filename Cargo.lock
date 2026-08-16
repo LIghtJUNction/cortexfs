@@ -566,7 +566,9 @@ dependencies = [
  "arrow-schema",
  "base64",
  "cortexfs-channels",
+ "cortexfs-context",
  "cortexfs-paths",
+ "cortexfs-protocol",
  "cortexfs-runtime-client",
  "cortexfs-tool-sdk",
  "fuser",
@@ -616,6 +618,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexfs-context"
+version = "0.1.7"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cortexfs-mcp"
 version = "0.1.7"
 dependencies = [
@@ -629,8 +639,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexfs-metadatas"
+version = "0.1.7"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "cortexfs-paths"
 version = "0.1.7"
+
+[[package]]
+name = "cortexfs-protocol"
+version = "0.1.7"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cortexfs-runtime-client"

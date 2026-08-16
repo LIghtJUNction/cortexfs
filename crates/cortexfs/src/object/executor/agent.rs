@@ -225,7 +225,7 @@ pub(crate) fn candidate_window_budget(
     let effective = setting
         .resolve(limit)
         .map_err(|error| ExecError::new(format!("ineligible context limit: {error:?}")))?;
-    Ok(AgentWindowBudget::from_effective(effective))
+    Ok(budget_from_effective(effective))
 }
 
 pub(crate) fn parse_agent_context_budget(
@@ -250,7 +250,7 @@ pub(crate) fn parse_agent_context_budget(
         ));
     }
     let window = ModelContextLimit::known(token_value)
-        .and_then(AgentWindowBudget::from_effective)
+        .and_then(budget_from_effective)
         .ok_or_else(|| ExecError::new("invalid context window environment: token value is zero"))?;
     let char_value = chars.parse::<usize>().map_err(|_error| {
         ExecError::new(

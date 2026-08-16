@@ -44,9 +44,12 @@ The existing agent socket file remains the source of truth for idempotency, dura
 assistant event framing. Re-delivering the same platform message therefore
 replays the existing session result instead of executing the agent twice.
 
-The bridge maps the final assistant `message` event (or accumulated `delta`
-events) back to the same channel target. Errors and tool events are not
-exposed as assistant text.
+The bridge may consume the same stream incrementally. Built-in interactive
+hosts use `start`, `delta`, `message`, `error`, and `done` frames to provide a
+transport-local acknowledgement, typing indicator, bounded placeholder edit,
+and final message. These progress effects are not written to session history;
+the socket remains the source of truth. Errors and tool events are not exposed
+as assistant text unless the host chooses a user-facing failure notice.
 
 ## Built-in host
 
@@ -54,6 +57,13 @@ exposed as assistant text.
 subcommand, does not create a new root namespace, and does not watch files.
 Discord is configured with `/etc/cortexfs/channels/discord.toml` and runs over
 the Gateway; webhook modes remain available for the other stateless hosts:
+
+The built-in configuration contract uses the public client endpoint
+`/ctx/agent/<agent>.sock`, derived by `cortexfs-paths::agent_client_socket`.
+Private `/run/cortexfs/agent/<agent>.sock` paths are systemd implementation
+details and are rejected by the channel config loader. A host must verify the
+selected storage generation and live agent socket before advertising itself as
+ready.
 
 ```bash
 # Discord Gateway
@@ -75,5 +85,8 @@ verification is deployment policy and must not be silently bypassed.
 
 The codec currently covers Telegram text updates, Discord message/webhook
 payloads, Slack message events and URL verification, and Feishu/Lark text
-events. Media, reactions, and platform-specific signature/encryption features
-remain explicit capability work rather than being guessed as text.
+events. Discord and Telegram foreground hosts support best-effort reactions,
+typing indicators, placeholder messages, and coalesced edits; webhook hosts
+remain final-message only until their platform-specific edit contract is
+configured. Media and signature/encryption features remain explicit capability
+work rather than being guessed as text.

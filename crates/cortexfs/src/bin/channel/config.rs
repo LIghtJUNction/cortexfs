@@ -82,9 +82,24 @@ pub fn load() -> Result<CommandConfig, ConfigError> {
 }
 
 fn common() -> Result<CommonConfig, ConfigError> {
+    let agent = required("CORTEXFS_AGENT")?;
+    if !cortexfs::is_object_name(&agent) {
+        return Err(ConfigError::Invalid(
+            "CORTEXFS_AGENT",
+            "invalid agent name".to_owned(),
+        ));
+    }
+    let socket = PathBuf::from(required("CORTEXFS_AGENT_SOCKET")?);
+    let expected = cortexfs_paths::agent_client_socket(&agent);
+    if socket != expected {
+        return Err(ConfigError::Invalid(
+            "CORTEXFS_AGENT_SOCKET",
+            format!("use {}", expected.display()),
+        ));
+    }
     Ok(CommonConfig {
-        socket: PathBuf::from(required("CORTEXFS_AGENT_SOCKET")?),
-        agent: required("CORTEXFS_AGENT")?,
+        socket,
+        agent,
         prefix: optional("CORTEXFS_CHANNEL_SESSION_PREFIX", "im"),
         cwd: env::var("CORTEXFS_AGENT_CWD").ok(),
     })
