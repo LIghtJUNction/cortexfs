@@ -19,7 +19,7 @@ pub fn reconcile_provider_model_tree(
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
     let active = snapshot.active();
     let models = snapshot.models();
-    let model_path = root.join("model");
+    let model_path = cortexfs_paths::model_root_path(root);
     create_plain_dir(&model_path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
     let model_root =
         open_plain_directory(&model_path).map_err(|_error| ReferenceTreeError::CannotCreate)?;

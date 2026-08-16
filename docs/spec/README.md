@@ -85,6 +85,7 @@ tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
 ctx-coreutils.md        ctx command contract
 rolling-upgrades.md     rolling reference-tree update and storage switch rules
 channel-abi.md          multi-IM channel crate, routing, and host boundary
+paths.md                public path constants and filesystem/socket path ABI
 ```
 
 ## External references

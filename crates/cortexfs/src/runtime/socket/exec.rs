@@ -218,9 +218,7 @@ fn update_socket_prompt(
     }
     validate_agent_bootstrap_control_content(&request.control, &request.content)
         .map_err(|_error| runtime::control::RunCapabilityError::InvalidFrame)?;
-    let control_dir = source_root
-        .join("agent")
-        .join(format!("{}.d", request.agent));
+    let control_dir = cortexfs_paths::agent_control_path(source_root, &request.agent);
     open_plain_directory(&control_dir)
         .map_err(|_error| runtime::control::RunCapabilityError::CannotWrite)?;
     // 0o644 matches bootstrap-created prompt controls, so a self-updated

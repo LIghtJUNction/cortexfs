@@ -87,7 +87,7 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
         model: DEFAULT_WORKER_MODEL,
     },
 ];
-pub(crate) const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
+pub(crate) const REFERENCE_OBJECT_RUNNER: &str = CORTEXFS_OBJECT_RUNNER;
 
 pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(
@@ -117,13 +117,17 @@ pub(crate) fn ensure_reference_model_aliases(
     snapshot: &ProviderSnapshot,
 ) -> Result<(), ReferenceTreeError> {
     for alias in MODEL_ALIASES {
-        ensure_reference_model_alias(&root.join("model").join(alias), alias, snapshot)?;
+        ensure_reference_model_alias(
+            &cortexfs_paths::model_root_path(root).join(alias),
+            alias,
+            snapshot,
+        )?;
     }
     Ok(())
 }
 
 pub(crate) fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
-    let docs = root.join("shared").join(MANUAL_SHARED_DIR);
+    let docs = cortexfs_paths::shared_path(root, MANUAL_SHARED_DIR);
     let man = docs.join(MANUAL_MAN_DIR);
     create_reference_dir(&docs)?;
     create_reference_dir(&man)?;
@@ -137,22 +141,25 @@ pub(crate) fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeErro
 pub(crate) fn create_reference_root(root: &Path) -> Result<(), ReferenceTreeError> {
     for entry in ROOT_ENTRIES {
         match *entry {
-            "status" => write_reference_text(&root.join("status"), "ready\n")?,
-            directory => create_reference_dir(&root.join(directory))?,
+            "status" => write_reference_text(&cortexfs_paths::status_path(root), "ready\n")?,
+            directory => create_reference_dir(
+                &cortexfs_paths::root_entry_path(root, directory)
+                    .ok_or(ReferenceTreeError::CannotCreate)?,
+            )?,
         }
     }
     Ok(())
 }
 
 pub(crate) fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
-    let ctx = root.join("bin").join("ctx");
+    let ctx = cortexfs_paths::bin_root_path(root).join("ctx");
     write_reference_text(
         &ctx,
         "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec /usr/bin/ctx \"$@\"\n",
     )?;
     set_reference_executable(&ctx)?;
     for name in ["ctxterm", "tsh", "cortexfs-object-runner"] {
-        let path = root.join("bin").join(name);
+        let path = cortexfs_paths::bin_root_path(root).join(name);
         write_reference_text(
             &path,
             &format!(
@@ -172,13 +179,21 @@ pub(crate) fn ensure_reference_agent(
 ) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(root, ObjectClass::Agent, name, support::command::FALSE, &[])
         .map_err(ReferenceTreeError::Object)?;
-    let control = root.join("agent").join(format!("{name}.d"));
+    let control = cortexfs_paths::agent_control_path(root, name);
     let label = format!("user_u:agent_r:{name}_t:s0\n");
-    let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
+    let ctx_root = cortexfs_paths::ctx_root();
+    let home_root = format!(
+        "{}\n",
+        cortexfs_paths::agent_home_path(&ctx_root, "1000", name)
+            .join("root")
+            .display()
+    );
     let policy_subject = format!("{name}_t");
     let policy = reference_agent_policy(&policy_subject, name);
     let mount = format!(
-        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n"
+        "{root}\t{root}\tro\trbind,nosuid,nodev\n{}\t/home/agent\trw\trbind,nosuid,nodev\n",
+        cortexfs_paths::agent_home_path(&ctx_root, "1000", name).display(),
+        root = ctx_root.display(),
     );
     let overrides = [
         ("owner", "1000\n".to_owned()),
@@ -203,8 +218,15 @@ pub(crate) fn ensure_reference_agent(
         ("life", "owned\n".to_owned()),
         ("root", home_root),
         ("cwd", "/workspace\n".to_owned()),
-        ("env", "CTX_ROOT=/ctx\n".to_owned()),
-        ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
+        ("env", format!("CTX_ROOT={CTX_ROOT}\n")),
+        (
+            "path",
+            format!(
+                "{}:{}\n",
+                cortexfs_paths::tool_root_path(&ctx_root).display(),
+                cortexfs_paths::home_tool_path(&ctx_root, "1000").display()
+            ),
+        ),
         ("mount", mount),
         ("model", format!("{}\n", reference_agent_model(name))),
         ("window", "auto\n".to_owned()),
@@ -220,16 +242,19 @@ pub(crate) fn ensure_reference_agent(
         ("meta.json", "{}\n".to_owned()),
     ];
     for (file, content) in overrides {
-        write_reference_text(&control.join(file), &content)?;
+        write_reference_text(
+            &cortexfs_paths::agent_control_file_path(root, name, file),
+            &content,
+        )?;
     }
     write_reference_text(
-        &root.join("agent").join(name),
+        &cortexfs_paths::agent_path(root, name),
         &reference_agent_wrapper_script(name),
     )?;
-    set_reference_executable(&root.join("agent").join(name))?;
-    let uid = read_reference_owner_id(&control.join("uid"))?;
-    let gid = read_reference_owner_id(&control.join("gid"))?;
-    ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")), uid, gid)?;
+    set_reference_executable(&cortexfs_paths::agent_path(root, name))?;
+    let uid = read_reference_owner_id(&cortexfs_paths::agent_control_file_path(root, name, "uid"))?;
+    let gid = read_reference_owner_id(&cortexfs_paths::agent_control_file_path(root, name, "gid"))?;
+    ensure_reference_socket(&cortexfs_paths::agent_socket_path(root, name), uid, gid)?;
     ensure_reference_agent_control_ownership(&control)
 }
 
@@ -476,14 +501,11 @@ pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), Reference
         )
         .map_err(ReferenceTreeError::Object)?;
         if let Some(script) = reference_tool_stub_script(tool.name) {
-            write_reference_text(&root.join("tool").join(tool.name), script)?;
-            set_reference_executable(&root.join("tool").join(tool.name))?;
+            write_reference_text(&cortexfs_paths::tool_path(root, tool.name), &script)?;
+            set_reference_executable(&cortexfs_paths::tool_path(root, tool.name))?;
         }
         if tool.name == "tsh" {
-            write_reference_text(
-                &root.join("tool").join("tsh.d").join("config"),
-                DEFAULT_TSH_CONFIG,
-            )?;
+            write_reference_text(&cortexfs_paths::tool_config_path(root), DEFAULT_TSH_CONFIG)?;
         }
     }
     Ok(())

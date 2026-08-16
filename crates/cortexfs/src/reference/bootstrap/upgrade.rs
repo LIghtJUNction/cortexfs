@@ -136,9 +136,9 @@ pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
     );
 
     for agent in REFERENCE_AGENTS {
-        let exec = root.join("agent").join(agent.name);
-        let control = root.join("agent").join(format!("{}.d", agent.name));
-        let socket = root.join("agent").join(format!("{}.sock", agent.name));
+        let exec = cortexfs_paths::agent_path(root, agent.name);
+        let control = cortexfs_paths::agent_control_path(root, agent.name);
+        let socket = cortexfs_paths::agent_socket_path(root, agent.name);
         let exists = exec.exists() || control.exists() || fs::symlink_metadata(socket).is_ok();
         if agent.name == "worker" && exists && !worker_is_managed {
             plan.actions.push(BootstrapAction::SkipAgent {
@@ -263,9 +263,9 @@ pub(crate) fn reject_unsupported_version(plan: &BootstrapPlan) -> Result<(), Ref
 }
 
 fn retired_reference_agent_present(root: &Path, name: &str) -> bool {
-    let exec = root.join("agent").join(name);
-    let control = root.join("agent").join(format!("{name}.d"));
-    let sock = root.join("agent").join(format!("{name}.sock"));
+    let exec = cortexfs_paths::agent_path(root, name);
+    let control = cortexfs_paths::agent_control_path(root, name);
+    let sock = cortexfs_paths::agent_socket_path(root, name);
     exec.exists() || control.exists() || sock.exists()
 }
 
@@ -319,9 +319,9 @@ pub fn list_present_retired_reference_agents(root: &Path) -> Vec<String> {
     RETIRED_REFERENCE_AGENTS
         .iter()
         .filter(|name| {
-            root.join("agent").join(name).exists()
-                || root.join("agent").join(format!("{name}.d")).exists()
-                || root.join("agent").join(format!("{name}.sock")).exists()
+            cortexfs_paths::agent_path(root, name).exists()
+                || cortexfs_paths::agent_control_path(root, name).exists()
+                || cortexfs_paths::agent_socket_path(root, name).exists()
         })
         .map(|name| (*name).to_owned())
         .collect()

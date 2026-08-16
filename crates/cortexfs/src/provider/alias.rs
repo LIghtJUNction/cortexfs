@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{ProjectedProviderModel, ProviderSnapshot};
-use crate::{
-    DEFAULT_MODEL_ALIAS, DEFAULT_MODEL_ALIAS_TARGET, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
-};
+use crate::{DEFAULT_MODEL_ALIAS, HELPER_MODEL_ALIAS};
 
 pub fn current_model_alias_target(
     alias: &str,
@@ -16,19 +14,23 @@ pub fn current_model_alias_target(
         return existing.to_path_buf();
     }
     let preferred = match alias {
-        DEFAULT_MODEL_ALIAS => Some(DEFAULT_MODEL_ALIAS_TARGET),
-        HELPER_MODEL_ALIAS => Some(HELPER_MODEL_ALIAS_TARGET),
+        DEFAULT_MODEL_ALIAS => Some(cortexfs_paths::model_path(
+            &cortexfs_paths::ctx_root(),
+            "openai",
+            "gpt-5.6",
+        )),
+        HELPER_MODEL_ALIAS => Some(cortexfs_paths::model_path(
+            &cortexfs_paths::ctx_root(),
+            "openai",
+            "gpt-5.6-sol",
+        )),
         _ => None,
     };
     let selected = (alias == DEFAULT_MODEL_ALIAS)
         .then(|| configured_default_model(snapshot))
         .flatten()
         .or_else(|| {
-            preferred.and_then(|target| {
-                models
-                    .iter()
-                    .find(|model| model_target(model) == Path::new(target))
-            })
+            preferred.and_then(|target| models.iter().find(|model| model_target(model) == target))
         })
         .or_else(|| {
             (alias == HELPER_MODEL_ALIAS)
@@ -37,7 +39,10 @@ pub fn current_model_alias_target(
         })
         .or_else(|| capability_model(alias, models))
         .or_else(|| models.first());
-    selected.map_or_else(|| PathBuf::from("/ctx/model/debug/echo"), model_target)
+    selected.map_or_else(
+        || cortexfs_paths::model_path(&cortexfs_paths::ctx_root(), "debug", "echo"),
+        model_target,
+    )
 }
 
 fn configured_default_model(snapshot: &ProviderSnapshot) -> Option<&ProjectedProviderModel> {
@@ -64,12 +69,12 @@ fn configured_default_model(snapshot: &ProviderSnapshot) -> Option<&ProjectedPro
 }
 
 pub fn is_current_model_alias_target(target: &Path, models: &[ProjectedProviderModel]) -> bool {
-    target == Path::new("/ctx/model/debug/echo")
+    target == cortexfs_paths::model_path(&cortexfs_paths::ctx_root(), "debug", "echo")
         || models.iter().any(|model| target == model_target(model))
 }
 
 fn model_target(model: &ProjectedProviderModel) -> PathBuf {
-    PathBuf::from(format!("/ctx/model/{}/{}", model.provider, model.model))
+    cortexfs_paths::model_path(&cortexfs_paths::ctx_root(), &model.provider, &model.model)
 }
 
 fn capability_model<'a>(

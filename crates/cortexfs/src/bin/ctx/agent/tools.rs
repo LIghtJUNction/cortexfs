@@ -45,10 +45,12 @@ pub(crate) fn agent_visible_tool_entries(
             if !is_executable_file(&tool_path) || is_control_or_socket_name(&tool) {
                 continue;
             }
-            let status = read_optional_trimmed(
-                &tool_path.with_file_name(format!("{tool}.d")).join("status"),
-            )?
-            .unwrap_or_else(|| "unknown".to_owned());
+            let status_path = tool_path
+                .parent()
+                .map(|parent| cortexfs_paths::tool_control_file_path(parent, &tool, "status"))
+                .ok_or_else(|| CliError::unavailable("tool path has no parent"))?;
+            let status =
+                read_optional_trimmed(&status_path)?.unwrap_or_else(|| "unknown".to_owned());
             tools.push(AgentVisibleTool {
                 name: tool,
                 path: tool_path,

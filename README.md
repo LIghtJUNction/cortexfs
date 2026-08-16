@@ -8,6 +8,7 @@
   <a href="https://github.com/LIghtJUNction/cortexfs/actions/workflows/pages.yml"><img alt="Pages deployment" src="https://img.shields.io/github/actions/workflow/status/LIghtJUNction/cortexfs/pages.yml?branch=main&amp;label=pages"></a>
   <a href="https://lightjunction.github.io/cortexfs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-live-2A8F73"></a>
   <a href="https://crates.io/crates/cortexfs"><img alt="crates.io" src="https://img.shields.io/crates/v/cortexfs"></a>
+  <a href="https://crates.io/crates/cortexfs-paths"><img alt="cortexfs-paths on crates.io" src="https://img.shields.io/crates/v/cortexfs-paths"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust 1.91 or newer" src="https://img.shields.io/badge/rust-1.91%2B-000000?logo=rust"></a>
   <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img alt="Rust edition 2024" src="https://img.shields.io/badge/edition-2024-000000?logo=rust"></a>
   <a href="https://www.kernel.org/doc/html/latest/filesystems/fuse.html"><img alt="Linux FUSE" src="https://img.shields.io/badge/platform-Linux%20%7C%20FUSE-FCC624?logo=linux&amp;logoColor=black"></a>
@@ -62,6 +63,11 @@ for `.deb`, `.rpm`, Arch Linux packages, and portable tarballs.
 For Telegram, Discord, Slack, and Feishu/Lark integration, see the
 [multi-IM channel guide](docs/channels.md) and the normative
 [channel ABI](docs/spec/channel-abi.md).
+
+For integrations that need to derive CortexFS locations, use the published
+[`cortexfs-paths`](https://crates.io/crates/cortexfs-paths) ABI crate and the
+[path ABI guide](docs/paths.md); do not copy `/ctx` or host runtime path
+literals into adapters.
 
 [Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
 

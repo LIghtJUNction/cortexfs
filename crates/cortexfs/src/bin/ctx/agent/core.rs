@@ -311,25 +311,22 @@ pub(crate) fn agent_runtime_context_matches_values(
     let Ok(view) = derive_agent_runtime_view(source, agent) else {
         return false;
     };
-    let source_control = source.join("agent").join(format!("{agent}.d"));
-    let projected_control = root.join("agent").join(format!("{agent}.d"));
+    let source_control = cortexfs_paths::agent_control_path(source, agent);
+    let projected_control = cortexfs_paths::agent_control_path(root, agent);
     for file in [
         "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path", "mount",
         "model", "policy", "parent", "life", "perm",
     ] {
-        let source_value = fs::read_to_string(source_control.join(file));
-        let projected_value = fs::read_to_string(projected_control.join(file));
+        let source_value =
+            fs::read_to_string(cortexfs_paths::control_file_path(&source_control, file));
+        let projected_value =
+            fs::read_to_string(cortexfs_paths::control_file_path(&projected_control, file));
         if !matches!((source_value, projected_value), (Ok(left), Ok(right)) if left == right) {
             return false;
         }
     }
-    let session_dir = source
-        .join("home")
-        .join(view.owner().to_string())
-        .join("agent")
-        .join(agent)
-        .join("session")
-        .join(session);
+    let session_dir =
+        cortexfs_paths::agent_session_path(source, &view.owner().to_string(), agent, session);
     session_dir
         .symlink_metadata()
         .is_ok_and(|metadata| metadata.is_dir())

@@ -48,11 +48,24 @@ pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, St
         ("life".to_owned(), "owned".to_owned()),
         (
             "root".to_owned(),
-            format!("/ctx/home/{uid}/agent/{}/root", agent.name),
+            cortexfs_paths::agent_home_path(&cortexfs_paths::ctx_root(), &uid, &agent.name)
+                .join("root")
+                .display()
+                .to_string(),
         ),
         ("cwd".to_owned(), "/workspace".to_owned()),
-        ("env".to_owned(), "CTX_ROOT=/ctx".to_owned()),
-        ("path".to_owned(), format!("/ctx/tool:/ctx/home/{uid}/tool")),
+        (
+            "env".to_owned(),
+            format!("CTX_ROOT={}", cortexfs_paths::CTX_ROOT),
+        ),
+        (
+            "path".to_owned(),
+            format!(
+                "{}:{}",
+                cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root()).display(),
+                cortexfs_paths::home_tool_path(&cortexfs_paths::ctx_root(), &uid).display()
+            ),
+        ),
         (
             "mount".to_owned(),
             agent_new_mount_control(&uid, &agent.name, &[]),

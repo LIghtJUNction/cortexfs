@@ -35,10 +35,7 @@ fn main() -> ExitCode {
 
 fn run() -> io::Result<()> {
     let mut options = parse(env::args().skip(1))?;
-    let socket = options
-        .root
-        .join("agent")
-        .join(format!("{}.sock", options.agent));
+    let socket = cortexfs_paths::agent_socket_path(&options.root, &options.agent);
     let workspace = env::current_dir()?;
     if !io::stdin().is_terminal() {
         let mut input = String::new();
@@ -185,21 +182,19 @@ fn helper(options: &Options, workspace: &Path) -> ChatHelper {
 
 fn session_dir(options: &Options) -> PathBuf {
     let uid = nix::unistd::Uid::effective().as_raw();
-    options
-        .root
-        .join("home")
-        .join(uid.to_string())
-        .join("agent")
-        .join(&options.agent)
-        .join("session")
-        .join(&options.session)
+    cortexfs_paths::agent_session_path(
+        &options.root,
+        &uid.to_string(),
+        &options.agent,
+        &options.session,
+    )
 }
 fn messages(options: &Options) -> PathBuf {
     session_dir(options).join("messages.jsonl")
 }
 fn tool_names(root: &Path) -> Vec<String> {
     const MAX_TOOLS: usize = 4096;
-    fs::read_dir(root.join("tool"))
+    fs::read_dir(cortexfs_paths::tool_root_path(root))
         .ok()
         .into_iter()
         .flatten()
@@ -248,7 +243,7 @@ fn validate_name(value: &str) -> io::Result<()> {
 }
 
 fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
-    let mut root = PathBuf::from("/ctx");
+    let mut root = cortexfs_paths::ctx_root();
     let mut agent = None;
     let mut session = "default".to_owned();
     let mut raw = false;

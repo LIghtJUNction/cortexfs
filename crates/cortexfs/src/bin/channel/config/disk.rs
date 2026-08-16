@@ -75,7 +75,7 @@ fn validate(config: &DiscordConfig) -> Result<(), DiscordConfigError> {
 pub(super) fn load_command(
     mut args: impl Iterator<Item = String>,
 ) -> Result<CommandConfig, ConfigError> {
-    let mut path = PathBuf::from("/etc/cortexfs/channels/discord.toml");
+    let mut path = cortexfs_paths::channel_config_path("discord");
     while let Some(arg) = args.next() {
         if arg != "--config" {
             return Err(ConfigError::Usage);

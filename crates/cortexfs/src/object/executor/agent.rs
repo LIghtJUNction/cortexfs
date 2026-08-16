@@ -69,10 +69,9 @@ pub(crate) struct AgentModelRunConfig {
 
 impl AgentModelRunConfig {
     fn new(agent: &str) -> Result<Self, ExecError> {
-        let source =
-            env::var_os("CTX_SOURCE").map_or_else(|| PathBuf::from(DEFAULT_SOURCE), PathBuf::from);
-        let ctx_root =
-            env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+        let source = env::var_os("CTX_SOURCE")
+            .map_or_else(cortexfs_paths::storage_current_path, PathBuf::from);
+        let ctx_root = env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
         Self::new_with_paths(agent, source, ctx_root)
     }
 
@@ -83,7 +82,7 @@ impl AgentModelRunConfig {
     ) -> Result<Self, ExecError> {
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
         let agent_dir = agent_model_control_dir(&source, agent);
-        let model_path = agent_dir.join("model");
+        let model_path = cortexfs_paths::control_file_path(&agent_dir, "model");
         let configured_model =
             read_small_plain_text_file(&model_path, MAX_RUNNER_CONTROL_BYTES, "runner")
                 .map_or_else(
@@ -216,10 +215,7 @@ pub(crate) fn candidate_window_budget(
         .split_once('/')
         .ok_or_else(|| ExecError::new("invalid model candidate"))?;
     let content = read_small_plain_text_file(
-        &ctx_root
-            .join("model")
-            .join(provider)
-            .join(format!("{name}.d/limit")),
+        &cortexfs_paths::model_control_file_path(ctx_root, provider, name, "limit"),
         MAX_RUNNER_CONTROL_BYTES,
         "runner",
     )
@@ -303,7 +299,7 @@ pub(crate) fn agent_model_control_dir(source: &Path, agent: &str) -> PathBuf {
             return control;
         }
     }
-    source.join("agent").join(format!("{agent}.d"))
+    cortexfs_paths::agent_control_path(source, agent)
 }
 
 pub(crate) fn current_user_agent_model_control_dirs(source: &Path, agent: &str) -> Vec<PathBuf> {
@@ -311,13 +307,11 @@ pub(crate) fn current_user_agent_model_control_dirs(source: &Path, agent: &str) 
     if let Some(ctx_home) = env::var_os("CTX_HOME").map(PathBuf::from)
         && ctx_home.starts_with(source)
     {
-        controls.push(ctx_home.join("agent").join(format!("{agent}.d")));
+        controls.push(cortexfs_paths::agent_control_path(&ctx_home, agent));
     }
-    let uid_control = source
-        .join("home")
-        .join(nix::unistd::Uid::effective().as_raw().to_string())
-        .join("agent")
-        .join(format!("{agent}.d"));
+    let uid = nix::unistd::Uid::effective().as_raw().to_string();
+    let uid_control =
+        cortexfs_paths::agent_control_path(&cortexfs_paths::ctx_home_path(source, &uid), agent);
     if !controls.iter().any(|control| control == &uid_control) {
         controls.push(uid_control);
     }

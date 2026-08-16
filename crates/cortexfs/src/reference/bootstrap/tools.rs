@@ -153,21 +153,18 @@ cache_capacity=32
 window_percent=1
 ";
 
-pub(crate) fn reference_tool_stub_script(name: &str) -> Option<&'static str> {
-    match name {
-        "tsh" => Some(reference_exec_named_tool_script("tsh")),
-        _ => None,
-    }
+pub(crate) fn reference_tool_stub_script(name: &str) -> Option<String> {
+    (name == "tsh").then(|| reference_exec_named_tool_script(name))
 }
 
-pub(crate) fn reference_exec_named_tool_script(name: &'static str) -> &'static str {
+pub(crate) fn reference_exec_named_tool_script(name: &str) -> String {
     match name {
-        "tsh" => {
-            r#"#!/bin/sh
-# CortexFS reference-tree tsh tool.
-exec /ctx/bin/tsh "$@"
-"#
-        }
-        _ => "",
+        "tsh" => format!(
+            "#!/bin/sh\n# CortexFS reference-tree tsh tool.\nexec {} \"$@\"\n",
+            cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+                .join("tsh")
+                .display()
+        ),
+        _ => String::new(),
     }
 }

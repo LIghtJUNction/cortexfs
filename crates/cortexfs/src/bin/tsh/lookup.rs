@@ -118,13 +118,17 @@ pub(crate) fn ctx_tool_path_with_home(
 pub(crate) fn tshrc_tool_path(root: &Path, home: &Path, value: &str) -> ToolPath {
     ToolPath::new(value.split(':').map(|component| {
         let path = Path::new(component);
-        if path == Path::new("/ctx/tool") {
-            return root.join("tool");
+        if path == cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root()) {
+            return cortexfs_paths::tool_root_path(root);
         }
         if let Some(uid) = home.file_name()
-            && path == Path::new("/ctx/home").join(uid).join("tool")
+            && path
+                == cortexfs_paths::home_tool_path(
+                    &cortexfs_paths::ctx_root(),
+                    &uid.to_string_lossy(),
+                )
         {
-            return home.join("tool");
+            return cortexfs_paths::home_tool_from_home_path(home);
         }
         path.to_path_buf()
     }))
@@ -197,21 +201,25 @@ pub(crate) fn validate_tshrc_ctx_path(value: &str, root: &Path, home: &Path) -> 
 }
 
 pub(crate) fn is_allowed_tshrc_tool_dir(path: &Path, root: &Path, home: &Path) -> bool {
-    path == Path::new("/ctx/tool")
-        || path == root.join("tool")
-        || path == home.join("tool")
-        || home
-            .file_name()
-            .is_some_and(|uid| path == Path::new("/ctx/home").join(uid).join("tool"))
+    path == cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root())
+        || path == cortexfs_paths::tool_root_path(root)
+        || path == cortexfs_paths::home_tool_from_home_path(home)
+        || home.file_name().is_some_and(|uid| {
+            path == cortexfs_paths::home_tool_path(
+                &cortexfs_paths::ctx_root(),
+                &uid.to_string_lossy(),
+            )
+        })
 }
 
 pub(crate) fn ctx_home(root: &Path) -> Result<PathBuf, TshError> {
     if let Some(home) = env::var_os("CTX_HOME") {
         return Ok(PathBuf::from(home));
     }
-    Ok(root
-        .join("home")
-        .join(current_uid_text().map_err(TshError::unavailable)?))
+    Ok(cortexfs_paths::ctx_home_path(
+        root,
+        &current_uid_text().map_err(TshError::unavailable)?,
+    ))
 }
 
 pub(crate) fn tool_path_error(error: cortexfs::ToolPathError) -> TshError {

@@ -38,18 +38,19 @@ pub(crate) fn agent_runtime_socket(
     name: &str,
     session: &str,
 ) -> Result<PathBuf, CliError> {
-    let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
-        Some(path) => PathBuf::from(path),
-        None => PathBuf::from("/run")
-            .join("user")
-            .join(current_uid_for_ctx(root)?),
+    let runtime_root = if let Some(path) = env::var_os("XDG_RUNTIME_DIR") {
+        PathBuf::from(path)
+    } else {
+        let uid = current_uid_for_ctx(root)?
+            .parse::<u32>()
+            .map_err(|error| CliError::unavailable(format!("invalid current uid: {error}")))?;
+        cortexfs_paths::user_runtime_root(uid)
     };
-    Ok(runtime_root
-        .join("cortexfs")
-        .join("terminal")
-        .join(name)
-        .join(session)
-        .join("main.sock"))
+    Ok(cortexfs_paths::terminal_runtime_socket(
+        &runtime_root,
+        name,
+        session,
+    ))
 }
 
 pub(crate) fn ensure_best_effort_visible_terminal_socket(

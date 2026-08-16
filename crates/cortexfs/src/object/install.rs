@@ -558,11 +558,18 @@ pub(crate) fn install_class_path(
     tier: InstallTier,
 ) -> Result<PathBuf, InstallError> {
     let directory = match (class, tier) {
-        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => root
-            .join("home")
-            .join(nix::unistd::Uid::effective().as_raw().to_string())
-            .join(class.as_str()),
-        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => root.join(class.as_str()),
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => {
+            cortexfs_paths::object_root_path(
+                &cortexfs_paths::ctx_home_path(
+                    root,
+                    &nix::unistd::Uid::effective().as_raw().to_string(),
+                ),
+                class.as_str(),
+            )
+        }
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => {
+            cortexfs_paths::object_root_path(root, class.as_str())
+        }
         (ObjectClass::Model, _) => {
             return Err(InstallError::invalid(
                 "model object installation is unsupported",

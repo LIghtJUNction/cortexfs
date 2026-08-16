@@ -9,11 +9,18 @@ pub(crate) fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeErro
     for agent in REFERENCE_AGENTS {
         ensure_reference_home_agent(root, agent.name)?;
     }
-    create_reference_dir(&root.join("home").join("1000").join("tool"))?;
-    create_reference_dir(&root.join("home").join("1000").join("model"))?;
+    create_reference_dir(&cortexfs_paths::home_tool_path(root, "1000"))?;
+    create_reference_dir(&cortexfs_paths::home_model_path(root, "1000"))?;
+    let ctx = cortexfs_paths::ctx_root();
+    let tool_path = cortexfs_paths::tool_root_path(&ctx);
+    let home_tool_path = cortexfs_paths::home_tool_path(&ctx, "1000");
     write_reference_text(
-        &root.join("home").join("1000").join(".tshrc"),
-        "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n",
+        &cortexfs_paths::ctx_home_path(root, "1000").join(".tshrc"),
+        &format!(
+            "CTX_PATH={}:{}\n",
+            tool_path.display(),
+            home_tool_path.display()
+        ),
     )?;
 
     ensure_reference_home_scaffold_ownership(root)
@@ -23,7 +30,7 @@ pub(crate) fn ensure_reference_home_agent(
     root: &Path,
     agent: &str,
 ) -> Result<(), ReferenceTreeError> {
-    let agent_root = root.join("home").join("1000").join("agent").join(agent);
+    let agent_root = cortexfs_paths::agent_home_path(root, "1000", agent);
     create_reference_dir(&agent_root.join("root"))?;
     create_reference_dir(&agent_root.join("session").join("index").join("by-cwd"))?;
     create_reference_dir(&agent_root.join("session").join("index").join("by-hash"))?;
@@ -36,18 +43,18 @@ pub(crate) fn ensure_reference_home_agent(
 pub(crate) fn ensure_reference_home_scaffold_ownership(
     root: &Path,
 ) -> Result<(), ReferenceTreeError> {
-    let home = root.join("home").join("1000");
+    let home = cortexfs_paths::ctx_home_path(root, "1000");
     for path in [
         home.clone(),
-        home.join("agent"),
-        home.join("tool"),
-        home.join("model"),
+        cortexfs_paths::home_agent_root_path(root, "1000"),
+        cortexfs_paths::home_tool_path(root, "1000"),
+        cortexfs_paths::home_model_path(root, "1000"),
         home.join(".tshrc"),
     ] {
         ensure_reference_home_entry_ownership(&path)?;
     }
     for agent in REFERENCE_AGENTS {
-        let agent_root = home.join("agent").join(agent.name);
+        let agent_root = cortexfs_paths::agent_home_path(root, "1000", agent.name);
         for path in [
             agent_root.clone(),
             agent_root.join("root"),
@@ -70,8 +77,14 @@ pub(crate) fn migrate_reference_legacy_session_meta_models(
     root: &Path,
 ) -> Result<(), ReferenceTreeError> {
     let mut meta_paths = Vec::new();
-    collect_reference_agent_session_meta_paths(&root.join("home"), &mut meta_paths)?;
-    collect_reference_shared_agent_session_meta_paths(&root.join("shared"), &mut meta_paths)?;
+    collect_reference_agent_session_meta_paths(
+        &cortexfs_paths::home_root_path(root),
+        &mut meta_paths,
+    )?;
+    collect_reference_shared_agent_session_meta_paths(
+        &cortexfs_paths::shared_root_path(root),
+        &mut meta_paths,
+    )?;
     for meta_path in meta_paths {
         migrate_reference_session_meta_model(&meta_path)?;
     }
@@ -91,7 +104,7 @@ pub(crate) fn collect_reference_agent_session_meta_paths(
         let user_name = reference_tree_entry_name(&user)?;
         if reference_tree_entry_is_directory(&home_dir, user_name.as_str())? {
             collect_reference_session_meta_paths(
-                &home_root.join(&user_name).join("agent"),
+                &cortexfs_paths::home_agent_root_from_home_path(&home_root.join(&user_name)),
                 meta_paths,
             )?;
         }
@@ -112,7 +125,7 @@ pub(crate) fn collect_reference_shared_agent_session_meta_paths(
         let space_name = reference_tree_entry_name(&space)?;
         if reference_tree_entry_is_directory(&shared_dir, space_name.as_str())? {
             collect_reference_session_meta_paths(
-                &shared_root.join(&space_name).join("agent"),
+                &cortexfs_paths::shared_agent_root_from_space_path(&shared_root.join(&space_name)),
                 meta_paths,
             )?;
         }

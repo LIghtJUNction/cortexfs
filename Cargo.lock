@@ -566,6 +566,7 @@ dependencies = [
  "arrow-schema",
  "base64",
  "cortexfs-channels",
+ "cortexfs-paths",
  "cortexfs-runtime-client",
  "cortexfs-tool-sdk",
  "fuser",
@@ -626,6 +627,10 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
 ]
+
+[[package]]
+name = "cortexfs-paths"
+version = "0.1.7"
 
 [[package]]
 name = "cortexfs-runtime-client"

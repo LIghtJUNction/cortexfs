@@ -890,7 +890,7 @@ impl FuseProjection {
     ) -> Result<(), FuseError> {
         let candidate =
             std::str::from_utf8(candidate).map_err(|_error| FuseError::InvalidContent)?;
-        let control_dir = self.root.join("agent").join(format!("{agent}.d"));
+        let control_dir = cortexfs_paths::agent_control_path(&self.root, agent);
         // During initial agent materialization the peer control does not exist
         // yet; a missing peer takes its creation default instead of failing.
         let read_peer = |file: &str| match support::plain::read_small_text_file(
@@ -926,9 +926,13 @@ impl FuseProjection {
             .ok_or(FuseError::InvalidContent)?;
         let model_name = if is_model_alias(model) {
             let target = self.default_model_alias_target(model, snapshot)?;
+            let model_root = format!(
+                "{}/",
+                cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
+            );
             target
                 .to_str()
-                .and_then(|target| target.strip_prefix("/ctx/model/"))
+                .and_then(|target| target.strip_prefix(&model_root))
                 .filter(|target| is_model_name(target))
                 .ok_or(FuseError::InvalidContent)?
                 .to_owned()
@@ -960,8 +964,9 @@ impl FuseProjection {
         if !matches!(control, "model" | "window") {
             return Ok(None);
         }
-        let control_dir = open_plain_directory(&self.root.join("agent").join(format!("{agent}.d")))
-            .map_err(|_error| FuseError::Io)?;
+        let control_dir =
+            open_plain_directory(&cortexfs_paths::agent_control_path(&self.root, agent))
+                .map_err(|_error| FuseError::Io)?;
         #[cfg(test)]
         AGENT_WINDOW_LOCK_HOOK.with(|hook| {
             if let Some(sender) = hook.borrow_mut().take() {
@@ -981,7 +986,7 @@ impl FuseProjection {
     }
 
     pub(crate) fn authorize_agent_owner(&self, agent: &str, uid: u32) -> Result<(), FuseError> {
-        let control = self.root.join("agent").join(format!("{agent}.d"));
+        let control = cortexfs_paths::agent_control_path(&self.root, agent);
         let metadata = fs::symlink_metadata(&control).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 FuseError::NotFound
@@ -992,7 +997,7 @@ impl FuseProjection {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(FuseError::InvalidPath);
         }
-        let owner = control.join("owner");
+        let owner = cortexfs_paths::agent_control_file_path(&self.root, agent, "owner");
         match support::plain::read_small_text_file(&owner, 64) {
             Ok(owner) => owner
                 .trim()

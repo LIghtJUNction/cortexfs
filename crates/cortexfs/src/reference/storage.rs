@@ -13,10 +13,7 @@ use super::bootstrap::{
     plan_reference_tree_upgrade, read_bootstrap_state,
 };
 
-/// Default host storage directory containing versioned `CortexFS` generations.
-pub const SYSTEM_STORAGE_DIR: &str = "/var/lib/cortexfs/storage";
-/// Stable host path selected by the system mount and agent runtime.
-pub const SYSTEM_STORAGE_CURRENT: &str = "/var/lib/cortexfs/storage/current";
+pub use cortexfs_paths::{SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR};
 
 /// Error while staging or atomically selecting a storage generation.
 #[derive(Debug, thiserror::Error)]
@@ -46,9 +43,9 @@ pub fn update_storage_generation_with_prune(
     prune: bool,
 ) -> Result<PathBuf, StorageUpdateError> {
     require_plain_or_create(storage)?;
-    let generations = storage.join("generations");
+    let generations = cortexfs_paths::storage_generations_path(storage);
     require_plain_or_create(&generations)?;
-    let lock = open_lock(&storage.join(".update.lock"))?;
+    let lock = open_lock(&cortexfs_paths::storage_update_lock_path(storage))?;
     let _lock = Flock::lock(lock, FlockArg::LockExclusiveNonblock).map_err(|(_file, _error)| {
         StorageUpdateError::Invalid("storage update is already running")
     })?;
@@ -130,7 +127,7 @@ fn current_generation(
     storage: &Path,
     generations: &Path,
 ) -> Result<Option<PathBuf>, StorageUpdateError> {
-    let current = storage.join("current");
+    let current = cortexfs_paths::storage_current_link_path(storage);
     let target = match fs::read_link(&current) {
         Ok(target) => target,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -167,7 +164,10 @@ fn switch_current(storage: &Path, target: PathBuf) -> Result<(), StorageUpdateEr
     }
     symlink(target, &temporary)?;
     sync_dir(storage)?;
-    fs::rename(&temporary, storage.join("current"))?;
+    fs::rename(
+        &temporary,
+        cortexfs_paths::storage_current_link_path(storage),
+    )?;
     sync_dir(storage)
 }
 
@@ -195,12 +195,16 @@ fn validate_generation(root: &Path) -> Result<(), StorageUpdateError> {
         ));
     }
     for agent in REFERENCE_AGENTS {
-        let control = root.join("agent").join(format!("{}.d", agent.name));
-        let abi = fs::read_to_string(control.join("abi"))?;
+        let control = cortexfs_paths::agent_control_path(root, agent.name);
+        let abi = fs::read_to_string(cortexfs_paths::agent_control_file_path(
+            root, agent.name, "abi",
+        ))?;
         if !is_agent_launch_abi(&abi) {
             return Err(StorageUpdateError::Invalid("agent abi is invalid"));
         }
-        let model = fs::read_to_string(control.join("model"))?;
+        let model = fs::read_to_string(cortexfs_paths::agent_control_file_path(
+            root, agent.name, "model",
+        ))?;
         let model = model.trim();
         let policy = fs::read_to_string(control.join("policy"))?;
         let expected = format!("allow {}_t model:{model} use", agent.name);

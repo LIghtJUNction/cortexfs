@@ -151,8 +151,7 @@ pub use policy::subject::*;
 
 use abi::constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
-    DEFAULT_MODEL_ALIAS_TARGET, DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
-    MODEL_ROUTE_FILE, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
+    DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, MODEL_ROUTE_FILE, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi::path::is_object_name_for_class;
 use support::plain::{open_plain_directory, plain_file_name};
@@ -312,12 +311,12 @@ pub fn ensure_durable_session_layout(
         }
 
         record_text(
-            &session_root.join("index").join("list"),
+            &cortexfs_paths::session_index_file_path(session_root, "list"),
             &format!("{session_name}\n"),
             &mut receipts,
         )?;
         record_text(
-            &session_root.join("index").join("current"),
+            &cortexfs_paths::session_index_file_path(session_root, "current"),
             &format!("{session_name}\n"),
             &mut receipts,
         )?;

@@ -2,6 +2,7 @@
 members = [
     "crates/cortexfs",
     "crates/cortexfs-channels",
+    "crates/cortexfs-paths",
     "crates/cortexfs-agent-sdk", "crates/cortexfs-mcp",
     "crates/cortexfs-runtime-client",
     "crates/cortexfs-tool-sdk",

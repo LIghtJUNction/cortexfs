@@ -4,6 +4,7 @@ const sidebars: SidebarsConfig = {
   docs: [
     'getting-started',
     'channels',
+    'paths',
     'using-cortexfs',
     'extensions',
     'developing-cortexfs',

@@ -628,14 +628,13 @@ pub(crate) fn validate_tsh_runtime_context(
         projected.mount_table(),
         backing.mount_table()
     );
-    let current_run = source
-        .join("home")
-        .join(backing.owner().to_string())
-        .join("agent")
-        .join(agent)
-        .join("session")
-        .join(session)
-        .join("current_run");
+    let current_run = cortexfs_paths::session_file_path(
+        source,
+        &backing.owner().to_string(),
+        agent,
+        session,
+        "current_run",
+    );
     let recorded = read_small_plain_text_file(&current_run, MAX_TSH_CONTROL_BYTES, "tsh")
         .map_err(|_error| TshError::unavailable("agent runtime context session mismatch"))?;
     if recorded.trim() != run {

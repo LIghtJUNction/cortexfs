@@ -3,14 +3,8 @@
     reason = "private split module exposes internal constants to the parent crate"
 )]
 
-/// Default `CortexFS` mount root.
-pub const CTX_ROOT: &str = "/ctx";
-
-/// Rust object runner used by executable object metadata files.
-pub const CORTEXFS_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
-
-/// Root entries reserved by the FUSE filesystem ABI.
-pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
+pub use cortexfs_paths::{CORTEXFS_OBJECT_RUNNER, CTX_ROOT, ROOT_ENTRIES};
+pub use cortexfs_paths::{SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR};
 
 /// Object classes exposed as executable files.
 pub const EXEC_OBJECTS: &[&str] = &["model", "agent", "tool"];
@@ -74,12 +68,6 @@ pub fn is_worker_agent_name(agent_name: &str) -> bool {
 pub fn is_dedicated_worker_agent_name(agent_name: &str) -> bool {
     agent_name.starts_with("executor-") || agent_name.starts_with("worker-")
 }
-pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6";
-pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6-sol";
-/// Host directory containing system-wide provider configuration files.
-pub const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
-pub(crate) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";
-
 /// Stable semantic model capability words in the ABI.
 pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
     "chat",

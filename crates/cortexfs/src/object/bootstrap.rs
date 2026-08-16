@@ -215,9 +215,18 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
         "iso" => "shared".to_owned(),
         "life" => "owned".to_owned(),
         "root" | "cwd" => "/".to_owned(),
-        "env" => "CTX_ROOT=/ctx".to_owned(),
-        "path" => "/ctx/tool".to_owned(),
-        "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
+        "env" => format!("CTX_ROOT={CTX_ROOT}"),
+        "path" => cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root())
+            .display()
+            .to_string(),
+        "mount" => {
+            let root = cortexfs_paths::ctx_root();
+            format!(
+                "{}\t{}\tro\trbind,nosuid,nodev",
+                root.display(),
+                root.display()
+            )
+        }
         "window" => "auto".to_owned(),
         "status" => "idle".to_owned(),
         "system.md" => format!("You are CortexFS agent `{object_name}`."),

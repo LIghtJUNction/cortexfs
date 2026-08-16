@@ -37,15 +37,14 @@ pub(crate) fn provider_chat_completion(
     let (provider, model) = name.split_once('/').ok_or_else(|| {
         ProviderCompletionError::fallback(format!("invalid provider model: {name}"))
     })?;
-    let ctx_root =
-        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let ctx_root = env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
     let config = provider_config(provider)
         .or_else(|| provider_config_from_model_control(&ctx_root, provider, model))
         .ok_or_else(|| {
             ProviderCompletionError::fallback(format!("missing provider: {provider}"))
         })?;
     let route = read_small_plain_text_file(
-        &ctx_root.join("model").join("route"),
+        &cortexfs_paths::model_route_path(&ctx_root),
         MAX_RUNNER_CONTROL_BYTES,
         "runner",
     )
@@ -126,11 +125,7 @@ fn model_runtime_drivers(
     model: &str,
     agent_call: bool,
 ) -> Result<Option<Vec<ProviderRuntimeDriver>>, String> {
-    let control = ctx_root
-        .join("model")
-        .join(provider)
-        .join(format!("{model}.d"))
-        .join("driver");
+    let control = cortexfs_paths::model_control_path(ctx_root, provider, model).join("driver");
     let content = match read_small_plain_text_file(&control, MAX_RUNNER_CONTROL_BYTES, "runner") {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),

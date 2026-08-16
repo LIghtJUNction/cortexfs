@@ -65,14 +65,13 @@ pub(crate) fn prepare_agent_tool_call(
         ExecError::new(format!("cannot derive agent authority: {}", error.errno()))
     })?;
     let owner = view.owner().to_string();
-    let home_source = config
-        .source
-        .join("home")
-        .join(&owner)
-        .join("agent")
-        .join(view.agent_name());
-    let context_path =
-        cortexfs::tsh_context_state_path(&home_source.join("session").join(config.session));
+    let home_source = cortexfs_paths::agent_home_path(config.source, &owner, view.agent_name());
+    let context_path = cortexfs::tsh_context_state_path(&cortexfs_paths::agent_session_path(
+        config.source,
+        &owner,
+        view.agent_name(),
+        config.session,
+    ));
     let network_allowed = authorize_network_connect(
         "default",
         NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
@@ -119,9 +118,10 @@ pub(crate) fn prepare_agent_tool_call(
     let tool_executable = open_executable_no_follow(grant.hit().path())
         .map_err(|error| ExecError::new(format!("cannot run tool:{}: {error}", tool_call.name)))?;
     let sandbox = prepare_optional_agent_tool_sandbox(&view, config.source)?;
-    let ctx_home_target = Path::new(DEFAULT_CTX_ROOT).join("home").join(&owner);
+    let ctx_home_target = cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), &owner);
     let authorized_object = authorized_tool_target(config.source, grant.hit());
-    let home_target = ctx_home_target.join("agent").join(view.agent_name());
+    let home_target =
+        cortexfs_paths::agent_home_path(&cortexfs_paths::ctx_root(), &owner, view.agent_name());
     let (home_dir, home_alias_dir) = open_agent_home_fds(&home_source)?;
     let mut command =
         crate::runtime::socket::command_for_agent_identity(BWRAP_PROGRAM, view.identity());
@@ -402,7 +402,7 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
 pub(crate) fn authorized_tool_target(source: &Path, hit: &cortexfs::ToolHit) -> PathBuf {
     hit.path().strip_prefix(source).map_or_else(
         |_error| hit.path().to_path_buf(),
-        |relative| Path::new(DEFAULT_CTX_ROOT).join(relative),
+        |relative| cortexfs_paths::ctx_root().join(relative),
     )
 }
 
@@ -436,15 +436,14 @@ pub(crate) fn prepare_agent_tool_sandbox(
         .ok()
         .filter(|value| is_stable_overlay_component(value))
         .unwrap_or_else(|| "default".to_owned());
-    let root = source
-        .join("home")
-        .join(view.owner().to_string())
-        .join("agent")
-        .join(view.agent_name())
-        .join("session")
-        .join(session)
-        .join("workspace-overlay")
-        .join(hash);
+    let root = cortexfs_paths::session_file_path(
+        source,
+        &view.owner().to_string(),
+        view.agent_name(),
+        &session,
+        "workspace-overlay",
+    )
+    .join(hash);
     let upper = root.join("upper");
     let work = root.join("work");
     fs::create_dir_all(&upper).map_err(|error| {
@@ -575,10 +574,13 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from(&request.config.run),
         OsString::from("--setenv"),
         OsString::from("CTX_ROOT"),
-        OsString::from(DEFAULT_CTX_ROOT),
+        OsString::from(cortexfs_paths::CTX_ROOT),
         OsString::from("--setenv"),
         OsString::from("CTX_PROVIDER_CONFIG_DIR"),
-        OsString::from("/ctx/shared/providers.d"),
+        OsString::from(cortexfs_paths::shared_path(
+            &cortexfs_paths::ctx_root(),
+            "providers.d",
+        )),
         OsString::from("--setenv"),
         OsString::from("CTX_HOME"),
         request.ctx_home_target.as_os_str().to_owned(),
@@ -588,8 +590,9 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("--setenv"),
         OsString::from("CTX_PATH"),
         OsString::from(format!(
-            "/ctx/tool:{}/tool",
-            request.ctx_home_target.display()
+            "{}:{}",
+            cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root()).display(),
+            cortexfs_paths::home_tool_from_home_path(request.ctx_home_target).display()
         )),
         OsString::from("--setenv"),
         OsString::from("CTX_SOURCE"),
@@ -719,18 +722,16 @@ pub(crate) fn workspace_overlay_hash(path: &Path) -> String {
 
 pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {
     let source_path = Path::new(source);
-    if source_path == Path::new(DEFAULT_CTX_ROOT) {
-        if !source_root.exists() && Path::new(DEFAULT_CTX_ROOT).exists() {
-            return DEFAULT_CTX_ROOT.to_owned();
+    let ctx_root = cortexfs_paths::ctx_root();
+    if source_path == ctx_root {
+        if !source_root.exists() && ctx_root.exists() {
+            return cortexfs_paths::CTX_ROOT.to_owned();
         }
         return source_root.display().to_string();
     }
-    if let Ok(relative) = source_path.strip_prefix(DEFAULT_CTX_ROOT) {
-        if !source_root.exists() && Path::new(DEFAULT_CTX_ROOT).exists() {
-            return Path::new(DEFAULT_CTX_ROOT)
-                .join(relative)
-                .display()
-                .to_string();
+    if let Ok(relative) = source_path.strip_prefix(&ctx_root) {
+        if !source_root.exists() && ctx_root.exists() {
+            return ctx_root.join(relative).display().to_string();
         }
         return source_root.join(relative).display().to_string();
     }
