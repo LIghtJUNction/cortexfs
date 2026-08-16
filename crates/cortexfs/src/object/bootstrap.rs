@@ -277,7 +277,9 @@ pub(crate) fn stage_generated_model_pair(
     }
     validate_control_overrides(ObjectClass::Model, control_overrides)?;
     let control_name = format!("{model}.d");
-    let control = support::plain::create_plain_dir_at(provider_dir, &control_name, 0o700)
+    // Agent sandboxes execute as the agent uid while reading model controls
+    // from the backing tree; model controls contain no provider secret.
+    let control = support::plain::create_plain_dir_at(provider_dir, &control_name, 0o755)
         .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for file in MODEL_CONTROL_FILES {
         let content = object_control_content(ObjectClass::Model, id, file, control_overrides)?;
