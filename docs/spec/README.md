@@ -46,12 +46,12 @@ agent decides whether to execute tools
 agent policy decides whether execution is allowed
 ```
 
-Rig boundary:
+Protocol boundary:
 
 ```text
 CortexFS owns: file ABI, agent lifecycle, socket sessions, permissions, chroot, bind mounts, CTX_PATH, shared/home
-Rig      owns: provider connections, API format compatibility, model calls, stream/event adaptation, low-level provider quirks
-agent    owns: tool loops, context shaping, child task handoff, whether to execute tools
+protocol adapters own: provider connections, API format compatibility, model calls, stream/event adaptation, low-level provider quirks
+agent         owns: tool loops, context shaping, child task handoff, whether to execute tools
 ```
 
 CortexFS does not define these as root ABI:

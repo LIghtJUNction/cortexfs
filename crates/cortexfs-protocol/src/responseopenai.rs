@@ -1,4 +1,4 @@
-use crate::responseopenaipart::{invalid, missing, text_events, tool_call};
+use crate::responseopenaipart::{invalid, text_events, tool_call};
 use crate::{ConversionError, EventStatus, ModelEvent, Usage, WireProtocol};
 use serde_json::{Map, Value, json};
 
@@ -6,7 +6,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let root = crate::responseutil::parse(WireProtocol::OpenAiChat, input)?;
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
-    let model = crate::responseutil::text(map.get("model")).ok_or_else(|| missing("model"))?;
+    let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
         model,
@@ -39,6 +39,16 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         events.push(ModelEvent::Done {
             run: run.clone(),
             status,
+        });
+    }
+    if !events
+        .iter()
+        .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
+        && let Some(text) = crate::responseutil::text(map.get("output_text"))
+    {
+        events.push(ModelEvent::TextDelta {
+            run: run.clone(),
+            text,
         });
     }
     if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {

@@ -48,12 +48,7 @@ pub(crate) struct CurlJsonTarget {
     pub(crate) unix_socket: Option<String>,
 }
 pub(crate) type CurlJsonOutputParts = (std::process::ExitStatus, Vec<u8>, Vec<u8>);
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ProviderRuntimeDriver {
-    OpenAiChat,
-    OpenAiResponses,
-    AnthropicMessages,
-}
+pub(crate) type ProviderRuntimeDriver = cortexfs_protocol::WireProtocol;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderCredential {
     Bearer(String),

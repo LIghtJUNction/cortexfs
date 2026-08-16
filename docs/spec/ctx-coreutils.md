@@ -775,4 +775,5 @@ fallback to another model
 hide runtime errors behind product language
 ```
 
-Those jobs belong to Rig, the agent runtime, tools, or the CortexFS ABI itself.
+Those jobs belong to CortexFS protocol adapters, the agent runtime, tools, or
+the CortexFS ABI itself.

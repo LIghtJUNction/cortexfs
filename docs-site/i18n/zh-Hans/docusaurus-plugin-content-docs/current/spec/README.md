@@ -46,11 +46,11 @@ agent 决定是否执行工具
 agent policy 决定是否允许执行
 ```
 
-架构边界：
+协议边界：
 
 ```text
 CortexFS 负责：文件 ABI、agent 生命周期、socket 会话、权限、chroot、bind mount、CTX_PATH、shared/home
-Rig 负责：provider 连接、API 格式兼容、model 调用、流/事件适配、底层 provider 异常行为
+CortexFS 协议适配层负责：provider 连接、API 格式兼容、model 调用、流/事件适配、底层 provider 异常行为
 agent 负责：工具循环、context 组织、子任务交接、是否执行工具
 ```
 

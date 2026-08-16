@@ -14,7 +14,7 @@ agent is the policy-bound orchestrator.
 tool is a capability endpoint.
 session is ordinary file history.
 policy is a minimal SELinux-like allowlist.
-Rig removes provider and API-format differences.
+CortexFS protocol adapters remove provider and API-format differences.
 CortexFS does not express provider/API formats as root ABI.
 MCP servers are tool sources; MCP capabilities are ordinary tools.
 CortexFS controls agent visibility, execution, and sharing, not framework config formats.

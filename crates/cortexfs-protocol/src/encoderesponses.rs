@@ -1,4 +1,6 @@
-use crate::{Content, ContextReference, ConversionError, Message, ModelRequest, WireProtocol};
+use crate::{
+    Content, ContextReference, ConversionError, Message, ModelRequest, ToolChoice, WireProtocol,
+};
 use serde_json::{Map, Value, json};
 
 pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
@@ -33,7 +35,10 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         .collect();
     root.insert("input".to_owned(), Value::Array(input));
     if !request.tools.is_empty() {
-        root.insert("tools".to_owned(), Value::Array(request.tools.iter().map(|tool| json!({"type": "function", "name": tool.name, "description": tool.description, "parameters": tool.parameters})).collect()));
+        root.insert("tools".to_owned(), Value::Array(request.tools.iter().map(|tool| json!({"type": "function", "name": tool.name, "description": tool.description, "parameters": tool.parameters, "strict": true})).collect()));
+    }
+    if let Some(choice) = request.tool_choice.as_ref() {
+        root.insert("tool_choice".to_owned(), choice_value(choice));
     }
     root.insert("stream".to_owned(), Value::Bool(request.stream));
     if let Some(tokens) = request.max_output_tokens {
@@ -82,6 +87,15 @@ fn items(source: &Message) -> Result<Vec<Value>, ConversionError> {
         values.push(json!({"type": "function_call", "call_id": call.id, "name": call.name, "arguments": call.arguments.to_string()}));
     }
     Ok(values)
+}
+
+fn choice_value(choice: &ToolChoice) -> Value {
+    match *choice {
+        ToolChoice::Auto => Value::String("auto".to_owned()),
+        ToolChoice::None => Value::String("none".to_owned()),
+        ToolChoice::Required => Value::String("required".to_owned()),
+        ToolChoice::Tool { ref name } => json!({"type": "function", "name": name}),
+    }
 }
 
 fn parts(content: &Content, role: &str) -> Result<Vec<Value>, ConversionError> {

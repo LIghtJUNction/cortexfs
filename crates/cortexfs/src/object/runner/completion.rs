@@ -12,7 +12,7 @@ pub(crate) fn provider_runtime_driver(
         .iter()
         .any(|format| format.trim() == "anthropic.messages")
     {
-        ProviderRuntimeDriver::AnthropicMessages
+        ProviderRuntimeDriver::Anthropic
     } else if config
         .formats
         .iter()
@@ -153,7 +153,7 @@ fn model_runtime_drivers(
         .map(|driver| match driver.as_str() {
             "openai-chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
             "openai-responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
-            "anthropic-messages" => Ok(ProviderRuntimeDriver::AnthropicMessages),
+            "anthropic-messages" => Ok(ProviderRuntimeDriver::Anthropic),
             _ => Err(format!("unsupported model driver adapter: {driver}")),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -182,7 +182,7 @@ fn call_provider_driver(
         ProviderRuntimeDriver::OpenAiChat => {
             let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
-            let request = OpenAiProviderRequest {
+            let request = ProviderRequest {
                 model,
                 input,
                 credential: credential.as_ref(),
@@ -190,7 +190,7 @@ fn call_provider_driver(
             };
             stream_or_complete(
                 OpenAiStreamApi::Chat.call_streaming(&route.transport, &request, run, stdout),
-                || call_openai_chat(&route.transport, &request, run),
+                || call_provider(&route.transport, driver, &request, run),
                 run,
                 stdout,
             )
@@ -198,7 +198,7 @@ fn call_provider_driver(
         ProviderRuntimeDriver::OpenAiResponses => {
             let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
-            let request = OpenAiProviderRequest {
+            let request = ProviderRequest {
                 model,
                 input,
                 credential: credential.as_ref(),
@@ -206,23 +206,32 @@ fn call_provider_driver(
             };
             stream_or_complete(
                 OpenAiStreamApi::Responses.call_streaming(&route.transport, &request, run, stdout),
-                || call_openai_responses(&route.transport, &request, run),
+                || call_provider(&route.transport, driver, &request, run),
                 run,
                 stdout,
             )
         }
-        ProviderRuntimeDriver::AnthropicMessages => {
+        ProviderRuntimeDriver::Anthropic => {
             let credential = credential.ok_or_else(|| {
                 ProviderCompletionError::fallback(format!(
                     "missing provider credential: {provider}"
                 ))
             })?;
-            let completion = call_anthropic_messages(&route.transport, model, input, &credential)
+            let request = ProviderRequest {
+                model,
+                input,
+                credential: Some(&credential),
+                effort,
+            };
+            let completion = call_provider(&route.transport, driver, &request, run)
                 .map_err(ProviderCompletionError::fallback)?;
             write_text_completion(stdout, run, &completion).map_err(|error| {
                 ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
             })
         }
+        ProviderRuntimeDriver::Gemini => Err(ProviderCompletionError::fallback(
+            "Gemini runner adapter is not implemented".to_owned(),
+        )),
     }
 }
 

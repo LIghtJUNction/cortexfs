@@ -3,64 +3,60 @@ use serde_json::json;
 use super::curl::run_curl_json_with_headers;
 use super::*;
 use cortexfs::{derive_agent_runtime_view, is_object_name};
-use cortexfs_protocol::{Content, ContentPart, ModelRequest, ToolChoice, ToolDefinition};
-use serde_json::{Map, Value};
+use cortexfs_protocol::{
+    ModelRequest, ToolChoice, ToolDefinition, WireProtocol, encode_model_request,
+};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-pub(crate) struct OpenAiProviderRequest<'a> {
+pub(crate) struct ProviderRequest<'a> {
     pub(crate) model: &'a str,
     pub(crate) input: &'a str,
     pub(crate) credential: Option<&'a ProviderCredential>,
     pub(crate) effort: cortexfs::ModelEffort,
 }
-pub(crate) fn call_openai_chat(
+pub(crate) fn call_provider(
     transport: &ResolvedTransport,
-    request: &OpenAiProviderRequest<'_>,
+    protocol: WireProtocol,
+    request: &ProviderRequest<'_>,
     run: &str,
 ) -> Result<ProviderTextCompletion, String> {
-    let (target, headers) = openai_request_target(transport, request.credential, false, run)?;
-    let body = openai_chat_body(request.model, request.input, false, request.effort);
+    let (target, headers) = provider_request_target(transport, request.credential, protocol, run)?;
+    let agent_tools = protocol != WireProtocol::Anthropic && env::var_os("CTX_AGENT").is_some();
+    let body = provider_request_body(
+        protocol,
+        request.model,
+        request.input,
+        false,
+        request.effort,
+        agent_tools,
+    )?;
     let output = run_curl_json_with_headers(&target, &headers, &body)?;
     Ok(ProviderTextCompletion {
-        content: parse_openai_chat_content(&output)?,
+        content: parse_provider_content(protocol, &output)?,
         usage: parse_provider_usage(&output)?,
     })
 }
-pub(crate) fn call_openai_responses(
-    transport: &ResolvedTransport,
-    request: &OpenAiProviderRequest<'_>,
-    run: &str,
-) -> Result<ProviderTextCompletion, String> {
-    let (target, headers) = openai_request_target(transport, request.credential, true, run)?;
-    let body = openai_responses_body(request.model, request.input, false, request.effort);
-    let output = run_curl_json_with_headers(&target, &headers, &body)?;
-    Ok(ProviderTextCompletion {
-        content: parse_openai_response_content(&output)?,
-        usage: parse_provider_usage(&output)?,
-    })
-}
-pub(crate) fn call_anthropic_messages(
-    transport: &ResolvedTransport,
+pub(crate) fn provider_request_body(
+    protocol: WireProtocol,
     model: &str,
     input: &str,
-    credential: &ProviderCredential,
-) -> Result<ProviderTextCompletion, String> {
-    let target = provider_target(transport, "messages");
-    let request = model_request(model, input, false, cortexfs::ModelEffort::Auto, false);
-    let body = anthropic_body(&request);
-    let headers = anthropic_headers(credential);
-    let output = run_curl_json_with_headers(&target, &headers, &body)?;
-    Ok(ProviderTextCompletion {
-        content: parse_anthropic_message_content(&output)?,
-        usage: parse_provider_usage(&output)?,
-    })
-}
-#[derive(Clone, Copy)]
-enum OpenAiEndpoint {
-    Chat,
-    Responses,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+    agent_tools: bool,
+) -> Result<String, String> {
+    let mut request = model_request(protocol, model, input, stream, effort, agent_tools);
+    if stream && protocol == WireProtocol::OpenAiChat {
+        request.option("stream_options", json!({ "include_usage": true }));
+    }
+    if !request.tools.is_empty() {
+        request.option("parallel_tool_calls", json!(false));
+    }
+    let bytes = encode_model_request(protocol, &request).map_err(|error| error.to_string())?;
+    String::from_utf8(bytes).map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())
 }
 
+#[cfg(test)]
 pub(crate) fn openai_chat_body(
     model: &str,
     input: &str,
@@ -75,6 +71,8 @@ pub(crate) fn openai_chat_body(
         env::var_os("CTX_AGENT").is_some(),
     )
 }
+
+#[cfg(test)]
 pub(crate) fn openai_chat_body_with_agent_tools(
     model: &str,
     input: &str,
@@ -82,15 +80,17 @@ pub(crate) fn openai_chat_body_with_agent_tools(
     effort: cortexfs::ModelEffort,
     agent_tools: bool,
 ) -> String {
-    openai_body(
+    test_request_body(
+        WireProtocol::OpenAiChat,
         model,
         input,
         stream,
         effort,
         agent_tools,
-        OpenAiEndpoint::Chat,
     )
 }
+
+#[cfg(test)]
 pub(crate) fn openai_responses_body(
     model: &str,
     input: &str,
@@ -105,6 +105,8 @@ pub(crate) fn openai_responses_body(
         env::var_os("CTX_AGENT").is_some(),
     )
 }
+
+#[cfg(test)]
 pub(crate) fn openai_responses_body_with_agent_tools(
     model: &str,
     input: &str,
@@ -112,84 +114,31 @@ pub(crate) fn openai_responses_body_with_agent_tools(
     effort: cortexfs::ModelEffort,
     agent_tools: bool,
 ) -> String {
-    openai_body(
+    test_request_body(
+        WireProtocol::OpenAiResponses,
         model,
         input,
         stream,
         effort,
         agent_tools,
-        OpenAiEndpoint::Responses,
     )
 }
-fn openai_body(
+
+#[cfg(test)]
+fn test_request_body(
+    protocol: WireProtocol,
     model: &str,
     input: &str,
     stream: bool,
     effort: cortexfs::ModelEffort,
     agent_tools: bool,
-    endpoint: OpenAiEndpoint,
 ) -> String {
-    let request = model_request(model, input, stream, effort, agent_tools);
-    let messages = openai_messages(&request);
-    let mut body = match endpoint {
-        OpenAiEndpoint::Chat => {
-            json!({ "model": request.model, "messages": messages, "stream": request.stream })
-        }
-        OpenAiEndpoint::Responses => {
-            json!({ "model": request.model, "input": messages, "stream": request.stream })
-        }
-    };
-    let Some(fields) = body.as_object_mut() else {
-        return body.to_string();
-    };
-    if matches!(endpoint, OpenAiEndpoint::Chat) && stream {
-        fields.insert(
-            "stream_options".to_owned(),
-            json!({ "include_usage": true }),
-        );
-    }
-    if !request.tools.is_empty() {
-        let tools = request
-            .tools
-            .iter()
-            .map(|tool| openai_tool(tool, endpoint))
-            .collect();
-        fields.insert("tools".to_owned(), Value::Array(tools));
-        fields.insert("tool_choice".to_owned(), json!("auto"));
-        fields.insert("parallel_tool_calls".to_owned(), json!(false));
-    }
-    if let Some(value) = request.options.get("reasoning_effort") {
-        match endpoint {
-            OpenAiEndpoint::Chat => {
-                fields.insert("reasoning_effort".to_owned(), value.clone());
-            }
-            OpenAiEndpoint::Responses => {
-                fields.insert("reasoning".to_owned(), json!({ "effort": value }));
-            }
-        }
-    }
-    body.to_string()
-}
-fn openai_tool(tool: &ToolDefinition, endpoint: OpenAiEndpoint) -> Value {
-    let mut function = Map::from_iter([
-        ("name".to_owned(), json!(tool.name)),
-        (
-            "description".to_owned(),
-            json!(tool.description.as_deref().unwrap_or_default()),
-        ),
-        ("parameters".to_owned(), tool.parameters.clone()),
-        ("strict".to_owned(), json!(true)),
-    ]);
-    match endpoint {
-        OpenAiEndpoint::Chat => json!({ "type": "function", "function": function }),
-        OpenAiEndpoint::Responses => {
-            function.insert("type".to_owned(), json!("function"));
-            Value::Object(function)
-        }
-    }
+    provider_request_body(protocol, model, input, stream, effort, agent_tools)
+        .unwrap_or_else(|error| format!("protocol encoding error: {error}"))
 }
 
 fn model_request(
+    protocol: WireProtocol,
     model: &str,
     input: &str,
     stream: bool,
@@ -214,7 +163,14 @@ fn model_request(
         request.tool_choice = Some(ToolChoice::Auto);
     }
     if effort != cortexfs::ModelEffort::Auto {
-        request.option("reasoning_effort", json!(effort.to_string()));
+        let value = json!(effort.to_string());
+        match protocol {
+            WireProtocol::OpenAiChat => request.option("reasoning_effort", value),
+            WireProtocol::OpenAiResponses => {
+                request.option("reasoning", json!({ "effort": value }));
+            }
+            WireProtocol::Gemini | WireProtocol::Anthropic => {}
+        }
     }
     request
 }
@@ -228,68 +184,6 @@ fn protocol_tool(name: String) -> ToolDefinition {
     }
 }
 
-fn openai_messages(request: &ModelRequest) -> Value {
-    Value::Array(
-        request
-            .messages
-            .iter()
-            .map(|message| {
-                json!({
-                    "role": message.role.as_str(),
-                    "content": openai_content(&message.content)
-                })
-            })
-            .collect(),
-    )
-}
-
-fn openai_content(content: &Content) -> Value {
-    match *content {
-        Content::Text(ref value) => json!(value),
-        Content::Parts(ref parts) => Value::Array(parts.iter().map(openai_part).collect()),
-    }
-}
-
-fn openai_part(part: &ContentPart) -> Value {
-    match *part {
-        ContentPart::Text { ref text } => json!({"type":"text", "text":text}),
-        ContentPart::Image { ref uri, .. } => {
-            json!({"type":"image_url", "image_url":{"url":uri}})
-        }
-        ContentPart::Audio { ref uri, .. } => {
-            json!({"type":"audio", "audio_url":{"url":uri}})
-        }
-        ContentPart::Data {
-            ref name,
-            ref value,
-        } => json!({"type":name, "data":value}),
-    }
-}
-
-fn anthropic_body(request: &ModelRequest) -> String {
-    let system = request
-        .messages
-        .iter()
-        .filter(|message| matches!(message.role.as_str(), "system" | "developer"))
-        .map(|message| message.content.text_value())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let messages = request
-        .messages
-        .iter()
-        .filter(|message| !matches!(message.role.as_str(), "system" | "developer"))
-        .map(
-            |message| json!({"role":message.role.as_str(), "content":message.content.text_value()}),
-        )
-        .collect::<Vec<_>>();
-    let mut body = json!({"model":request.model, "max_tokens":4096, "messages":messages});
-    if !system.is_empty()
-        && let Some(fields) = body.as_object_mut()
-    {
-        fields.insert("system".to_owned(), json!(system));
-    }
-    body.to_string()
-}
 pub(crate) fn current_agent_openai_tools() -> Vec<String> {
     let agent = env::var("CTX_AGENT").ok();
     let root =

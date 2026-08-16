@@ -5,7 +5,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let root = crate::responseutil::parse(WireProtocol::OpenAiResponses, input)?;
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
-    let model = crate::responseutil::text(map.get("model")).ok_or_else(|| missing("model"))?;
+    let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
         model,
@@ -14,6 +14,16 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         for item in output {
             output_item(&mut events, &run, item)?;
         }
+    }
+    if !events
+        .iter()
+        .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
+        && let Some(text) = crate::responseutil::text(map.get("output_text"))
+    {
+        events.push(ModelEvent::TextDelta {
+            run: run.clone(),
+            text,
+        });
     }
     if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {
         events.push(ModelEvent::Usage {
@@ -35,12 +45,17 @@ fn output_item(
 ) -> Result<(), ConversionError> {
     let map = value.as_object().ok_or_else(|| invalid("output[]"))?;
     match crate::responseutil::text(map.get("type")).as_deref() {
-        Some("message") => {
+        Some("message") | None => {
             if let Some(parts) = map.get("content").and_then(Value::as_array) {
                 for part in parts {
                     if let Some(text) = crate::responseutil::text(
                         part.as_object().and_then(|item| item.get("text")),
-                    ) {
+                    )
+                    .or_else(|| {
+                        crate::responseutil::text(
+                            part.as_object().and_then(|item| item.get("refusal")),
+                        )
+                    }) {
                         events.push(ModelEvent::TextDelta {
                             run: run.to_owned(),
                             text,
@@ -93,12 +108,6 @@ fn usage_value(usage: &Usage) -> Value {
 }
 fn invalid(field: &str) -> ConversionError {
     ConversionError::InvalidField {
-        protocol: WireProtocol::OpenAiResponses,
-        field: field.to_owned(),
-    }
-}
-fn missing(field: &str) -> ConversionError {
-    ConversionError::MissingField {
         protocol: WireProtocol::OpenAiResponses,
         field: field.to_owned(),
     }

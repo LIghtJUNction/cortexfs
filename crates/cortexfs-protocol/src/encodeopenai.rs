@@ -56,7 +56,7 @@ fn message(source: &Message) -> Result<Value, ConversionError> {
 }
 
 fn tool(source: &crate::ToolDefinition) -> Value {
-    json!({"type": "function", "function": {"name": source.name, "description": source.description, "parameters": source.parameters}})
+    json!({"type": "function", "function": {"name": source.name, "description": source.description, "parameters": source.parameters, "strict": true}})
 }
 
 fn choice_value(choice: &ToolChoice) -> Value {

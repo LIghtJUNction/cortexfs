@@ -5,7 +5,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let root = crate::responseutil::parse(WireProtocol::Anthropic, input)?;
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
-    let model = crate::responseutil::text(map.get("model")).ok_or_else(|| missing("model"))?;
+    let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
         model,
@@ -96,12 +96,6 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
 
 fn invalid(field: &str) -> ConversionError {
     ConversionError::InvalidField {
-        protocol: WireProtocol::Anthropic,
-        field: field.to_owned(),
-    }
-}
-fn missing(field: &str) -> ConversionError {
-    ConversionError::MissingField {
         protocol: WireProtocol::Anthropic,
         field: field.to_owned(),
     }
