@@ -488,7 +488,7 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(ref socket) = control {
+    if let Some(socket) = control.as_ref().filter(|_| name == "agent.create") {
         command.env("CTX_CONTROL_SOCKET", socket);
     }
     if validated_tsh_runtime_context_from_env(root, &runtime.agent)? != runtime

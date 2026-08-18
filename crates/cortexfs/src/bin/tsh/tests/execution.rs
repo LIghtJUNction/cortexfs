@@ -376,8 +376,8 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
 [ "$CTX_SESSION" = live ] || exit 16
 [ "$CTX_RUN_ID" = run-1 ] || exit 17
 [ "$CTX_SOURCE" = "$CTX_ROOT" ] || exit 18
-[ "$CTX_CONTROL_SOCKET" = /run/cortexfs/control.sock ] || exit 19
-[ "$(env | grep -c '^CTX_CONTROL_')" = 1 ] || exit 20
+[ -z "$CTX_CONTROL_SOCKET" ] || exit 19
+[ "$(env | grep -c '^CTX_CONTROL_')" = 0 ] || exit 20
 [ "$CTX_AUTHORIZED_OBJECT" = /ctx/tool/probe ] || exit 15
 [ "$PATH" = /usr/bin:/bin ] || exit 13
 [ -n "$CTX_ROOT" ] || exit 14
