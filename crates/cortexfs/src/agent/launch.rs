@@ -1669,14 +1669,11 @@ pub fn terminal_command(
     command
         .args
         .extend(["--chdir".to_owned(), request.cwd.clone()]);
-    if let Some((host, guest)) = terminal_resource_mount(request, view) {
+    if let Some(events) = terminal_events_path(request, view) {
         command.args.extend([
-            "--bind".to_owned(),
-            host.display().to_string(),
-            guest.clone(),
             "--setenv".to_owned(),
             "CTX_TERMINAL_EVENTS".to_owned(),
-            format!("{guest}/events.jsonl"),
+            events,
         ]);
     }
     command.args.extend([
@@ -1693,10 +1690,10 @@ pub fn terminal_command(
     command
 }
 
-fn terminal_resource_mount(
+fn terminal_events_path(
     request: &AgentLaunchRequest,
     view: &crate::AgentRuntimeView,
-) -> Option<(PathBuf, String)> {
+) -> Option<String> {
     let id = crate::runtime::terminal::terminal_id(&request.agent, &request.session);
     let host = cortexfs_paths::session_terminal_from_home_path(
         view.ctx_home(),
@@ -1707,17 +1704,16 @@ fn terminal_resource_mount(
     if crate::support::plain::open_plain_directory(&host).is_err() {
         return None;
     }
-    let owner = view.ctx_home().file_name()?.to_str()?;
-    let guest = cortexfs_paths::session_terminal_path(
-        &cortexfs_paths::ctx_root(),
-        owner,
-        &request.agent,
-        &request.session,
-        &id,
+    Some(
+        Path::new("/home/agent")
+            .join("session")
+            .join(&request.session)
+            .join("terminal")
+            .join(id)
+            .join("events.jsonl")
+            .display()
+            .to_string(),
     )
-    .display()
-    .to_string();
-    Some((host, guest))
 }
 
 fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
