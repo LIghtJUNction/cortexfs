@@ -7,6 +7,9 @@ use super::super::{
 };
 use super::SocketRuntimeError;
 use crate::object::executor::AgentToolCall;
+use cortexfs_runtime_client::interaction::{
+    InteractionFrame, InteractionPayload, InteractionRequest, InteractionResult,
+};
 
 pub(super) struct ToolApproval {
     pub(super) frames: [String; 2],
@@ -16,6 +19,7 @@ pub(super) struct ToolApproval {
 
 pub(super) fn request_tool_approval(
     stream: &mut UnixStream,
+    request_id: &str,
     run: &str,
     call: &AgentToolCall,
 ) -> Result<ToolApproval, SocketRuntimeError> {
@@ -41,20 +45,7 @@ pub(super) fn request_tool_approval(
         .transpose()
         .ok()
         .flatten();
-    let decision = response
-        .and_then(|line| serde_json::from_str::<Value>(&line).ok())
-        .filter(|value| {
-            value.as_object().is_some_and(|object| object.len() == 4)
-                && value.get("op").and_then(Value::as_str) == Some("approve")
-                && value.get("run").and_then(Value::as_str) == Some(run)
-                && value.get("id").and_then(Value::as_str) == Some(call.id.as_str())
-        })
-        .and_then(|value| {
-            value
-                .get("decision")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        });
+    let decision = response.and_then(|line| approval_decision(&line, request_id, run, &call.id));
     let mut allowed = decision.as_deref() == Some("allow_once");
     let mut reason = if !request_delivered {
         "approval request delivery failed"
@@ -76,6 +67,44 @@ pub(super) fn request_tool_approval(
         allowed,
         reason,
     })
+}
+
+fn approval_decision(line: &str, request_id: &str, run: &str, call_id: &str) -> Option<String> {
+    if let Some(decision) = serde_json::from_str::<Value>(line)
+        .ok()
+        .filter(|value| {
+            value.as_object().is_some_and(|object| object.len() == 4)
+                && value.get("op").and_then(Value::as_str) == Some("approve")
+                && value.get("run").and_then(Value::as_str) == Some(run)
+                && value.get("id").and_then(Value::as_str) == Some(call_id)
+        })
+        .and_then(|value| {
+            value
+                .get("decision")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+    {
+        return Some(decision);
+    }
+    let frame = serde_json::from_str::<InteractionFrame>(line).ok()?;
+    frame.validate().ok()?;
+    let InteractionPayload::Request(InteractionRequest::CommandResult {
+        request_id: result_request_id,
+        command_id,
+        result,
+        ..
+    }) = frame.payload
+    else {
+        return None;
+    };
+    (result_request_id == request_id && command_id == call_id)
+        .then(|| match result {
+            InteractionResult::Accepted => "allow_once".to_owned(),
+            InteractionResult::Rejected { .. } => "deny".to_owned(),
+            InteractionResult::Value { .. } => String::new(),
+        })
+        .filter(|decision| !decision.is_empty())
 }
 
 fn approval_result_frame(run: &str, call: &AgentToolCall, allowed: bool, reason: &str) -> String {

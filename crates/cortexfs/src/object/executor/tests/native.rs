@@ -1,15 +1,16 @@
 #[test]
 fn only_declared_native_tool_executes_without_bypassing_policy()
 -> Result<(), Box<dyn std::error::Error>> {
-    let (root, bash_control) = agent_tool_fixture("loaded-native-tool", "bash")?;
+    let tool_name = "native";
+    let (root, tool_control) = agent_tool_fixture("loaded-native-tool", tool_name)?;
     let control = root.join("agent/coder.d");
     let tool_dir = root.join("tool");
     fs::create_dir_all(root.join("home").join("1000").join("agent").join("coder"))?;
     fs::write(
-        bash_control.join("policy"),
-        "allow coder_t tool:bash execute\n",
+        tool_control.join("policy"),
+        "allow coder_t tool:native execute\n",
     )?;
-    write_sdk_tool(&tool_dir.join("bash"), "bash", "loaded-direct")?;
+    write_sdk_tool(&tool_dir.join(tool_name), tool_name, "loaded-direct")?;
 
     let config = AgentModelRunConfig {
         ctx_root: root.clone(),
@@ -18,7 +19,7 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
     };
     let call = AgentToolCall {
         id: "call-1".to_owned(),
-        name: "bash".to_owned(),
+        name: tool_name.to_owned(),
         args: Vec::new(),
     };
 
@@ -31,8 +32,8 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let mut state = cortexfs::TshContextState::default();
     state.tools = vec![cortexfs::TshLoadedToolState {
-        name: "bash".to_owned(),
-        path: tool_dir.join("bash"),
+        name: tool_name.to_owned(),
+        path: tool_dir.join(tool_name),
         description: String::new(),
         schema: None,
         dynamic_resident: true,
@@ -47,7 +48,7 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
         matches!(after_session_load, Err(ref error) if error.message().contains("declare it in the agent tools control"))
     );
 
-    fs::write(control.join("tools"), "bash\n")?;
+    fs::write(control.join("tools"), format!("{tool_name}\n"))?;
     let after_declaration = execute_prepared_agent_tool_call(&config, &call)?;
     assert_eq!(after_declaration, "loaded-direct");
 
@@ -55,14 +56,14 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
     let after_tsh_unload = execute_prepared_agent_tool_call(&config, &call)?;
     assert_eq!(after_tsh_unload, "loaded-direct");
 
-    assert_sdk_output_contract(&tool_dir.join("bash"), &config, &call)?;
-    write_sdk_tool(&tool_dir.join("bash"), "bash", "loaded-direct")?;
+    assert_sdk_output_contract(&tool_dir.join(tool_name), &config, &call)?;
+    write_sdk_tool(&tool_dir.join(tool_name), tool_name, "loaded-direct")?;
 
     fs::write(control.join("policy"), "allow coder_t model:main use\n")?;
     let declared_but_denied = execute_prepared_agent_tool_call(&config, &call);
     assert_eq!(
         declared_but_denied,
-        Err(ExecError::new("cannot execute tool:bash: EACCES"))
+        Err(ExecError::new("cannot execute tool:native: EACCES"))
     );
 
     let _ignored = fs::remove_dir_all(root);

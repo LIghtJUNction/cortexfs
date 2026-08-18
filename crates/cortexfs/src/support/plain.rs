@@ -272,19 +272,29 @@ pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
     create_plain_dir(parent)?;
     let parent_dir = open_plain_directory(parent)?;
     let name = plain_file_name(path)?;
-    match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
+    ensure_socket_placeholder_at(&parent_dir, name, mode)
+}
+
+/// Ensures a Unix socket placeholder relative to an already-held directory fd.
+pub(crate) fn ensure_socket_placeholder_at(
+    parent: &fs::File,
+    name: &str,
+    mode: u32,
+) -> Result<bool> {
+    validate_plain_name(name)?;
+    match nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
         Ok(stat)
             if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
                 .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
         {
-            set_socket_mode(&parent_dir, name, mode)?;
+            set_socket_mode(parent, name, mode)?;
             return Ok(false);
         }
         Ok(stat)
             if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
                 .contains(nix::sys::stat::SFlag::S_IFLNK) =>
         {
-            match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::empty()) {
+            match nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::empty()) {
                 Ok(target)
                     if nix::sys::stat::SFlag::from_bits_truncate(target.st_mode)
                         .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
@@ -292,12 +302,8 @@ pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
                     return Ok(false);
                 }
                 Err(nix::errno::Errno::ENOENT) => {
-                    nix::unistd::unlinkat(
-                        &parent_dir,
-                        name,
-                        nix::unistd::UnlinkatFlags::NoRemoveDir,
-                    )
-                    .map_err(std::io::Error::from)?;
+                    nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+                        .map_err(std::io::Error::from)?;
                 }
                 Ok(_) | Err(_) => {
                     return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
@@ -308,10 +314,10 @@ pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
         Err(nix::errno::Errno::ENOENT) => {}
         Err(error) => return Err(std::io::Error::from(error)),
     }
-    UnixListener::bind(path)?;
-    if let Err(error) = set_socket_mode(&parent_dir, name, mode) {
-        let _ignored =
-            nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir);
+    let socket_path = proc_fd_path(parent).join(name);
+    UnixListener::bind(socket_path)?;
+    if let Err(error) = set_socket_mode(parent, name, mode) {
+        let _ignored = nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::NoRemoveDir);
         return Err(error);
     }
     Ok(true)

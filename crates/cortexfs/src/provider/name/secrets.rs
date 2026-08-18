@@ -20,7 +20,7 @@ pub fn store_provider_system_secret(
         return Err(ProviderSystemSecretError::InvalidName);
     };
     create_private_provider_secret_dir(parent)?;
-    set_private_dir_permissions(Path::new("/var/lib/cortexfs/secrets"))?;
+    set_private_dir_permissions(&cortexfs_paths::provider_secret_root_path())?;
     set_private_dir_permissions(Path::new(PROVIDER_SYSTEM_SECRET_ROOT))?;
     set_private_dir_permissions(parent)?;
     atomic_replace_text_with_mode(&path, &format!("{secret}\n"), 0o600)

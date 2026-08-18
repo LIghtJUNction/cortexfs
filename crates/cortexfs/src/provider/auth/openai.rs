@@ -1,13 +1,10 @@
-use super::adapter::{
-    AuthProvider, AuthProviderError, AuthRequest, AuthTransport, default_login, default_models,
-    default_refresh, device_request,
-};
+use super::adapter::{AuthProviderError, AuthTransport};
 use super::codexdevice;
-use super::common::AdapterCore;
+use super::common::{AdapterCore, CoreAuthProvider};
 use super::device::{DeviceChallenge, DeviceConfig};
 use super::model::model_url;
 use super::{Credential, ProviderAuthConfig};
-use crate::provider::oauth::{OAuthPkce, OAuthProviderConfig, codex_oauth_config};
+use crate::provider::oauth::{OAuthProviderConfig, codex_oauth_config};
 /// OpenAI-compatible adapter, including the Codex subscription OAuth profile.
 #[derive(Debug)]
 pub struct OpenAiAdapter {
@@ -59,48 +56,12 @@ impl OpenAiAdapter {
         }
     }
 }
-impl AuthProvider for OpenAiAdapter {
-    fn id(&self) -> &str {
-        &self.core.id
+impl CoreAuthProvider for OpenAiAdapter {
+    fn core(&self) -> &AdapterCore {
+        &self.core
     }
 
-    fn methods(&self) -> &[ProviderAuthConfig] {
-        &self.core.methods
-    }
-
-    fn aliases(&self) -> &[String] {
-        &self.core.aliases
-    }
-
-    fn authorization_url(
-        &self,
-        state: &str,
-        pkce: &OAuthPkce,
-    ) -> Result<String, AuthProviderError> {
-        self.core.authorization(state, pkce)
-    }
-
-    fn login(&self, request: AuthRequest) -> Result<Credential, AuthProviderError> {
-        default_login(self, request)
-    }
-
-    fn login_with(
-        &self,
-        request: AuthRequest,
-        transport: &mut dyn AuthTransport,
-        now: u64,
-    ) -> Result<Credential, AuthProviderError> {
-        if let Some(credential) = device_request(self, &request, transport, now)? {
-            return Ok(credential);
-        }
-        self.core.login(request, transport, now)
-    }
-
-    fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
-        self.core.persist(credential, now)
-    }
-
-    fn device_login_with(
+    fn device_login(
         &self,
         timeout_secs: u64,
         transport: &mut dyn AuthTransport,
@@ -118,40 +79,5 @@ impl AuthProvider for OpenAiAdapter {
         }
         self.core
             .device_login(timeout_secs, transport, now, notify, pause)
-    }
-
-    fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {
-        default_refresh(self, credential)
-    }
-
-    fn refresh_with(
-        &self,
-        credential: &Credential,
-        transport: &mut dyn AuthTransport,
-        now: u64,
-    ) -> Result<Credential, AuthProviderError> {
-        self.core.refresh(credential, transport, now)
-    }
-
-    fn models(&self, credential: Option<&Credential>) -> Result<Vec<String>, AuthProviderError> {
-        default_models(self, credential)
-    }
-
-    fn models_with(
-        &self,
-        credential: Option<&Credential>,
-        transport: &mut dyn AuthTransport,
-    ) -> Result<Vec<String>, AuthProviderError> {
-        let credential = credential.ok_or(AuthProviderError::InvalidCredential)?;
-        let headers = self.model_headers(credential)?;
-        let response = self.core.model_response_with_headers(transport, &headers)?;
-        self.parse_models(response)
-    }
-
-    fn model_headers(
-        &self,
-        credential: &Credential,
-    ) -> Result<Vec<(String, String)>, AuthProviderError> {
-        self.core.model_headers(credential, "Authorization")
     }
 }

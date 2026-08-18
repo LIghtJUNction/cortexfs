@@ -517,4 +517,4 @@ fallback 到其他模型
 把运行时错误掩藏为产品文案
 ```
 
-这些职责属于 Rig、agent runtime、tools 或 CortexFS ABI 本身。
+这些职责属于 CortexFS 协议适配层、agent runtime、tools 或 CortexFS ABI 本身。

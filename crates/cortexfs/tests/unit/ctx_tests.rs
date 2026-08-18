@@ -50,8 +50,8 @@ use super::{
     set_gc_delete_fault_for_test, set_gc_delete_sync_fault_for_test,
     set_gc_list_publish_replacement_for_test, set_gc_list_rollback_replacement_for_test,
     set_gc_source_claim_fault_for_test, set_profile_tools_policy_fault, shell_quote_arg,
-    socket_bind_path, stream_socket_request, stream_terminal_socket, system_agent_runtime_socket,
-    system_agent_socket_command, system_agent_socket_unit, systemctl_user_command, temp_file_name,
+    socket_bind_path, stream_socket_request, stream_terminal_socket, system_agent_socket_command,
+    systemctl_user_command, temp_file_name,
     terminal_connect_cli_error, terminal_safe_text, terminal_socket_exists, waiting_diagnostic,
     write_agent_control_plain, write_agent_session_plain,
 };

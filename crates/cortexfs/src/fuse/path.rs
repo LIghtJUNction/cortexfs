@@ -110,6 +110,7 @@ pub(crate) fn fuse_metadata_error(error: &std::io::Error) -> FuseError {
     match error.kind() {
         std::io::ErrorKind::NotFound => FuseError::NotFound,
         std::io::ErrorKind::PermissionDenied => FuseError::PermissionDenied,
+        std::io::ErrorKind::AlreadyExists => FuseError::AlreadyExists,
         _ => FuseError::Io,
     }
 }

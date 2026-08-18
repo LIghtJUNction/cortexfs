@@ -42,8 +42,10 @@ pub(super) fn ensure_targets_absent(
 ) -> Result<(), CliError> {
     let uid = nix::unistd::Uid::effective().as_raw().to_string();
     let class_path = |class: &str| match tier {
-        InstallTier::User => source.join("home").join(&uid).join(class),
-        InstallTier::System => source.join(class),
+        InstallTier::User => {
+            cortexfs_paths::object_root_path(&cortexfs_paths::ctx_home_path(source, &uid), class)
+        }
+        InstallTier::System => cortexfs_paths::object_root_path(source, class),
     };
     for (class, name) in package
         .document

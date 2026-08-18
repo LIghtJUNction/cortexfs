@@ -51,16 +51,6 @@ pub(crate) struct PackageAgent {
     pub(crate) tools: Vec<String>,
     #[serde(default)]
     pub(crate) parent: Option<String>,
-    #[serde(default)]
-    pub(crate) identity: Option<PackageIdentity>,
-}
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct PackageIdentity {
-    pub(crate) uid: u32,
-    pub(crate) gid: u32,
-    #[serde(default)]
-    pub(crate) groups: Vec<u32>,
 }
 pub(crate) struct Package {
     pub(crate) root: PathBuf,

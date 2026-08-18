@@ -63,6 +63,7 @@ messages.jsonl  conversation messages
 events.jsonl    tool calls, errors, and state changes
 latest.md       latest assistant text
 state           active, idle, done, error
+state.json      structured non-secret runtime projection (optional for legacy sessions)
 cwd             session working directory
 created_at      creation time
 updated_at      update time
@@ -133,6 +134,7 @@ session/
     events.jsonl
     latest.md
     state
+    state.json
     cwd
     created_at
     updated_at

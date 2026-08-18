@@ -396,7 +396,7 @@ fn agent_new_host_fallback_rejects_existing_home_without_partial_object() {
 }
 
 #[test]
-fn agent_new_host_fallback_rolls_back_after_socket_creation_failure() {
+fn agent_new_host_fallback_supports_long_root_with_held_socket_parent() {
     let base = clean_test_dir("ctx-agent-new-host-socket-rollback");
     let root = base.join("x".repeat(80));
     assert!(fs::create_dir_all(&root).is_ok());
@@ -405,11 +405,15 @@ fn agent_new_host_fallback_rolls_back_after_socket_creation_failure() {
         return;
     };
 
-    assert!(agent_new_host_fallback(&root, &args).is_err());
-    assert!(!root.join("agent/worker").exists());
-    assert!(!root.join("agent/worker.d").exists());
-    assert!(fs::symlink_metadata(root.join("agent/worker.sock")).is_err());
-    assert!(!ctx_home(&root).unwrap_or_default().join("agent/worker").exists());
+    assert!(agent_new_host_fallback(&root, &args).is_ok());
+    assert!(root.join("agent/worker").is_file());
+    assert!(root.join("agent/worker.d").is_dir());
+    assert!(matches!(
+        fs::symlink_metadata(root.join("agent/worker.sock")),
+        Ok(metadata) if metadata.file_type().is_socket()
+    ));
+    assert!(ctx_home(&root).unwrap_or_default().join("agent/worker").is_dir());
+    assert!(fs::remove_dir_all(base).is_ok());
 }
 
 #[test]
@@ -598,8 +602,8 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
     let projected_control = projection.join("agent/coder.d");
     assert!(fs::create_dir_all(&projected_control).is_ok());
     for file in [
-        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path",
-        "mount", "model", "policy", "parent", "life",
+        "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
+        "path", "mount", "model", "policy", "parent", "life",
     ] {
         assert!(fs::copy(source_control.join(file), projected_control.join(file)).is_ok());
     }
@@ -701,8 +705,8 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
     let projected_control = projection.join("agent/coder.d");
     fs::create_dir_all(&projected_control)?;
     for file in [
-        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path",
-        "mount", "model", "policy", "parent", "life",
+        "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
+        "path", "mount", "model", "policy", "parent", "life",
     ] {
         fs::copy(source.join("agent/coder.d").join(file), projected_control.join(file))?;
     }

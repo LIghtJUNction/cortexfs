@@ -22,14 +22,14 @@ pub(crate) fn agent_inspect_lines(
     let control = agent_control_dir(root, name);
     let session_name = agent_session_name(root, name, session)?;
     let session_dir = agent_session_dir(root, name, Some(&session_name))?;
-    let receipt = read_optional_trimmed(&control.join("meta.json"))?
+    let receipt = read_optional_trimmed(&cortexfs_paths::control_file_path(&control, "meta.json"))?
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .and_then(|meta| meta.get("runtime_receipt").cloned())
         .is_some();
     let model_control = inspect_model_control(root, view.model());
     let capabilities = model_control
         .as_ref()
-        .map(|path| path.join("cap"))
+        .map(|path| cortexfs_paths::control_file_path(path, "cap"))
         .map(|path| read_optional_trimmed(&path))
         .transpose()?
         .flatten()
@@ -39,13 +39,19 @@ pub(crate) fn agent_inspect_lines(
         );
     let tools = agent_visible_tool_entries(root, name)?;
     Ok(vec![
-        format!("definition={}", root.join("agent").join(name).display()),
+        format!(
+            "definition={}",
+            cortexfs_paths::agent_path(root, name).display()
+        ),
         format!("control={}", control.display()),
         format!(
             "instance.status={}",
-            inspect_value(&control.join("status"))?
+            inspect_value(&cortexfs_paths::control_file_path(&control, "status"))?
         ),
-        format!("instance.pid={}", inspect_value(&control.join("pid"))?),
+        format!(
+            "instance.pid={}",
+            inspect_value(&cortexfs_paths::control_file_path(&control, "pid"))?
+        ),
         format!("instance.receipt={}", if receipt { "present" } else { "-" }),
         format!("session.name={session_name}"),
         format!("session.path={}", session_dir.display()),
@@ -57,8 +63,14 @@ pub(crate) fn agent_inspect_lines(
         format!("model.name={}", view.model()),
         format!("model.limit={}", view.model_limit()),
         format!("model.cap={capabilities}"),
-        format!("policy={}", control.join("policy").display()),
-        format!("mount={}", control.join("mount").display()),
+        format!(
+            "policy={}",
+            cortexfs_paths::control_file_path(&control, "policy").display()
+        ),
+        format!(
+            "mount={}",
+            cortexfs_paths::control_file_path(&control, "mount").display()
+        ),
         format!("tools={}", tools.len()),
     ])
 }
@@ -71,14 +83,18 @@ fn inspect_model_control(root: &Path, model: &str) -> Option<PathBuf> {
     let model = if is_model_name(model) {
         model.to_owned()
     } else {
-        let target = fs::read_link(root.join("model").join(model)).ok()?;
+        let target = fs::read_link(cortexfs_paths::model_root_path(root).join(model)).ok()?;
         let target = target.to_str()?;
+        let model_root = format!(
+            "{}/",
+            cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
+        );
         target
-            .strip_prefix("/ctx/model/")
+            .strip_prefix(&model_root)
             .or_else(|| target.strip_prefix("model/"))
             .filter(|target| is_model_name(target))?
             .to_owned()
     };
     let (provider, name) = model.split_once('/')?;
-    Some(root.join("model").join(provider).join(format!("{name}.d")))
+    Some(cortexfs_paths::model_control_path(root, provider, name))
 }

@@ -54,20 +54,9 @@ host-owned:
 ctx install ./review-kit --source /var/lib/cortexfs/storage/current
 ```
 
-When a privileged installer is targeting a different user, declare that
-runtime identity in the package instead of inheriting the installer's root
-credentials:
-
-```toml
-[[agents]]
-name = "kit_reviewer"
-run = "bin/review-agent"
-
-[agents.identity]
-uid = 1000
-gid = 1000
-groups = [1000]
-```
+Agent Unix identity is host authority, not package metadata. The installer
+derives it from its effective user and supplementary groups; package authors
+cannot select a uid, gid, or privileged group.
 
 The `run` file is the extension point. A tool implements the Tool SDK and an
 agent implements the Agent SDK; both are ordinary executable files, so a Rust,

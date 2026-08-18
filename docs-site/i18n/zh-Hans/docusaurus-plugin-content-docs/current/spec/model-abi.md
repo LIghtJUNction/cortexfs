@@ -47,9 +47,9 @@
 `model/<provider>/<model>.d/default` 中供检查显示，但 secrets 绝不能出现在模型元数据或 `.d/` 文件中。
 
 底层 AI API 格式不进入 ABI。OpenAI Responses、Anthropic Messages、Gemini
-GenerateContent、OpenAI 兼容 chat、local runtimes 与聚合器专有请求格式都属于 Rig
-或提供商适配器细节。底层有状态/无状态行为不进入 ABI，Rig 负责把提供商连接、
-API 兼容性和流式行为适配为稳定的 CortexFS 请求与 JSONL 事件流。
+GenerateContent、OpenAI 兼容 chat、local runtimes 与聚合器专有请求格式都属于协议适配器
+细节。底层有状态/无状态行为不进入 ABI，CortexFS 协议适配层负责把提供商连接、API
+兼容性和流式行为适配为稳定的 CortexFS 请求与 JSONL 事件流。
 
 示例：
 
@@ -280,7 +280,7 @@ Google 预设使用 Gemini 的 OpenAI 兼容端点。Anthropic 预设使用 `ant
 
 `/ctx/model/<provider>/<model>` 是只读可执行对象。读取该路径返回该模型的 CortexFS 元数据文本。执行会进行一次性推理：通过 CortexFS/Rust 运行时代码或 provider adapter；模型对象不得是 shell 脚本实现。
 
-首批元数据字段对应 Rig 0.39 模型列表：
+首批元数据字段对应通用模型列表字段：
 
 ```text
 id

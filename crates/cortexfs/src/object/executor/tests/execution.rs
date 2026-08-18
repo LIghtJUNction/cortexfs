@@ -825,7 +825,31 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 }
 use super::runtime::test_agent_run_config;
 use super::*;
-use crate::object::executor::exec::{ToolStdout, authorized_tool_target, parse_tool_stdout};
+use crate::object::executor::exec::{
+    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout,
+};
+use std::process::Command;
+
+#[test]
+fn passthrough_tool_output_accepts_raw_stdout_and_reports_stderr()
+-> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg("printf 'workspace\\n'")
+        .output()?;
+    assert_eq!(finish_agent_tool_output(&output, "tsh")?, "workspace\n");
+
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg("printf 'missing tool\\n' >&2; exit 7")
+        .output()?;
+    let error = finish_agent_tool_output(&output, "tsh")
+        .err()
+        .ok_or_else(|| std::io::Error::other("failed tsh must be reported"))?;
+    assert!(error.message().contains("missing tool"));
+    assert!(error.message().contains("exit status: 7"));
+    Ok(())
+}
 
 #[test]
 fn authorized_tool_target_maps_backing_source_tiers_under_ctx() {

@@ -118,6 +118,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
       uid
       gid
       groups
+      perm
       label
       iso
       parent
@@ -142,6 +143,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
       uid
       gid
       groups
+      perm
       label
       iso
       parent
@@ -165,6 +167,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
       uid
       gid
       groups
+      perm
       label
       iso
       parent
@@ -188,6 +191,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
       uid
       gid
       groups
+      perm
       label
       iso
       parent
@@ -211,6 +215,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
       uid
       gid
       groups
+      perm
       label
       iso
       parent
@@ -230,6 +235,10 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
   tool/
     fs.read
     fs.read.d/
+    fs.list
+    fs.list.d/
+    fs.stat
+    fs.stat.d/
     tsh
     tsh.d/
       name

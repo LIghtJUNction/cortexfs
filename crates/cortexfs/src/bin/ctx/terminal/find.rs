@@ -3,7 +3,7 @@ use crate::*;
 use cortexfs::runtime::terminal::{TerminalRecord, read_record};
 
 pub(super) fn find_terminals(root: &Path) -> Result<Vec<(PathBuf, TerminalRecord)>, CliError> {
-    let agents = ctx_home(root)?.join("agent");
+    let agents = cortexfs_paths::home_agent_root_from_home_path(&ctx_home(root)?);
     let mut output = Vec::new();
     let Ok(agent_entries) = fs::read_dir(&agents) else {
         return Ok(output);

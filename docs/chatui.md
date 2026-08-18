@@ -40,5 +40,7 @@ for line in s.makefile():
 ```
 
 `ctxchat` adds completion, multiline paste, `:tsh` commands, bounded `@path`
-and `@history:N` references, and clipboard adapters. References are prompt
-context only and never grant filesystem or tool authority.
+and `@history:N` references, clipboard adapters, and an interactive raw mode.
+Enter `/raw` to toggle JSONL event output, or use `/raw on` and `/raw off` to
+select it explicitly; the same mode is available at startup with `--raw`.
+References are prompt context only and never grant filesystem or tool authority.

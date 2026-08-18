@@ -88,7 +88,7 @@ cortexfs-fuse         fuser projection only
 cortexfs (facade)     re-exports + optional features; bins depend on facade
         ▲
 bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp
-sdks: tool-sdk, agent-sdk, runtime-client   (depend only on narrow crates)
+sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client   (depend only on narrow crates)
 ```
 
 ### 3.2 Crate rules

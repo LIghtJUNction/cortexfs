@@ -218,9 +218,7 @@ fn update_socket_prompt(
     }
     validate_agent_bootstrap_control_content(&request.control, &request.content)
         .map_err(|_error| runtime::control::RunCapabilityError::InvalidFrame)?;
-    let control_dir = source_root
-        .join("agent")
-        .join(format!("{}.d", request.agent));
+    let control_dir = cortexfs_paths::agent_control_path(source_root, &request.agent);
     open_plain_directory(&control_dir)
         .map_err(|_error| runtime::control::RunCapabilityError::CannotWrite)?;
     // 0o644 matches bootstrap-created prompt controls, so a self-updated
@@ -243,10 +241,12 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         return result;
     }
     let SocketRequest::Send {
+        ref id,
         ref session,
         scope,
         ref cwd,
         ref input,
+        ref event,
         ..
     } = request
     else {
@@ -319,11 +319,13 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     })?;
 
     let run_request = AgentExecutableRunRequest {
+        request_id: id,
         run_id: &run_id,
         cancellation_id: &run_id,
         session,
         cwd: cwd.as_deref(),
         input,
+        event: event.as_ref(),
         history_messages: &history_messages,
         tool_context: &tool_context,
         debug,
@@ -401,6 +403,7 @@ fn handle_agent_tsh_request(
         cwd: None,
         workspace: None,
         input: format!(":tsh {input}"),
+        event: None,
     };
     let recorder = match handle_socket_send(
         runtime.session_root,
@@ -513,7 +516,7 @@ fn replayed_run_response(
     }
 }
 
-fn run_agent_request(
+pub(crate) fn run_agent_request(
     stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
@@ -819,6 +822,7 @@ fn run_agent_envelope_loop_with_control(
     let mut frames = Vec::new();
     let mut seen = HashSet::new();
     let mut observation = Value::Null;
+    let mut tool_context = request.tool_context.to_owned();
     for step in 0..=MAX_CALLS {
         if agent_run_cancelled(
             &runtime.session_root.join(request.session),
@@ -829,17 +833,38 @@ fn run_agent_envelope_loop_with_control(
                 process: AgentProcessOutcome::Cancelled,
             });
         }
-        let envelope = serde_json::json!({
+        let observation_text = observation.to_string();
+        let context_revision = runtime::observation::context_revision(
+            request.history_messages,
+            &tool_context,
+            &observation_text,
+        );
+        if let Some(record_dir) = record_dir {
+            set_session_runtime_observation(
+                record_dir,
+                request.run_id,
+                step,
+                "agent",
+                None,
+                Some(&context_revision),
+            )
+            .map_err(SocketRuntimeError::Record)?;
+        }
+        let mut envelope = serde_json::json!({
             "schema": "cortexfs.agent-invocation/v1",
             "run": request.run_id,
             "step": step,
             "input": request.input,
             "history_messages": request.history_messages,
-            "tool_context": request.tool_context,
+            "tool_context": tool_context,
             "observation": observation
-        })
-        .to_string()
-            + "\n";
+        });
+        if let Some(event) = request.event
+            && let Some(object) = envelope.as_object_mut()
+        {
+            object.insert("event".to_owned(), event.clone());
+        }
+        let envelope = envelope.to_string() + "\n";
         if envelope.len() > 1024 * 1024 {
             return Ok(agent_error_outcome(
                 frames,
@@ -886,6 +911,9 @@ fn run_agent_envelope_loop_with_control(
         } else {
             None
         };
+        let process_message = (process == AgentProcessOutcome::Error)
+            .then(|| terminal_error_message(request.run_id, &new_frames))
+            .flatten();
         frames.extend(new_frames);
         if process == AgentProcessOutcome::Cancelled {
             return Ok(AgentRunOutcome {
@@ -896,7 +924,10 @@ fn run_agent_envelope_loop_with_control(
         if process == AgentProcessOutcome::Error {
             return Ok(agent_error_outcome(
                 frames,
-                agent_process_failed_frames(request.run_id, "agent process failed"),
+                agent_process_failed_frames(
+                    request.run_id,
+                    process_message.as_deref().unwrap_or("agent process failed"),
+                ),
             ));
         }
         let Some(call) = call else {
@@ -908,6 +939,17 @@ fn run_agent_envelope_loop_with_control(
                 process: AgentProcessOutcome::Success,
             });
         };
+        if let Some(record_dir) = record_dir {
+            set_session_runtime_observation(
+                record_dir,
+                request.run_id,
+                step,
+                "tool_call",
+                Some(&call.name),
+                Some(&context_revision),
+            )
+            .map_err(SocketRuntimeError::Record)?;
+        }
         if step == MAX_CALLS || !seen.insert(call.id.clone()) {
             return Ok(agent_error_outcome(
                 frames,
@@ -943,7 +985,8 @@ fn run_agent_envelope_loop_with_control(
         let (content, status) =
             match object::executor::exec::prepare_agent_tool_call(&config, &call) {
                 Ok(prepared) if prepared.approval() == AgentApprovalMode::Ask => {
-                    let approval = request_tool_approval(stream, request.run_id, &call)?;
+                    let approval =
+                        request_tool_approval(stream, request.request_id, request.run_id, &call)?;
                     if let Some(session_dir) = record_dir {
                         record_tool_approval_frames(session_dir, &approval.frames)
                             .map_err(SocketRuntimeError::Record)?;
@@ -1006,8 +1049,39 @@ fn run_agent_envelope_loop_with_control(
             "tool_call_id": call.id, "name": call.name,
             "status": status, "content": content, "truncated": truncated
         });
+        tool_context = continuation_tool_context(request.tool_context, &call, status);
     }
     Err(SocketRuntimeError::InvalidAgentOutput)
+}
+
+fn continuation_tool_context(
+    base: &str,
+    call: &object::executor::AgentToolCall,
+    status: &str,
+) -> String {
+    let mut context = base.to_owned();
+    if !context.trim().is_empty() {
+        context.push_str("\n\n");
+    }
+    context.push_str("Latest host tool completion:\n- tool: ");
+    context.push_str(&call.name);
+    context.push_str("\n- args: ");
+    let args = object::executor::tool_call_args_strings(call);
+    context.push_str(&serde_json::to_string(&args).unwrap_or_else(|_error| "[]".to_owned()));
+    context.push_str("\n- status: ");
+    context.push_str(status);
+    context.push('\n');
+    if status == "ok" {
+        context.push_str(
+            "The host completed this exact call. Use the authoritative result below and answer the original user; do not repeat this call.",
+        );
+    } else {
+        context.push_str(
+            "The host rejected or failed this call. Inspect the error before choosing a different action; do not blindly repeat it.",
+        );
+    }
+    object::executor::trim_tool_context_to_limit(&mut context);
+    context
 }
 
 fn create_run_provider_egress(
@@ -1015,13 +1089,13 @@ fn create_run_provider_egress(
     request: AgentExecutableRunRequest<'_>,
 ) -> Result<Option<runtime::egress::ProviderEgress>, SocketRuntimeError> {
     let provider_model = match runtime.execution {
-        AgentExecutableSocketExecution::Direct => false,
-        AgentExecutableSocketExecution::Bwrap { .. } => runtime
+        AgentExecutableSocketExecution::Bwrap { .. } if runtime.network_allowed => runtime
             .model
             .map(|model| runtime::egress::is_provider_model(runtime.ctx_root, model))
             .transpose()
             .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
             .unwrap_or(false),
+        _ => false,
     };
     if !provider_model {
         return Ok(None);
@@ -1184,10 +1258,13 @@ pub(crate) fn run_agent_executable_streaming(
                 let value: Value = serde_json::from_str(&line)
                     .map_err(|_error| SocketRuntimeError::InvalidAgentOutput)?;
                 let frame_type = event_type(&line);
+                let recoverable_error =
+                    value.get("recoverable").and_then(Value::as_bool) == Some(true);
                 if matches!(
                     frame_type.as_deref(),
-                    Some("approval_request" | "approval_result" | "start" | "error" | "done")
-                ) {
+                    Some("approval_request" | "approval_result" | "start" | "done")
+                ) || frame_type.as_deref() == Some("error") && !recoverable_error
+                {
                     terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
@@ -1240,7 +1317,21 @@ pub(crate) fn run_agent_executable_streaming(
     let status = child
         .wait()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    let _stderr = stderr_reader.join();
+    let stderr = stderr_reader
+        .join()
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    if !status.success() {
+        let diagnostic = safe_agent_process_diagnostic(&stderr);
+        if !diagnostic.is_empty() {
+            frames.extend(agent_terminal_error_frames(
+                request.run_id,
+                "EIO",
+                &diagnostic,
+            ));
+        }
+    }
     if cancelled {
         return Ok(AgentRunOutcome {
             frames,
@@ -1320,11 +1411,43 @@ pub(crate) struct AgentRunOutcome {
 }
 
 fn agent_error_outcome(mut frames: Vec<String>, terminal: Vec<String>) -> AgentRunOutcome {
-    frames.extend(terminal);
+    if let Some(error) = promoted_recoverable_error(&frames) {
+        frames.push(error);
+        if let Some(done) = terminal
+            .iter()
+            .find(|frame| event_type(frame).as_deref() == Some("done"))
+        {
+            frames.push(done.clone());
+        } else {
+            frames.extend(terminal);
+        }
+    } else {
+        frames.extend(terminal);
+    }
     AgentRunOutcome {
         frames,
         process: AgentProcessOutcome::Error,
     }
+}
+
+fn promoted_recoverable_error(frames: &[String]) -> Option<String> {
+    frames.iter().rev().find_map(|frame| {
+        let value = serde_json::from_str::<Value>(frame).ok()?;
+        if value.get("type").and_then(Value::as_str) != Some("error")
+            || value.get("recoverable").and_then(Value::as_bool) != Some(true)
+        {
+            return None;
+        }
+        Some(
+            serde_json::json!({
+                "type": "error",
+                "run": value.get("run").and_then(Value::as_str)?,
+                "code": value.get("code").and_then(Value::as_str)?,
+                "message": value.get("message").and_then(Value::as_str)?
+            })
+            .to_string(),
+        )
+    })
 }
 
 pub(crate) fn read_agent_executable_stderr_limited(stderr: impl Read) -> std::io::Result<String> {
@@ -1338,13 +1461,94 @@ pub(crate) fn read_agent_executable_stderr_limited(stderr: impl Read) -> std::io
     Ok(String::from_utf8_lossy(&bytes).trim().to_owned())
 }
 
+const MAX_AGENT_PROCESS_DIAGNOSTIC_CHARS: usize = 512;
+const AGENT_SECRET_MARKERS: [&str; 10] = [
+    "sk-",
+    "Bearer ",
+    "api_key=",
+    "apikey=",
+    "token=",
+    "secret=",
+    "password=",
+    "authorization=",
+    "\"api_key\":\"",
+    "\"token\":\"",
+];
+
+fn terminal_error_message(run_id: &str, frames: &[String]) -> Option<String> {
+    frames.iter().rev().find_map(|frame| {
+        let value = serde_json::from_str::<Value>(frame).ok()?;
+        if value.get("type").and_then(Value::as_str) != Some("error")
+            || value.get("run").and_then(Value::as_str) != Some(run_id)
+            || value.get("recoverable").and_then(Value::as_bool) == Some(true)
+        {
+            return None;
+        }
+        value
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    })
+}
+
+fn safe_agent_process_diagnostic(stderr: &str) -> String {
+    let line = stderr
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or_default();
+    let mut diagnostic = line
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect::<String>();
+    for marker in AGENT_SECRET_MARKERS {
+        diagnostic = redact_diagnostic_marker(&diagnostic, marker);
+    }
+    diagnostic
+        .chars()
+        .take(MAX_AGENT_PROCESS_DIAGNOSTIC_CHARS)
+        .collect()
+}
+
+fn redact_diagnostic_marker(value: &str, marker: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut remaining = value;
+    while let Some(start) = remaining.find(marker) {
+        let value_start = start.saturating_add(marker.len());
+        let Some(prefix) = remaining.get(..value_start) else {
+            break;
+        };
+        let Some(tail) = remaining.get(value_start..) else {
+            break;
+        };
+        output.push_str(prefix);
+        let value_len = tail
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, '"' | '\'' | ',' | '}' | '&')
+            })
+            .unwrap_or(tail.len());
+        if value_len == 0 {
+            remaining = tail;
+        } else {
+            output.push_str("<redacted>");
+            let Some(next) = tail.get(value_len..) else {
+                break;
+            };
+            remaining = next;
+        }
+    }
+    output.push_str(remaining);
+    output
+}
+
 pub(crate) fn agent_process_failed_frames(run_id: &str, stderr: &str) -> Vec<String> {
-    let message = if stderr.is_empty() {
-        "agent process failed before emitting events"
+    let diagnostic = safe_agent_process_diagnostic(stderr);
+    let message = if diagnostic.is_empty() {
+        "agent process failed".to_owned()
     } else {
-        stderr
+        format!("agent process failed: {diagnostic}")
     };
-    agent_terminal_error_frames(run_id, "EIO", message)
+    agent_terminal_error_frames(run_id, "EIO", &message)
 }
 
 fn agent_invalid_output_frames(run_id: &str) -> Vec<String> {
@@ -1393,11 +1597,13 @@ pub(crate) fn read_agent_executable_frame_line(
 
 #[derive(Clone, Copy)]
 pub(crate) struct AgentExecutableRunRequest<'a> {
+    pub(crate) request_id: &'a str,
     pub(crate) run_id: &'a str,
     pub(crate) cancellation_id: &'a str,
     pub(crate) session: &'a str,
     pub(crate) cwd: Option<&'a str>,
     pub(crate) input: &'a str,
+    pub(crate) event: Option<&'a Value>,
     pub(crate) history_messages: &'a str,
     pub(crate) tool_context: &'a str,
     pub(crate) debug: Option<SocketDebugTiming>,
@@ -1427,6 +1633,9 @@ pub(crate) fn prompt_quoted(value: &str) -> String {
 mod completion_tests {
     use super::*;
     use crate::reference::bootstrap::ensure_runtime_models_from;
+    use cortexfs_runtime_client::interaction::{
+        InteractionFrame, InteractionRequest, InteractionResult,
+    };
     use std::ffi::OsString;
     use std::io;
     use std::net::{Shutdown, TcpListener};
@@ -1454,13 +1663,14 @@ mod completion_tests {
             let (mut client, mut server) = UnixStream::pair()?;
             client.write_all(response.as_bytes())?;
             client.shutdown(Shutdown::Write)?;
-            let approval = request_tool_approval(&mut server, "run-1", &approval_call())
-                .map_err(|error| io::Error::other(format!("{error:?}")))?;
+            let approval =
+                request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
+                    .map_err(|error| io::Error::other(format!("{error:?}")))?;
             assert!(!approval.allowed, "{response:?}");
         }
         let (_client, mut server) = UnixStream::pair()?;
         server.set_read_timeout(Some(Duration::from_millis(10)))?;
-        let approval = request_tool_approval(&mut server, "run-1", &approval_call())
+        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
             .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(!approval.allowed);
 
@@ -1469,7 +1679,37 @@ mod completion_tests {
             b"{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
         )?;
         client.shutdown(Shutdown::Write)?;
-        let approval = request_tool_approval(&mut server, "run-1", &approval_call())
+        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        assert!(approval.allowed);
+
+        let (mut client, mut server) = UnixStream::pair()?;
+        let response = InteractionFrame::request(InteractionRequest::CommandResult {
+            request_id: "other-request".to_owned(),
+            session: "default".to_owned(),
+            command_id: "call-1".to_owned(),
+            result: InteractionResult::Accepted,
+        })
+        .encode()
+        .map_err(io::Error::other)?;
+        client.write_all(&response)?;
+        client.shutdown(Shutdown::Write)?;
+        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        assert!(!approval.allowed);
+
+        let (mut client, mut server) = UnixStream::pair()?;
+        let response = InteractionFrame::request(InteractionRequest::CommandResult {
+            request_id: "request-1".to_owned(),
+            session: "default".to_owned(),
+            command_id: "call-1".to_owned(),
+            result: InteractionResult::Accepted,
+        })
+        .encode()
+        .map_err(io::Error::other)?;
+        client.write_all(&response)?;
+        client.shutdown(Shutdown::Write)?;
+        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
             .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(approval.allowed);
         Ok(())
@@ -1485,13 +1725,13 @@ mod completion_tests {
         )?;
         client.shutdown(Shutdown::Write)?;
 
-        let first = request_tool_approval(&mut server, "run-1", &approval_call())
+        let first = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
             .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(first.allowed);
 
         let mut second_call = approval_call();
         second_call.id = "call-2".to_owned();
-        let replayed = request_tool_approval(&mut server, "run-1", &second_call)
+        let replayed = request_tool_approval(&mut server, "request-1", "run-1", &second_call)
             .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(!replayed.allowed);
         Ok(())
@@ -1668,11 +1908,13 @@ mod completion_tests {
             execution: AgentExecutableSocketExecution::Direct,
         };
         let request = AgentExecutableRunRequest {
+            request_id: "request-1",
             run_id: "run1",
             cancellation_id: "run1",
             session: "default",
             cwd: None,
             input: "overflow",
+            event: None,
             history_messages: "",
             tool_context: "",
             debug: None,
@@ -1693,7 +1935,7 @@ mod completion_tests {
     }
 
     #[test]
-    fn bwrap_agent_streams_through_provider_egress_to_http_upstream()
+    fn network_allowed_bwrap_agent_streams_through_provider_egress()
     -> Result<(), Box<dyn std::error::Error>> {
         let runner = test_object_runner().ok_or("missing built cortexfs-object-runner")?;
         if !Command::new("/usr/bin/bwrap")
@@ -1742,7 +1984,7 @@ mod completion_tests {
             session_root: &session_root,
             default_cwd: "/workspace",
             model: Some("fixture/chat"),
-            network_allowed: false,
+            network_allowed: true,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Bwrap {
@@ -1752,11 +1994,13 @@ mod completion_tests {
             },
         };
         let request = AgentExecutableRunRequest {
+            request_id: "request-1",
             run_id: "run1",
             cancellation_id: "run1",
             session: "default",
             cwd: None,
             input: "say hello",
+            event: None,
             history_messages: "",
             tool_context: "",
             debug: None,
@@ -1947,6 +2191,31 @@ mod completion_tests {
             compact_child_outcome("run", &cancelled).0,
             ChildContextStatus::Cancelled
         );
+    }
+
+    #[test]
+    fn process_diagnostic_is_bounded_and_redacts_credentials() {
+        let diagnostic = safe_agent_process_diagnostic(
+            "cortexfs-object-runner: request failed api_key=sk-live-secret Bearer abc\nsecond",
+        );
+        assert!(diagnostic.contains("api_key=<redacted>"));
+        assert!(diagnostic.contains("Bearer <redacted>"));
+        assert!(!diagnostic.contains("live-secret"));
+        assert!(!diagnostic.contains("abc"));
+        assert!(diagnostic.chars().count() <= MAX_AGENT_PROCESS_DIAGNOSTIC_CHARS);
+    }
+
+    #[test]
+    fn continuation_context_marks_completed_tool_call() {
+        let call = object::executor::AgentToolCall {
+            id: "call-1".to_owned(),
+            name: "tsh".to_owned(),
+            args: vec![OsString::from("shell.exec"), OsString::from("pwd")],
+        };
+        let context = continuation_tool_context("base", &call, "ok");
+        assert!(context.contains("Latest host tool completion:"));
+        assert!(context.contains(r#"["shell.exec","pwd"]"#));
+        assert!(context.contains("do not repeat this call"));
     }
 
     #[test]

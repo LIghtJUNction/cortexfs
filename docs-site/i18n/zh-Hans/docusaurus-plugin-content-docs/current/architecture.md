@@ -13,7 +13,7 @@ agent 是受策略约束的编排进程。
 tool 是能力端点。
 session 是普通文件历史。
 policy 是最小化、类 SELinux 的 allowlist。
-Rig 消除 provider 和 API 格式差异。
+CortexFS 协议适配层消除 provider 和 API 格式差异。
 CortexFS 不把 provider/API 格式表达为根 ABI。
 MCP 服务器是工具来源；MCP 能力是普通工具。
 CortexFS 管理代理可见性、执行与共享，不管理框架配置格式。

@@ -12,7 +12,7 @@ pub fn persist_agent_launch_meta(
     terminal: &AgentLaunchReceipt,
     system: &SystemAgentSocketReceipt,
 ) -> Result<(), AgentLaunchError> {
-    let control = source.join("agent").join(format!("{name}.d"));
+    let control = cortexfs_paths::agent_control_path(source, name);
     let control_meta =
         fs::symlink_metadata(&control).map_err(|_error| AgentLaunchError::CannotExecute)?;
     if !control_meta.is_dir() || control_meta.file_type().is_symlink() {

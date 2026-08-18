@@ -1,3 +1,6 @@
+use super::adapter::{
+    AuthProvider, default_login, default_models, default_refresh, device_request,
+};
 use super::device::{self, DeviceChallenge, DeviceConfig};
 use super::protocol::{credential_from_token, parse_token};
 use super::{AuthProviderError, AuthRequest, AuthTransport, Credential, ProviderAuthConfig};
@@ -170,5 +173,100 @@ impl AdapterCore {
             &[("Accept", "application/json")],
         )?;
         credential_from_token(&self.id, parse_token(&response)?, None, now)
+    }
+}
+pub(super) trait CoreAuthProvider {
+    fn core(&self) -> &AdapterCore;
+    fn device_login(
+        &self,
+        timeout_secs: u64,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+        notify: &mut dyn FnMut(&DeviceChallenge),
+        pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        self.core()
+            .device_login(timeout_secs, transport, now, notify, pause)
+    }
+    fn headers(&self, credential: &Credential) -> Result<Vec<(String, String)>, AuthProviderError> {
+        self.core().model_headers(credential, "Authorization")
+    }
+}
+
+impl<T: CoreAuthProvider + Send + Sync> AuthProvider for T {
+    fn id(&self) -> &str {
+        &self.core().id
+    }
+    fn methods(&self) -> &[ProviderAuthConfig] {
+        &self.core().methods
+    }
+    fn aliases(&self) -> &[String] {
+        &self.core().aliases
+    }
+    fn authorization_url(
+        &self,
+        state: &str,
+        pkce: &OAuthPkce,
+    ) -> Result<String, AuthProviderError> {
+        self.core().authorization(state, pkce)
+    }
+    fn login(&self, request: AuthRequest) -> Result<Credential, AuthProviderError> {
+        default_login(self, request)
+    }
+    fn login_with(
+        &self,
+        request: AuthRequest,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+    ) -> Result<Credential, AuthProviderError> {
+        if let Some(credential) = device_request(self, &request, transport, now)? {
+            return Ok(credential);
+        }
+        self.core().login(request, transport, now)
+    }
+    fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
+        self.core().persist(credential, now)
+    }
+    fn device_login_with(
+        &self,
+        timeout_secs: u64,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+        notify: &mut dyn FnMut(&DeviceChallenge),
+        pause: &mut dyn FnMut(u64),
+    ) -> Result<Credential, AuthProviderError> {
+        self.device_login(timeout_secs, transport, now, notify, pause)
+    }
+    fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {
+        default_refresh(self, credential)
+    }
+    fn refresh_with(
+        &self,
+        credential: &Credential,
+        transport: &mut dyn AuthTransport,
+        now: u64,
+    ) -> Result<Credential, AuthProviderError> {
+        self.core().refresh(credential, transport, now)
+    }
+    fn models(&self, credential: Option<&Credential>) -> Result<Vec<String>, AuthProviderError> {
+        default_models(self, credential)
+    }
+    fn models_with(
+        &self,
+        credential: Option<&Credential>,
+        transport: &mut dyn AuthTransport,
+    ) -> Result<Vec<String>, AuthProviderError> {
+        let credential = credential.ok_or(AuthProviderError::InvalidCredential)?;
+        let headers = self.headers(credential)?;
+        self.parse_models(
+            self.core()
+                .model_response_with_headers(transport, &headers)?,
+        )
+    }
+    fn model_headers(
+        &self,
+        credential: &Credential,
+    ) -> Result<Vec<(String, String)>, AuthProviderError> {
+        self.headers(credential)
     }
 }

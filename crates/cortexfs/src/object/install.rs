@@ -29,6 +29,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "uid",
     "gid",
     "groups",
+    "perm",
     "label",
     "iso",
     "parent",
@@ -42,6 +43,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "window",
     "abi",
     "approval",
+    "loop",
     "tools",
     "system.md",
     "prompt.template.md",
@@ -435,7 +437,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
             )));
         }
         let validated_value = if class == ObjectClass::Agent
-            && matches!(name.as_str(), "tools" | "window")
+            && matches!(name.as_str(), "tools" | "window" | "perm")
             && !value.ends_with('\n')
         {
             format!("{value}\n")
@@ -557,11 +559,18 @@ pub(crate) fn install_class_path(
     tier: InstallTier,
 ) -> Result<PathBuf, InstallError> {
     let directory = match (class, tier) {
-        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => root
-            .join("home")
-            .join(nix::unistd::Uid::effective().as_raw().to_string())
-            .join(class.as_str()),
-        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => root.join(class.as_str()),
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => {
+            cortexfs_paths::object_root_path(
+                &cortexfs_paths::ctx_home_path(
+                    root,
+                    &nix::unistd::Uid::effective().as_raw().to_string(),
+                ),
+                class.as_str(),
+            )
+        }
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => {
+            cortexfs_paths::object_root_path(root, class.as_str())
+        }
         (ObjectClass::Model, _) => {
             return Err(InstallError::invalid(
                 "model object installation is unsupported",
@@ -620,10 +629,16 @@ fn write_manifest_controls(
             InstallError::unavailable(format!("cannot write object control {name}: {error}"))
         })?;
     }
-    if class == ObjectClass::Agent && !manifest.controls.contains_key("window") {
-        write_text_file_at(control, "window", "auto\n", 0o644).map_err(|error| {
-            InstallError::unavailable(format!("cannot write object control window: {error}"))
-        })?;
+    if class == ObjectClass::Agent {
+        for (name, content) in [("window", "auto\n"), ("perm", "rwx\n")] {
+            if !manifest.controls.contains_key(name) {
+                write_text_file_at(control, name, content, 0o644).map_err(|error| {
+                    InstallError::unavailable(format!(
+                        "cannot write object control {name}: {error}"
+                    ))
+                })?;
+            }
+        }
     }
     let runtime: &[(&str, &str)] = if class == ObjectClass::Tool {
         &[("status", "idle\n"), ("log", "")]

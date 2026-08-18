@@ -274,9 +274,11 @@ fn assert_reference_agents(root: &Path) {
 
     assert_file_text(&root.join("agent/architect.d/parent"), "\n");
     assert_file_text(&root.join("agent/architect.d/cwd"), "/workspace\n");
+    assert_file_text(&root.join("agent/architect.d/perm"), "r--\n");
     assert_file_text(&root.join("agent/coder.d/parent"), "agent:architect\n");
     assert_file_text(&root.join("agent/coder.d/cwd"), "/workspace\n");
     assert_file_text(&root.join("agent/coder.d/model"), "main\n");
+    assert_file_text(&root.join("agent/coder.d/perm"), "rwx\n");
     assert_file_text(&root.join("agent/reviewer.d/parent"), "agent:architect\n");
     assert_file_text(&root.join("agent/reviewer.d/model"), "main\n");
     assert_file_text(&root.join("agent/worker.d/parent"), "agent:architect\n");

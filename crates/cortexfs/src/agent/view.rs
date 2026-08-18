@@ -37,6 +37,9 @@ pub fn derive_agent_runtime_view(
     let gid = parse_agent_number_control(&control_dir, AgentControlKind::Gid, "gid")?;
     let groups = parse_agent_groups_control(&control_dir)?;
     let identity = AgentUnixIdentity::new(uid, gid, groups);
+    let permissions =
+        AgentPermissions::parse_control(&read_required_agent_control(&control_dir, "perm")?)
+            .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("perm".to_owned()))?;
 
     let label = read_required_agent_control_value(&control_dir, "label")?;
     let policy_subject = policy_subject_from_label(&label)
@@ -71,6 +74,7 @@ pub fn derive_agent_runtime_view(
     let effective_window = window_setting
         .resolve(model_limit)
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("window".to_owned()))?;
+    let loop_kind = read_agent_loop_control(&control_dir)?;
 
     let policy_content = read_required_agent_control(&control_dir, "policy")?;
     let policy = PolicyV0::parse(&policy_content)
@@ -81,16 +85,18 @@ pub fn derive_agent_runtime_view(
     }
     let approval = parse_agent_approval_control(&control_dir)?;
 
-    let ctx_home = ctx_root.join("home").join(owner.to_string());
-    let home = ctx_home.join("agent").join(agent_name);
-    let env = derive_agent_runtime_env(
+    let owner_text = owner.to_string();
+    let ctx_home = cortexfs_paths::ctx_home_path(ctx_root, &owner_text);
+    let home = cortexfs_paths::agent_home_path(ctx_root, &owner_text, agent_name);
+    let env = derive_agent_runtime_env(&AgentRuntimeEnv {
         ctx_root,
-        &ctx_home,
-        &home,
-        &raw_path,
-        &control_dir,
+        ctx_home: &ctx_home,
+        home: &home,
+        ctx_path: &raw_path,
+        control_dir: &control_dir,
         effective_window,
-    )?;
+        loop_kind: &loop_kind,
+    })?;
 
     Ok(AgentRuntimeView {
         agent_name: agent_name.to_owned(),
@@ -100,6 +106,7 @@ pub fn derive_agent_runtime_view(
         home,
         owner,
         identity,
+        permissions,
         label,
         policy_subject,
         iso,
@@ -114,6 +121,7 @@ pub fn derive_agent_runtime_view(
         model_limit,
         window_setting,
         effective_window,
+        loop_kind,
         policy,
         declared_tools,
         approval,
@@ -125,7 +133,7 @@ fn read_agent_model_limit(
     model: &str,
 ) -> Result<ModelContextLimit, AgentRuntimeViewError> {
     let model_name = if is_model_alias(model) {
-        let alias = ctx_root.join("model").join(model);
+        let alias = cortexfs_paths::model_root_path(ctx_root).join(model);
         let metadata = fs::symlink_metadata(&alias)
             .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
         if !metadata.file_type().is_symlink() {
@@ -135,9 +143,13 @@ fn read_agent_model_limit(
         }
         let target = fs::read_link(alias)
             .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
+        let model_root = format!(
+            "{}/",
+            cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
+        );
         let target = target
             .to_str()
-            .and_then(|target| target.strip_prefix("/ctx/model/"))
+            .and_then(|target| target.strip_prefix(&model_root))
             .filter(|target| is_model_name(target))
             .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
         target.to_owned()
@@ -151,11 +163,7 @@ fn read_agent_model_limit(
     let (provider, model) = model_name
         .split_once('/')
         .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
-    let path = ctx_root
-        .join("model")
-        .join(provider)
-        .join(format!("{model}.d"))
-        .join("limit");
+    let path = cortexfs_paths::model_control_path(ctx_root, provider, model).join("limit");
     let content =
         read_small_text_file(&path, MAX_AGENT_RUNTIME_CONTROL_BYTES).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -214,7 +222,7 @@ pub(crate) fn resolve_agent_runtime_control_dir(
             return Ok(control_dir);
         }
     }
-    let control_dir = ctx_root.join("agent").join(format!("{agent_name}.d"));
+    let control_dir = cortexfs_paths::agent_control_path(ctx_root, agent_name);
     if open_plain_directory(&control_dir).is_err() {
         return Err(AgentRuntimeViewError::MissingControlDirectory);
     }
@@ -226,12 +234,13 @@ pub(crate) fn current_user_agent_control_dirs(ctx_root: &Path, agent_name: &str)
     if let Some(ctx_home) = env::var_os("CTX_HOME").map(PathBuf::from)
         && ctx_home.starts_with(ctx_root)
     {
-        controls.push(ctx_home.join("agent").join(format!("{agent_name}.d")));
+        controls.push(cortexfs_paths::agent_control_path(&ctx_home, agent_name));
     }
-    let uid_home = ctx_root
-        .join("home")
-        .join(nix::unistd::Uid::effective().as_raw().to_string());
-    let uid_control = uid_home.join("agent").join(format!("{agent_name}.d"));
+    let uid_home = cortexfs_paths::ctx_home_path(
+        ctx_root,
+        &nix::unistd::Uid::effective().as_raw().to_string(),
+    );
+    let uid_control = cortexfs_paths::agent_control_path(&uid_home, agent_name);
     if !controls.iter().any(|control| control == &uid_control) {
         controls.push(uid_control);
     }
@@ -318,27 +327,38 @@ pub(crate) fn parse_agent_absolute_path_control(
     Ok(PathBuf::from(value))
 }
 
-pub(crate) fn derive_agent_runtime_env(
-    ctx_root: &Path,
-    ctx_home: &Path,
-    home: &Path,
-    ctx_path: &str,
-    control_dir: &Path,
+pub(crate) struct AgentRuntimeEnv<'a> {
+    ctx_root: &'a Path,
+    ctx_home: &'a Path,
+    home: &'a Path,
+    ctx_path: &'a str,
+    control_dir: &'a Path,
     effective_window: AgentEffectiveWindow,
+    loop_kind: &'a AgentLoop,
+}
+
+pub(crate) fn derive_agent_runtime_env(
+    config: &AgentRuntimeEnv<'_>,
 ) -> Result<Vec<(String, String)>, AgentRuntimeViewError> {
-    let env_content = read_required_agent_control(control_dir, "env")?;
+    let env_content = read_required_agent_control(config.control_dir, "env")?;
     let mut env = vec![
-        ("CTX_ROOT".to_owned(), ctx_root.display().to_string()),
+        ("CTX_ROOT".to_owned(), config.ctx_root.display().to_string()),
         (
             "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-            ctx_root.join("shared/providers.d").display().to_string(),
+            cortexfs_paths::shared_path(config.ctx_root, "providers.d")
+                .display()
+                .to_string(),
         ),
-        ("CTX_HOME".to_owned(), ctx_home.display().to_string()),
-        ("HOME".to_owned(), home.display().to_string()),
+        ("CTX_HOME".to_owned(), config.ctx_home.display().to_string()),
+        ("HOME".to_owned(), config.home.display().to_string()),
         ("PATH".to_owned(), support::command::TRUSTED_PATH.to_owned()),
-        ("CTX_PATH".to_owned(), ctx_path.to_owned()),
+        ("CTX_PATH".to_owned(), config.ctx_path.to_owned()),
+        (
+            "CTX_AGENT_LOOP".to_owned(),
+            config.loop_kind.as_str().to_owned(),
+        ),
     ];
-    if let Some(budget) = AgentWindowBudget::from_effective(effective_window) {
+    if let Some(budget) = budget_from_effective(config.effective_window) {
         env.push((
             "CTX_CONTEXT_WINDOW_TOKENS".to_owned(),
             budget.tokens().to_string(),
@@ -350,6 +370,15 @@ pub(crate) fn derive_agent_runtime_env(
     }
     let _validated_env = parse_agent_env_control(&env_content)?;
     Ok(env)
+}
+
+fn read_agent_loop_control(control_dir: &Path) -> Result<AgentLoop, AgentRuntimeViewError> {
+    match read_small_text_file(&control_dir.join("loop"), 256) {
+        Ok(content) => AgentLoop::parse(&content)
+            .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("loop".to_owned())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AgentLoop::default()),
+        Err(_error) => Err(AgentRuntimeViewError::CannotReadControl("loop".to_owned())),
+    }
 }
 
 pub(crate) fn parse_agent_env_control(
