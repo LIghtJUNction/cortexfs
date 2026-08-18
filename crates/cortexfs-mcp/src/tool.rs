@@ -12,6 +12,7 @@ use std::path::PathBuf;
 struct Locator {
     transport: String,
     config: PathBuf,
+    sha256: String,
     server: String,
     tool: String,
 }
@@ -43,8 +44,12 @@ impl Tool for McpTool {
         output: &mut ToolEmitter<&mut dyn Write>,
     ) -> ToolResult<()> {
         let arguments = invocation.json()?;
-        let server = config::read(&self.locator.config, &self.locator.server)
-            .map_err(|error| ToolError::new("EIO", format!("cannot read MCP config: {error}")))?;
+        let server = config::read(
+            &self.locator.config,
+            &self.locator.server,
+            Some(&self.locator.sha256),
+        )
+        .map_err(|error| ToolError::new("EIO", format!("cannot read MCP config: {error}")))?;
         let mut client = Client::start(&server)
             .map_err(|error| ToolError::new("EIO", format!("cannot start MCP server: {error}")))?;
         let result = client
@@ -105,6 +110,7 @@ pub(crate) fn run() -> io::Result<std::process::ExitCode> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if locator.transport != "stdio"
         || !locator.config.is_absolute()
+        || !valid_digest(&locator.sha256)
         || !cortexfs::is_object_name(&locator.server)
         || !cortexfs::is_object_name(&locator.tool)
     {
@@ -118,6 +124,13 @@ pub(crate) fn run() -> io::Result<std::process::ExitCode> {
         locator,
     };
     Ok(cortexfs_tool_sdk::run_cli(&tool, env::args_os().skip(1)))
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 #[cfg(test)]
