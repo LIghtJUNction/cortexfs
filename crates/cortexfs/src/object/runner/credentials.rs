@@ -37,9 +37,14 @@ pub(crate) fn provider_credential(
         }
         let Some(oauth) = oauth else { return Ok(None) };
         return if key_slot.is_none() {
-            cortexfs::resolve_oauth_credential(provider, oauth)
-                .map(|value| value.map(codex_credential))
-                .map_err(|_error| format!("oauth credential unavailable: {provider}"))
+            cortexfs::resolve_oauth_access_token_with(
+                provider,
+                oauth,
+                |name| env::var(name),
+                cortexfs::oauth_keychain_secret,
+            )
+            .map(|value| value.and_then(codex_credential))
+            .map_err(|_error| format!("oauth credential unavailable: {provider}"))
         } else {
             Ok(None)
         };
@@ -52,9 +57,14 @@ pub(crate) fn provider_credential(
             .filter(|_| key_slot.is_none())
             .ok_or_else(|| format!("provider OAuth is not configured: {provider}"))
             .and_then(|oauth| {
-                resolve_runtime_oauth(provider, config, oauth)
-                    .map(|token| token.map(|(access, _account)| ProviderCredential::Bearer(access)))
-                    .map_err(|_error| format!("oauth credential unavailable: {provider}"))
+                cortexfs::resolve_oauth_access_token_with(
+                    provider,
+                    oauth,
+                    |name| env::var(name),
+                    cortexfs::oauth_keychain_secret,
+                )
+                .map(|token| token.map(ProviderCredential::Bearer))
+                .map_err(|_error| format!("oauth credential unavailable: {provider}"))
             });
     }
     let credential = |token| {
@@ -92,32 +102,20 @@ pub(crate) fn provider_credential(
         return Ok(None);
     };
     if key_slot.is_none() {
-        return resolve_runtime_oauth(provider, config, oauth)
-            .map(|token| token.map(|(access, _account)| ProviderCredential::Bearer(access)))
-            .map_err(|_error| format!("oauth credential unavailable: {provider}"));
+        return cortexfs::resolve_oauth_access_token_with(
+            provider,
+            oauth,
+            |name| env::var(name),
+            cortexfs::oauth_keychain_secret,
+        )
+        .map(|token| token.map(ProviderCredential::Bearer))
+        .map_err(|_error| format!("oauth credential unavailable: {provider}"));
     }
     Ok(None)
 }
-fn codex_credential((token, account_id): cortexfs::OAuthCredential) -> ProviderCredential {
-    ProviderCredential::Codex { token, account_id }
-}
-
-fn resolve_runtime_oauth(
-    provider: &str,
-    config: &RunnerProviderConfig,
-    oauth: &cortexfs::OAuthProviderConfig,
-) -> Result<Option<(String, String)>, String> {
-    let adapter = cortexfs::configured_adapter(
-        provider,
-        &config.base_url,
-        config.auth_methods(),
-        Some(oauth.clone()),
-    )
-    .ok_or_else(|| format!("provider OAuth adapter unavailable: {provider}"))?;
-    cortexfs::resolve_oauth_credential_with(provider, oauth, |request| {
-        cortexfs::refresh_oauth_result(provider, request, adapter.as_ref())
-    })
-    .map_err(|_error| format!("oauth credential unavailable: {provider}"))
+fn codex_credential(token: String) -> Option<ProviderCredential> {
+    cortexfs::oauth_account_id(&token)
+        .map(|account_id| ProviderCredential::Codex { token, account_id })
 }
 
 fn runtime_secret_env_matches(
