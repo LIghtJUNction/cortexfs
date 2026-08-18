@@ -392,21 +392,27 @@ build_cortexfs() {
     local source=$1
     card "$( [[ $LANGUAGE == zh ]] && printf '04 · Release 构建' || printf '04 · Release build' )"
     say "Source: $source" "源码：$source"
-    say "Command: cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp" \
-        "命令：cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp"
+    say "Command: cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp -p cortexfs-channel-nostr -p cortexfs-channel-amqp -p cortexfs-channel-wecom-ws -p cortexfs-channel-voice -p cortexfs-channel-slack -p cortexfs-channel-mqtt" \
+        "命令：cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp -p cortexfs-channel-nostr -p cortexfs-channel-amqp -p cortexfs-channel-wecom-ws -p cortexfs-channel-voice -p cortexfs-channel-slack -p cortexfs-channel-mqtt"
     confirm "BUILD CORTEXFS" \
         "Type BUILD CORTEXFS to start the release build as your current user." \
         "输入 BUILD CORTEXFS，以当前用户开始 release 构建。"
     (
         cd "$source"
         CARGO_TARGET_DIR="$source/target" \
-            cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp
+            cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+                -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
+                -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
+                -p cortexfs-channel-voice -p cortexfs-channel-slack \
+                -p cortexfs-channel-mqtt
     )
 }
 
 expected_binaries() {
     printf '%s\n' ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-        cortexfs-agent-runtime cortexfs-channel ctxmcp
+        cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr \
+        cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
+        cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 }
 
 verify_build() {
@@ -446,8 +452,8 @@ ensure_mountpoint() {
 deploy() {
     local source=$1 binary unit
     card "$( [[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment' )"
-    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,ctxmcp}" \
-        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,ctxmcp}"
+    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
+        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
     say "Units: /usr/lib/systemd/system/cortexfs*.{service,socket}" \
         "单元：/usr/lib/systemd/system/cortexfs*.{service,socket}"
     say "Preserved: /var/lib/cortexfs/{storage,secrets}, /etc/cortexfs/providers.d, existing *.env, and /ctx user state." \
@@ -460,12 +466,27 @@ deploy() {
     sudo install -d -m 0755 /usr/lib/systemd/system /usr/share/doc/cortexfs \
         /etc/cortexfs /etc/cortexfs/providers.d /var/lib/cortexfs \
         /var/lib/cortexfs/storage /var/lib/cortexfs/storage/generations
+    sudo install -d -m 0700 /etc/cortexfs/channels
     sudo install -d -m 0700 /var/lib/cortexfs/secrets
     ensure_mountpoint
     while IFS= read -r binary; do
         atomic_install "$source/target/release/$binary" "/usr/bin/$binary" 0755
     done < <(expected_binaries)
-    for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket; do
+    for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
+        cortexfs-channel@.service cortexfs-channel-bluesky.service \
+        cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
+        cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
+        cortexfs-channel-wechat.service cortexfs-channel-voice.service \
+        cortexfs-channel-slack.service cortexfs-channel-mqtt.service \
+        cortexfs-channel-clawdtalk.service \
+        cortexfs-channel-dingtalk.service \
+        cortexfs-channel-email.service cortexfs-channel-gmail.service \
+        cortexfs-channel-irc.service cortexfs-channel-matrix.service \
+        cortexfs-channel-mattermost.service cortexfs-channel-mochat.service \
+        cortexfs-channel-notion.service \
+        cortexfs-channel-qq.service \
+        cortexfs-channel-reddit.service cortexfs-channel-twitch.service \
+        cortexfs-channel-twitter.service; do
         atomic_install "$source/packaging/systemd/$unit" "/usr/lib/systemd/system/$unit" 0644
     done
     atomic_install "$source/README.md" /usr/share/doc/cortexfs/README.md 0644
@@ -477,6 +498,10 @@ deploy() {
     else
         sudo systemctl start cortexfs.service
     fi
+    for unit in /etc/systemd/system/sockets.target.wants/cortexfs-agent@*.socket; do
+        [[ -e $unit ]] || continue
+        sudo systemctl start "${unit##*/}"
+    done
     systemctl is-active --quiet cortexfs.service ||
         die "cortexfs.service did not become active. Run: sudo systemctl status cortexfs.service" \
             "cortexfs.service 未进入 active。请运行：sudo systemctl status cortexfs.service"

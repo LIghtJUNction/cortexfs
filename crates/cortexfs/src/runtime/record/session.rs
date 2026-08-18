@@ -59,7 +59,7 @@ pub(crate) fn prepare_owned_durable_session(
         Err(error) => return Err(format!("cannot create current_run base file: {error}")),
     }
     repair_agent_private_home_permissions(session_root, uid, gid)?;
-    repair_agent_session_root_permissions(session_root, uid, gid)?;
+    repair_agent_session_permissions(&session_dir, uid, gid)?;
     let session_file = open_repair_path(&session_dir, true)?;
     let session_metadata = session_file
         .metadata()
@@ -119,6 +119,7 @@ pub(crate) fn repair_agent_session_permissions(
     repair_agent_permissions(session, uid, gid, PreflightRoot::Session)
 }
 
+#[cfg(test)]
 fn repair_agent_session_root_permissions(
     session_root: &Path,
     uid: u32,
@@ -417,8 +418,87 @@ fn verify_owned_session_preparation(
 }
 
 pub(crate) fn set_session_state(dir: &Path, state: &str) -> SocketRecordResult<()> {
+    set_session_state_with_error(dir, state, None)
+}
+
+pub(crate) fn set_session_state_with_error(
+    dir: &Path,
+    state: &str,
+    error: Option<&str>,
+) -> SocketRecordResult<()> {
     write_session_file(dir, "state", &format!("{state}\n"))?;
+    let current = support::plain::read_small_text_file(
+        &dir.join("state.json"),
+        MAX_SESSION_TRANSITION_FILE_BYTES,
+    )
+    .unwrap_or_default();
+    let run = support::plain::read_small_text_file(
+        &dir.join("current_run"),
+        MAX_SESSION_TRANSITION_FILE_BYTES,
+    )
+    .ok()
+    .map(|run| run.trim().to_owned());
+    write_runtime_state_file(
+        dir,
+        "state.json",
+        &RuntimeState::transition_json(
+            &current,
+            state,
+            run.as_deref(),
+            &unix_timestamp_text(),
+            error,
+        ),
+    )?;
     touch_session(dir)
+}
+
+pub(crate) fn set_session_runtime_observation(
+    dir: &Path,
+    run: &str,
+    step: u8,
+    action: &str,
+    tool: Option<&str>,
+    context_revision: Option<&str>,
+) -> SocketRecordResult<()> {
+    let current = support::plain::read_small_text_file(
+        &dir.join("state.json"),
+        MAX_SESSION_TRANSITION_FILE_BYTES,
+    )
+    .unwrap_or_default();
+    write_runtime_state_file(
+        dir,
+        "state.json",
+        &RuntimeState::observe_json(
+            &current,
+            &runtime::observation::RuntimeObservation {
+                run,
+                step,
+                action,
+                tool,
+                context_revision,
+                updated_at: &unix_timestamp_text(),
+            },
+        ),
+    )?;
+    touch_session(dir)
+}
+
+fn write_runtime_state_file(dir: &Path, file: &str, content: &str) -> SocketRecordResult<()> {
+    let path = dir.join(file);
+    match support::plain::path_metadata_no_follow(&path) {
+        Ok(metadata) if metadata.is_file() => write_session_file(dir, file, content),
+        Ok(_metadata) => Err(SocketSessionRecordError::CannotRecord),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match atomic_create_text_with_mode(&path, content, 0o600) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    write_session_file(dir, file, content)
+                }
+                Err(_error) => Err(SocketSessionRecordError::CannotRecord),
+            }
+        }
+        Err(_error) => Err(SocketSessionRecordError::CannotRecord),
+    }
 }
 
 pub(crate) fn set_active_session_run_locked(
@@ -436,11 +516,12 @@ pub(crate) fn transition_active_session_run_locked(
     dir: &Path,
     run_id: &str,
     terminal_state: &str,
+    error: Option<&str>,
 ) -> SocketRecordResult<bool> {
     if !active_session_run_matches_locked(history, dir, run_id)? {
         return Ok(false);
     }
-    set_session_state(dir, terminal_state)?;
+    set_session_state_with_error(dir, terminal_state, error)?;
     Ok(true)
 }
 
@@ -1037,6 +1118,7 @@ mod permission_tests {
             cwd: Some("/workspace".to_owned()),
             workspace: None,
             input: "input".to_owned(),
+            event: None,
         };
         let response = handle_socket_request(&session_root, "/workspace", None, &request);
         assert!(response.is_ok());

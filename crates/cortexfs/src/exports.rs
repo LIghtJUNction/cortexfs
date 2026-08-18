@@ -22,6 +22,7 @@ pub use agent::control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
     inspect_agent_tools_control,
 };
+pub use agent::loopconfig::AgentLoop;
 pub use agent::prompt::{
     AgentPromptContext, MAX_HISTORY_MESSAGES_CHARS, MAX_SKILL_METADATA_CHARS, SkillMetadata,
     agent_prompt_messages, agent_provider_messages, agent_runtime_contract, collect_agent_rules,
@@ -81,6 +82,7 @@ pub use reference::storage::{
     SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR, StorageUpdateError, pin_storage_source,
     update_storage_generation, update_storage_generation_with_prune,
 };
+pub use runtime::state::RuntimeState;
 pub use support::control::ControlLineIssue;
 pub use support::index::{
     SessionIndexGuard, SessionIndexIssue, SessionIndexKind, SessionIndexReport,

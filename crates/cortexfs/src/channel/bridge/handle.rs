@@ -1,8 +1,8 @@
-use cortexfs_channels::{InboundMessage, MessageBody, MessageTarget, OutboundMessage};
-use cortexfs_runtime_client::{SessionSendRequest, session};
+use cortexfs_channels::{InboundMessage, OutboundMessage};
+use cortexfs_runtime_client::interaction;
+use serde_json::{Value, json};
 
-use super::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink, safe};
-use crate::channel::event::AssistantEvents;
+use super::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink, dispatch};
 
 impl AgentChannelBridge {
     pub fn handle(&self, inbound: InboundMessage) -> Result<OutboundMessage, ChannelBridgeError> {
@@ -14,48 +14,42 @@ impl AgentChannelBridge {
         inbound: InboundMessage,
         sink: &mut S,
     ) -> Result<OutboundMessage, ChannelBridgeError> {
+        let inbound = self.bind_message(inbound);
         inbound.body.validate()?;
         sink.begin(&inbound);
-        let session_name = self.route.session_for(&inbound.target);
-        let mut events = AssistantEvents::default();
-        let result = session::send_stream(
-            &self.socket,
-            SessionSendRequest {
-                request_id: &self.route.request_id_for(&inbound),
-                session: &session_name,
-                scope: "private",
-                cwd: self.cwd.as_deref(),
-                workspace: None,
-                input: &inbound.body.text,
+        let interaction = interaction::InteractionRequest::Input {
+            request_id: self.route.request_id_for(&inbound),
+            session: self.route.session_for_message(&inbound),
+            scope: "private".to_owned(),
+            input: inbound.body.text.clone(),
+            event: attachment_event(&inbound),
+            origin: interaction::InteractionOrigin {
+                transport: "channel".to_owned(),
+                endpoint: Some(inbound.target.channel.to_string()),
+                identity: Some(inbound.sender.id.clone()),
+                conversation: Some(inbound.target.conversation.to_string()),
+                thread: inbound.target.thread.clone(),
+                metadata: inbound.metadata.clone(),
             },
-            |frame| {
-                if let Some(text) = events.push(frame) {
-                    sink.delta(&text);
-                }
-                Ok::<(), ChannelBridgeError>(())
-            },
-        );
-        if let Err(error) = result {
-            sink.error(safe::message(&error));
-            return Err(error);
-        }
-        let reply = match events.finish() {
-            Ok(reply) => reply,
-            Err(error) => {
-                sink.error(safe::message(&error));
-                return Err(error);
-            }
+            cwd: self.cwd.clone(),
+            workspace: None,
         };
-        sink.complete(&reply);
-        Ok(OutboundMessage {
-            target: MessageTarget {
-                channel: inbound.target.channel,
-                conversation: inbound.target.conversation,
-                thread: inbound.target.thread,
-                reply_to: Some(inbound.id),
-            },
-            body: MessageBody::text(reply)?,
-            metadata: inbound.metadata,
-        })
+        dispatch::run(
+            self,
+            inbound.target,
+            inbound.id,
+            interaction,
+            inbound.metadata,
+            sink,
+        )
     }
+}
+
+fn attachment_event(inbound: &InboundMessage) -> Option<Value> {
+    (!inbound.body.attachments.is_empty()).then(|| {
+        json!({
+            "type": "message",
+            "attachments": &inbound.body.attachments,
+        })
+    })
 }

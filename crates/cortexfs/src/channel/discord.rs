@@ -1,6 +1,6 @@
 use std::{path::PathBuf, thread, time::Duration};
 
-use cortexfs_channels::ChannelError;
+use cortexfs_channels::{ChannelError, ChannelId};
 
 use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
@@ -12,6 +12,7 @@ pub struct DiscordConfig {
     pub agent: String,
     pub session_prefix: String,
     pub cwd: Option<String>,
+    pub channel: Option<ChannelId>,
     pub api_base: String,
     pub gateway_url: String,
     pub intents: u64,
@@ -26,6 +27,7 @@ impl std::fmt::Debug for DiscordConfig {
             .field("agent", &self.agent)
             .field("session_prefix", &self.session_prefix)
             .field("cwd", &self.cwd)
+            .field("channel", &self.channel)
             .field("api_base", &self.api_base)
             .field("gateway_url", &self.gateway_url)
             .field("intents", &self.intents)

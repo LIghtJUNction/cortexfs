@@ -5,6 +5,9 @@ use crate::{
     ChannelError, ChannelId, ConversationId, InboundMessage, MessageTarget, OutboundMessage,
 };
 
+mod effect;
+mod event;
+
 /// Telegram Bot API update codec. Polling and HTTP transport remain host-owned.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TelegramCodec;
@@ -55,11 +58,18 @@ impl ChannelCodec for TelegramCodec {
         }))
     }
 
+    fn decode_event(
+        &self,
+        payload: &str,
+    ) -> Result<Option<crate::ChannelIncomingEvent>, ChannelError> {
+        event::decode(payload, self.channel())
+    }
+
     fn encode(&self, message: &OutboundMessage) -> Result<OutboundRequest, ChannelError> {
         message.body.validate()?;
-        if !message.body.attachments.is_empty() {
+        if message.body.attachments.len() > 1 {
             return Err(ChannelError::Unsupported(
-                "telegram media attachments".to_owned(),
+                "telegram multiple media attachments".to_owned(),
             ));
         }
         let mut fields = serde_json::Map::new();
@@ -67,16 +77,43 @@ impl ChannelCodec for TelegramCodec {
             "chat_id".to_owned(),
             json!(message.target.conversation.as_str()),
         );
-        fields.insert("text".to_owned(), json!(message.body.text));
+        let path = if let Some(attachment) = message.body.attachments.first() {
+            let (path, field) = attachment_path(attachment.mime.as_deref());
+            fields.insert(field.to_owned(), json!(attachment.url));
+            if !message.body.text.is_empty() {
+                fields.insert("caption".to_owned(), json!(message.body.text));
+            }
+            path
+        } else {
+            fields.insert("text".to_owned(), json!(message.body.text));
+            "sendMessage"
+        };
         if let Some(reply) = message.target.reply_to.as_deref() {
             fields.insert("reply_to_message_id".to_owned(), json!(reply));
         }
         Ok(OutboundRequest {
             method: "POST".to_owned(),
-            path: "sendMessage".to_owned(),
+            path: path.to_owned(),
             content_type: "application/json".to_owned(),
             body: serde_json::Value::Object(fields).to_string(),
             headers: std::collections::BTreeMap::new(),
         })
+    }
+
+    fn encode_effect(
+        &self,
+        target: &MessageTarget,
+        effect: &crate::ChannelEffect,
+    ) -> Result<Option<OutboundRequest>, ChannelError> {
+        effect::encode(target, effect)
+    }
+}
+
+fn attachment_path(mime: Option<&str>) -> (&'static str, &'static str) {
+    match mime.unwrap_or_default().split('/').next() {
+        Some("image") => ("sendPhoto", "photo"),
+        Some("audio") => ("sendAudio", "audio"),
+        Some("video") => ("sendVideo", "video"),
+        _ => ("sendDocument", "document"),
     }
 }

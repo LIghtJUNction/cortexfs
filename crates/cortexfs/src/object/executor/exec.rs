@@ -220,7 +220,7 @@ impl PreparedAgentToolCall {
         drop(self.home_dir);
         drop(self.home_alias_dir);
         drop(self.tool_executable);
-        let result = finish_agent_tool_output(&output)?;
+        let result = finish_agent_tool_output(&output, &self.name)?;
         if let Some((path, tool, limit)) = self.working_set {
             cortexfs::retain_tsh_context_tool(&path, tool, limit).map_err(|error| {
                 ExecError::new(format!("cannot persist session tool context: {error}"))
@@ -230,18 +230,25 @@ impl PreparedAgentToolCall {
     }
 }
 
-fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, ExecError> {
+pub(crate) fn finish_agent_tool_output(
+    output: &std::process::Output,
+    tool_name: &str,
+) -> Result<String, ExecError> {
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed = parse_tool_stdout(&stdout)
-        .map_err(|error| ExecError::new(trim_tool_result(error.message())))?;
-    let mut result = match parsed {
-        ToolStdout::SdkSuccess(text) => text,
-        ToolStdout::SdkError { mut content, error } => {
-            if !content.is_empty() && !content.ends_with('\n') {
-                content.push('\n');
+    let mut result = if is_passthrough_tool(tool_name) {
+        stdout.into_owned()
+    } else {
+        let parsed = parse_tool_stdout(&stdout)
+            .map_err(|error| ExecError::new(trim_tool_result(error.message())))?;
+        match parsed {
+            ToolStdout::SdkSuccess(text) => text,
+            ToolStdout::SdkError { mut content, error } => {
+                if !content.is_empty() && !content.ends_with('\n') {
+                    content.push('\n');
+                }
+                content.push_str(&error);
+                return Err(ExecError::new(trim_tool_result(&content)));
             }
-            content.push_str(&error);
-            return Err(ExecError::new(trim_tool_result(&content)));
         }
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -253,11 +260,12 @@ fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, Exe
         result.push('\n');
     }
     if !output.status.success() {
-        if result.trim().is_empty() {
-            result.push_str("tool exited with ");
-            result.push_str(&output.status.to_string());
+        if !result.is_empty() && !result.ends_with('\n') {
             result.push('\n');
         }
+        result.push_str("tool exited with ");
+        result.push_str(&output.status.to_string());
+        result.push('\n');
         return Err(ExecError::new(trim_tool_result(&result)));
     }
     Ok(trim_tool_result(&result))

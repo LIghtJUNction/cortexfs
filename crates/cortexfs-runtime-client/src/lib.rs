@@ -1,5 +1,7 @@
 pub mod agent;
+pub mod interaction;
 pub mod session;
+pub mod status;
 pub use session::SessionSendRequest;
 
 use serde::{Deserialize, Serialize};
@@ -412,15 +414,25 @@ pub fn ping_from_environment(
                 env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
             let run =
                 env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+            let step = env::var("CTX_AGENT_STEP")
+                .ok()
+                .and_then(|value| value.parse::<u8>().ok());
             ping(
                 &PathBuf::from(socket),
                 "",
-                &format!("startup-{run}"),
+                &startup_ping_request_id(&run, step),
                 agent,
                 &session,
                 &run,
             )
         }
+    }
+}
+
+fn startup_ping_request_id(run: &str, step: Option<u8>) -> String {
+    match step {
+        Some(step) if step > 0 => format!("startup-{run}-{step}"),
+        _ => format!("startup-{run}"),
     }
 }
 
@@ -758,5 +770,12 @@ mod tests {
         }))?;
         assert!(matches!(legacy, RequestFrame::Ping { token, .. } if token == "legacy"));
         Ok(())
+    }
+
+    #[test]
+    fn continuation_startup_ping_ids_are_unique() {
+        assert_eq!(startup_ping_request_id("run-1", Some(0)), "startup-run-1");
+        assert_eq!(startup_ping_request_id("run-1", Some(1)), "startup-run-1-1");
+        assert_eq!(startup_ping_request_id("run-1", None), "startup-run-1");
     }
 }

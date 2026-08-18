@@ -247,11 +247,13 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     assert_control_environment(&args);
     let opened = ok!(open_agent_executable_no_follow(&agent_executable));
     let request = AgentExecutableRunRequest {
+        request_id: "request-1",
         run_id: "run-1",
         cancellation_id: "cancel-1",
         session: "default",
         cwd: Some("/workspace"),
         input: "hi",
+        event: None,
         history_messages: "",
         tool_context: "",
         debug: None,
@@ -360,11 +362,13 @@ fn prepared_bwrap_command(
         control_dir: None,
     };
     let request = AgentExecutableRunRequest {
+        request_id: "request-1",
         run_id: "run-1",
         cancellation_id: "run-1",
         session: "default",
         cwd: Some("/"),
         input: "hi",
+        event: None,
         history_messages: "",
         tool_context: "",
         debug: None,
@@ -434,11 +438,13 @@ fn provider_egress_is_borrowed_across_agent_steps_and_cleans_up_after_run() {
         &mut socket,
         runtime,
         AgentExecutableRunRequest {
+            request_id: "request-1",
             run_id: "run-1",
             cancellation_id: "run-1",
             session: "default",
             cwd: None,
             input: "hi",
+            event: None,
             history_messages: "",
             tool_context: "",
             debug: None,
@@ -457,11 +463,13 @@ fn provider_egress_is_borrowed_across_agent_steps_and_cleans_up_after_run() {
         &mut socket,
         runtime,
         AgentExecutableRunRequest {
+            request_id: "request-1",
             run_id: "run-1",
             cancellation_id: "run-1",
             session: "default",
             cwd: None,
             input: "hi",
+            event: None,
             history_messages: "",
             tool_context: "",
             debug: None,
@@ -511,11 +519,13 @@ fn debug_alias_does_not_create_provider_egress() {
             },
         },
         AgentExecutableRunRequest {
+            request_id: "request-1",
             run_id: "run-1",
             cancellation_id: "run-1",
             session: "default",
             cwd: None,
             input: "hi",
+            event: None,
             history_messages: "",
             tool_context: "",
             debug: None,
@@ -778,11 +788,13 @@ fn run_registered_bwrap_capability_probe(
         },
     };
     let request = AgentExecutableRunRequest {
+        request_id: "request-1",
         run_id: "run-1",
         cancellation_id: "run-1",
         session: "default",
         cwd: None,
         input: "ignored",
+        event: None,
         history_messages: "[]",
         tool_context: "",
         debug: None,

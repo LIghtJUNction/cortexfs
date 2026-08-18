@@ -33,10 +33,10 @@ pub use root::{
 };
 pub use runtime::{
     AGENT_EXECUTABLE_SOCKET, PROVIDER_EGRESS_SANDBOX_PATH, RUN_CONTROL_SOCKET,
-    SYSTEM_AGENT_RUNTIME_DIR, SYSTEM_CONTROL_DIR, SYSTEM_RUN_DIR, SYSTEM_RUNTIME_DIR,
-    agent_backing_socket, agent_client_socket, agent_executable_socket, run_control_dir,
-    system_agent_runtime_socket, system_agent_socket_unit, system_run_root,
-    terminal_runtime_socket, user_agent_runtime_socket, user_runtime_root,
+    SYSTEM_AGENT_RUNTIME_DIR, SYSTEM_CHANNEL_RUNTIME_DIR, SYSTEM_CONTROL_DIR, SYSTEM_RUN_DIR,
+    SYSTEM_RUNTIME_DIR, agent_backing_socket, agent_client_socket, agent_executable_socket,
+    channel_driver_socket, run_control_dir, system_agent_runtime_socket, system_agent_socket_unit,
+    system_run_root, terminal_runtime_socket, user_agent_runtime_socket, user_runtime_root,
     user_systemd_transient_path,
 };
 pub use session::{

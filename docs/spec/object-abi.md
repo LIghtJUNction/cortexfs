@@ -30,9 +30,16 @@ name.d/
 hooks that run after the object action. This is an object-local convention under
 `agent` and `tool`; it does not create a `/ctx/hook` root namespace. Model
 control directories stay limited to provider/model controls and do not carry
-empty hook trees. The stable ABI defines the directory shape only. Implementations may keep
-compiled hook state in process memory, but development refresh is still a Git
-commit/runtime restart boundary; CortexFS does not define background
+empty hook trees. For an executable Agent, the runtime executes the sorted
+regular executable files in these directories around the model action. Each
+hook receives one `cortexfs.hook/v1` JSON object on stdin containing only
+phase, action, Agent, run, step, tool, and status fields; prompt text, message
+text, and credentials are never injected. A hook must exit zero to continue.
+The runtime rejects symlinks and non-executable files, caps the list at 32,
+caps captured output at 16 KiB, and applies a two-second timeout. Hook output
+is diagnostic-only and is not forwarded to the client. Implementations may
+keep compiled hook state in process memory, but development refresh is still a
+Git commit/runtime restart boundary; CortexFS does not define background
 watchers, polling, or hot reload.
 
 Do not expand one object into `profile/`, `runtime/`, `policy/`, `control/`,

@@ -1,6 +1,6 @@
 [package]
 name = "cortexfs-channels"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,6 +11,7 @@ keywords = ["agent", "chat", "channel", "im"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
+base64 = "0.22.1"
 futures-core = "0.3.34"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

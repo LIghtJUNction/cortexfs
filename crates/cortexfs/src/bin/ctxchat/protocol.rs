@@ -2,6 +2,9 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
+use cortexfs_runtime_client::interaction::{
+    InteractionFrame, InteractionOrigin, InteractionRequest, InteractionResult,
+};
 use serde_json::{Value, json};
 
 const MAX_FRAME_BYTES: usize = cortexfs::MAX_SOCKET_FRAME_BYTES;
@@ -21,6 +24,7 @@ pub(crate) fn request(
     let mut response_bytes = 0usize;
     let mut saw_error = false;
     let mut reader = BufReader::new(stream.try_clone()?);
+    let interaction_context = interaction_context(value);
     while let Some(line) = read_frame(&mut reader)? {
         response_bytes = response_bytes
             .checked_add(line.len().saturating_add(1))
@@ -34,7 +38,7 @@ pub(crate) fn request(
         let frame = serde_json::from_str::<Value>(&line)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if frame.get("type").and_then(Value::as_str) == Some("approval_request") {
-            respond_approval(&mut stream, &frame, approvals)?;
+            respond_approval(&mut stream, &frame, approvals, interaction_context)?;
         }
         saw_error |= frame.get("type").and_then(Value::as_str) == Some("error");
         let done = frame.get("type").and_then(Value::as_str) == Some("done");
@@ -80,6 +84,7 @@ fn respond_approval(
     stream: &mut UnixStream,
     frame: &Value,
     approvals: &[String],
+    interaction_context: Option<(&str, &str)>,
 ) -> io::Result<()> {
     let object = frame
         .as_object()
@@ -103,12 +108,39 @@ fn respond_approval(
     } else {
         "deny"
     };
-    serde_json::to_writer(
-        &mut *stream,
-        &json!({"op":"approve", "run":run, "id":id, "decision":decision}),
-    )?;
-    stream.write_all(b"\n")?;
+    if let Some((request_id, session)) = interaction_context {
+        let result = if decision == "allow_once" {
+            InteractionResult::Accepted
+        } else {
+            InteractionResult::Rejected {
+                reason: "terminal approval denied".to_owned(),
+            }
+        };
+        let response = InteractionFrame::request(InteractionRequest::CommandResult {
+            request_id: request_id.to_owned(),
+            session: session.to_owned(),
+            command_id: id.to_owned(),
+            result,
+        })
+        .encode()
+        .map_err(io::Error::other)?;
+        stream.write_all(&response)?;
+    } else {
+        serde_json::to_writer(
+            &mut *stream,
+            &json!({"op":"approve", "run":run, "id":id, "decision":decision}),
+        )?;
+        stream.write_all(b"\n")?;
+    }
     stream.flush()
+}
+
+fn interaction_context(value: &Value) -> Option<(&str, &str)> {
+    let value = value.get("payload")?.get("value")?;
+    Some((
+        value.get("request_id")?.as_str()?,
+        value.get("session")?.as_str()?,
+    ))
 }
 
 pub(crate) fn send(
@@ -118,11 +150,18 @@ pub(crate) fn send(
     input: &str,
     approvals: &[String],
 ) -> io::Result<Vec<Value>> {
-    request(
-        socket,
-        &json!({"op":"send", "id":id, "session":session, "input":input}),
-        approvals,
-    )
+    let interaction = InteractionRequest::input(
+        id,
+        session,
+        input,
+        InteractionOrigin {
+            transport: "terminal".to_owned(),
+            ..InteractionOrigin::default()
+        },
+    );
+    let frame =
+        serde_json::to_value(InteractionFrame::request(interaction)).map_err(io::Error::other)?;
+    request(socket, &frame, approvals)
 }
 
 pub(crate) fn tsh(
@@ -141,6 +180,7 @@ pub(crate) fn tsh(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cortexfs_runtime_client::interaction::InteractionPayload;
     use std::os::unix::net::UnixListener;
     use std::thread;
 
@@ -149,10 +189,13 @@ mod tests {
         let root = tempfile::tempdir()?;
         let socket = root.path().join("agent.sock");
         let listener = UnixListener::bind(&socket)?;
-        let server = thread::spawn(move || -> io::Result<Value> {
+        let server = thread::spawn(move || -> io::Result<InteractionFrame> {
             let (mut stream, _) = listener.accept()?;
             let mut line = String::new();
             BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+            if !line.contains("\"abi\":\"cortexfs.interaction/v1\"") {
+                return Err(io::Error::other("missing interaction ABI"));
+            }
             stream.write_all(b"{\"type\":\"approval_request\",\"run\":\"r1\",\"id\":\"c1\",\"name\":\"example.echo\",\"args\":[]}\n")?;
             stream.flush()?;
             line.clear();
@@ -177,10 +220,15 @@ mod tests {
         let response = server
             .join()
             .map_err(|_panic| io::Error::other("server panicked"))??;
-        assert_eq!(
-            response.get("decision").and_then(Value::as_str),
-            Some("allow_once")
-        );
+        assert!(matches!(
+            response.payload,
+            InteractionPayload::Request(InteractionRequest::CommandResult {
+                request_id,
+                session,
+                command_id,
+                result: InteractionResult::Accepted,
+            }) if request_id == "r1" && session == "default" && command_id == "c1"
+        ));
         Ok(())
     }
 

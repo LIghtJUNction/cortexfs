@@ -1,9 +1,14 @@
-use serde_json::json;
+use serde_json::Value;
 
-use super::{ChannelCodec, OutboundRequest, object, participant, scalar, text};
+use super::{ChannelCodec, OutboundRequest, object, participant, scalar, string};
 use crate::{
-    ChannelError, ChannelId, ConversationId, InboundMessage, MessageTarget, OutboundMessage,
+    Attachment, ChannelError, ChannelId, ConversationId, InboundMessage, MessageBody,
+    MessageTarget, OutboundMessage,
 };
+
+mod effect;
+mod encode;
+mod event;
 
 /// Discord message/webhook codec. Gateway authentication and websocket choice remain host-owned.
 #[derive(Clone, Copy, Debug, Default)]
@@ -19,7 +24,7 @@ impl ChannelCodec for DiscordCodec {
         if root
             .get("author")
             .and_then(|author| author.get("bot"))
-            .and_then(serde_json::Value::as_bool)
+            .and_then(Value::as_bool)
             == Some(true)
         {
             return Ok(None);
@@ -48,31 +53,50 @@ impl ChannelCodec for DiscordCodec {
                     "author.id",
                 )?,
             ),
-            body: text(root.get("content"))?,
+            body: MessageBody::with_attachments(
+                root.get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                root.get("attachments")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|attachment| {
+                        Ok(Attachment {
+                            url: string(attachment.get("url"), "attachments.url")?,
+                            name: attachment
+                                .get("filename")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            mime: attachment
+                                .get("content_type")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ChannelError>>()?,
+            )?,
             timestamp_ms: None,
             metadata: std::collections::BTreeMap::new(),
         }))
     }
 
+    fn decode_event(
+        &self,
+        payload: &str,
+    ) -> Result<Option<crate::ChannelIncomingEvent>, ChannelError> {
+        event::decode(payload, self.channel())
+    }
+
     fn encode(&self, message: &OutboundMessage) -> Result<OutboundRequest, ChannelError> {
-        message.body.validate()?;
-        if !message.body.attachments.is_empty() {
-            return Err(ChannelError::Unsupported(
-                "discord media attachments".to_owned(),
-            ));
-        }
-        let mut fields = serde_json::Map::new();
-        fields.insert("content".to_owned(), json!(message.body.text));
-        fields.insert("allowed_mentions".to_owned(), json!({ "parse": [] }));
-        if let Some(thread) = message.target.thread.as_deref() {
-            fields.insert("thread_id".to_owned(), json!(thread));
-        }
-        Ok(OutboundRequest {
-            method: "POST".to_owned(),
-            path: "webhook".to_owned(),
-            content_type: "application/json".to_owned(),
-            body: serde_json::Value::Object(fields).to_string(),
-            headers: std::collections::BTreeMap::new(),
-        })
+        encode::request(message)
+    }
+
+    fn encode_effect(
+        &self,
+        target: &MessageTarget,
+        effect: &crate::ChannelEffect,
+    ) -> Result<Option<OutboundRequest>, ChannelError> {
+        effect::encode(target, effect)
     }
 }

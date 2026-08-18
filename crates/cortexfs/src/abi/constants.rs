@@ -126,6 +126,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
 /// Entries may overlap [`AGENT_CONTROL_FILES`] to preserve canonical bootstrap materialization.
 pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &[
     "approval",
+    "loop",
     "tools",
     "system.md",
     "prompt.template.md",

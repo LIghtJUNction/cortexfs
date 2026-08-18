@@ -45,6 +45,7 @@ fn socket_session_recorder_revalidates_public_request_values() {
         cwd: Some("/work".to_owned()),
         workspace: Some("/repo".to_owned()),
         input: "hello".to_owned(),
+        event: None,
     };
     assert_eq!(
         record_unindexed_socket_request_for_test(&session, &bad_send),

@@ -68,21 +68,31 @@ fn dispatch(
     name: &str,
     data: &serde_json::Value,
 ) -> Result<(), DiscordError> {
-    if name != "MESSAGE_CREATE" {
-        return Ok(());
+    let payload = serde_json::to_string(data)?;
+    if name == "MESSAGE_CREATE" {
+        let Some(inbound) = DiscordCodec.decode(&payload)? else {
+            return Ok(());
+        };
+        let mut sink = progress::Progress::new(client, config, &inbound);
+        return match bridge.handle_with_progress(inbound, &mut sink) {
+            Ok(outbound) if !sink.completed() => api::send_reply(
+                client,
+                config,
+                outbound.target.conversation.as_str(),
+                &outbound.body.text,
+            ),
+            Ok(_) | Err(_) => Ok(()),
+        };
     }
-    let inbound = DiscordCodec.decode(&serde_json::to_string(data)?)?;
-    let Some(inbound) = inbound else {
-        return Ok(());
-    };
-    let mut sink = progress::Progress::new(client, config, &inbound);
-    match bridge.handle_with_progress(inbound, &mut sink) {
-        Ok(outbound) if !sink.completed() => api::send_reply(
+    if let Some(event) = DiscordCodec.decode_event(&payload)?
+        && let Ok(outbound) = bridge.handle_event(&event)
+    {
+        api::send_reply(
             client,
             config,
             outbound.target.conversation.as_str(),
             &outbound.body.text,
-        ),
-        Ok(_) | Err(_) => Ok(()),
+        )?;
     }
+    Ok(())
 }

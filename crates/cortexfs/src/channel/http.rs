@@ -3,6 +3,9 @@ use std::net::{TcpListener, TcpStream};
 
 pub mod parse;
 
+#[cfg(test)]
+pub(crate) mod test;
+
 pub use parse::{HttpRequest, read_request};
 
 const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
@@ -21,6 +24,15 @@ impl HttpResponse {
         Self {
             status: 200,
             content_type: "application/json",
+            body,
+        }
+    }
+
+    #[must_use]
+    pub fn ndjson(body: String) -> Self {
+        Self {
+            status: 200,
+            content_type: "application/x-ndjson",
             body,
         }
     }
@@ -50,15 +62,23 @@ pub fn serve_once(
     handler: impl FnOnce(HttpRequest) -> HttpResponse,
 ) -> Result<(), HttpError> {
     let (mut stream, _) = listener.accept()?;
-    let request = match read_request(&mut stream, MAX_HTTP_BODY_BYTES) {
+    serve_stream_once(&mut stream, handler)
+}
+
+/// Serves one already accepted HTTP connection.
+pub fn serve_stream_once(
+    stream: &mut TcpStream,
+    handler: impl FnOnce(HttpRequest) -> HttpResponse,
+) -> Result<(), HttpError> {
+    let request = match read_request(stream, MAX_HTTP_BODY_BYTES) {
         Ok(request) => request,
         Err(error) => {
-            write_response(&mut stream, &HttpResponse::error(400, "invalid request"))?;
+            write_response(stream, &HttpResponse::error(400, "invalid request"))?;
             return Err(HttpError::Invalid(error.to_string()));
         }
     };
     let response = handler(request);
-    write_response(&mut stream, &response)
+    write_response(stream, &response)
 }
 
 fn write_response(stream: &mut TcpStream, response: &HttpResponse) -> Result<(), HttpError> {

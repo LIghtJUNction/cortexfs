@@ -69,6 +69,29 @@ fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
 }
 
 #[test]
+fn openai_stream_tool_call_ignores_extra_provider_indices() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut stream = OpenAiToolCallStream::default();
+    for line in [
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-first","function":{"name":"tsh","arguments":"{\"args\":[\"pwd\"]}"}}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call-second","function":{"name":"tsh","arguments":"{\"args\":[\"ls\"]}"}}]}}]}"#,
+    ] {
+        let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(line)?.event else {
+            return Err("expected tool call delta".into());
+        };
+        stream.push(delta);
+    }
+    assert_eq!(
+        stream.finish()?,
+        Some(
+            r#"{"arguments":{"args":["pwd"]},"id":"call-first","name":"tsh","type":"tool_call"}"#
+                .to_owned()
+        )
+    );
+    Ok(())
+}
+
+#[test]
 fn model_usage_preserves_optional_cache_metrics() -> Result<(), Box<dyn std::error::Error>> {
     let usage = |cached_tokens, cache_write_tokens| TokenUsage {
         input_tokens: 12,
@@ -589,10 +612,6 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
         .env(PROVIDER_ENV, &provider)
         .env("CTX_PROVIDER_CONFIG_DIR", &providers)
         .env("CTX_ROOT", &root)
-        .env(
-            cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
-            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
-        )
         .env_remove("CTX_AGENT")
         .env_remove("CTX_PROVIDER_SECRET_VALUE")
         .env_remove("CTX_PROVIDER_SECRET_FD")

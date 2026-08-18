@@ -43,6 +43,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "window",
     "abi",
     "approval",
+    "loop",
     "tools",
     "system.md",
     "prompt.template.md",

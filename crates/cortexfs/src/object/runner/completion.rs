@@ -51,13 +51,13 @@ pub(crate) fn provider_chat_completion(
     .ok();
     let mut route = provider_route(&config, provider, model, route.as_deref())
         .map_err(ProviderCompletionError::fallback)?;
-    let allow_unauthenticated = transport_allows_unauthenticated(&route.transport);
     route.transport = provider_egress_transport(
         provider,
         route.transport,
         env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV).as_deref(),
     )
     .map_err(ProviderCompletionError::fallback)?;
+    let allow_unauthenticated = transport_allows_unauthenticated(&route.transport);
     let effort = model_effort(&ctx_root, provider, model);
     let agent_call = env::var_os("CTX_AGENT").is_some();
     let drivers = model_runtime_drivers(&ctx_root, provider, model, agent_call)

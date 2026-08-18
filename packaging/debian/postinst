@@ -11,10 +11,15 @@ if [ "$1" = configure ]; then
         if command -v deb-systemd-helper >/dev/null 2>&1; then
             deb-systemd-helper enable cortexfs.service >/dev/null || true
         else
-            systemctl enable cortexfs.service >/dev/null 2>&1 || true
+        systemctl enable cortexfs.service >/dev/null 2>&1 || true
         fi
         if [ -n "${2:-}" ] && systemctl is-active --quiet cortexfs.service; then
             systemctl try-restart cortexfs.service >/dev/null 2>&1 || true
+            for socket_path in /etc/systemd/system/sockets.target.wants/cortexfs-agent@*.socket; do
+                [ -e "$socket_path" ] || continue
+                socket=$(basename "$socket_path")
+                systemctl start "$socket" >/dev/null 2>&1 || true
+            done
         fi
     fi
 fi

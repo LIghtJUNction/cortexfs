@@ -23,6 +23,8 @@ pub fn build_provider(
     .map_err(|_error| ReferenceTreeError::CannotCreate)?;
     let desired = open_directory_at(stage, OsStr::new("next"))
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    nix::sys::stat::fchmod(&desired, nix::sys::stat::Mode::from_bits_truncate(0o755))
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
     for model in models {
         let controls = MODEL_CONTROL_FILES
             .iter()

@@ -2,12 +2,37 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::{ChannelError, ChannelId, InboundMessage, OutboundMessage, Participant};
+use crate::{
+    ChannelEffect, ChannelError, ChannelId, ChannelIncoming, ChannelIncomingEvent, InboundMessage,
+    MessageTarget, OutboundMessage, Participant,
+};
 
+pub mod bluesky;
+pub mod catalog;
+pub mod dingtalk;
 pub mod discord;
+pub mod email;
 pub mod feishu;
+pub mod gmail;
+pub mod irc;
+pub mod lark;
+pub mod line;
+pub mod linq;
+pub mod matrix;
+pub mod mattermost;
+pub mod mochat;
+pub mod nextcloud;
+pub mod notion;
+pub mod qq;
+pub mod reddit;
+pub mod signal;
 pub mod slack;
+pub mod teams;
 pub mod telegram;
+pub mod twitch;
+pub mod twitter;
+pub mod wecom;
+pub mod whatsapp;
 
 /// Platform-neutral HTTP operation emitted by a webhook codec.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,8 +47,66 @@ pub struct OutboundRequest {
 /// Stateless codec for one platform's webhook payload and send shape.
 pub trait ChannelCodec: Send + Sync {
     fn channel(&self) -> ChannelId;
+    fn capabilities(&self) -> crate::ChannelCapabilities {
+        catalog::find(self.channel().as_str())
+            .map_or_else(crate::ChannelCapabilities::text, |spec| spec.capabilities)
+    }
+    fn actions(&self) -> crate::ChannelActions {
+        catalog::find(self.channel().as_str())
+            .map_or_else(crate::ChannelActions::empty, |spec| spec.actions())
+    }
     fn decode(&self, payload: &str) -> Result<Option<InboundMessage>, ChannelError>;
+    fn decode_event(&self, _payload: &str) -> Result<Option<ChannelIncomingEvent>, ChannelError> {
+        Ok(None)
+    }
+    fn decode_incoming(&self, payload: &str) -> Result<Option<ChannelIncoming>, ChannelError> {
+        if let Some(event) = self.decode_event(payload)? {
+            return Ok(Some(ChannelIncoming::Event(event)));
+        }
+        Ok(self.decode(payload)?.map(ChannelIncoming::Message))
+    }
+    fn decode_incoming_for(
+        &self,
+        channel: ChannelId,
+        payload: &str,
+    ) -> Result<Option<ChannelIncoming>, ChannelError> {
+        self.decode_incoming(payload)
+            .map(|incoming| incoming.map(|item| item.with_channel(channel)))
+    }
+    fn decode_many(&self, payload: &str) -> Result<Vec<InboundMessage>, ChannelError> {
+        Ok(self.decode(payload)?.into_iter().collect())
+    }
+    fn decode_many_incoming(&self, payload: &str) -> Result<Vec<ChannelIncoming>, ChannelError> {
+        if let Some(event) = self.decode_event(payload)? {
+            return Ok(vec![ChannelIncoming::Event(event)]);
+        }
+        Ok(self
+            .decode_many(payload)?
+            .into_iter()
+            .map(ChannelIncoming::Message)
+            .collect())
+    }
+    fn decode_many_incoming_for(
+        &self,
+        channel: ChannelId,
+        payload: &str,
+    ) -> Result<Vec<ChannelIncoming>, ChannelError> {
+        self.decode_many_incoming(payload).map(|items| {
+            items
+                .into_iter()
+                .map(|item| item.with_channel(channel.clone()))
+                .collect()
+        })
+    }
     fn encode(&self, message: &OutboundMessage) -> Result<OutboundRequest, ChannelError>;
+    fn encode_effect(
+        &self,
+        _target: &MessageTarget,
+        effect: &ChannelEffect,
+    ) -> Result<Option<OutboundRequest>, ChannelError> {
+        effect.validate()?;
+        Ok(None)
+    }
     fn challenge(&self, _payload: &str) -> Option<String> {
         None
     }

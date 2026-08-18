@@ -1,6 +1,8 @@
 use std::{fmt, time::Duration};
 
-use cortexfs_channels::{ChannelCodec, ChannelError, platform::telegram::TelegramCodec};
+use cortexfs_channels::{
+    ChannelCodec, ChannelError, ChannelIncoming, platform::telegram::TelegramCodec,
+};
 use serde_json::Value;
 
 use super::bridge::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink};
@@ -83,18 +85,27 @@ pub fn run(config: &TelegramConfig, bridge: &AgentChannelBridge) -> Result<(), T
         for update in updates {
             let payload = serde_json::to_string(&update)?;
             let update_id = update.get("update_id").and_then(Value::as_i64);
-            let Some(inbound) = codec.decode(&payload)? else {
+            let Some(inbound) = codec.decode_incoming(&payload)? else {
                 if let Some(update_id) = update_id {
                     offset = offset.max(update_id.saturating_add(1));
                 }
                 continue;
             };
-            let mut sink = progress::Progress::new(&client, config, &inbound);
-            match bridge.handle_with_progress(inbound, &mut sink) {
-                Ok(outbound) if !sink.completed() => {
-                    api::send_message(&client, config, codec.encode(&outbound)?)?;
+            match inbound {
+                ChannelIncoming::Message(inbound) => {
+                    let mut sink = progress::Progress::new(&client, config, &inbound);
+                    match bridge.handle_with_progress(inbound, &mut sink) {
+                        Ok(outbound) if !sink.completed() => {
+                            api::send_message(&client, config, codec.encode(&outbound)?)?;
+                        }
+                        Ok(_) | Err(_) => {}
+                    }
                 }
-                Ok(_) | Err(_) => {}
+                ChannelIncoming::Event(event) => {
+                    if let Ok(outbound) = bridge.handle_event(&event) {
+                        api::send_message(&client, config, codec.encode(&outbound)?)?;
+                    }
+                }
             }
             if let Some(update_id) = update_id {
                 offset = offset.max(update_id.saturating_add(1));

@@ -10,11 +10,26 @@ WORK_DIR=
 
 readonly BINARIES=(
     ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner
-    cortexfs-agent-runtime cortexfs-channel ctxmcp
+    cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr
+    cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat
+    cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 )
 readonly UNITS=(
     cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket
-    cortexfs-channel@.service
+    cortexfs-channel@.service cortexfs-channel-bluesky.service
+    cortexfs-channel-driver@.service cortexfs-channel-nostr.service
+    cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service
+    cortexfs-channel-wechat.service cortexfs-channel-voice.service
+    cortexfs-channel-slack.service cortexfs-channel-mqtt.service
+    cortexfs-channel-clawdtalk.service
+    cortexfs-channel-dingtalk.service
+    cortexfs-channel-email.service cortexfs-channel-gmail.service
+    cortexfs-channel-irc.service cortexfs-channel-matrix.service
+    cortexfs-channel-mattermost.service cortexfs-channel-mochat.service
+    cortexfs-channel-notion.service
+    cortexfs-channel-qq.service
+    cortexfs-channel-reddit.service cortexfs-channel-twitch.service
+    cortexfs-channel-twitter.service
 )
 
 fail() {
@@ -69,7 +84,11 @@ build_release() {
     (
         cd "$ROOT"
         CARGO_TARGET_DIR="$(dirname "$target")" \
-            cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp
+        cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+            -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
+            -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
+            -p cortexfs-channel-voice -p cortexfs-channel-slack \
+            -p cortexfs-channel-mqtt
     )
 }
 

@@ -45,6 +45,11 @@ The Agent socket and terminal socket are transports for an active instance.
 Their stable `/ctx` paths may be aliases to endpoints under `/run`, and their
 absence never deletes the Agent definition or a private/shared session.
 
+The packaged `cortexfs-agent@.socket` is ordered after and restart-coupled to
+`cortexfs.service`. Package upgrades also start only the agent socket instances
+explicitly enabled through `sockets.target.wants`; an upgrade therefore does
+not leave an enabled chat endpoint inactive after the FUSE mount restarts.
+
 ## Runtime Surfaces
 
 The equivalent resource commands are ctx terminal status, ctx terminal watch,
@@ -122,8 +127,33 @@ Socket requests are JSONL. They name a session and operation:
 {"op":"send","id":"msg-1","session":"default","scope":"private","cwd":"/workspace","input":"hello"}
 {"op":"tsh","id":"tool-1","session":"default","args":["load","bash"]}
 {"op":"resume","session":"default"}
+{"op":"status","session":"default"}
 {"op":"cancel","id":"run-1"}
 ```
+
+`status` is a read-only control-plane query. It returns one bounded JSONL
+projection such as:
+
+```json
+{"type":"status","session":"default","status":"active","phase":"active","run":"run-1","step":1,"model":"main","updated_at":"1710000000"}
+```
+
+The projection is non-secret. It may contain lifecycle, run, step, action,
+tool, model reference, context revision, timestamp, and stable errno fields,
+but never credentials, prompt contents, or message contents. A missing session
+is reported as `idle`; malformed state is an `EIO`-class runtime failure.
+When a hosted step has a compiled working set, `context_revision` is a
+length-delimited SHA-256 digest of its bounded inputs; it is not the Context
+contents and cannot be used to reconstruct them.
+Existing clients can continue to use `resume` for replay and `send` for a live
+run stream.
+
+The socket surfaces map to Unix-style operations without adding a root
+namespace: chat is `send`, command execution is `tsh` or `cancel`, event
+attachment is `resume` with an optional cursor, and inspection is `status`.
+Each request remains bounded and one-shot at the transport layer; a caller
+may reconnect with the last event id after a disconnect. Durable files, not
+socket presence, remain lifecycle truth.
 
 `tsh` executes through the authenticated agent runtime without a model call.
 It emits canonical `start`, `tool_call`, `tool_result`, and `done` frames.
@@ -434,6 +464,11 @@ Interactive host-like behavior is provided by ordinary tool objects named
 `bash`, `tmux`, or `zellij` when visible and allowed. `tsh` itself must not
 fallback to arbitrary host commands.
 
+These passthrough tools use terminal stdout/stderr rather than the Tool SDK
+JSONL envelope. The runtime captures their bounded output and wraps it as the
+provider-neutral tool observation; SDK-backed tools continue to require the
+`start`/`message`/`done` envelope.
+
 ## Self Iteration
 
 An agent iterates itself through the `agent.update` tool. The tool sends one
@@ -510,6 +545,31 @@ metadata through the same library functions used by the object runner.
 Runtime-only blocks such as tool injection and historical message context
 remain bounded dynamic inputs; when they are not available to the CLI, the
 command prints explicit placeholder text.
+
+The optional `agent/<name>.d/loop` control selects the behavior contract passed
+to an executable Agent through `CTX_AGENT_LOOP`. Built-in values are `chat`,
+`react`, `coding`, `planner`, and `research`; a validated object name may name
+a custom loop. This is a behavior hint, not a capability grant: the executable
+still uses the unchanged `sdk-envelope-v1` stdin/stdout ABI, and tool authority
+continues to come only from the runtime policy intersection.
+
+Agent-local hooks use the existing `agent/<name>.d/hooks/pre.d/` and
+`post.d/` directories. The runtime runs them in lexical order immediately
+before and after each model action. A hook is an executable regular file and
+receives one JSONL frame such as:
+
+```json
+{"abi":"cortexfs.hook/v1","phase":"pre","action":"model","agent":"coder","run":"run-1","step":0}
+```
+
+The frame is deliberately metadata-only. Hooks do not receive the current
+prompt, user message, model response, provider secret, or socket capability.
+Exit zero continues the run; a non-zero exit becomes a host-owned error frame.
+The host applies the same agent Linux identity, rejects symlinks, bounds hook
+count/output/time, and discards hook stdout/stderr after recording only the
+stable error code. Hook directories are ordinary object-local files and are
+reloaded at the next runtime/process boundary; no watcher or hot reload is
+involved.
 
 When an agent run builds its prompt, the object runner also writes session
 load snapshots (best-effort) under the private agent session directory:

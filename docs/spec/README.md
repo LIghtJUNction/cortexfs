@@ -80,11 +80,13 @@ model-abi.md            one model ABI, model exec, model socket, event stream
 session-abi.md          durable history and session indexes
 agent-tool-security.md  agent identity, view, mount, and creation
 agent-runtime.md        end-to-end agent runtime, REPL, terminal, tsh, sandbox
+module-abi.md           static module API and stable external wire contract
 terminal-abi.md         durable terminal resources, PTY events, and attach
 tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
 ctx-coreutils.md        ctx command contract
 rolling-upgrades.md     rolling reference-tree update and storage switch rules
 channel-abi.md          multi-IM channel crate, routing, and host boundary
+interaction-abi.md      frontend/runtime bidirectional interaction frames
 paths.md                public path constants and filesystem/socket path ABI
 ```
 

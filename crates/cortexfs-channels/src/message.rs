@@ -22,9 +22,16 @@ pub struct MessageBody {
 
 impl MessageBody {
     pub fn text(value: impl Into<String>) -> Result<Self, ChannelError> {
+        Self::with_attachments(value, Vec::new())
+    }
+
+    pub fn with_attachments(
+        text: impl Into<String>,
+        attachments: Vec<Attachment>,
+    ) -> Result<Self, ChannelError> {
         let body = Self {
-            text: value.into(),
-            attachments: Vec::new(),
+            text: text.into(),
+            attachments,
         };
         body.validate()?;
         Ok(body)
@@ -39,6 +46,15 @@ impl MessageBody {
         if self.text.contains('\0') {
             return Err(ChannelError::InvalidMessage(
                 "message text contains NUL".to_owned(),
+            ));
+        }
+        if self
+            .attachments
+            .iter()
+            .any(|attachment| attachment.url.is_empty() || attachment.url.contains('\0'))
+        {
+            return Err(ChannelError::InvalidMessage(
+                "attachment URL is invalid".to_owned(),
             ));
         }
         Ok(())

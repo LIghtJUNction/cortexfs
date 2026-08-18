@@ -1,14 +1,13 @@
 #![forbid(unsafe_code)]
 
+pub mod commands;
 pub mod config;
+pub mod gmail;
+pub mod web;
 pub mod webhook;
 
 use std::io::Write as _;
 use std::process::ExitCode;
-
-use config::CommandConfig;
-use cortexfs::channel::bridge::AgentChannelBridge;
-use cortexfs_channels::ChannelSessionRoute;
 
 fn main() -> ExitCode {
     match run() {
@@ -21,47 +20,5 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    match config::load()? {
-        CommandConfig::Discord { config } => {
-            let route = ChannelSessionRoute::new(&config.agent, &config.session_prefix)?;
-            let bridge =
-                AgentChannelBridge::new(config.agent_socket.clone(), route, config.cwd.clone());
-            bridge.check_socket()?;
-            cortexfs::channel::discord::run(&config, &bridge)?;
-        }
-        CommandConfig::Telegram {
-            common,
-            token,
-            api_base,
-            poll_seconds,
-        } => {
-            let route = ChannelSessionRoute::new(&common.agent, &common.prefix)?;
-            let bridge = AgentChannelBridge::new(common.socket, route, common.cwd);
-            bridge.check_socket()?;
-            let config = cortexfs::channel::telegram::TelegramConfig::new(token, api_base)?
-                .with_poll_seconds(poll_seconds);
-            cortexfs::channel::telegram::run(&config, &bridge)?;
-        }
-        CommandConfig::Webhook {
-            common,
-            bind,
-            path,
-            platform,
-            outbound_url,
-            token,
-        } => {
-            let route = ChannelSessionRoute::new(&common.agent, &common.prefix)?;
-            let bridge = AgentChannelBridge::new(common.socket, route, common.cwd);
-            bridge.check_socket()?;
-            let config = webhook::WebhookConfig {
-                bind,
-                path,
-                platform,
-                outbound_url,
-                token,
-            };
-            webhook::run(&config, &bridge)?;
-        }
-    }
-    Ok(())
+    commands::run(config::load()?)
 }

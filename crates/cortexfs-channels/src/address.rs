@@ -37,6 +37,26 @@ impl ChannelId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Returns the platform family portion of this id.
+    ///
+    /// The complete value identifies one running channel instance. An
+    /// optional suffix after the first dot identifies that instance, so
+    /// `telegram.primary` has the family `telegram`.
+    #[must_use]
+    pub fn family(&self) -> &str {
+        self.0
+            .split_once('.')
+            .map_or(self.as_str(), |(family, _)| family)
+    }
+
+    /// Returns the optional instance name carried by this id.
+    #[must_use]
+    pub fn instance(&self) -> Option<&str> {
+        self.0
+            .split_once('.')
+            .and_then(|(_, instance)| (!instance.is_empty()).then_some(instance))
+    }
 }
 
 impl fmt::Display for ChannelId {

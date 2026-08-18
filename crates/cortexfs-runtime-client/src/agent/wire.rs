@@ -26,6 +26,7 @@ const MAX_AGENT_INVOCATION_READ: u64 = 1024 * 1024 + 1;
 /// - [rust-fs-mcp truncation metrics](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l557)
 /// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 const MAX_OBSERVATION_BYTES: usize = 16 * 1024;
+const MAX_EVENT_BYTES: usize = 64 * 1024;
 
 /// Reads and validates one newline-terminated invocation envelope frame from a stream.
 ///
@@ -69,6 +70,10 @@ pub fn read_agent_invocation(
         || envelope.step > MAX_AGENT_STEPS
         || envelope.history_messages.len() > MAX_AGENT_CONTEXT_BYTES
         || envelope.tool_context.len() > MAX_AGENT_CONTEXT_BYTES
+        || envelope
+            .event
+            .as_ref()
+            .is_some_and(|event| !event.is_object() || event_bytes_too_large(event))
         || (envelope.step == 0) != envelope.observation.0.is_none()
         || envelope.observation().is_some_and(invalid_observation)
     {
@@ -76,6 +81,10 @@ pub fn read_agent_invocation(
     }
 
     Ok(envelope)
+}
+
+fn event_bytes_too_large(event: &serde_json::Value) -> bool {
+    serde_json::to_vec(event).is_ok_and(|bytes| bytes.len() > MAX_EVENT_BYTES)
 }
 
 /// Returns whether a tool observation violates the wire contract.

@@ -24,6 +24,9 @@
 
 extern crate self as cortexfs;
 
+/// Provider-neutral static module API and external wire contract.
+pub use cortexfs_module as module;
+
 pub mod imports;
 pub use imports::*;
 
@@ -275,6 +278,11 @@ pub fn ensure_durable_session_layout(
         record_text(&session_dir.join("events.jsonl"), "", &mut receipts)?;
         record_text(&session_dir.join("latest.md"), "", &mut receipts)?;
         record_text(&session_dir.join("state"), "idle\n", &mut receipts)?;
+        record_text(
+            &session_dir.join("state.json"),
+            &RuntimeState::idle(model, &now).json(),
+            &mut receipts,
+        )?;
         record_text(&session_dir.join("cwd"), &format!("{cwd}\n"), &mut receipts)?;
         record_text(&session_dir.join("created_at"), &now, &mut receipts)?;
         record_text(&session_dir.join("updated_at"), &now, &mut receipts)?;

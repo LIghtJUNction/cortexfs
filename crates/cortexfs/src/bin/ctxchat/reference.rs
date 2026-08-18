@@ -11,14 +11,18 @@ const MAX_HISTORY_BYTES: u64 = 1024 * 1024;
 const MAX_DIRECTORY_ENTRIES: usize = 4096;
 
 pub(crate) fn expand(input: &str, workspace: &Path, messages: &Path) -> io::Result<String> {
-    let history = history_texts(messages)?;
+    let history = input
+        .split_whitespace()
+        .any(|token| token.starts_with("@history:"))
+        .then(|| history_texts(messages))
+        .transpose()?;
     let mut blocks = String::new();
     for token in input
         .split_whitespace()
         .filter(|token| token.starts_with('@'))
     {
         let block = if let Some(query) = token.strip_prefix("@history:") {
-            history_block(&history, query)?
+            history_block(history.as_deref().unwrap_or(&[]), query)?
         } else {
             path_block(workspace, token.trim_start_matches('@'))?
         };
@@ -266,6 +270,16 @@ mod tests {
         )?;
         assert!(expand("@history:0", root.path(), &messages)?.contains("alpha"));
         assert!(expand("@history:beta", root.path(), &messages)?.contains("beta result"));
+        Ok(())
+    }
+
+    #[test]
+    fn plain_input_does_not_require_a_session_history_file() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        assert_eq!(
+            expand("hi", root.path(), &root.path().join("missing"))?,
+            "hi"
+        );
         Ok(())
     }
 

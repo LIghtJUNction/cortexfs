@@ -77,6 +77,15 @@ fn validate(config: &DiscordConfig) -> Result<(), DiscordConfigError> {
             expected.display()
         )));
     }
+    if config
+        .channel
+        .as_ref()
+        .is_some_and(|channel| channel.family() != "discord")
+    {
+        return Err(DiscordConfigError::Parse(
+            "channel must use the discord family".to_owned(),
+        ));
+    }
     Ok(())
 }
 

@@ -152,6 +152,7 @@ pub(crate) fn validate_agent_bootstrap_control_content(
 ) -> Result<(), ObjectBootstrapError> {
     let valid = match file {
         "abi" => is_agent_launch_abi(content),
+        "loop" => AgentLoop::parse(content).is_some(),
         "tools" => inspect_agent_tools_control(content).is_ok(),
         "meta.json" => serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()),
         "system.md" | "prompt.template.md" => !content.contains('\0'),
@@ -280,6 +281,8 @@ pub(crate) fn stage_generated_model_pair(
     // Agent sandboxes execute as the agent uid while reading model controls
     // from the backing tree; model controls contain no provider secret.
     let control = support::plain::create_plain_dir_at(provider_dir, &control_name, 0o755)
+        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
+    nix::sys::stat::fchmod(&control, nix::sys::stat::Mode::from_bits_truncate(0o755))
         .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for file in MODEL_CONTROL_FILES {
         let content = object_control_content(ObjectClass::Model, id, file, control_overrides)?;

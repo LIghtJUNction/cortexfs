@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use cortexfs::channel::discord::DiscordConfig;
+use cortexfs_channels::ChannelId;
 
 const DEFAULT_API_BASE: &str = "https://discord.com/api/v10";
 const DEFAULT_GATEWAY: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -18,6 +19,8 @@ pub(super) struct RawDiscordConfig {
     session_prefix: String,
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default)]
+    channel: Option<ChannelId>,
     #[serde(default = "default_api_base")]
     api_base: String,
     #[serde(default = "default_gateway")]
@@ -35,6 +38,7 @@ impl RawDiscordConfig {
             agent: self.agent,
             session_prefix: self.session_prefix,
             cwd: self.cwd,
+            channel: self.channel,
             api_base: self.api_base,
             gateway_url: self.gateway_url,
             intents: self.intents,

@@ -72,6 +72,27 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(env_value(view.env(), "CTX_PROVIDER_SECRET_PATH"), None);
     assert_eq!(env_value(view.env(), "CTX_CONTEXT_WINDOW_TOKENS"), None);
     assert_eq!(env_value(view.env(), "CTX_CONTEXT_WINDOW_CHARS"), None);
+    assert_eq!(view.loop_kind(), &crate::AgentLoop::Chat);
+    assert_eq!(env_value(view.env(), "CTX_AGENT_LOOP"), Some("chat"));
+}
+
+#[test]
+fn agent_runtime_view_loads_a_custom_loop_control() {
+    let root = clean_test_dir("agent-runtime-loop-control");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    write_text_file(&control.join("loop"), "coding\n");
+
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    assert_eq!(view.loop_kind(), &crate::AgentLoop::Coding);
+    assert_eq!(env_value(view.env(), "CTX_AGENT_LOOP"), Some("coding"));
+
+    write_text_file(&control.join("loop"), "custom-review\n");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    assert_eq!(
+        view.loop_kind(),
+        &crate::AgentLoop::Custom("custom-review".to_owned())
+    );
 }
 
 #[test]

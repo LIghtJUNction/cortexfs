@@ -38,13 +38,27 @@ pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), ExecError> 
     config.suppress_model_error_events = true;
     let outcome = run_agent_model_once(&config, envelope.input(), &mut stdout)?;
     if !outcome.success || frames_have_error(&outcome.frames) {
-        return Err(ExecError::new("agent model failed"));
+        return Err(ExecError::new(agent_model_failure_message(&outcome.frames)));
     }
     if let Some(tool_call) = first_tool_call(&outcome.frames)? {
         write_agent_frames_for_tool_iteration(&mut stdout, &config.run, &outcome.frames, &tool_call)
     } else {
         write_hosted_agent_frames(&mut stdout, &config.run, &outcome.frames, outcome.streamed)
     }
+}
+
+fn agent_model_failure_message(frames: &[String]) -> String {
+    frames
+        .iter()
+        .rev()
+        .find_map(|frame| {
+            let value = serde_json::from_str::<Value>(frame).ok()?;
+            (value.get("type").and_then(Value::as_str) == Some("error"))
+                .then(|| value.get("message").and_then(Value::as_str))
+                .flatten()
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "agent model failed".to_owned())
 }
 
 pub(crate) struct AgentModelRunConfig {
@@ -185,24 +199,33 @@ impl AgentModelRunConfig {
         self.history_messages.push_str(envelope.history_messages());
         self.tool_context.clear();
         self.tool_context.push_str(envelope.tool_context());
-        let Some(observation) = envelope.observation() else {
-            return;
-        };
-        if !self.tool_context.trim().is_empty() {
-            self.tool_context.push_str("\n\n");
+        if let Some(observation) = envelope.observation() {
+            if !self.tool_context.trim().is_empty() {
+                self.tool_context.push_str("\n\n");
+            }
+            self.tool_context.push_str("Tool result ");
+            self.tool_context.push_str(observation.tool_call_id());
+            self.tool_context.push_str(" from ");
+            self.tool_context.push_str(observation.name());
+            self.tool_context.push_str(" status ");
+            self.tool_context.push_str(observation.status());
+            if observation.truncated() {
+                self.tool_context.push_str(" (truncated)");
+            }
+            self.tool_context.push_str(":\n");
+            self.tool_context.push_str(observation.content());
+            trim_tool_context_to_limit(&mut self.tool_context);
         }
-        self.tool_context.push_str("Tool result ");
-        self.tool_context.push_str(observation.tool_call_id());
-        self.tool_context.push_str(" from ");
-        self.tool_context.push_str(observation.name());
-        self.tool_context.push_str(" status ");
-        self.tool_context.push_str(observation.status());
-        if observation.truncated() {
-            self.tool_context.push_str(" (truncated)");
+        if let Some(event) = envelope.event()
+            && let Ok(encoded) = serde_json::to_string(event)
+        {
+            if !self.tool_context.trim().is_empty() {
+                self.tool_context.push_str("\n\n");
+            }
+            self.tool_context.push_str("External channel event:\n");
+            self.tool_context.push_str(&encoded);
+            trim_tool_context_to_limit(&mut self.tool_context);
         }
-        self.tool_context.push_str(":\n");
-        self.tool_context.push_str(observation.content());
-        trim_tool_context_to_limit(&mut self.tool_context);
     }
 }
 
