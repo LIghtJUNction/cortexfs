@@ -1,4 +1,27 @@
 use super::{ProviderTarget, Request};
+pub(super) fn authorize_provider_credential(
+    request: &Request,
+    target: &ProviderTarget,
+    client_token: &str,
+) -> std::io::Result<()> {
+    let Some(credential) = target.credential.as_ref() else {
+        return Ok(());
+    };
+    let bearer = format!("Bearer {}", credential.token);
+    let client_bearer = format!("Bearer {client_token}");
+    if request.headers.iter().any(|header| {
+        let name = header.0.as_str();
+        let value = header.1.as_str();
+        (name == "authorization" && (value == bearer || value == client_bearer))
+            || (name == "x-api-key" && value == credential.token)
+    }) {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "invalid provider egress credential",
+    ))
+}
 
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {

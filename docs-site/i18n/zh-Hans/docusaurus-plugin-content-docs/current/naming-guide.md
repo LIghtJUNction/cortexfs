@@ -4,7 +4,7 @@
 文件短小、全小写、单 token 模块名，避免装饰性分隔符。
 
 贡献者入口：
-[AGENTS.md](https://github.com/LIghtJUNction/cortexfs/blob/main/AGENTS.md)、  
+[AGENTS.md](https://github.com/LIghtJUNction/cortexfs/blob/main/AGENTS.md)、
 [DESIGN.md](DESIGN.md)、[developing-cortexfs.md](developing-cortexfs.md)。
 
 ## 1. 文件命名

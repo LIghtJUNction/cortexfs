@@ -224,6 +224,9 @@ fn pass_provider_egress_env(command: &mut Command) {
             cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
         );
     }
+    if let Some(value) = env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_TOKEN_ENV) {
+        command.env(cortexfs::runtime::egress::PROVIDER_EGRESS_TOKEN_ENV, value);
+    }
 }
 
 pub(crate) fn append_model_exit_error(

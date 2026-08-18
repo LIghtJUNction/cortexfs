@@ -1163,6 +1163,7 @@ pub(crate) fn run_agent_executable_streaming(
         step,
         command_control,
         provider_egress.map(runtime::egress::ProviderEgress::host_dir),
+        provider_egress.map(runtime::egress::ProviderEgress::client_token),
     );
     let (mut command, agent_executable_fd) = command_result?;
     apply_socket_debug_timing_env(&mut command, request.debug);

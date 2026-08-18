@@ -8,6 +8,10 @@ const SOCKET_AGENT_EXECUTABLE_PATH: &str = cortexfs_paths::AGENT_EXECUTABLE_SOCK
 pub const SOCKET_RUN_CONTROL_PATH: &str = cortexfs_paths::RUN_CONTROL_SOCKET;
 pub(crate) type RunControlCommand<'a> = (&'a Path, &'a [(String, String)], RawFd);
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the command boundary keeps the run-scoped relay capability separate from the bind path"
+)]
 pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
@@ -15,8 +19,9 @@ pub(crate) fn agent_executable_socket_command(
     step: u8,
     control: Option<RunControlCommand<'_>>,
     provider_egress: Option<&Path>,
+    provider_egress_token: Option<&str>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
-    let environment = agent_executable_socket_env(runtime, request, step);
+    let environment = agent_executable_socket_env(runtime, request, provider_egress_token, step);
     let (control_socket, control_environment, control_gate) = match control {
         Some((socket, environment, gate)) => (Some(socket), Some(environment), Some(gate)),
         None => (None, None, None),
@@ -127,12 +132,16 @@ impl Drop for InheritedFd {
 fn agent_executable_socket_env(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
+    provider_egress_token: Option<&str>,
     step: u8,
 ) -> Vec<(String, String)> {
     let mut environment = runtime
         .env
         .iter()
-        .filter(|env| !env.0.starts_with("CTX_PROVIDER_SECRET_"))
+        .filter(|env| {
+            !env.0.starts_with("CTX_PROVIDER_SECRET_")
+                && env.0 != runtime::egress::PROVIDER_EGRESS_TOKEN_ENV
+        })
         .cloned()
         .collect::<Vec<_>>();
     environment.extend([
@@ -150,6 +159,12 @@ fn agent_executable_socket_env(
         ("CTX_AGENT_LAUNCH".to_owned(), AGENT_LAUNCH_ABI.to_owned()),
         ("CTX_AGENT_STEP".to_owned(), step.to_string()),
     ]);
+    if let Some(token) = provider_egress_token {
+        environment.push((
+            runtime::egress::PROVIDER_EGRESS_TOKEN_ENV.to_owned(),
+            token.to_owned(),
+        ));
+    }
     environment
 }
 

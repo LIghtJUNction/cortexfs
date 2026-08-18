@@ -24,6 +24,11 @@ pub(crate) fn provider_credential(
         .unwrap_or_else(|| "default".to_owned());
     let runtime =
         provider_secret_from_runtime_value_with_env(provider, &account, |name| env::var(name));
+    if runtime.is_none()
+        && let Ok(token) = env::var(cortexfs::runtime::egress::PROVIDER_EGRESS_TOKEN_ENV)
+    {
+        return Ok(Some(ProviderCredential::Bearer(token)));
+    }
     if codex {
         if driver != ProviderRuntimeDriver::OpenAiResponses {
             return Err("Codex OAuth only supports openai.responses".to_owned());

@@ -256,6 +256,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         0,
         None,
         Some(Path::new("/run/cortexfs/egress-run-1")),
+        None,
     ));
     drop(agent_executable_fd);
     let command_env: Vec<_> = command
@@ -365,7 +366,7 @@ fn prepared_bwrap_command(
         debug: None,
     };
     let (command, inherited_fds) =
-        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
+        agent_executable_socket_command(runtime, &opened, request, 0, None, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     Ok(PreparedBwrapCommand {
         root,
@@ -760,6 +761,7 @@ fn run_registered_bwrap_capability_probe(
         request,
         0,
         Some((capability.socket(), environment.as_slice(), gate.block_fd())),
+        None,
         None,
     )
     .map_err(|error| std::io::Error::other(format!("{error:?}")))?;

@@ -24,6 +24,8 @@ const ACCEPT_PAUSE: Duration = Duration::from_millis(10);
 pub use cortexfs_paths::PROVIDER_EGRESS_SANDBOX_PATH;
 /// Environment variable advertising the fixed provider relay directory.
 pub const PROVIDER_EGRESS_DIR_ENV: &str = "CTX_PROVIDER_EGRESS_DIR";
+/// Environment variable carrying the run-scoped relay capability.
+pub const PROVIDER_EGRESS_TOKEN_ENV: &str = "CTX_PROVIDER_EGRESS_TOKEN";
 
 /// Stable failure while planning or creating a provider egress boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
@@ -46,6 +48,7 @@ pub enum ProviderEgressError {
 pub struct ProviderEgress {
     directory: EmptyDirReceipt,
     sockets: BTreeMap<String, SocketReceipt>,
+    client_token: String,
     shutdown: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
@@ -66,6 +69,8 @@ impl ProviderEgress {
         uid: u32,
         gid: u32,
     ) -> Result<Self, ProviderEgressError> {
+        let client_token = crate::support::receipt::random_hex::<32>()
+            .map_err(|_error| ProviderEgressError::CannotCreate)?;
         let runtime_owner = (
             nix::unistd::geteuid().as_raw(),
             nix::unistd::getegid().as_raw(),
@@ -100,8 +105,10 @@ impl ProviderEgress {
             let provider = target.provider.clone();
             match thread::Builder::new()
                 .name(format!("egress-{provider}"))
-                .spawn(move || serve(listener, target, uid, stop))
-            {
+                .spawn({
+                    let client_token = client_token.clone();
+                    move || serve(listener, target, uid, stop, &client_token)
+                }) {
                 Ok(handle) => threads.push(handle),
                 Err(_error) => {
                     shutdown.store(true, Ordering::Release);
@@ -114,6 +121,7 @@ impl ProviderEgress {
         Ok(Self {
             directory,
             sockets,
+            client_token,
             shutdown,
             threads,
         })
@@ -127,6 +135,10 @@ impl ProviderEgress {
     #[must_use]
     pub fn socket(&self, provider: &str) -> Option<&Path> {
         self.sockets.get(provider).map(SocketReceipt::path)
+    }
+
+    pub(crate) fn client_token(&self) -> &str {
+        &self.client_token
     }
 }
 
@@ -142,7 +154,13 @@ impl Drop for ProviderEgress {
     clippy::needless_pass_by_value,
     reason = "the host thread exclusively owns its listener, target set, and stop handle"
 )]
-fn serve(listener: UnixListener, target: ProviderTarget, uid: u32, shutdown: Arc<AtomicBool>) {
+fn serve(
+    listener: UnixListener,
+    target: ProviderTarget,
+    uid: u32,
+    shutdown: Arc<AtomicBool>,
+    client_token: &str,
+) {
     if listener.set_nonblocking(true).is_err() {
         return;
     }
@@ -150,7 +168,7 @@ fn serve(listener: UnixListener, target: ProviderTarget, uid: u32, shutdown: Arc
         match listener.accept() {
             Ok((stream, _address)) => {
                 if peer_credentials(&stream).is_ok_and(|peer| peer.uid() == uid) {
-                    let _ignored = http::relay(stream, &target, &shutdown);
+                    let _ignored = http::relay(stream, &target, &shutdown, client_token);
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {

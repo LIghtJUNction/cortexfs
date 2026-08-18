@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use auth::inject_provider_credential;
+use auth::{authorize_provider_credential, inject_provider_credential};
 use curl::run_curl;
 use request::parse_request;
 
@@ -31,6 +31,7 @@ pub(super) fn relay(
     mut local: UnixStream,
     target: &ProviderTarget,
     shutdown: &Arc<AtomicBool>,
+    client_token: &str,
 ) -> io::Result<()> {
     local.set_read_timeout(Some(CLIENT_TIMEOUT))?;
     local.set_write_timeout(Some(CLIENT_TIMEOUT))?;
@@ -40,6 +41,11 @@ pub(super) fn relay(
             b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
         );
     })?;
+    if let Err(error) = authorize_provider_credential(&request, target, client_token) {
+        let _ignored = local
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        return Err(error);
+    }
     let request = inject_provider_credential(request, target);
     run_curl(local, target, &request, shutdown)
 }
