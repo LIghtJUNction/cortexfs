@@ -51,10 +51,10 @@ secrets never appear in model metadata or `.d/` files.
 
 Bottom-layer AI API formats do not enter the ABI. OpenAI Responses, Anthropic
 Messages, Gemini GenerateContent, OpenAI-compatible chat, local runtimes, and
-aggregator-specific request formats are Rig or provider-adapter details.
-Bottom-layer stateful/stateless behavior does not enter the ABI. Rig adapts
-provider connections, API compatibility, and streaming into the canonical
-CortexFS request and JSONL event stream.
+aggregator-specific request formats are protocol-adapter details.
+Bottom-layer stateful/stateless behavior does not enter the ABI. CortexFS
+protocol adapters convert provider connections, API compatibility, and
+streaming into the canonical CortexFS request and JSONL event stream.
 
 Example:
 
@@ -319,7 +319,7 @@ CortexFS metadata text for that model. Executing it performs one-shot
 inference through CortexFS/Rust runtime code or a provider adapter; model
 objects must not be shell-script implementations.
 
-The first metadata keys mirror Rig 0.39 model listing fields:
+The first metadata keys mirror common model-listing fields:
 
 ```text
 id

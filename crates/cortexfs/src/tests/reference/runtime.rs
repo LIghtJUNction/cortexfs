@@ -137,7 +137,7 @@ fn malformed_former_active_provider_preserves_projection_without_residue() -> st
 }
 
 #[test]
-fn inactive_legacy_provider_fails_closed() -> std::io::Result<()> {
+fn inactive_unmanaged_provider_is_preserved() -> std::io::Result<()> {
     let root = clean_test_dir("reference-provider-inactive-legacy");
     let providers = root.join("providers.d");
     let config = providers.join("local.json");
@@ -146,9 +146,36 @@ fn inactive_legacy_provider_fails_closed() -> std::io::Result<()> {
     assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_ok());
     fs::remove_file(root.join("model/local/.cortexfs-provider.json"))?;
     fs::remove_file(config)?;
-    assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_err());
+    assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_ok());
     assert!(root.join("model/local/old").is_file());
     assert!(install_residues(&root)?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn active_unmanaged_provider_is_archived_before_replacement() -> std::io::Result<()> {
+    let root = clean_test_dir("reference-provider-active-legacy");
+    let providers = root.join("providers.d");
+    let config = providers.join("local.json");
+    let cache = root.join("provider-models");
+    write_text_file(&config, &local_config("[\"old\"]"));
+    assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_ok());
+    fs::remove_file(root.join("model/local/.cortexfs-provider.json"))?;
+    write_text_file(&config, &local_config("[\"new\"]"));
+
+    assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_ok());
+    assert!(root.join("model/local/new.d/id").is_file());
+    assert!(!root.join("model/local/old").exists());
+    let legacy = fs::read_dir(root.join("model"))?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(".cortexfs-legacy-local-"))
+        });
+    assert!(legacy.is_some());
+    assert!(legacy.is_some_and(|entry| entry.path().join("old").is_file()));
     Ok(())
 }
 

@@ -1,30 +1,26 @@
 use serde_json::json;
 
 use super::*;
+use cortexfs_protocol::{EventStatus, ModelEvent, ToolCall, WireProtocol, decode_response_events};
 use serde_json::Value;
 
 use crate::provider::openai_response_item_requires_continuation;
 use cortexfs::is_object_name;
 
-pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
+pub(crate) fn parse_provider_content(
+    protocol: WireProtocol,
+    output: &[u8],
+) -> Result<String, String> {
     let value = serde_json::from_slice::<Value>(output)
         .map_err(|error| format!("invalid provider json: {error}"))?;
-    openai_chat_finish_reason(&value)?;
-    if let Some(tool_call) = value
-        .pointer("/choices/0/message/tool_calls/0")
-        .and_then(openai_chat_tool_call_content)
-    {
-        return Ok(tool_call);
-    }
-    if let Some(content) = value
-        .pointer("/choices/0/message/content")
-        .and_then(Value::as_str)
-        .or_else(|| value.get("output_text").and_then(Value::as_str))
-        && !content.is_empty()
-    {
-        return Ok(content.to_owned());
-    }
-    Err("provider response missing content".to_owned())
+    validate_provider_response(protocol, &value)?;
+    let events = decode_response_events(protocol, output).map_err(|error| error.to_string())?;
+    normalized_content(&events)
+}
+
+#[cfg(test)]
+pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
+    parse_provider_content(WireProtocol::OpenAiChat, output)
 }
 pub(crate) fn openai_chat_finish_reason(value: &Value) -> Result<Option<&str>, String> {
     let reason = value
@@ -61,9 +57,23 @@ pub(crate) fn openai_chat_tool_call_args(arguments: &Value) -> Option<Vec<String
         .map(|value| value.as_str().map(str::to_owned))
         .collect()
 }
+#[cfg(test)]
 pub(crate) fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
-    let value = serde_json::from_slice::<Value>(output)
-        .map_err(|error| format!("invalid provider json: {error}"))?;
+    parse_provider_content(WireProtocol::OpenAiResponses, output)
+}
+
+#[cfg(test)]
+pub(crate) fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
+    parse_provider_content(WireProtocol::Anthropic, output)
+}
+
+fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(), String> {
+    if protocol == WireProtocol::OpenAiChat {
+        openai_chat_finish_reason(value)?;
+    }
+    if protocol != WireProtocol::OpenAiResponses {
+        return Ok(());
+    }
     if let Some((path, status)) = match value.get("status").and_then(Value::as_str) {
         Some(status @ ("failed" | "cancelled")) => Some(("/error/message", status)),
         Some("incomplete") => Some(("/incomplete_details/reason", "incomplete")),
@@ -81,25 +91,55 @@ pub(crate) fn parse_openai_response_content(output: &[u8]) -> Result<String, Str
     if items.iter().any(openai_response_item_requires_continuation) {
         return Err("provider response requires host-owned program continuation".to_owned());
     }
-    if let Some(tool_call) = items.iter().find_map(openai_response_tool_call_content) {
-        return Ok(tool_call);
+    Ok(())
+}
+
+fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
+    if let Some(call) = events.iter().find_map(tool_call_content) {
+        return Ok(call);
     }
-    if let Some(text) = value.get("output_text").and_then(Value::as_str)
-        && !text.is_empty()
-    {
-        return Ok(text.to_owned());
+    let text = events
+        .iter()
+        .filter_map(|event| match *event {
+            ModelEvent::TextDelta { ref text, .. }
+            | ModelEvent::ReasoningDelta { ref text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    if events.iter().any(|event| {
+        matches!(
+            event,
+            ModelEvent::Done {
+                status: EventStatus::Error | EventStatus::Cancelled,
+                ..
+            }
+        )
+    }) {
+        return Err("provider response failed".to_owned());
     }
-    let content = text_parts(items.iter().flat_map(|item| {
-        item.get("content")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-    }));
-    if content.is_empty() {
+    if text.is_empty() {
         Err("provider response missing content".to_owned())
     } else {
-        Ok(content)
+        Ok(text)
     }
+}
+
+fn tool_call_content(event: &ModelEvent) -> Option<String> {
+    let ModelEvent::ToolCall { ref call, .. } = *event else {
+        return None;
+    };
+    canonical_event_tool_call(call)
+}
+
+fn canonical_event_tool_call(call: &ToolCall) -> Option<String> {
+    if !provider_function_name_is_compatible(&call.name) || !is_object_name(&call.id) {
+        return None;
+    }
+    let args = openai_chat_tool_call_args(&call.arguments)?;
+    Some(
+        json!({"type":"tool_call","id":call.id,"name":call.name,"arguments":{"args":args}})
+            .to_string(),
+    )
 }
 pub(crate) fn openai_response_tool_call_content(value: &Value) -> Option<String> {
     if value.get("type").and_then(Value::as_str) != Some("function_call") {
@@ -117,22 +157,6 @@ fn canonical_tool_call(name: &str, id: &str, arguments: &Value) -> Option<String
     }
     let args = openai_chat_tool_call_args(arguments)?;
     Some(json!({"type":"tool_call","id":id,"name":name,"arguments":{"args":args}}).to_string())
-}
-pub(crate) fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
-    let value = serde_json::from_slice::<Value>(output)
-        .map_err(|error| format!("invalid provider json: {error}"))?;
-    let output = text_parts(
-        value
-            .get("content")
-            .and_then(Value::as_array)
-            .ok_or_else(|| "provider response missing content".to_owned())?
-            .iter(),
-    );
-    if output.is_empty() {
-        Err("provider response missing text content".to_owned())
-    } else {
-        Ok(output)
-    }
 }
 pub(crate) fn text_parts<'a>(parts: impl Iterator<Item = &'a Value>) -> String {
     parts
@@ -193,7 +217,37 @@ pub(crate) fn provider_target(transport: &ResolvedTransport, path: &str) -> Curl
         unix_socket,
     }
 }
+pub(crate) fn provider_request_target(
+    transport: &ResolvedTransport,
+    credential: Option<&ProviderCredential>,
+    protocol: WireProtocol,
+    run: &str,
+) -> Result<(CurlJsonTarget, Vec<String>), String> {
+    match protocol {
+        WireProtocol::OpenAiChat => openai_target(transport, credential, false, run),
+        WireProtocol::OpenAiResponses => openai_target(transport, credential, true, run),
+        WireProtocol::Anthropic => {
+            let credential = credential.ok_or_else(|| "missing Anthropic credential".to_owned())?;
+            Ok((
+                provider_target(transport, "messages"),
+                anthropic_headers(credential),
+            ))
+        }
+        WireProtocol::Gemini => Err("Gemini transport is not implemented by the runner".to_owned()),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn openai_request_target(
+    transport: &ResolvedTransport,
+    credential: Option<&ProviderCredential>,
+    responses: bool,
+    run: &str,
+) -> Result<(CurlJsonTarget, Vec<String>), String> {
+    openai_target(transport, credential, responses, run)
+}
+
+fn openai_target(
     transport: &ResolvedTransport,
     credential: Option<&ProviderCredential>,
     responses: bool,

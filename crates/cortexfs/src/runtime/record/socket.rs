@@ -46,6 +46,7 @@ fn record_socket_request(
         SocketRequest::Cancel { ref id } => record_socket_cancel_to_session(session_dir, id),
         SocketRequest::Tsh { .. }
         | SocketRequest::Resume { .. }
+        | SocketRequest::Status { .. }
         | SocketRequest::Stop { .. }
         | SocketRequest::Ping => Err(SocketSessionRecordError::UnsupportedRequest),
     }
@@ -94,6 +95,7 @@ fn record_indexed_socket_send(
         ),
         SocketRequest::Tsh { .. }
         | SocketRequest::Resume { .. }
+        | SocketRequest::Status { .. }
         | SocketRequest::Cancel { .. }
         | SocketRequest::Stop { .. }
         | SocketRequest::Ping => {
@@ -264,7 +266,7 @@ pub fn record_tool_execution_denial_to_session(
     let done = done_event_json(run_id, "error");
 
     append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
-    set_session_state(session_dir, "error")?;
+    set_session_state_with_error(session_dir, "error", Some(denial.errno()))?;
 
     Ok(SocketSessionRecord::new(Vec::new(), vec![event, done]))
 }

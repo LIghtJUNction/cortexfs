@@ -4,5 +4,12 @@ pub(crate) fn update_storage(path: Option<&Path>, prune: bool) -> Result<(), Cli
     let storage = path.unwrap_or_else(|| Path::new(cortexfs::SYSTEM_STORAGE_DIR));
     let generation = update_storage_generation_with_prune(storage, prune)
         .map_err(|error| CliError::unavailable(format!("cannot update storage: {error}")))?;
+    ensure_runtime_models(&generation).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot materialize runtime models {}: {} ({error:?})",
+            generation.display(),
+            error.errno(),
+        ))
+    })?;
     print_line(&generation.display().to_string())
 }

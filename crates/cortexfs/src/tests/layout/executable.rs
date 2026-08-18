@@ -70,6 +70,7 @@ fn agent_bootstrap_rejects_invalid_optional_control_content() {
         ("tools", "fs.read\nfs.read\n"),
         ("meta.json", "not-json\n"),
         ("meta.json", "[]\n"),
+        ("loop", "bad/loop\n"),
         ("system.md", "bad\0system\n"),
         ("prompt.template.md", "bad\0prompt\n"),
     ] {
@@ -77,6 +78,16 @@ fn agent_bootstrap_rejects_invalid_optional_control_content() {
             crate::validate_object_control_content(ObjectClass::Agent, file, content),
             Err(ObjectBootstrapError::InvalidControlValue),
             "{file}: {content:?}"
+        );
+    }
+}
+
+#[test]
+fn agent_bootstrap_accepts_builtin_and_custom_loops() {
+    for content in ["chat\n", "coding\n", "review\n"] {
+        assert!(
+            crate::validate_object_control_content(ObjectClass::Agent, "loop", content).is_ok(),
+            "{content:?}"
         );
     }
 }

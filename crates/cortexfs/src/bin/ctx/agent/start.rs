@@ -291,16 +291,6 @@ fn start_agent_runtime_services(
 }
 
 #[cfg(test)]
-pub(crate) fn system_agent_socket_unit(agent: &str) -> String {
-    format!("cortexfs-agent@{agent}.socket")
-}
-
-#[cfg(test)]
-pub(crate) fn system_agent_runtime_socket(agent: &str) -> PathBuf {
-    Path::new("/run/cortexfs/agent").join(format!("{agent}.sock"))
-}
-
-#[cfg(test)]
 pub(crate) fn system_agent_socket_command(action: &str, agent: &str) -> ProcessCommand {
     let mut command = ProcessCommand::new(SYSTEMCTL_PROGRAM);
     command
@@ -309,7 +299,7 @@ pub(crate) fn system_agent_socket_command(action: &str, agent: &str) -> ProcessC
         .args([
             "--no-ask-password",
             action,
-            &system_agent_socket_unit(agent),
+            &cortexfs_paths::system_agent_socket_unit(agent),
         ]);
     command
 }
@@ -349,10 +339,7 @@ pub(crate) fn ensure_agent_start_session(
     cwd: &str,
     workspace: Option<&str>,
 ) -> Result<(), CliError> {
-    let session_root = ctx_home(root)?
-        .join("agent")
-        .join(&args.name)
-        .join("session");
+    let session_root = cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, &args.name);
     let _receipts = ensure_durable_session_layout(
         &session_root,
         &args.session,
@@ -384,10 +371,7 @@ fn write_agent_terminal_record(
     state: &str,
     socket: Option<&Path>,
 ) -> Result<(), CliError> {
-    let session_dir = ctx_home(root)?
-        .join("agent")
-        .join(&args.name)
-        .join("session")
+    let session_dir = cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, &args.name)
         .join(&args.session);
     let record = cortexfs::runtime::terminal::TerminalRecord {
         id: cortexfs::runtime::terminal::terminal_id(&args.name, &args.session),
@@ -395,7 +379,12 @@ fn write_agent_terminal_record(
         session: args.session.clone(),
         owner: view.owner().to_string(),
         cwd: cwd.to_owned(),
-        command: vec!["/ctx/bin/tsh".to_owned()],
+        command: vec![
+            cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+                .join("tsh")
+                .display()
+                .to_string(),
+        ],
         state: state.to_owned(),
         socket: socket.map(|path| path.display().to_string()),
         created_at: current_time_unix(),
@@ -427,11 +416,17 @@ pub(crate) fn record_agent_start_state(
             control.display()
         )));
     }
-    write_agent_control_plain(&control.join("status"), "ready\n")?;
+    write_agent_control_plain(
+        &cortexfs_paths::control_file_path(&control, "status"),
+        "ready\n",
+    )?;
     let pid = agent_unit_main_pid(identity, unit).unwrap_or_default();
-    write_agent_control_plain(&control.join("pid"), &format!("{pid}\n"))?;
+    write_agent_control_plain(
+        &cortexfs_paths::control_file_path(&control, "pid"),
+        &format!("{pid}\n"),
+    )?;
     append_agent_log_event(
-        &control.join("log"),
+        &cortexfs_paths::control_file_path(&control, "log"),
         &agent_start_log_event(&args.name, &args.session, unit, facts, invocation),
     )
 }
@@ -483,7 +478,9 @@ pub(crate) fn agent_start_status_lines(
     uid: &str,
 ) -> Vec<String> {
     let service = format!("{unit}.service");
-    let loaded_path = format!("/run/user/{uid}/systemd/transient/{service}");
+    let loaded_path = cortexfs_paths::user_systemd_transient_path(uid, &service)
+        .display()
+        .to_string();
     let loaded = styled(color, ANSI_GREEN, "loaded");
     let mut lines = vec![
         format!(

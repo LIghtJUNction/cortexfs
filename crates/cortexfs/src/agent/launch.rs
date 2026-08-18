@@ -37,7 +37,7 @@ enum UserManagerCaller {
 impl UserManagerIdentity {
     /// Validates `/run/user/<uid>` and its user-bus socket without following links.
     pub fn fresh(identity: &AgentUnixIdentity) -> io::Result<Self> {
-        let runtime = PathBuf::from(format!("/run/user/{}", identity.uid()));
+        let runtime = cortexfs_paths::user_runtime_root(identity.uid());
         let metadata = fs::symlink_metadata(&runtime)?;
         if !metadata.is_dir()
             || metadata.file_type().is_symlink()
@@ -180,7 +180,7 @@ mod user_manager_tests {
         dispose_claimed_alias, ensure_terminal_runtime_dir, exact_alias_receipt,
         open_owned_alias_parent, parse_unit_state, prepare_exact_socket_alias,
         remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
-        system_agent_visible_socket, wait_system_agent_visible_socket,
+        wait_system_agent_visible_socket,
     };
     use crate::AgentUnixIdentity;
     use std::fs;
@@ -282,7 +282,7 @@ mod user_manager_tests {
     #[test]
     fn system_socket_visible_path_matches_backing_agent_socket_abi() {
         assert_eq!(
-            system_agent_visible_socket(std::path::Path::new("/storage/root"), "child"),
+            cortexfs_paths::agent_backing_socket(std::path::Path::new("/storage/root"), "child"),
             std::path::Path::new("/storage/root/agent/child.sock")
         );
     }
@@ -569,21 +569,6 @@ pub struct SystemAgentSocketReceipt {
     pub invocation: String,
 }
 
-#[must_use]
-pub fn system_agent_socket_unit(agent: &str) -> String {
-    format!("cortexfs-agent@{agent}.socket")
-}
-
-#[must_use]
-pub fn system_agent_runtime_socket(agent: &str) -> PathBuf {
-    Path::new("/run/cortexfs/agent").join(format!("{agent}.sock"))
-}
-
-#[must_use]
-pub fn system_agent_visible_socket(source: &Path, agent: &str) -> PathBuf {
-    source.join("agent").join(format!("{agent}.sock"))
-}
-
 const BOOTSTRAP_SOCKET_MODE: u32 = 0o777;
 
 /// Replaces the trusted bootstrap socket with the exact systemd runtime alias.
@@ -595,7 +580,7 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     let _agent_dir = open_owned_alias_child(&source_dir, "agent")?;
     let view = crate::derive_agent_runtime_view(source, agent)
         .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
-    let executable = source.join("agent").join(agent);
+    let executable = cortexfs_paths::agent_path(source, agent);
     let executable_meta = fs::symlink_metadata(&executable)?;
     if !executable_meta.is_file()
         || executable_meta.file_type().is_symlink()
@@ -606,8 +591,8 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
             "agent executable is not a plain executable file",
         ));
     }
-    let runtime = system_agent_runtime_socket(agent);
-    let run_dir = open_owned_alias_parent(Path::new("/run"))?;
+    let runtime = cortexfs_paths::system_agent_runtime_socket(agent);
+    let run_dir = open_owned_alias_parent(&cortexfs_paths::system_run_root())?;
     let cortexfs_dir = open_owned_alias_child(&run_dir, "cortexfs")?;
     let runtime_dir = open_owned_alias_child(&cortexfs_dir, "agent")?;
     let runtime_name = runtime
@@ -629,7 +614,7 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
         Err(error) => return Err(io::Error::from(error)),
     }
     prepare_exact_socket_alias(
-        &system_agent_visible_socket(source, agent),
+        &cortexfs_paths::agent_backing_socket(source, agent),
         &runtime,
         (view.identity().uid(), view.identity().gid()),
         BOOTSTRAP_SOCKET_MODE,
@@ -646,8 +631,8 @@ pub fn cleanup_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     let view = crate::derive_agent_runtime_view(source, agent)
         .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
     cleanup_exact_socket_alias(
-        &system_agent_visible_socket(source, agent),
-        &system_agent_runtime_socket(agent),
+        &cortexfs_paths::agent_backing_socket(source, agent),
+        &cortexfs_paths::system_agent_runtime_socket(agent),
         (view.identity().uid(), view.identity().gid()),
         BOOTSTRAP_SOCKET_MODE,
     )
@@ -1072,7 +1057,7 @@ pub fn ensure_system_agent_socket(
     agent: &str,
     visible: &Path,
 ) -> Result<SystemAgentSocketReceipt, AgentLaunchError> {
-    let unit = system_agent_socket_unit(agent);
+    let unit = cortexfs_paths::system_agent_socket_unit(agent);
     let before = system_unit_state(&unit);
     let was_active = before
         .as_ref()
@@ -1108,7 +1093,7 @@ pub fn ensure_system_agent_socket(
         owned_start: !was_active,
         invocation: state.invocation,
     };
-    let runtime = system_agent_runtime_socket(agent);
+    let runtime = cortexfs_paths::system_agent_runtime_socket(agent);
     if wait_socket(&runtime, 50, Duration::from_millis(100)).is_err()
         || wait_system_agent_visible_socket(visible, &runtime, 50, Duration::from_millis(100))
             .is_err()
@@ -1684,15 +1669,51 @@ pub fn terminal_command(
     command
         .args
         .extend(["--chdir".to_owned(), request.cwd.clone()]);
+    if let Some(events) = terminal_events_path(request, view) {
+        command.args.extend([
+            "--setenv".to_owned(),
+            "CTX_TERMINAL_EVENTS".to_owned(),
+            events,
+        ]);
+    }
     command.args.extend([
         crate::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
         "--no-stdio".to_owned(),
         "--".to_owned(),
-        "/ctx/bin/tsh".to_owned(),
+        cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+            .join("tsh")
+            .display()
+            .to_string(),
     ]);
     command
+}
+
+fn terminal_events_path(
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+) -> Option<String> {
+    let id = crate::runtime::terminal::terminal_id(&request.agent, &request.session);
+    let host = cortexfs_paths::session_terminal_from_home_path(
+        view.ctx_home(),
+        &request.agent,
+        &request.session,
+        &id,
+    );
+    if crate::support::plain::open_plain_directory(&host).is_err() {
+        return None;
+    }
+    Some(
+        Path::new("/home/agent")
+            .join("session")
+            .join(&request.session)
+            .join("terminal")
+            .join(id)
+            .join("events.jsonl")
+            .display()
+            .to_string(),
+    )
 }
 
 fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
@@ -1713,12 +1734,22 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         crate::ChildLifecycle::Temp => "temp",
     };
     let mut env = vec![
-        ("CTX_ROOT".to_owned(), "/ctx".to_owned()),
+        (
+            "CTX_ROOT".to_owned(),
+            cortexfs_paths::ctx_root().display().to_string(),
+        ),
         (
             "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-            "/ctx/shared/providers.d".to_owned(),
+            cortexfs_paths::shared_path(&cortexfs_paths::ctx_root(), "providers.d")
+                .display()
+                .to_string(),
         ),
-        ("CTX_HOME".to_owned(), format!("/ctx/home/{owner}")),
+        (
+            "CTX_HOME".to_owned(),
+            cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), owner)
+                .display()
+                .to_string(),
+        ),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
         ("CTX_AGENT_ROLE".to_owned(), "agent".to_owned()),
         ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
@@ -1763,7 +1794,8 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
 
 fn host_mount_source(root: &Path, source: &str) -> String {
     let source = Path::new(source);
-    source.strip_prefix("/ctx").map_or_else(
+    let ctx_root = cortexfs_paths::ctx_root();
+    source.strip_prefix(&ctx_root).map_or_else(
         |_| source.display().to_string(),
         |relative| root.join(relative).display().to_string(),
     )

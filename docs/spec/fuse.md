@@ -68,6 +68,7 @@ agent/<name>.d/owner   durable
 agent/<name>.d/uid     durable
 agent/<name>.d/gid     durable
 agent/<name>.d/groups  durable
+agent/<name>.d/perm    durable
 agent/<name>.d/label   durable
 agent/<name>.d/iso     durable
 agent/<name>.d/parent  durable
@@ -124,6 +125,13 @@ therefore treats processes sharing that uid as one security subject. On FUSE,
 path-derived synthetic inode numbers cannot be compared across an atomic
 temporary path and its target; the remaining same-uid lost-update window is not
 a cross-uid authorization boundary and does not grant another owner access.
+
+`agent/<name>.d/perm` contains one canonical `rwx` triplet such as `r-x\n`.
+FUSE projects that triplet as the marker file's owner mode bits, with group and
+other bits clear, so `ls -l agent/<name>.d/perm` displays the agent ceiling.
+`chmod` rewrites the same canonical control atomically from its owner triplet;
+direct atomic replacement of the text control has the same effect. The backing
+file's ordinary mode remains an implementation detail.
 
 ## Runtime Socket Aliases
 

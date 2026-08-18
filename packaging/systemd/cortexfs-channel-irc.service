@@ -1,0 +1,24 @@
+[Unit]
+Description=CortexFS IRC channel adapter
+Documentation=file:/usr/share/doc/cortexfs/docs/channels.md
+After=network-online.target cortexfs.service
+Wants=network-online.target
+Requires=cortexfs.service
+PartOf=cortexfs.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/cortexfs/channels/irc.env
+ExecStart=/usr/bin/cortexfs-channel irc
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=128M
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cortexfs/channels
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

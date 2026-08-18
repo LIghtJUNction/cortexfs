@@ -154,22 +154,20 @@ pub(crate) fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, Cli
 }
 
 pub(crate) fn agent_object_path(root: &Path, agent: &str) -> PathBuf {
-    root.join("agent").join(agent)
+    cortexfs_paths::agent_path(root, agent)
 }
 
 pub(crate) fn agent_control_dir(root: &Path, agent: &str) -> PathBuf {
     agent_user_control_dir(root, agent)
         .filter(|control| is_plain_dir(control))
-        .unwrap_or_else(|| agent_object_path(root, &format!("{agent}.d")))
+        .unwrap_or_else(|| cortexfs_paths::agent_control_path(root, agent))
 }
 
 pub(crate) fn agent_user_control_dir(root: &Path, agent: &str) -> Option<PathBuf> {
-    Some(
-        ctx_home(root)
-            .ok()?
-            .join("agent")
-            .join(format!("{agent}.d")),
-    )
+    Some(cortexfs_paths::agent_control_path(
+        &ctx_home(root).ok()?,
+        agent,
+    ))
 }
 
 pub(crate) fn is_plain_dir(path: &Path) -> bool {
@@ -178,7 +176,7 @@ pub(crate) fn is_plain_dir(path: &Path) -> bool {
 }
 
 pub(crate) fn agent_control_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
-    let agent_root = agent_object_path(root, "");
+    let agent_root = cortexfs_paths::agent_root_path(root);
     let entries = fs::read_dir(&agent_root).map_err(|error| {
         CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
     })?;

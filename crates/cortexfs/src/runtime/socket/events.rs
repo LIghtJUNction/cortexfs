@@ -241,13 +241,13 @@ impl<'a> AgentFrameBatch<'a> {
         history
             .refresh_claims()
             .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-        let state = match terminal {
+        let (state, error_code) = match terminal {
             AgentTerminal::Success {
                 assistant: Some(assistant),
                 done,
             } => {
                 record_assistant_response_locked(&history, session_dir, run_id, &assistant, done)?;
-                "done"
+                ("done", None)
             }
             AgentTerminal::Success {
                 assistant: None,
@@ -256,20 +256,36 @@ impl<'a> AgentFrameBatch<'a> {
                 history
                     .append(columnar::Stream::Events, &[done])
                     .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-                "done"
+                ("done", None)
             }
             AgentTerminal::Error { error, done } => {
                 history
                     .append(columnar::Stream::Events, &[error, done])
                     .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-                "error"
+                ("error", stable_error_code(error))
             }
         };
         history
             .refresh_claims()
             .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-        transition_active_session_run_locked(&history, session_dir, run_id, state)
+        transition_active_session_run_locked(
+            &history,
+            session_dir,
+            run_id,
+            state,
+            error_code.as_deref(),
+        )
     }
+}
+
+fn stable_error_code(frame: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(frame).ok()?;
+    let code = value.get("code")?.as_str()?;
+    ((1..=32).contains(&code.len())
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'))
+    .then(|| code.to_owned())
 }
 
 pub(crate) fn record_tool_approval_frames(

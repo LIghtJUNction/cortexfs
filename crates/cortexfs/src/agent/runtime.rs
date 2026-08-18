@@ -22,6 +22,7 @@ pub struct AgentRuntimeView {
     pub(crate) home: PathBuf,
     pub(crate) owner: u32,
     pub(crate) identity: AgentUnixIdentity,
+    pub(crate) permissions: AgentPermissions,
     pub(crate) label: String,
     pub(crate) policy_subject: String,
     pub(crate) iso: String,
@@ -36,6 +37,7 @@ pub struct AgentRuntimeView {
     pub(crate) model_limit: ModelContextLimit,
     pub(crate) window_setting: AgentWindowSetting,
     pub(crate) effective_window: AgentEffectiveWindow,
+    pub(crate) loop_kind: AgentLoop,
     pub(crate) policy: PolicyV0,
     pub(crate) declared_tools: BTreeSet<String>,
     pub(crate) approval: AgentApprovalMode,
@@ -142,6 +144,12 @@ impl AgentRuntimeView {
         &self.identity
     }
 
+    /// Returns the coarse `r/w/x` file and shell permission ceiling.
+    #[must_use]
+    pub const fn permissions(&self) -> AgentPermissions {
+        self.permissions
+    }
+
     /// Returns the full label control value.
     #[must_use]
     pub fn label(&self) -> &str {
@@ -225,6 +233,12 @@ impl AgentRuntimeView {
     #[must_use]
     pub const fn effective_window(&self) -> AgentEffectiveWindow {
         self.effective_window
+    }
+
+    /// Returns the configured provider-neutral behavior loop.
+    #[must_use]
+    pub fn loop_kind(&self) -> &AgentLoop {
+        &self.loop_kind
     }
 
     /// Returns the parsed v0 policy.

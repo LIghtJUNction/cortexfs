@@ -518,7 +518,7 @@ pub(crate) fn agent_apply(
 
     let model = profile.models.first().cloned();
     if let Some(ref model) = model {
-        require_plain_agent_control_target(&control.join("model"))?;
+        require_plain_agent_control_target(&cortexfs_paths::control_file_path(&control, "model"))?;
         writes.push(ProfileWrite {
             file: "model",
             content: ensure_profile_newline(model),

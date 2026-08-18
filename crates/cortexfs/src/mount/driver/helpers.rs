@@ -66,7 +66,7 @@ struct MountConfig {
 impl MountConfig {
     fn parse(args: Vec<OsString>) -> Result<Self, String> {
         let mut source =
-            env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from("/ctx"), PathBuf::from);
+            env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
         let mut mountpoint = None;
         let mut values = args.into_iter();
 

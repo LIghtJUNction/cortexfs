@@ -27,7 +27,7 @@ pub(crate) const AGENT_CREATE_SCHEMA: &str = r#"{
     "window": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
   }
 }"#;
-const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
+const REFERENCE_OBJECT_RUNNER: &str = cortexfs_paths::CORTEXFS_OBJECT_RUNNER;
 #[cfg(test)]
 static FORCE_PRODUCTION_CLAIM_CONFLICT: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -409,12 +409,22 @@ pub(crate) fn create_child_context(
         ("uid".to_owned(), uid.clone()),
         ("gid".to_owned(), view.identity().gid().to_string()),
         ("groups".to_owned(), groups),
+        (
+            "perm".to_owned(),
+            view.permissions().control().trim_end().to_owned(),
+        ),
         ("label".to_owned(), label),
         ("parent".to_owned(), parent_ref),
         ("life".to_owned(), life.to_owned()),
-        ("root".to_owned(), "/ctx".to_owned()),
+        (
+            "root".to_owned(),
+            cortexfs_paths::ctx_root().display().to_string(),
+        ),
         ("cwd".to_owned(), cwd.to_owned()),
-        ("env".to_owned(), "CTX_ROOT=/ctx".to_owned()),
+        (
+            "env".to_owned(),
+            format!("CTX_ROOT={}", cortexfs_paths::CTX_ROOT),
+        ),
         ("path".to_owned(), path),
         ("mount".to_owned(), mount_text),
         ("model".to_owned(), view.model().to_owned()),
@@ -422,19 +432,8 @@ pub(crate) fn create_child_context(
         ("policy".to_owned(), policy_text),
         ("status".to_owned(), "idle".to_owned()),
     ];
-    let child_session_root = source
-        .join("home")
-        .join(&uid)
-        .join("agent")
-        .join(name)
-        .join("session");
-    let parent_session = source
-        .join("home")
-        .join(&uid)
-        .join("agent")
-        .join(parent)
-        .join("session")
-        .join(session);
+    let child_session_root = cortexfs_paths::agent_sessions_path(source, &uid, name);
+    let parent_session = cortexfs_paths::agent_session_path(source, &uid, parent, session);
     let model = view.model().to_owned();
     let mut ops = ProductionOps {
         source,
@@ -775,11 +774,9 @@ fn launch_child(
     session: &str,
 ) -> ChildCreateResult<ChildLaunch> {
     use std::time::Duration;
-    let runtime = PathBuf::from(format!("/run/user/{}", view.identity().uid()));
-    let terminal_dir = runtime
-        .join("cortexfs/terminal")
-        .join(view.agent_name())
-        .join(session);
+    let runtime = cortexfs_paths::user_runtime_root(view.identity().uid());
+    let terminal_socket =
+        cortexfs_paths::terminal_runtime_socket(&runtime, view.agent_name(), session);
     let terminal_fd = crate::agent::launch::ensure_terminal_runtime_dir(
         &runtime,
         view.agent_name(),
@@ -787,7 +784,6 @@ fn launch_child(
         view.identity(),
     )
     .map_err(|error| child_error("EIO", error.to_string()))?;
-    let terminal_socket = terminal_dir.join("main.sock");
     let startup = prepare_startup_stub(&terminal_fd, view.identity().uid(), view.identity().gid())
         .map_err(|error| child_error("EIO", error.to_string()))?;
     let terminal_unit = format!("cortexfs-agent-{}-{session}-terminal", view.agent_name());
@@ -836,7 +832,7 @@ fn launch_child(
                 )
             })?;
     let pid = terminal.pid;
-    let chat_visible = crate::agent::launch::system_agent_visible_socket(source, view.agent_name());
+    let chat_visible = cortexfs_paths::agent_backing_socket(source, view.agent_name());
     let system =
         match crate::agent::launch::ensure_system_agent_socket(view.agent_name(), &chat_visible) {
             Ok(receipt) => receipt,
@@ -850,14 +846,14 @@ fn launch_child(
                 return Err(startup_failure(&terminal_fd, startup, original));
             }
         };
-    let control = source
-        .join("agent")
-        .join(format!("{}.d", view.agent_name()));
     for (file, value) in [
         ("status", "ready\n".to_owned()),
         ("pid", format!("{pid}\n")),
     ] {
-        if let Err(error) = write_control(&control.join(file), &value) {
+        if let Err(error) = write_control(
+            &cortexfs_paths::agent_control_file_path(source, view.agent_name(), file),
+            &value,
+        ) {
             let launch = ChildLaunch {
                 terminal,
                 system,
@@ -901,7 +897,7 @@ fn dispatch_child_handoff(
     cwd: &str,
     handoff: &str,
 ) -> ChildCreateResult<()> {
-    let socket = crate::agent::launch::system_agent_visible_socket(source, child);
+    let socket = cortexfs_paths::agent_backing_socket(source, child);
     let run = format!("handoff-{session}");
     let request = serde_json::json!({
         "op": "send",
@@ -1017,7 +1013,7 @@ fn runtime_field(name: &str) -> ChildCreateResult<String> {
 }
 
 fn read_control(root: &Path, agent: &str, file: &str) -> ChildCreateResult<String> {
-    fs::read_to_string(root.join("agent").join(format!("{agent}.d")).join(file))
+    fs::read_to_string(cortexfs_paths::agent_control_file_path(root, agent, file))
         .map_err(|_error| child_error("EIO", format!("cannot read parent {file}")))
 }
 

@@ -515,7 +515,9 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         "inspect" => {
             let (target, session) = parse_agent_session_option_args(values, "inspect")?;
-            let target = target.strip_prefix("/ctx/").unwrap_or(&target);
+            let target = target
+                .strip_prefix(&format!("{CTX_ROOT}/"))
+                .unwrap_or(&target);
             let name = target
                 .strip_prefix("agent/")
                 .filter(|name| is_object_name(name))

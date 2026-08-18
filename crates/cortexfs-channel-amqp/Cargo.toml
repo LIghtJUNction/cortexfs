@@ -1,0 +1,24 @@
+[package]
+name = "cortexfs-channel-amqp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Process-isolated AMQP channel driver for CortexFS."
+readme = "README.md"
+keywords = ["agent", "amqp", "channel", "rabbitmq"]
+categories = ["network-programming"]
+
+[dependencies]
+cortexfs-channels = { version = "0.1.16", path = "../cortexfs-channels" }
+cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
+futures-util = "0.3.34"
+lapin = { version = "2", default-features = false, features = ["rustls"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio-executor-trait = "2"
+tokio-reactor-trait = "1"
+
+[lints]
+workspace = true

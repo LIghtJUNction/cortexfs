@@ -1,0 +1,24 @@
+[Unit]
+Description=CortexFS Nostr channel driver
+Documentation=file:/usr/share/doc/cortexfs/docs/channels.md
+After=network-online.target cortexfs-channel-driver@nostr.service
+Wants=network-online.target
+Requires=cortexfs-channel-driver@nostr.service
+PartOf=cortexfs.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/cortexfs/channels/nostr.env
+ExecStart=/usr/bin/cortexfs-channel-nostr
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=128M
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cortexfs/channels
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

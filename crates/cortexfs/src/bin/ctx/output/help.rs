@@ -107,9 +107,7 @@ pub(crate) fn print_shared_or_builtin_man(
     file_name: &str,
     fallback: &str,
 ) -> Result<(), CliError> {
-    let shared = root
-        .join("shared")
-        .join(MANUAL_SHARED_DIR)
+    let shared = cortexfs_paths::shared_path(root, MANUAL_SHARED_DIR)
         .join(if file_name == MANUAL_INDEX_FILE {
             ""
         } else {

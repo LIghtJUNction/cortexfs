@@ -104,6 +104,35 @@ fn agent_model_process_rejects_symlink_executable_without_running_target()
 }
 
 #[test]
+fn rejected_agent_hook_is_streamed_as_safe_recoverable_error()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-agent-hook-error")?;
+    let model = root.join("model-script");
+    let hooks = root.join("agent/coder.d/hooks/pre.d");
+    fs::create_dir_all(&hooks)?;
+    write_executable_script(&hooks.join("reject"), "#!/bin/sh\nexit 7\n")?;
+    write_executable_script(
+        &model,
+        "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\n",
+    )?;
+    let mut config = test_agent_run_config();
+    config.source = root.clone();
+    config.model_path = model;
+    config.suppress_model_error_events = true;
+    let mut output = Vec::new();
+
+    let outcome = run_agent_model_once(&config, "hello", &mut output)?;
+
+    assert!(!outcome.success);
+    assert!(outcome.frames.iter().any(|frame| {
+        frame.contains(r#""code":"EACCES""#) && frame.contains(r#""recoverable":true"#)
+    }));
+    assert!(String::from_utf8(output)?.contains(r#""recoverable":true"#));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn agent_model_process_timeout_kills_process_group() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-agent-model-timeout")?;
     let model = root.join("model-script");
@@ -210,9 +239,8 @@ fn assert_model_overflow(case: &str, script: &str) -> Result<(), Box<dyn std::er
 fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), ExecError> {
     let mut config = test_agent_run_config();
     config.model_path = PathBuf::from("/definitely/not/a/model");
-    config.context_budget = AgentWindowBudget::from_effective(
-        ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown),
-    );
+    config.context_budget =
+        budget_from_effective(ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown));
     config.suppress_model_error_events = true;
     let mut output = Vec::new();
 
@@ -249,7 +277,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         model_path: model,
         ..test_agent_run_config()
     };
-    config.context_budget = AgentWindowBudget::from_effective(
+    config.context_budget = budget_from_effective(
         ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
     );
     let mut output = Vec::new();

@@ -24,6 +24,13 @@ FUSE、bubblewrap 0.10+ 与 Rust。每个持久化变更都会展示计划，只
 
 安装完成后可运行 `ctx status`、`ctx ls`、`ctx doctor` 和 `ctx --help`。
 
+如需原生安装包，请参阅[多发行版打包与安装指南](docs/packaging.md)，可生成
+`.deb`、`.rpm`、Arch Linux 安装包和通用 tar.gz 压缩包。
+
+如需接入 Telegram、Discord、Slack、飞书/Lark，请参阅[多 IM 接入指南](docs/channels.md)
+与[channel ABI 规范](docs/spec/channel-abi.md)。每个 IM 会话都会复用现有 agent
+socket 与持久化 session，因此支持真正的多轮对话。
+
 ## 项目介绍
 
 <p align="center">

@@ -1,18 +1,12 @@
-use super::adapter::{
-    AuthProvider, AuthProviderError, AuthRequest, AuthTransport, DeviceChallenge, default_login,
-    default_models, default_refresh, device_request,
-};
-use super::common::AdapterCore;
+use super::ProviderAuthConfig;
+use super::common::{AdapterCore, CoreAuthProvider};
 use super::device::DeviceConfig;
-use super::{Credential, ProviderAuthConfig};
-use crate::provider::oauth::{OAuthPkce, OAuthProviderConfig};
-
+use crate::provider::oauth::OAuthProviderConfig;
 /// GitHub OAuth adapter for Copilot-compatible model endpoints.
 #[derive(Debug)]
 pub struct GitHubCopilotAdapter {
     core: AdapterCore,
 }
-
 impl GitHubCopilotAdapter {
     /// Builds the GitHub OAuth metadata used by a Copilot client registration.
     #[must_use]
@@ -36,7 +30,6 @@ impl GitHubCopilotAdapter {
     pub fn new(oauth: OAuthProviderConfig) -> Self {
         Self::with_base(oauth, "https://api.githubcopilot.com")
     }
-
     /// Builds a Copilot adapter using the configured provider base URL.
     #[must_use]
     pub fn with_base(oauth: OAuthProviderConfig, base_url: &str) -> Self {
@@ -88,91 +81,8 @@ fn default_methods() -> Vec<ProviderAuthConfig> {
         ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
     ]
 }
-impl AuthProvider for GitHubCopilotAdapter {
-    fn id(&self) -> &str {
-        &self.core.id
-    }
-
-    fn methods(&self) -> &[ProviderAuthConfig] {
-        &self.core.methods
-    }
-
-    fn aliases(&self) -> &[String] {
-        &self.core.aliases
-    }
-
-    fn authorization_url(
-        &self,
-        state: &str,
-        pkce: &OAuthPkce,
-    ) -> Result<String, AuthProviderError> {
-        self.core.authorization(state, pkce)
-    }
-
-    fn login(&self, request: AuthRequest) -> Result<Credential, AuthProviderError> {
-        default_login(self, request)
-    }
-
-    fn login_with(
-        &self,
-        request: AuthRequest,
-        transport: &mut dyn AuthTransport,
-        now: u64,
-    ) -> Result<Credential, AuthProviderError> {
-        if let Some(credential) = device_request(self, &request, transport, now)? {
-            return Ok(credential);
-        }
-        self.core.login(request, transport, now)
-    }
-
-    fn persist(&self, credential: &Credential, now: u64) -> Result<(), AuthProviderError> {
-        self.core.persist(credential, now)
-    }
-
-    fn device_login_with(
-        &self,
-        timeout_secs: u64,
-        transport: &mut dyn AuthTransport,
-        now: u64,
-        notify: &mut dyn FnMut(&DeviceChallenge),
-        pause: &mut dyn FnMut(u64),
-    ) -> Result<Credential, AuthProviderError> {
-        self.core
-            .device_login(timeout_secs, transport, now, notify, pause)
-    }
-
-    fn refresh(&self, credential: &Credential) -> Result<Credential, AuthProviderError> {
-        default_refresh(self, credential)
-    }
-
-    fn refresh_with(
-        &self,
-        credential: &Credential,
-        transport: &mut dyn AuthTransport,
-        now: u64,
-    ) -> Result<Credential, AuthProviderError> {
-        self.core.refresh(credential, transport, now)
-    }
-
-    fn models(&self, credential: Option<&Credential>) -> Result<Vec<String>, AuthProviderError> {
-        default_models(self, credential)
-    }
-
-    fn models_with(
-        &self,
-        credential: Option<&Credential>,
-        transport: &mut dyn AuthTransport,
-    ) -> Result<Vec<String>, AuthProviderError> {
-        let credential = credential.ok_or(AuthProviderError::InvalidCredential)?;
-        let headers = self.model_headers(credential)?;
-        let response = self.core.model_response_with_headers(transport, &headers)?;
-        self.parse_models(response)
-    }
-
-    fn model_headers(
-        &self,
-        credential: &Credential,
-    ) -> Result<Vec<(String, String)>, AuthProviderError> {
-        self.core.model_headers(credential, "Authorization")
+impl CoreAuthProvider for GitHubCopilotAdapter {
+    fn core(&self) -> &AdapterCore {
+        &self.core
     }
 }

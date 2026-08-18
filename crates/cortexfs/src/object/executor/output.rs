@@ -9,7 +9,11 @@ pub(crate) fn write_hosted_agent_frames(
     for frame in frames {
         let kind = event_type(frame);
         if matches!(kind.as_deref(), Some("start" | "error" | "done"))
-            || streamed && matches!(kind.as_deref(), Some("delta" | "reasoning_delta" | "usage"))
+            || streamed
+                && matches!(
+                    kind.as_deref(),
+                    Some("delta" | "reasoning_delta" | "usage" | "error")
+                )
         {
             continue;
         }

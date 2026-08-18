@@ -1,8 +1,9 @@
 use crate::object::executor::{cleanup_curl_child, spawn_child_stderr_reader};
 use crate::object::runner::{
-    MAX_PROVIDER_STREAM_LINE_BYTES, OpenAiProviderRequest, ResolvedTransport,
-    call_openai_sse_streaming, openai_chat_body, openai_request_target, openai_responses_body,
+    MAX_PROVIDER_STREAM_LINE_BYTES, ProviderRequest, ResolvedTransport, call_openai_sse_streaming,
+    provider_request_body, provider_request_target,
 };
+use cortexfs_protocol::WireProtocol;
 use std::io::{self, BufRead, Read, Write};
 use std::process::{Child, ChildStdout};
 use std::thread;
@@ -26,20 +27,31 @@ impl OpenAiStreamApi {
     pub(crate) fn call_streaming(
         self,
         transport: &ResolvedTransport,
-        request: &OpenAiProviderRequest<'_>,
+        request: &ProviderRequest<'_>,
         run: &str,
         stdout: &mut impl Write,
     ) -> Result<(), StreamFailure> {
+        let protocol = self.protocol();
         let (target, headers) =
-            openai_request_target(transport, request.credential, self == Self::Responses, run)
+            provider_request_target(transport, request.credential, protocol, run)
                 .map_err(|message| stream_failure(message, false))?;
-        let body = match self {
-            Self::Chat => openai_chat_body(request.model, request.input, true, request.effort),
-            Self::Responses => {
-                openai_responses_body(request.model, request.input, true, request.effort)
-            }
-        };
+        let body = provider_request_body(
+            protocol,
+            request.model,
+            request.input,
+            true,
+            request.effort,
+            std::env::var_os("CTX_AGENT").is_some(),
+        )
+        .map_err(|message| stream_failure(message, false))?;
         call_openai_sse_streaming(&target, &headers, &body, self, run, stdout)
+    }
+
+    fn protocol(self) -> WireProtocol {
+        match self {
+            Self::Chat => WireProtocol::OpenAiChat,
+            Self::Responses => WireProtocol::OpenAiResponses,
+        }
     }
 }
 

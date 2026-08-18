@@ -58,7 +58,7 @@ pub(crate) fn provider_credential(
             });
     }
     let credential = |token| {
-        if driver == ProviderRuntimeDriver::AnthropicMessages {
+        if driver == ProviderRuntimeDriver::Anthropic {
             ProviderCredential::AnthropicApiKey(token)
         } else {
             ProviderCredential::Bearer(token)

@@ -141,6 +141,10 @@ Tools are executable capability endpoints:
 echo '{"cmd":"pwd"}' | /ctx/tool/shell.exec
 ```
 
+For an agent caller, the matching `agent/<name>.d/perm` bit is an additional
+mandatory ceiling before tool policy: `r` for `fs.read`/`fs.list`/`fs.stat`,
+`w` for `fs.write`/`fs.replace`, and `x` for shell or terminal execution.
+
 Optional agent lifecycle tools may appear only when implemented:
 
 ```text

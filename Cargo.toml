@@ -1,6 +1,19 @@
 [workspace]
 members = [
     "crates/cortexfs",
+    "crates/cortexfs-channels",
+    "crates/cortexfs-channel-nostr",
+    "crates/cortexfs-channel-amqp",
+    "crates/cortexfs-channel-wecom-ws",
+    "crates/cortexfs-channel-wechat",
+    "crates/cortexfs-channel-voice",
+    "crates/cortexfs-channel-slack",
+    "crates/cortexfs-channel-mqtt",
+    "crates/cortexfs-context",
+    "crates/cortexfs-metadatas",
+    "crates/cortexfs-module",
+    "crates/cortexfs-paths",
+    "crates/cortexfs-protocol",
     "crates/cortexfs-agent-sdk", "crates/cortexfs-mcp",
     "crates/cortexfs-runtime-client",
     "crates/cortexfs-tool-sdk",
@@ -9,7 +22,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.16"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT"

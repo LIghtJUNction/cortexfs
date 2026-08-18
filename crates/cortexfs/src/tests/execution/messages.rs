@@ -297,11 +297,13 @@ fn executable_agent_rejects_non_authoritative_tool_frames() {
             &mut socket,
             direct_agent_runtime(&root, &view, &session_root, &agent_executable),
             AgentExecutableRunRequest {
+                request_id: "request-1",
                 run_id: "r1",
                 cancellation_id: "r1",
                 session: "default",
                 cwd: None,
                 input: "",
+                event: None,
                 history_messages: "",
                 tool_context: "",
                 debug: None,

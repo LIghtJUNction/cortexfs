@@ -2,7 +2,7 @@ use super::files::provider_env_label;
 use super::selection::{canonical_provider_name_from_host, provider_host_requires_name};
 use crate::*;
 
-pub(crate) const PROVIDER_SYSTEM_SECRET_ROOT: &str = "/var/lib/cortexfs/secrets/provider";
+pub(crate) const PROVIDER_SYSTEM_SECRET_ROOT: &str = cortexfs_paths::SYSTEM_PROVIDER_SECRET_DIR;
 
 pub(crate) const MAX_PROVIDER_SYSTEM_SECRET_BYTES: u64 = 64 * 1024;
 

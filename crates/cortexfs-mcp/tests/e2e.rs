@@ -72,6 +72,7 @@ fn agent_fixture(
     }
     for (name, value) in [
         ("abi", "sdk-envelope-v1\n"),
+        ("perm", "rwx\n"),
         ("label", "user_u:agent_r:coder_t:s0\n"),
         ("iso", "shared\n"),
         ("parent", "\n"),
@@ -214,6 +215,7 @@ fn call_tool(root: &Path, name: &str) -> Result<(std::process::Output, PathBuf),
             view.policy_subject(),
             view.policy(),
             &tool_policy,
+            view.permissions(),
         ),
     )
     .map_err(|denial| format!("{}: {denial:?}", denial.errno()))?;

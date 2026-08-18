@@ -1,0 +1,14 @@
+[package]
+name = "cortexfs-paths"
+description = "Stable CortexFS filesystem, runtime, and host path ABI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["cortexfs", "filesystem", "abi", "paths"]
+categories = ["filesystem"]
+
+[lints]
+workspace = true

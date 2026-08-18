@@ -1,6 +1,6 @@
 [Unit]
 Description=CortexFS agent runtime for %i
-Documentation=file:/usr/share/doc/cortexfs-git/README.md
+Documentation=file:/usr/share/doc/cortexfs/README.md
 BindsTo=cortexfs.service
 PartOf=cortexfs.service
 After=cortexfs.service

@@ -16,6 +16,29 @@ fn package_command_keeps_install_surface_small() {
 }
 
 #[test]
+fn package_rejects_agent_identity() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(
+        root.path().join("cortexfs.toml"),
+        r#"[[agents]]
+name = "agent"
+run = "bin/agent"
+
+[agents.identity]
+uid = 0
+gid = 0
+groups = [0]
+"#,
+    )?;
+
+    let Err(error) = manifest::load_package(root.path()) else {
+        return Err("package-controlled identity was accepted".into());
+    };
+    assert!(error.message.contains("unknown field `identity`"));
+    Ok(())
+}
+
+#[test]
 fn package_installs_tool_agent_and_parent_edge() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let package = root.path().join("kit");

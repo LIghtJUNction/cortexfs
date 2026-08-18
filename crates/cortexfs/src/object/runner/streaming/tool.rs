@@ -6,6 +6,7 @@ use std::io::{self, Write};
 
 #[derive(Default)]
 pub(crate) struct OpenAiToolCallStream {
+    index: Option<usize>,
     id: Option<String>,
     name: Option<String>,
     arguments: String,
@@ -13,6 +14,7 @@ pub(crate) struct OpenAiToolCallStream {
 
 #[derive(Debug)]
 pub(crate) struct OpenAiToolCallDelta {
+    pub(crate) index: Option<usize>,
     pub(crate) id: Option<String>,
     pub(crate) name: Option<String>,
     pub(crate) arguments: String,
@@ -20,6 +22,18 @@ pub(crate) struct OpenAiToolCallDelta {
 
 impl OpenAiToolCallStream {
     pub(crate) fn push(&mut self, delta: OpenAiToolCallDelta) {
+        // The agent runtime ABI executes one tool call per iteration.  Some
+        // OpenAI-compatible gateways still emit extra indices despite the
+        // request's parallel_tool_calls=false; keep the first call isolated.
+        if let Some(index) = delta.index {
+            if let Some(active) = self.index {
+                if active != index {
+                    return;
+                }
+            } else {
+                self.index = Some(index);
+            }
+        }
         if let Some(id) = delta.id {
             self.id = Some(id);
         }
@@ -77,6 +91,10 @@ pub(crate) fn emit_openai_stream_tool_call(
 
 pub(crate) fn openai_stream_tool_call_delta(value: &Value) -> OpenAiToolCallDelta {
     OpenAiToolCallDelta {
+        index: value
+            .get("index")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok()),
         id: value.get("id").and_then(Value::as_str).map(str::to_owned),
         name: value
             .pointer("/function/name")

@@ -409,6 +409,11 @@ records the ordinary `agent/<name>.d/parent` control value, such as
 `agent:coder session:default run:r1`, so a created worker child has a
 wait/stop-visible parent without adding a separate process table.
 
+Creation derives `agent/<name>.d/perm` from the requested core tools; installed
+legacy manifests without this control default to `rwx` for compatibility. Use
+ordinary Unix inspection and mutation on the marker, for example
+`ls -l /ctx/agent/coder.d/perm` and `chmod 500 /ctx/agent/coder.d/perm`.
+
 `--from` accepts a host-side `agent.yaml` file, a directory containing one,
 or a short profile name. New/apply validates profile fields before materializing
 them into ordinary `.d/*` controls. Apply preserves unspecified controls and
@@ -770,4 +775,5 @@ fallback to another model
 hide runtime errors behind product language
 ```
 
-Those jobs belong to Rig, the agent runtime, tools, or the CortexFS ABI itself.
+Those jobs belong to CortexFS protocol adapters, the agent runtime, tools, or
+the CortexFS ABI itself.

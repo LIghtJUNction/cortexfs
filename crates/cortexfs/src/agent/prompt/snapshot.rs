@@ -43,25 +43,16 @@ pub fn snapshot_dirs(ctx_root: &Path, agent: &str) -> Vec<PathBuf> {
     if let Some(ctx_home) = env::var_os("CTX_HOME").map(PathBuf::from) {
         push_unique(
             &mut dirs,
-            ctx_home
-                .join("agent")
-                .join(agent)
-                .join("session")
-                .join(&session),
+            cortexfs_paths::agent_sessions_from_home_path(&ctx_home, agent).join(&session),
         );
     }
     if let Ok(view) = derive_agent_runtime_view(ctx_root, agent) {
         push_unique(&mut dirs, view.home().join("session").join(&session));
     }
+    let uid = nix::unistd::Uid::effective().as_raw().to_string();
     push_unique(
         &mut dirs,
-        ctx_root
-            .join("home")
-            .join(nix::unistd::Uid::effective().as_raw().to_string())
-            .join("agent")
-            .join(agent)
-            .join("session")
-            .join(session),
+        cortexfs_paths::agent_sessions_path(ctx_root, &uid, agent).join(session),
     );
     dirs
 }

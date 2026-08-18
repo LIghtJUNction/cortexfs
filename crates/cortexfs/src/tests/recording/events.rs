@@ -101,6 +101,8 @@ fn batch_uses_last_done_and_nonrecoverable_error() {
     assert_eq!(batch.settle(&session, "run-1"), Ok(true));
 
     assert_file_text(&session.join("state"), "error\n");
+    let state = ok!(fs::read_to_string(session.join("state.json")));
+    assert!(state.contains(r#""error":"EIO""#));
     let events = ok!(fs::read_to_string(session.join("events.jsonl")));
     assert!(events.contains("selected") && !events.contains("old"));
     assert!(
