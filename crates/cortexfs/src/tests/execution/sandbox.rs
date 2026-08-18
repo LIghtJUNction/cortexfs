@@ -52,8 +52,10 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
         args,
         "--setenv",
         "CTX_PROVIDER_CONFIG_DIR",
-        &root.join("shared/providers.d").display().to_string()
+        "/ctx/shared/providers.d"
     ));
+    assert!(contains_arg_triplet(args, "--setenv", "CTX_ROOT", "/ctx"));
+    assert!(contains_arg_triplet(args, "--setenv", "CTX_SOURCE", "/ctx"));
     assert_provider_egress_absent(args);
     assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
     for secret in [
@@ -73,7 +75,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
         root.to_str().unwrap_or_default(),
         "/ctx"
     ));
-    assert!(contains_arg_triplet(
+    assert!(!contains_arg_triplet(
         args,
         "--ro-bind",
         root.to_str().unwrap_or_default(),
@@ -207,7 +209,11 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
             control_dir: None,
         },
     };
-    let environment = [("CTX_AGENT".to_owned(), "coder".to_owned())];
+    let environment = [
+        ("CTX_AGENT".to_owned(), "coder".to_owned()),
+        ("CTX_ROOT".to_owned(), root.display().to_string()),
+        ("CTX_SOURCE".to_owned(), root.display().to_string()),
+    ];
     let control_environment = [(
         "CTX_CONTROL_SOCKET".to_owned(),
         "/run/cortexfs/control.sock".to_owned(),
