@@ -1264,24 +1264,22 @@ fn fuse_projection_cleans_only_new_socket_entries_after_chown_failure() {
 }
 
 #[test]
-fn socket_placeholder_creation_stays_with_held_parent() {
+fn socket_placeholder_creation_stays_with_held_parent() -> Result<(), Box<dyn std::error::Error>> {
     let root = clean_test_dir("fuse-socket-held-parent");
     let original = root.join("original");
     let moved = root.join("moved");
-    assert!(fs::create_dir_all(&root).is_ok());
-    assert!(fs::create_dir(&original).is_ok());
-    let parent = crate::support::plain::open_plain_directory(&original).unwrap();
-    assert!(fs::rename(&original, &moved).is_ok());
-    assert!(fs::create_dir(&original).is_ok());
+    fs::create_dir_all(&original)?;
+    let parent = crate::support::plain::open_plain_directory(&original)?;
+    fs::rename(&original, &moved)?;
+    fs::create_dir_all(&original)?;
 
-    assert!(
-        crate::support::plain::ensure_socket_placeholder_at(&parent, "agent.sock", 0o600,).is_ok()
-    );
+    crate::support::plain::ensure_socket_placeholder_at(&parent, "agent.sock", 0o600)?;
     assert!(matches!(
         fs::symlink_metadata(moved.join("agent.sock")),
         Ok(metadata) if metadata.file_type().is_socket()
     ));
     assert!(fs::symlink_metadata(original.join("agent.sock")).is_err());
+    Ok(())
 }
 
 #[test]

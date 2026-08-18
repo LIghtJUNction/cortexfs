@@ -6,24 +6,9 @@ use crate::{
 use std::collections::BTreeMap;
 
 pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, String>, CliError> {
-    let (uid, gid, groups) = if let Some(identity) = agent.identity.as_ref() {
-        (
-            identity.uid.to_string(),
-            identity.gid.to_string(),
-            identity
-                .groups
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    } else {
-        (
-            nix::unistd::Uid::effective().as_raw().to_string(),
-            nix::unistd::Gid::effective().as_raw().to_string(),
-            current_supplementary_groups_control()?,
-        )
-    };
+    let uid = nix::unistd::Uid::effective().as_raw().to_string();
+    let gid = nix::unistd::Gid::effective().as_raw().to_string();
+    let groups = current_supplementary_groups_control()?;
     let model = agent.model.as_deref().unwrap_or("main");
     let subject = format!("{}_t", agent.name);
     let permissions = cortexfs::AgentPermissions::for_tools(agent.tools.iter().map(String::as_str));

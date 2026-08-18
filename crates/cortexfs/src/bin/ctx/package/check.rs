@@ -82,15 +82,6 @@ fn validate_agent(
             )));
         }
     }
-    if let Some(identity) = agent.identity.as_ref() {
-        let mut groups = std::collections::BTreeSet::new();
-        if identity.groups.iter().any(|group| !groups.insert(group)) {
-            return Err(CliError::usage(format!(
-                "duplicate agent identity group: {}",
-                agent.name
-            )));
-        }
-    }
     Ok(())
 }
 
