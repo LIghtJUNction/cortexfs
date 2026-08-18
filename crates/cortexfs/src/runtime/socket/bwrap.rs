@@ -189,7 +189,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }
-    if let Some(host_dir) = request.provider_egress {
+    if let (true, Some(host_dir)) = (request.runtime.network_allowed, request.provider_egress) {
         bwrap.extend([
             "--dir".to_owned(),
             runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),

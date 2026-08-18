@@ -516,7 +516,7 @@ fn replayed_run_response(
     }
 }
 
-fn run_agent_request(
+pub(crate) fn run_agent_request(
     stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
@@ -1089,13 +1089,13 @@ fn create_run_provider_egress(
     request: AgentExecutableRunRequest<'_>,
 ) -> Result<Option<runtime::egress::ProviderEgress>, SocketRuntimeError> {
     let provider_model = match runtime.execution {
-        AgentExecutableSocketExecution::Direct => false,
-        AgentExecutableSocketExecution::Bwrap { .. } => runtime
+        AgentExecutableSocketExecution::Bwrap { .. } if runtime.network_allowed => runtime
             .model
             .map(|model| runtime::egress::is_provider_model(runtime.ctx_root, model))
             .transpose()
             .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
             .unwrap_or(false),
+        _ => false,
     };
     if !provider_model {
         return Ok(None);
@@ -1935,7 +1935,7 @@ mod completion_tests {
     }
 
     #[test]
-    fn bwrap_agent_streams_through_provider_egress_to_http_upstream()
+    fn network_allowed_bwrap_agent_streams_through_provider_egress()
     -> Result<(), Box<dyn std::error::Error>> {
         let runner = test_object_runner().ok_or("missing built cortexfs-object-runner")?;
         if !Command::new("/usr/bin/bwrap")
@@ -1984,7 +1984,7 @@ mod completion_tests {
             session_root: &session_root,
             default_cwd: "/workspace",
             model: Some("fixture/chat"),
-            network_allowed: false,
+            network_allowed: true,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Bwrap {
