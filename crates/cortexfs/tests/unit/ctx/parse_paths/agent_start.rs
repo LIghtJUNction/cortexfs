@@ -1,4 +1,4 @@
-use crate::{agent_socket_path, agent_start_workspace_source, ensure_agent_start_session};
+use crate::{agent_socket_path, agent_start_host, agent_start_workspace_source, ensure_agent_start_session};
 
 fn current_uid_for_test() -> String {
     std::process::Command::new("id")
@@ -222,6 +222,29 @@ fn agent_start_builds_sandboxed_terminal_command() {
     assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
     assert!(contains_arg_pair(&bwrap, "--listen", socket.to_str().unwrap_or_default()));
     assert_eq!(bwrap.last().map(String::as_str), Some("/ctx/bin/tsh"));
+}
+
+#[test]
+fn agent_start_rejects_mount_outside_runtime_view() {
+    let root = clean_test_dir("ctx-agent-start-mount-authority");
+    assert!(ensure_reference_tree(&root).is_ok());
+    ensure_runtime_model_fixture(&root);
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: vec![AgentMount {
+            source: "/host-secret".to_owned(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }],
+    };
+    let result = agent_start_host(&root, &args);
+    assert!(
+        matches!(&result, Err(error) if error.message.contains("exceeds agent mount policy")),
+        "{result:?}"
+    );
 }
 
 #[test]
