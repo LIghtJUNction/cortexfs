@@ -37,12 +37,6 @@ impl AgentToolControl {
             .map_err(|_error| ExecError::new("cannot create run control launch gate"))
     }
 }
-pub(crate) fn execute_agent_tool_call_with(
-    config: &AgentToolExecutionConfig<'_>,
-    tool_call: &AgentToolCall,
-) -> Result<String, ExecError> {
-    prepare_agent_tool_call(config, tool_call)?.execute(config)
-}
 pub(crate) struct PreparedAgentToolCall {
     command: Command,
     home_dir: fs::File,
