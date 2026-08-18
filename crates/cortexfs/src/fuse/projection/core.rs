@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::authority::helpers::{AtomicCommit, atomic_write_owned};
 use crate::support::plain::{
     open_plain_directory, open_plain_file, path_metadata_no_follow, plain_file_name,
     read_symlink_target,
@@ -481,12 +482,7 @@ impl FuseProjection {
             }
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
-        self.write_control_file_at_with_snapshot(&normalized, 0, content, snapshot.as_ref())?;
-        Self::chown_fuse_plain_path(
-            &self.resolve_with_snapshot(&normalized, snapshot.as_ref())?,
-            uid,
-            gid,
-        )
+        self.write_control_file_at_with_snapshot(&normalized, 0, content, snapshot.as_ref())
     }
 
     pub(crate) fn append_plain_file_at_end(
@@ -577,13 +573,8 @@ impl FuseProjection {
         let content = std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
         let path = self.resolve(normalized)?;
         if Self::is_session_append_path(normalized) {
-            return atomic_create_text_with_mode(&path, content, 0o600).map_err(|error| {
-                if error.kind() == std::io::ErrorKind::AlreadyExists {
-                    FuseError::AlreadyExists
-                } else {
-                    FuseError::Io
-                }
-            });
+            return atomic_create_text_with_mode(&path, content, 0o600)
+                .map_err(|error| fuse_metadata_error(&error));
         }
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
@@ -601,19 +592,18 @@ impl FuseProjection {
         uid: u32,
         gid: u32,
     ) -> Result<(), FuseError> {
-        self.replace_session_plain_file(normalized, content)?;
-        Self::chown_fuse_plain_path(&self.resolve(normalized)?, uid, gid)
-    }
-
-    pub(crate) fn chown_fuse_plain_path(path: &Path, uid: u32, gid: u32) -> Result<(), FuseError> {
-        nix::unistd::fchownat(
-            nix::fcntl::AT_FDCWD,
-            path,
-            Some(nix::unistd::Uid::from_raw(uid)),
-            Some(nix::unistd::Gid::from_raw(gid)),
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        )
-        .map_err(|_error| FuseError::Io)
+        let content = std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
+        let path = self.resolve(normalized)?;
+        let owner = (uid, gid);
+        if Self::is_session_append_path(normalized) {
+            return atomic_write_owned(&path, content, 0o600, owner, AtomicCommit::NoReplace)
+                .map_err(|error| fuse_metadata_error(&error));
+        }
+        if fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink()) {
+            return Err(FuseError::Io);
+        }
+        atomic_write_owned(&path, content, 0o600, owner, AtomicCommit::Replace)
+            .map_err(|_error| FuseError::Io)
     }
 
     /// Creates one whitelisted session or agent-lifecycle directory.
@@ -653,8 +643,9 @@ impl FuseProjection {
             return Err(FuseError::NotControlFile);
         }
         self.authorize_layout_path(&normalized, uid)?;
-        self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)?;
-        Self::set_plain_mode(&self.resolve(&normalized)?, mode)
+        let path = self.resolve(&normalized)?;
+        atomic_write_owned(&path, "", mode, (uid, gid), AtomicCommit::NoReplace)
+            .map_err(|error| fuse_metadata_error(&error))
     }
 
     /// Renames one whitelisted same-directory atomic temp file.
@@ -806,13 +797,8 @@ impl FuseProjection {
         gid: u32,
         mode: u32,
     ) -> Result<(), FuseError> {
-        let created = support::plain::create_plain_dir_exclusive(path, mode).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                FuseError::AlreadyExists
-            } else {
-                FuseError::Io
-            }
-        })?;
+        let created = support::plain::create_plain_dir_exclusive(path, mode)
+            .map_err(|error| fuse_metadata_error(&error))?;
         let result = nix::unistd::fchown(
             &created,
             Some(nix::unistd::Uid::from_raw(uid)),

@@ -9,7 +9,7 @@ use std::cell::Cell;
 
 use crate::{
     ControlLineIssue, atomic_replace_text_preserving_metadata,
-    authority::helpers::atomic_create_text_with_mode_and_owner,
+    authority::helpers::{AtomicCommit, atomic_write_owned},
     is_object_name,
     support::control::{inspect_control_line, inspect_control_lines},
     support::plain::{open_plain_directory, read_small_text_file},
@@ -296,7 +296,7 @@ fn replace_secondary_index(
     if is_plain_file_path(path) {
         atomic_replace_text_preserving_metadata(path, &content)
     } else {
-        atomic_create_text_with_mode_and_owner(path, &content, 0o600, index_owner)
+        atomic_write_owned(path, &content, 0o600, index_owner, AtomicCommit::NoReplace)
     }
 }
 
