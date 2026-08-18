@@ -1,0 +1,24 @@
+[Unit]
+Description=CortexFS WeCom AI Bot WebSocket channel driver
+Documentation=file:/usr/share/doc/cortexfs/docs/channels.md
+After=network-online.target cortexfs-channel-driver@wecom-ws.service
+Wants=network-online.target
+Requires=cortexfs-channel-driver@wecom-ws.service
+PartOf=cortexfs.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/cortexfs/channels/wecom-ws.env
+ExecStart=/usr/bin/cortexfs-channel-wecom-ws
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=128M
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cortexfs/channels
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

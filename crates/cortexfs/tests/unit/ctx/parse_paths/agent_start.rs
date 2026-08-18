@@ -14,11 +14,11 @@ fn current_uid_for_test() -> String {
 #[test]
 fn system_agent_socket_uses_root_runtime_authority() {
     assert_eq!(
-        system_agent_socket_unit("worker-1"),
+        cortexfs_paths::system_agent_socket_unit("worker-1"),
         "cortexfs-agent@worker-1.socket"
     );
     assert_eq!(
-        system_agent_runtime_socket("worker-1"),
+        cortexfs_paths::system_agent_runtime_socket("worker-1"),
         PathBuf::from("/run/cortexfs/agent/worker-1.sock")
     );
     let command = system_agent_socket_command("start", "worker-1");
@@ -1280,10 +1280,10 @@ fn exact_socket_alias_cleanup_restores_mismatched_alias_after_claim() {
     }));
 }
 #[test]
-fn system_agent_visible_socket_matches_host_backing_path() {
+fn system_agent_backing_socket_matches_host_backing_path() {
     let root = Path::new("/var/lib/cortexfs/storage/current");
     assert_eq!(
-        cortexfs::agent::launch::system_agent_visible_socket(root, "child"),
+        cortexfs_paths::agent_backing_socket(root, "child"),
         root.join("agent/child.sock")
     );
 }

@@ -5,6 +5,7 @@ fn agent_controls_accept_fixed_values() {
     assert!(inspect_agent_control(AgentControlKind::Gid, "100\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Groups, "10\n20\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Groups, "").is_ok());
+    assert!(inspect_agent_control(AgentControlKind::Perm, "rw-\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Iso, "shared\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Iso, "uid\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Life, "owned\n").is_ok());
@@ -52,6 +53,7 @@ fn agent_window_rejects_noncanonical_or_out_of_range_values() {
 
 #[test]
 fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
+    assert!(!inspect_agent_control(AgentControlKind::Perm, "rwx").is_ok());
     assert_eq!(
         inspect_agent_control(AgentControlKind::Uid, "not-a-uid\n").issues(),
         &[ControlLineIssue::InvalidNumber {

@@ -1,5 +1,56 @@
 use crate::*;
 
+/// Coarse agent file and shell permissions projected as Unix owner mode bits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AgentPermissions(pub(crate) u8);
+impl AgentPermissions {
+    pub const ALL: Self = Self(0o7);
+    const CONTROL: [&'static str; 8] = [
+        "---\n", "--x\n", "-w-\n", "-wx\n", "r--\n", "r-x\n", "rw-\n", "rwx\n",
+    ];
+    /// Parses the canonical `rwx` control line.
+    #[must_use]
+    pub fn parse_control(content: &str) -> Option<Self> {
+        let bits = Self::CONTROL.iter().position(|value| *value == content)?;
+        u8::try_from(bits).ok().map(Self)
+    }
+    /// Returns the canonical control value including its final newline.
+    #[must_use]
+    pub fn control(self) -> &'static str {
+        Self::CONTROL
+            .get(usize::from(self.0))
+            .copied()
+            .unwrap_or("---\n")
+    }
+    /// Returns the owner mode bits rendered by `ls -l` for the permission marker.
+    #[must_use]
+    pub fn mode(self) -> u32 {
+        u32::from(self.0) << 6
+    }
+    fn tool_bit(name: &str) -> u8 {
+        match name {
+            "fs.read" | "fs.list" | "fs.stat" => 4,
+            "fs.write" | "fs.replace" => 2,
+            "shell.exec" | "bash" | "tmux" | "zellij" => 1,
+            _ => 0,
+        }
+    }
+    /// Derives the least coarse ceiling needed by a declared tool set.
+    #[must_use]
+    pub fn for_tools<'a>(tools: impl IntoIterator<Item = &'a str>) -> Self {
+        Self(
+            tools
+                .into_iter()
+                .map(Self::tool_bit)
+                .fold(0, std::ops::BitOr::bitor),
+        )
+    }
+    pub(crate) fn allows_tool(self, name: &str) -> bool {
+        let required = Self::tool_bit(name);
+        required == 0 || self.0 & required != 0
+    }
+}
+
 /// Effective-authority refusal reason for tool execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolExecutionDenial {
@@ -21,6 +72,8 @@ pub enum ToolExecutionDenial {
     AgentPolicy,
     /// Tool policy does not allow `tool:<name> execute`.
     ToolPolicy,
+    /// Agent `perm` mode does not allow this file or shell capability.
+    AgentPermission,
     /// Model principals may emit tool-call syntax but must not execute tools.
     ModelCannotExecute,
 }
@@ -38,6 +91,7 @@ impl ToolExecutionDenial {
             | Self::NoExecMount
             | Self::AgentPolicy
             | Self::ToolPolicy
+            | Self::AgentPermission
             | Self::ModelCannotExecute => "EACCES",
         }
     }
@@ -64,7 +118,6 @@ impl ToolExecutionGrant {
     pub const fn new(hit: ToolHit) -> Self {
         Self { hit }
     }
-
     /// Returns the executable tool selected by left-to-right `CTX_PATH`.
     #[must_use]
     pub const fn hit(&self) -> &ToolHit {
@@ -79,8 +132,9 @@ pub struct ToolExecutionAuthority<'a> {
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) mount_table: &'a MountTable,
     pub(crate) agent_subject: &'a str,
-    pub(crate) agent_policy: &'a PolicyV0,
-    pub(crate) tool_policy: &'a PolicyV0,
+    pub(crate) agent_policy: &'a dyn PolicyEvaluator,
+    pub(crate) tool_policy: &'a dyn PolicyEvaluator,
+    pub(crate) permissions: AgentPermissions,
 }
 
 impl<'a> ToolExecutionAuthority<'a> {
@@ -90,8 +144,9 @@ impl<'a> ToolExecutionAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         agent_subject: &'a str,
-        agent_policy: &'a PolicyV0,
-        tool_policy: &'a PolicyV0,
+        agent_policy: &'a dyn PolicyEvaluator,
+        tool_policy: &'a dyn PolicyEvaluator,
+        permissions: AgentPermissions,
     ) -> Self {
         Self {
             principal: ToolExecutionPrincipal::Agent,
@@ -100,6 +155,7 @@ impl<'a> ToolExecutionAuthority<'a> {
             agent_subject,
             agent_policy,
             tool_policy,
+            permissions,
         }
     }
 
@@ -110,8 +166,8 @@ impl<'a> ToolExecutionAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         model_subject: &'a str,
-        agent_policy: &'a PolicyV0,
-        tool_policy: &'a PolicyV0,
+        agent_policy: &'a dyn PolicyEvaluator,
+        tool_policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             principal: ToolExecutionPrincipal::Model,
@@ -120,6 +176,7 @@ impl<'a> ToolExecutionAuthority<'a> {
             agent_subject: model_subject,
             agent_policy,
             tool_policy,
+            permissions: AgentPermissions::ALL,
         }
     }
 }
@@ -242,7 +299,7 @@ pub struct SharedAccessAuthority<'a> {
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) mount_table: &'a MountTable,
     pub(crate) agent_subject: &'a str,
-    pub(crate) policy: &'a PolicyV0,
+    pub(crate) policy: &'a dyn PolicyEvaluator,
 }
 
 impl<'a> SharedAccessAuthority<'a> {
@@ -252,7 +309,7 @@ impl<'a> SharedAccessAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         agent_subject: &'a str,
-        policy: &'a PolicyV0,
+        policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             identity,
@@ -269,7 +326,7 @@ pub struct SessionAccessAuthority<'a> {
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) mount_table: &'a MountTable,
     pub(crate) agent_subject: &'a str,
-    pub(crate) policy: &'a PolicyV0,
+    pub(crate) policy: &'a dyn PolicyEvaluator,
 }
 
 impl<'a> SessionAccessAuthority<'a> {
@@ -279,7 +336,7 @@ impl<'a> SessionAccessAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         agent_subject: &'a str,
-        policy: &'a PolicyV0,
+        policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             identity,

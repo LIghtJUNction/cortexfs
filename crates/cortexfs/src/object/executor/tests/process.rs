@@ -104,6 +104,35 @@ fn agent_model_process_rejects_symlink_executable_without_running_target()
 }
 
 #[test]
+fn rejected_agent_hook_is_streamed_as_safe_recoverable_error()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-agent-hook-error")?;
+    let model = root.join("model-script");
+    let hooks = root.join("agent/coder.d/hooks/pre.d");
+    fs::create_dir_all(&hooks)?;
+    write_executable_script(&hooks.join("reject"), "#!/bin/sh\nexit 7\n")?;
+    write_executable_script(
+        &model,
+        "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\n",
+    )?;
+    let mut config = test_agent_run_config();
+    config.source = root.clone();
+    config.model_path = model;
+    config.suppress_model_error_events = true;
+    let mut output = Vec::new();
+
+    let outcome = run_agent_model_once(&config, "hello", &mut output)?;
+
+    assert!(!outcome.success);
+    assert!(outcome.frames.iter().any(|frame| {
+        frame.contains(r#""code":"EACCES""#) && frame.contains(r#""recoverable":true"#)
+    }));
+    assert!(String::from_utf8(output)?.contains(r#""recoverable":true"#));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn agent_model_process_timeout_kills_process_group() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-agent-model-timeout")?;
     let model = root.join("model-script");
@@ -150,62 +179,58 @@ fn agent_model_process_timeout_kills_process_group() -> Result<(), Box<dyn std::
 
 #[test]
 fn agent_model_output_rejects_oversized_frame() -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_dir("runner-agent-model-oversized-frame")?;
-    let model = root.join("model-script");
-    write_executable_script(
-        &model,
-        format!(
+    assert_model_overflow(
+        "agent_model_output_rejects_oversized_frame",
+        &format!(
             "#!/bin/sh\nhead -c {MAX_AGENT_MODEL_FRAME_BYTES} /dev/zero | tr '\\0' x\nprintf '\\n'\n"
         ),
-    )?;
-    let config = AgentModelRunConfig {
-        model_path: model,
-        ..test_agent_run_config()
-    };
-    let mut output = Vec::new();
-
-    let outcome = run_agent_model_once(&config, "hello", &mut output)?;
-
-    assert!(!outcome.success);
-    assert!(
-        outcome
-            .frames
-            .iter()
-            .any(|frame| frame.contains(r#""code":"EOVERFLOW""#))
-    );
-    let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""code":"EOVERFLOW""#));
-    let _ignored = fs::remove_dir_all(root);
-    Ok(())
+    )
 }
 
 #[test]
 fn agent_model_output_rejects_too_many_frames() -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_dir("runner-agent-model-too-many-frames")?;
-    let model = root.join("model-script");
-    write_executable_script(
-        &model,
-        format!(
+    assert_model_overflow(
+        "agent_model_output_rejects_too_many_frames",
+        &format!(
             "#!/bin/sh\ni=0\nwhile [ \"$i\" -le {MAX_AGENT_MODEL_FRAMES} ]; do printf '{{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"x\"}}\\n' \"$CTX_RUN_ID\"; i=$((i + 1)); done\n"
         ),
-    )?;
+    )
+}
+
+#[test]
+fn agent_model_output_rejects_aggregate_overflow() -> Result<(), Box<dyn std::error::Error>> {
+    assert_model_overflow(
+        "agent_model_output_rejects_aggregate_overflow",
+        "#!/bin/sh\npayload=$(head -c 131072 /dev/zero | tr '\\0' x)\ni=0\nwhile [ \"$i\" -le 64 ]; do printf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"%s\"}\\n' \"$CTX_RUN_ID\" \"$payload\"; i=$((i + 1)); done\n",
+    )
+}
+
+fn assert_model_overflow(case: &str, script: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir(case)?;
+    let model = root.join("model-script");
+    write_executable_script(&model, script)?;
     let config = AgentModelRunConfig {
         model_path: model,
         ..test_agent_run_config()
     };
     let mut output = Vec::new();
-
     let outcome = run_agent_model_once(&config, "hello", &mut output)?;
-
-    assert!(!outcome.success);
+    assert!(
+        !outcome.success,
+        "{case}: overflow run unexpectedly succeeded"
+    );
     assert!(
         outcome
             .frames
             .iter()
-            .any(|frame| frame.contains(r#""code":"EOVERFLOW""#))
+            .any(|frame| frame.contains(r#""code":"EOVERFLOW""#)),
+        "{case}: frames missing EOVERFLOW"
     );
     let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""code":"EOVERFLOW""#));
+    assert!(
+        output.contains(r#""code":"EOVERFLOW""#),
+        "{case}: output missing EOVERFLOW"
+    );
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
@@ -214,9 +239,8 @@ fn agent_model_output_rejects_too_many_frames() -> Result<(), Box<dyn std::error
 fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), ExecError> {
     let mut config = test_agent_run_config();
     config.model_path = PathBuf::from("/definitely/not/a/model");
-    config.context_budget = AgentWindowBudget::from_effective(
-        ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown),
-    );
+    config.context_budget =
+        budget_from_effective(ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown));
     config.suppress_model_error_events = true;
     let mut output = Vec::new();
 
@@ -253,7 +277,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         model_path: model,
         ..test_agent_run_config()
     };
-    config.context_budget = AgentWindowBudget::from_effective(
+    config.context_budget = budget_from_effective(
         ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
     );
     let mut output = Vec::new();

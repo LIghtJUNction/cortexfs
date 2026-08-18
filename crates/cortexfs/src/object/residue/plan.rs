@@ -45,7 +45,7 @@ pub(super) fn validate_cleanup_path(path: &Path) -> Result<(PathBuf, String), Re
             "residue cleanup accepts only .cortexfs-install-* stages",
         ));
     }
-    let valid_parent = matches!(parts.as_slice(), ["tool" | "agent", _])
+    let valid_parent = matches!(parts.as_slice(), ["tool" | "agent" | "model", _])
         || matches!(
             parts.as_slice(),
             ["home", uid, "tool" | "agent", _]

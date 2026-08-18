@@ -18,11 +18,19 @@ pub(crate) fn run_curl_json_with_headers(
     headers: &[String],
     body: &str,
 ) -> Result<Vec<u8>, String> {
-    let output = wait_for_curl_json_output(start_curl_json_with_headers(target, headers, body)?)?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(provider_request_failure_message(&output))
+    let retries = provider_retry_attempts();
+    let mut attempt = 0;
+    loop {
+        let output =
+            wait_for_curl_json_output(start_curl_json_with_headers(target, headers, body)?)?;
+        if output.status.success() {
+            return Ok(output.stdout);
+        }
+        if attempt >= retries || !provider_transport_retryable(output.status) {
+            return Err(provider_request_failure_message(&output));
+        }
+        wait_for_provider_retry(attempt);
+        attempt += 1;
     }
 }
 pub(crate) fn provider_request_failure_message(output: &std::process::Output) -> String {

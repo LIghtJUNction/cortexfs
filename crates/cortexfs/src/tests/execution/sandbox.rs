@@ -1,17 +1,8 @@
-fn assert_provider_egress_args(args: &[String], host_dir: &str) {
-    assert!(args.contains(&"--unshare-net".to_owned()));
-    assert!(contains_arg_triplet(
-        args,
-        "--ro-bind",
-        host_dir,
-        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
-    ));
-    assert!(contains_arg_triplet(
-        args,
-        "--setenv",
-        crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
-        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
-    ));
+fn assert_provider_egress_absent(args: &[String]) {
+    assert!(!args.iter().any(|arg| {
+        arg == crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+            || arg == crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV
+    }));
 }
 
 fn assert_control_environment(args: &[String]) {
@@ -63,7 +54,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
         "CTX_PROVIDER_CONFIG_DIR",
         &root.join("shared/providers.d").display().to_string()
     ));
-    assert_provider_egress_args(args, "/run/cortexfs/egress-run-1");
+    assert_provider_egress_absent(args);
     assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
     for secret in [
         "CTX_PROVIDER_SECRET_FD",
@@ -247,11 +238,13 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     assert_control_environment(&args);
     let opened = ok!(open_agent_executable_no_follow(&agent_executable));
     let request = AgentExecutableRunRequest {
+        request_id: "request-1",
         run_id: "run-1",
         cancellation_id: "cancel-1",
         session: "default",
         cwd: Some("/workspace"),
         input: "hi",
+        event: None,
         history_messages: "",
         tool_context: "",
         debug: None,
@@ -263,6 +256,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         0,
         None,
         Some(Path::new("/run/cortexfs/egress-run-1")),
+        None,
     ));
     drop(agent_executable_fd);
     let command_env: Vec<_> = command
@@ -287,119 +281,103 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
 }
 
 #[test]
-fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = reference_tree("agent-bwrap-opened-inode");
-    let session_root = agent_session_root(&root, "coder");
-    let view = derive_agent_runtime_view(&root, "coder")
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let agent_executable = root.join("agent").join("coder");
-    write_text_file(&agent_executable, "#!/bin/sh\nprintf A\n");
-    set_file_mode(&agent_executable, 0o755);
-    let opened = open_agent_executable_no_follow(&agent_executable)
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let runtime = AgentExecutableSocketRuntime {
-        ctx_root: &root,
-        source_root: &root,
-        identity: view.identity(),
-        env: view.env(),
-        session_root: &session_root,
-        default_cwd: "/",
-        model: Some("debug/echo"),
-        network_allowed: false,
-        agent_name: "coder",
-        agent_executable: &agent_executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
-            program: Path::new("/usr/bin/bwrap"),
-            mount_table: view.mount_table(),
-            control_dir: None,
-        },
-    };
-    let request = AgentExecutableRunRequest {
-        run_id: "run-1",
-        cancellation_id: "run-1",
-        session: "default",
-        cwd: Some("/"),
-        input: "hi",
-        history_messages: "",
-        tool_context: "",
-        debug: None,
-    };
-    let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let replacement = root.join("agent").join("replacement");
+fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement() {
+    let mut prepared = ok!(prepared_bwrap_command(
+        "agent-bwrap-opened-inode",
+        "#!/bin/sh\nprintf A\n",
+        &[],
+    ));
+    let replacement = prepared.root.join("agent/replacement");
     write_text_file(&replacement, "#!/bin/sh\nprintf B\n");
     set_file_mode(&replacement, 0o755);
-    fs::rename(replacement, &agent_executable)?;
+    assert!(fs::rename(replacement, &prepared.agent_executable).is_ok());
 
-    let output = command.output()?;
-    drop(agent_executable_fd);
+    let output = ok!(prepared.output());
     assert!(output.status.success(), "bwrap failed: {output:?}");
     assert_eq!(output.stdout, b"A");
-    Ok(())
 }
 
 #[test]
-fn agent_executable_socket_bwrap_does_not_inherit_provider_secret_env()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = reference_tree("agent-bwrap-provider-secret-env");
+fn agent_executable_socket_bwrap_does_not_inherit_provider_secret_env() {
+    let initial_env = [(
+        "CTX_PROVIDER_SECRET_VALUE".to_owned(),
+        "provider-secret".to_owned(),
+    )];
+    let mut prepared = ok!(prepared_bwrap_command(
+        "agent-bwrap-provider-secret-env",
+        "#!/bin/sh\nprintf %s \"${CTX_PROVIDER_SECRET_VALUE:-secret-not-inherited}\"\n",
+        &initial_env,
+    ));
+    let output = ok!(prepared.output());
+    assert!(output.status.success(), "bwrap failed: {output:?}");
+    assert_eq!(output.stdout, b"secret-not-inherited");
+}
+
+struct PreparedBwrapCommand {
+    root: TestDir,
+    agent_executable: PathBuf,
+    command: std::process::Command,
+    inherited_fds: Option<Vec<crate::runtime::socket::InheritedFd>>,
+}
+
+impl PreparedBwrapCommand {
+    fn output(&mut self) -> std::io::Result<std::process::Output> {
+        let inherited_fds = &self.inherited_fds;
+        let output = self.command.output();
+        let _ = inherited_fds;
+        output
+    }
+}
+
+fn prepared_bwrap_command(
+    case: &str,
+    script: &str,
+    initial_env: &[(String, String)],
+) -> Result<PreparedBwrapCommand, std::io::Error> {
+    let root = reference_tree(case);
     let session_root = agent_session_root(&root, "coder");
     let view = derive_agent_runtime_view(&root, "coder")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let agent_executable = root.join("agent").join("coder");
-    write_text_file(
-        &agent_executable,
-        "#!/bin/sh\nprintf %s \"${CTX_PROVIDER_SECRET_VALUE:-secret-not-inherited}\"\n",
-    );
+    let agent_executable = root.join("agent/coder");
+    write_text_file(&agent_executable, script);
     set_file_mode(&agent_executable, 0o755);
     let opened = open_agent_executable_no_follow(&agent_executable)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let mut env = view.env().to_vec();
-    env.push((
-        "CTX_PROVIDER_SECRET_VALUE".to_owned(),
-        "provider-secret".to_owned(),
-    ));
-    let runtime = AgentExecutableSocketRuntime {
-        ctx_root: &root,
-        source_root: &root,
-        identity: view.identity(),
-        env: &env,
-        session_root: &session_root,
-        default_cwd: "/",
-        model: Some("debug/echo"),
-        network_allowed: false,
-        agent_name: "coder",
-        agent_executable: &agent_executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
-            program: Path::new("/usr/bin/bwrap"),
-            mount_table: view.mount_table(),
-            control_dir: None,
-        },
+    env.extend_from_slice(initial_env);
+    let mut runtime = direct_agent_runtime(&root, &view, &session_root, &agent_executable);
+    runtime.default_cwd = "/";
+    runtime.env = &env;
+    runtime.execution = AgentExecutableSocketExecution::Bwrap {
+        program: Path::new("/usr/bin/bwrap"),
+        mount_table: view.mount_table(),
+        control_dir: None,
     };
     let request = AgentExecutableRunRequest {
+        request_id: "request-1",
         run_id: "run-1",
         cancellation_id: "run-1",
         session: "default",
         cwd: Some("/"),
         input: "hi",
+        event: None,
         history_messages: "",
         tool_context: "",
         debug: None,
     };
-
-    let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
+    let (command, inherited_fds) =
+        agent_executable_socket_command(runtime, &opened, request, 0, None, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let output = command.output()?;
-    drop(agent_executable_fd);
-    assert!(output.status.success(), "bwrap failed: {output:?}");
-    assert_eq!(output.stdout, b"secret-not-inherited");
-    Ok(())
+    Ok(PreparedBwrapCommand {
+        root,
+        agent_executable,
+        command,
+        inherited_fds,
+    })
 }
 
 #[test]
-fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
+fn network_denied_provider_does_not_create_egress() {
     let root = reference_tree("agent-bwrap-egress-spawn-failure");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -414,45 +392,45 @@ fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
     );
     let control_dir = root.join("runtime");
     assert!(fs::create_dir_all(&control_dir).is_ok());
-    let (client, mut socket) = ok!(UnixStream::pair());
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let envelope = agent_envelope("run-1");
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: view.env(),
+        session_root: &session_root,
+        default_cwd: "/workspace",
+        model: Some("fixture/chat"),
+        network_allowed: false,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/definitely/missing/bwrap"),
+            mount_table: view.mount_table(),
+            control_dir: Some(&control_dir),
+        },
+    };
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    let request = AgentExecutableRunRequest {
+        request_id: "request-1",
+        run_id: "run-1",
+        cancellation_id: "run-1",
+        session: "default",
+        cwd: None,
+        input: "hi",
+        event: None,
+        history_messages: "",
+        tool_context: "",
+        debug: None,
+    };
+    let result =
+        crate::runtime::socket::exec::run_agent_request(&mut socket, runtime, request, None);
+    socket.shutdown(Shutdown::Write).ok();
+    client.read_to_end(&mut Vec::new()).ok();
 
-    let result = crate::runtime::socket::exec::run_agent_executable_streaming(
-        &mut socket,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/workspace",
-            model: Some("fixture/chat"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Bwrap {
-                program: Path::new("/definitely/missing/bwrap"),
-                mount_table: view.mount_table(),
-                control_dir: Some(&control_dir),
-            },
-        },
-        AgentExecutableRunRequest {
-            run_id: "run-1",
-            cancellation_id: "run-1",
-            session: "default",
-            cwd: None,
-            input: "hi",
-            history_messages: "",
-            tool_context: "",
-            debug: None,
-        },
-        &envelope,
-        0,
-        None,
+    assert_eq!(
+        result.map(|outcome| outcome.process),
+        Ok(crate::AgentProcessOutcome::Error)
     );
-
-    assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
     assert!(!control_dir.join("egress-run-1").exists());
 }
 
@@ -490,17 +468,20 @@ fn debug_alias_does_not_create_provider_egress() {
             },
         },
         AgentExecutableRunRequest {
+            request_id: "request-1",
             run_id: "run-1",
             cancellation_id: "run-1",
             session: "default",
             cwd: None,
             input: "hi",
+            event: None,
             history_messages: "",
             tool_context: "",
             debug: None,
         },
         &envelope,
         0,
+        None,
         None,
     );
 
@@ -606,16 +587,23 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         control_socket: None,
         control_environment: None,
         control_gate: None,
-        provider_egress: None,
+        provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
     });
 
     assert!(!args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
-    assert!(
-        !args
-            .iter()
-            .any(|arg| arg == crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV)
-    );
+    assert!(contains_arg_triplet(
+        &args,
+        "--ro-bind",
+        "/run/cortexfs/egress-run-1",
+        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+    ));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
+        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+    ));
 }
 
 #[test]
@@ -756,11 +744,13 @@ fn run_registered_bwrap_capability_probe(
         },
     };
     let request = AgentExecutableRunRequest {
+        request_id: "request-1",
         run_id: "run-1",
         cancellation_id: "run-1",
         session: "default",
         cwd: None,
         input: "ignored",
+        event: None,
         history_messages: "[]",
         tool_context: "",
         debug: None,
@@ -771,6 +761,7 @@ fn run_registered_bwrap_capability_probe(
         request,
         0,
         Some((capability.socket(), environment.as_slice(), gate.block_fd())),
+        None,
         None,
     )
     .map_err(|error| std::io::Error::other(format!("{error:?}")))?;

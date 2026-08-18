@@ -14,6 +14,7 @@ fn config() -> OAuthProviderConfig {
         token_url: "https://auth.example/token".to_owned(),
         redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
         scopes: vec!["model.read".to_owned(), "offline_access".to_owned()],
+        device: None,
         access_token_account: None,
         refresh_token_account: None,
     }
@@ -54,6 +55,21 @@ fn oauth_token_exchange_is_hermetic_and_validates_bearer() {
     }));
     assert_eq!(token.access_token, "access");
     assert!(parse_oauth_token_response(br#"{"access_token":"x","token_type":"mac"}"#).is_err());
+}
+
+#[test]
+fn oauth_token_parser_rejects_control_character_credentials() {
+    assert_eq!(
+        parse_oauth_token_response(br#"{"access_token":"access\n"}"#),
+        Err(OAuthError::InvalidToken)
+    );
+}
+
+#[test]
+fn oauth_config_rejects_control_character_secret_accounts() {
+    let mut oauth = config();
+    oauth.access_token_account = Some("oauth\naccess".to_owned());
+    assert!(!oauth.is_valid());
 }
 
 #[test]

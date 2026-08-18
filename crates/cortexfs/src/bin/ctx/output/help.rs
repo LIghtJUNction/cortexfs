@@ -19,11 +19,13 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] history AGENT [--session SESSION]",
         "  ctx [--root PATH] resume AGENT [--session SESSION]",
         "  ctx [--root PATH] send AGENT [--session SESSION] INPUT",
-        "  ctx [--root PATH] agent new [NAME] [--from agent.yaml|DIR|NAME] [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
-        "  ctx [--root PATH] agent apply NAME --from agent.yaml|DIR|NAME",
+        "  ctx [--root PATH] inspect agent/NAME [--session SESSION]",
+        "  ctx [--root PATH] agent new [NAME] [--from agent.yaml|EVE_DIR|DIR|NAME] [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
+        "  ctx [--root PATH] agent apply NAME --from agent.yaml|EVE_DIR|DIR|NAME",
         "  ctx [--root PATH] agent start NAME [--session SESSION] [--cwd PATH] [--mount SOURCE TARGET ro|rw] [--no-default-workspace]",
         "  ctx [--root PATH] agent stop NAME",
         "  ctx [--root PATH] agent status NAME",
+        "  ctx [--root PATH] agent inspect NAME [--session SESSION]",
         "  ctx [--root PATH] agent env NAME",
         "  ctx [--root PATH] agent ps",
         "  ctx [--root PATH] agent send NAME [--session SESSION] [--raw] [--approve TOOL]... INPUT",
@@ -40,15 +42,22 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+        "  ctx [--root PATH] terminal list",
+        "  ctx [--root PATH] terminal status TERMINAL",
+        "  ctx [--root PATH] terminal watch TERMINAL",
+        "  ctx [--root PATH] terminal attach TERMINAL",
         "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
         "  ctx provider oauth status PROVIDER",
         "  ctx provider oauth refresh PROVIDER",
+        "  ctx provider auth methods PROVIDER",
         "  ctx provider secret set PROVIDER [--slot SLOT]",
         "  ctx provider secret status PROVIDER [--slot SLOT]",
         "  ctx provider preset list",
         "  ctx provider preset show openai|codex|anthropic|google",
         "  ctx provider preset install openai|codex|anthropic|google",
         "  ctx object install --source PATH MANIFEST [--tier user|system]",
+        "  ctx install [--source PATH] [--tier user|system] PACKAGE",
         "  ctx object check MANIFEST",
         "  ctx object inspect --source PATH CLASS NAME [--tier user|system]",
         "  ctx object replace --source PATH MANIFEST [--tier user|system] [--yes]",
@@ -98,9 +107,7 @@ pub(crate) fn print_shared_or_builtin_man(
     file_name: &str,
     fallback: &str,
 ) -> Result<(), CliError> {
-    let shared = root
-        .join("shared")
-        .join(MANUAL_SHARED_DIR)
+    let shared = cortexfs_paths::shared_path(root, MANUAL_SHARED_DIR)
         .join(if file_name == MANUAL_INDEX_FILE {
             ""
         } else {
@@ -129,6 +136,14 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
         "abi" => print_help_lines(&["usage:", "  ctx [--root PATH] abi"]),
         "env" => print_help_lines(&["usage:", "  ctx [--root PATH] env"]),
         "root" => print_help_lines(&["usage:", "  ctx [--root PATH] root"]),
+        "inspect" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] inspect agent/NAME [--session SESSION]",
+            "",
+            "output:",
+            "  definition, live instance summary, durable session, model capability, and authority paths",
+            "  read-only; creates no process, socket, session, or capability state",
+        ]),
         "man" => print_help_lines(&[
             "usage:",
             "  ctx man",
@@ -213,11 +228,12 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
         ]),
         "agent" => print_help_lines(&[
             "usage:",
-            "  ctx [--root PATH] agent new [NAME] [--from agent.yaml|DIR|NAME] [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
-            "  ctx [--root PATH] agent apply NAME --from agent.yaml|DIR|NAME",
+            "  ctx [--root PATH] agent new [NAME] [--from agent.yaml|EVE_DIR|DIR|NAME] [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
+            "  ctx [--root PATH] agent apply NAME --from agent.yaml|EVE_DIR|DIR|NAME",
             "  ctx [--root PATH] agent start NAME [--session SESSION] [--cwd PATH] [--mount SOURCE TARGET ro|rw] [--no-default-workspace]",
             "  ctx [--root PATH] agent stop NAME",
             "  ctx [--root PATH] agent status NAME",
+            "  ctx [--root PATH] agent inspect NAME [--session SESSION]",
             "  ctx [--root PATH] agent env NAME",
             "  ctx [--root PATH] agent ps",
             "  ctx [--root PATH] agent send NAME [--session SESSION] [--raw] [--approve TOOL]... INPUT",
@@ -250,6 +266,8 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "agent.yaml:",
             "  conventional host-side profile file name (also agent.yml / agent.json)",
             "  --from FILE loads that file; --from DIR looks for DIR/agent.yaml",
+            "  an Eve project DIR (agent/agent.ts or agent/instructions.md) is imported statically",
+            "  Eve TypeScript capabilities stay source data; only governed CortexFS tools execute",
             "  --from NAME searches .cortexfs/agents/NAME/agent.yaml and ~/.config/cortexfs/agents/…",
             "  materializes agent/<name>.d/*; runtime only reads .d/* (import/apply only)",
         ]),
@@ -286,17 +304,19 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
         ]),
         "agent new" => print_help_lines(&[
             "usage:",
-            "  ctx [--root PATH] agent new [NAME] [--from agent.yaml|DIR|NAME] [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
+            "  ctx [--root PATH] agent new [NAME] [--from agent.yaml|EVE_DIR|DIR|NAME] [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
             "",
-            "agent.yaml:",
+            "agent.yaml / Eve:",
             "  host-side YAML/JSON (schema cortexfs.agent.profile/v1, or Microsoft AgentSchema subset)",
             "  conventional name is agent.yaml under .cortexfs/agents/<name>/ or a project directory",
+            "  Eve projects with agent/agent.ts or agent/instructions.md are imported statically",
+            "  Eve TypeScript capabilities stay source data; only governed CortexFS tools execute",
             "  fields map to agent/<name>.d/{model,system.md,meta.json,policy,mount,...}",
             "  CLI flags override profile values",
         ]),
         "agent apply" => print_help_lines(&[
             "usage:",
-            "  ctx [--root PATH] agent apply NAME --from agent.yaml|DIR|NAME",
+            "  ctx [--root PATH] agent apply NAME --from agent.yaml|EVE_DIR|DIR|NAME",
             "",
             "applies a host-side agent.yaml profile onto an existing agent control directory",
             "updates declared fields only (system.md, meta.json, model, policy, mount)",
@@ -329,6 +349,14 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  groups=GID...|-",
             "  root=PATH|-",
             "  cwd=PATH|-",
+        ]),
+        "agent inspect" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent inspect NAME [--session SESSION]",
+            "",
+            "output:",
+            "  definition, live instance summary, durable session, model capability, and authority paths",
+            "  read-only; creates no process, socket, session, or capability state",
         ]),
         "agent env" => print_help_lines(&[
             "usage:",
@@ -427,7 +455,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "",
             "audit:",
             "  ctx agent tools coder",
-            "  verifies the bootstrapped coder can see tsh, fs.read, fs.write, fs.replace, and shell.exec",
+            "  verifies the bootstrapped coder can see tsh, fs.read, fs.list, fs.stat, fs.write, fs.replace, and shell.exec",
         ]),
         "agent children" => print_help_lines(&[
             "usage:",
@@ -462,11 +490,44 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "usage:",
             "  ctx [--root PATH] agent attach NAME [--session SESSION]",
         ]),
+        "terminal" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+            "  ctx [--root PATH] terminal list",
+            "  ctx [--root PATH] terminal status TERMINAL",
+            "  ctx [--root PATH] terminal watch TERMINAL",
+            "  ctx [--root PATH] terminal attach TERMINAL",
+            "",
+            "create is currently an Agent-backed terminal resource",
+            "watch is read-only; attach forwards input to the PTY",
+        ]),
+        "terminal create" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+            "",
+            "creates the session-local terminal resource and starts the Agent terminal",
+        ]),
+        "terminal list" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal list",
+            "",
+            "prints TERMINAL<TAB>STATE<TAB>AGENT<TAB>SESSION<TAB>PATH",
+        ]),
+        "terminal status" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal status TERMINAL"])
+        }
+        "terminal watch" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal watch TERMINAL"])
+        }
+        "terminal attach" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal attach TERMINAL"])
+        }
         "provider" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
+            "  ctx provider auth methods PROVIDER",
             "  ctx provider secret set PROVIDER [--slot SLOT]",
             "  ctx provider secret status PROVIDER [--slot SLOT]",
             "  ctx provider preset list",
@@ -485,6 +546,15 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
         ]),
+        "provider auth" => print_help_lines(&[
+            "usage:",
+            "  ctx provider auth methods PROVIDER",
+            "",
+            "prints provider-neutral auth method, flow, and logical slot",
+        ]),
+        "provider auth methods" => {
+            print_help_lines(&["usage:", "  ctx provider auth methods PROVIDER"])
+        }
         "provider oauth login" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
@@ -597,6 +667,16 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "on failure, matching quarantine is restored to the install name when safe",
             "otherwise .cortexfs-cleanup-* remains audit-only for later inspection",
             "rollback residue is audit-only and is never removed by residue cleanup",
+        ]),
+        "install" => print_help_lines(&[
+            "usage:",
+            "  ctx install [--source PATH] [--tier user|system] PACKAGE",
+            "",
+            "PACKAGE is a directory or cortexfs.toml file.",
+            "  tools and agents are installed through the existing atomic object ABI",
+            "  agent run + model + tools + parent form one small declarative extension",
+            "  default source: CTX_SOURCE, then ~/.local/share/cortexfs/root",
+            "  agents require the system tier; use parent: agent:NAME for topology",
         ]),
         "doctor" => print_help_lines(&["usage:", "  ctx [--root PATH] doctor"]),
         "validate-name" => print_help_lines(&["usage:", "  ctx validate-name NAME"]),

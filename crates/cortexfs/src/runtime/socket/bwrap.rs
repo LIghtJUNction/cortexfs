@@ -3,11 +3,15 @@ use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI};
 use nix::fcntl::{FcntlArg, fcntl};
 use std::os::fd::RawFd;
 
-const SOCKET_AGENT_EXECUTABLE_PATH: &str = "/run/cortexfs/agent-executable";
+const SOCKET_AGENT_EXECUTABLE_PATH: &str = cortexfs_paths::AGENT_EXECUTABLE_SOCKET;
 /// Fixed sandbox path for the receipt-bound per-run control socket.
-pub const SOCKET_RUN_CONTROL_PATH: &str = "/run/cortexfs/control.sock";
+pub const SOCKET_RUN_CONTROL_PATH: &str = cortexfs_paths::RUN_CONTROL_SOCKET;
 pub(crate) type RunControlCommand<'a> = (&'a Path, &'a [(String, String)], RawFd);
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the command boundary keeps the run-scoped relay capability separate from the bind path"
+)]
 pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
@@ -15,8 +19,9 @@ pub(crate) fn agent_executable_socket_command(
     step: u8,
     control: Option<RunControlCommand<'_>>,
     provider_egress: Option<&Path>,
+    provider_egress_token: Option<&str>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
-    let environment = agent_executable_socket_env(runtime, request, step);
+    let environment = agent_executable_socket_env(runtime, request, provider_egress_token, step);
     let (control_socket, control_environment, control_gate) = match control {
         Some((socket, environment, gate)) => (Some(socket), Some(environment), Some(gate)),
         None => (None, None, None),
@@ -127,12 +132,16 @@ impl Drop for InheritedFd {
 fn agent_executable_socket_env(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
+    provider_egress_token: Option<&str>,
     step: u8,
 ) -> Vec<(String, String)> {
     let mut environment = runtime
         .env
         .iter()
-        .filter(|env| !env.0.starts_with("CTX_PROVIDER_SECRET_"))
+        .filter(|env| {
+            !env.0.starts_with("CTX_PROVIDER_SECRET_")
+                && env.0 != runtime::egress::PROVIDER_EGRESS_TOKEN_ENV
+        })
         .cloned()
         .collect::<Vec<_>>();
     environment.extend([
@@ -150,6 +159,12 @@ fn agent_executable_socket_env(
         ("CTX_AGENT_LAUNCH".to_owned(), AGENT_LAUNCH_ABI.to_owned()),
         ("CTX_AGENT_STEP".to_owned(), step.to_string()),
     ]);
+    if let Some(token) = provider_egress_token {
+        environment.push((
+            runtime::egress::PROVIDER_EGRESS_TOKEN_ENV.to_owned(),
+            token.to_owned(),
+        ));
+    }
     environment
 }
 
@@ -169,10 +184,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--clearenv".to_owned(),
         "--setenv".to_owned(),
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-        request
-            .runtime
-            .ctx_root
-            .join("shared/providers.d")
+        cortexfs_paths::shared_path(request.runtime.ctx_root, "providers.d")
             .display()
             .to_string(),
         "--die-with-parent".to_owned(),
@@ -181,7 +193,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     bwrap.extend(support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
     bwrap.extend([
         "--dir".to_owned(),
-        "/run/cortexfs".to_owned(),
+        cortexfs_paths::SYSTEM_RUNTIME_DIR.to_owned(),
         "--perms".to_owned(),
         "0755".to_owned(),
         "--ro-bind-data".to_owned(),
@@ -192,7 +204,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }
-    if let Some(host_dir) = request.provider_egress {
+    if let (true, Some(host_dir)) = (request.runtime.network_allowed, request.provider_egress) {
         bwrap.extend([
             "--dir".to_owned(),
             runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
@@ -280,10 +292,11 @@ fn append_bwrap_agent_environment(
 
 pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {
     let source_path = Path::new(source);
-    if source_path == Path::new(CTX_ROOT) {
+    let ctx_root = cortexfs_paths::ctx_root();
+    if source_path == ctx_root {
         return source_root.display().to_string();
     }
-    if let Ok(relative) = source_path.strip_prefix(CTX_ROOT) {
+    if let Ok(relative) = source_path.strip_prefix(&ctx_root) {
         return source_root.join(relative).display().to_string();
     }
     source.to_owned()

@@ -13,7 +13,7 @@ use crate::*;
 pub fn inspect_agent_schedule_json(
     content: &str,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
 ) -> AgentScheduleReport {
     let (_nodes, issues) = parse_valid_agent_schedule_nodes(content, parent_subject, parent_policy);
     AgentScheduleReport::new(issues)
@@ -28,7 +28,7 @@ pub fn inspect_agent_schedule_json(
 pub fn ready_agent_schedule_nodes(
     content: &str,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
     completed_nodes: &[&str],
 ) -> Result<Vec<AgentScheduleNode>, AgentScheduleReport> {
     let (nodes, mut issues) =
@@ -56,7 +56,7 @@ pub fn ready_agent_schedule_nodes(
 pub fn agent_schedule_nodes(
     content: &str,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
 ) -> Result<Vec<AgentScheduleNode>, AgentScheduleReport> {
     let (nodes, issues) = parse_valid_agent_schedule_nodes(content, parent_subject, parent_policy);
     if issues.is_empty() {
@@ -73,7 +73,7 @@ pub fn agent_schedule_nodes(
 pub fn ready_agent_schedule_child_handoffs(
     content: &str,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
     completed_nodes: &[&str],
     default_child_session: &str,
 ) -> Result<Vec<AgentScheduleChildHandoff>, AgentScheduleReport> {

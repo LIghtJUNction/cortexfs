@@ -11,7 +11,7 @@ pub fn collect_agent_rules() -> String {
         paths.push(home.join(".agents").join("AGENTS.md"));
         paths.push(home.join("AGENTS.md"));
     }
-    paths.push(PathBuf::from("/etc/cortexfs/AGENTS.md"));
+    paths.push(PathBuf::from(cortexfs_paths::SYSTEM_AGENT_PROMPT_PATH));
     if let Ok(cwd) = env::current_dir() {
         let mut ancestors = cwd.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
         ancestors.reverse();

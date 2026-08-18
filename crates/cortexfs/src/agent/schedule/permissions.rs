@@ -68,7 +68,7 @@ pub(crate) fn inspect_required_permissions(
     node: &str,
     value: Option<&Value>,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
     issues: &mut Vec<AgentScheduleIssue>,
 ) {
     let Some(value) = value else {
@@ -91,7 +91,7 @@ pub(crate) fn inspect_required_permission(
     node: &str,
     value: &Value,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
     issues: &mut Vec<AgentScheduleIssue>,
 ) {
     let Ok(permission) = serde_json::from_value::<SchedulePermissionJson>(value.clone()) else {
@@ -143,7 +143,7 @@ pub(crate) fn inspect_required_permission(
         });
         return;
     };
-    if !parent_policy.allows(parent_subject, class, &name, permission) {
+    if !parent_policy.evaluate(parent_subject, class, &name, permission) {
         issues.push(AgentScheduleIssue::PermissionNotGranted {
             node: node.to_owned(),
             class: class_name,

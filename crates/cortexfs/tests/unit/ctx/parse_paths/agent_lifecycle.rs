@@ -67,6 +67,15 @@ fn parses_agent_lifecycle_commands() {
         Ok(Command::Agent(AgentArgs::Status { ref name })) if name == "reviewer"
     ));
 
+    let inspect = cmd!("agent", "inspect", "reviewer", "--session", "test");
+    assert!(matches!(
+        inspect,
+        Ok(Command::Agent(AgentArgs::Inspect {
+            ref name,
+            session: Some(ref session)
+        })) if name == "reviewer" && session == "test"
+    ));
+
     let ps = cmd!("agent", "ps");
     assert!(matches!(ps, Ok(Command::Agent(AgentArgs::Ps))));
 
@@ -87,6 +96,29 @@ fn parses_agent_lifecycle_commands() {
             session: None
         })) if name == "coder"
     ));
+}
+
+#[test]
+fn agent_inspect_projects_definition_instance_session_and_model() {
+    let root = clean_test_dir("ctx-agent-inspect");
+    let ensured = ensure_reference_tree(&root);
+    assert!(ensured.is_ok(), "reference tree: {ensured:?}");
+    ensure_runtime_model_fixture(&root);
+    let session = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent/coder/session/default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    write_text_file(&session.join("state"), "idle\n");
+    write_text_file(&session.join("cwd"), "/workspace\n");
+
+    let lines = agent_inspect_lines(&root, "coder", Some("default"));
+    assert!(lines.is_ok(), "agent inspect: {lines:?}");
+    let lines = lines.unwrap_or_default();
+    assert!(lines.iter().any(|line| line.ends_with("/agent/coder")));
+    assert!(lines.iter().any(|line| line == "session.state=idle"));
+    assert!(lines.iter().any(|line| line == "model.name=main"));
+    assert!(lines.iter().any(|line| line.starts_with("model.cap=")));
+    assert!(lines.iter().any(|line| line.starts_with("tools=")));
 }
 
 #[test]
@@ -364,7 +396,7 @@ fn agent_new_host_fallback_rejects_existing_home_without_partial_object() {
 }
 
 #[test]
-fn agent_new_host_fallback_rolls_back_after_socket_creation_failure() {
+fn agent_new_host_fallback_supports_long_root_with_held_socket_parent() {
     let base = clean_test_dir("ctx-agent-new-host-socket-rollback");
     let root = base.join("x".repeat(80));
     assert!(fs::create_dir_all(&root).is_ok());
@@ -373,11 +405,15 @@ fn agent_new_host_fallback_rolls_back_after_socket_creation_failure() {
         return;
     };
 
-    assert!(agent_new_host_fallback(&root, &args).is_err());
-    assert!(!root.join("agent/worker").exists());
-    assert!(!root.join("agent/worker.d").exists());
-    assert!(fs::symlink_metadata(root.join("agent/worker.sock")).is_err());
-    assert!(!ctx_home(&root).unwrap_or_default().join("agent/worker").exists());
+    assert!(agent_new_host_fallback(&root, &args).is_ok());
+    assert!(root.join("agent/worker").is_file());
+    assert!(root.join("agent/worker.d").is_dir());
+    assert!(matches!(
+        fs::symlink_metadata(root.join("agent/worker.sock")),
+        Ok(metadata) if metadata.file_type().is_socket()
+    ));
+    assert!(ctx_home(&root).unwrap_or_default().join("agent/worker").is_dir());
+    assert!(fs::remove_dir_all(base).is_ok());
 }
 
 #[test]
@@ -566,8 +602,8 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
     let projected_control = projection.join("agent/coder.d");
     assert!(fs::create_dir_all(&projected_control).is_ok());
     for file in [
-        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path",
-        "mount", "model", "policy", "parent", "life",
+        "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
+        "path", "mount", "model", "policy", "parent", "life",
     ] {
         assert!(fs::copy(source_control.join(file), projected_control.join(file)).is_ok());
     }
@@ -669,8 +705,8 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
     let projected_control = projection.join("agent/coder.d");
     fs::create_dir_all(&projected_control)?;
     for file in [
-        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path",
-        "mount", "model", "policy", "parent", "life",
+        "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
+        "path", "mount", "model", "policy", "parent", "life",
     ] {
         fs::copy(source.join("agent/coder.d").join(file), projected_control.join(file))?;
     }

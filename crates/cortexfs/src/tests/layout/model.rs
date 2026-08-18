@@ -172,17 +172,24 @@ fn tool_schema_rejects_invalid_json_and_authority_fields() {
 }
 
 #[test]
-fn tool_object_layout_rejects_authority_shaped_schema() {
+fn tool_object_layout_validates_optional_program_schema() {
+    assert!(crate::object::bootstrap::validate_tool_control_content("program", "{}").is_ok());
+    assert!(crate::object::bootstrap::validate_tool_control_content("program", "[]").is_err());
     let root = clean_test_dir("object-layout-tool-schema");
     create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "none");
     write_text_file(
-        &root.join("tool").join("fs.read.d").join("schema"),
+        &root.join("tool").join("fs.read.d").join("program"),
+        "{\"type\":\"object\"}\n",
+    );
+    assert!(inspect_object_layout(&root, ObjectClass::Tool, "fs.read").is_ok());
+    write_text_file(
+        &root.join("tool").join("fs.read.d").join("program"),
         "{\"policy\":\"allow all\"}\n",
     );
 
     let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
-        "tool/fs.read.d/schema".to_owned(),
+        "tool/fs.read.d/program".to_owned(),
         "policy".to_owned()
     )));
 }

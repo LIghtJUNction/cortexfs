@@ -12,11 +12,6 @@ pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>
         if let Some(call) = tool_call_from_event_frame(frame)? {
             return Ok(Some(call));
         }
-        if let Some(text) = event_text(frame)
-            && let Some(call) = tool_call_from_text(&text)?
-        {
-            return Ok(Some(call));
-        }
     }
     Ok(None)
 }
@@ -37,14 +32,6 @@ pub(crate) fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentTool
         return Ok(None);
     }
     agent_tool_call_from_value(&value)
-}
-
-pub(crate) fn event_text(frame: &str) -> Option<String> {
-    let value = serde_json::from_str::<Value>(frame).ok()?;
-    if value.get("type").and_then(Value::as_str) != Some("delta") {
-        return None;
-    }
-    value.get("text").and_then(Value::as_str).map(str::to_owned)
 }
 
 pub(crate) fn tool_call_from_text(text: &str) -> Result<Option<AgentToolCall>, ExecError> {

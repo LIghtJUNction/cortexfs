@@ -5,7 +5,7 @@ fn plan_temp_cleanup(root: &Path, name: &str) -> Result<TempCleanupPlan, CliErro
     let owner_uid = nix::unistd::Uid::effective().as_raw();
     plan_temp_cleanup_paths(
         owner_uid,
-        &root.join("agent"),
+        &cortexfs_paths::agent_root_path(root),
         &agent_object_path(root, name),
         &agent_socket_path(root, name)?,
         &agent_control_dir(root, name),

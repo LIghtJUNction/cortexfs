@@ -29,6 +29,18 @@ fn write_model(root: &Path, model: &str, base_url: &str) -> io::Result<()> {
     fs::write(control.join("default"), format!("base_url={base_url}\n"))
 }
 
+fn create_egress(
+    control: &Path,
+    root: &Path,
+    model: &str,
+    environment: &[(String, String)],
+    identity: (u32, u32),
+    run: &str,
+) -> Result<ProviderEgress, ProviderEgressError> {
+    let plan = ProviderEgressPlan::from_controls(root, model, environment, run)?;
+    ProviderEgress::create(control, plan, identity.0, identity.1)
+}
+
 #[test]
 fn plan_keeps_validated_fixed_base_without_dns() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
@@ -102,13 +114,15 @@ fn plan_rejects_provider_base_conflicts_before_resources() -> Result<(), Box<dyn
         root.path().join("model/fixture/primary.d/fallback"),
         "fixture/fallback\n",
     )?;
-    let result = ProviderEgress::create(
+    let result = create_egress(
         &control,
         root.path(),
         "fixture/primary",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     );
     assert!(matches!(
@@ -163,13 +177,15 @@ fn plan_skips_orphan_fallback_but_requires_primary_control()
         "orphan/missing\n",
     )?;
     assert_eq!(plan_targets(root.path(), "fixture/primary")?.len(), 1);
-    let result = ProviderEgress::create(
+    let result = create_egress(
         &control,
         root.path(),
         "orphan/missing",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     );
     assert!(matches!(result, Err(ProviderEgressError::MissingControl)));
@@ -199,15 +215,7 @@ fn create_preserves_receipts_owner_and_replacement() -> Result<(), Box<dyn std::
         nix::unistd::geteuid().as_raw(),
         nix::unistd::getegid().as_raw(),
     );
-    let egress = ProviderEgress::create(
-        &control,
-        root.path(),
-        "fixture/chat",
-        &[],
-        owner.0,
-        owner.1,
-        "run1",
-    )?;
+    let egress = create_egress(&control, root.path(), "fixture/chat", &[], owner, "run1")?;
     let directory = egress.host_dir().to_owned();
     let socket = egress.socket("fixture").ok_or("missing socket")?.to_owned();
     let metadata = fs::symlink_metadata(&socket)?;
@@ -238,15 +246,7 @@ fn run_directory_keeps_runtime_owner_when_agent_differs_if_root()
     } else {
         runtime
     };
-    let egress = ProviderEgress::create(
-        &control,
-        root.path(),
-        "fixture/chat",
-        &[],
-        agent.0,
-        agent.1,
-        "run1",
-    )?;
+    let egress = create_egress(&control, root.path(), "fixture/chat", &[], agent, "run1")?;
     let directory = fs::symlink_metadata(egress.host_dir())?;
     let socket = fs::symlink_metadata(egress.socket("fixture").ok_or("missing socket")?)?;
     assert_eq!((directory.uid(), directory.gid()), runtime);
@@ -274,13 +274,12 @@ fn root_agent_uid_can_use_http_adapter() -> Result<(), Box<dyn std::error::Error
         let _read = stream.read(&mut input)?;
         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
     });
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
         &[],
-        65_534,
-        65_534,
+        (65_534, 65_534),
         "run1",
     )?;
     let status = Command::new(std::env::current_exe()?)
@@ -334,7 +333,7 @@ fn listener_rejects_wrong_peer_without_reaching_upstream() -> Result<(), Box<dyn
     let shutdown = Arc::new(AtomicBool::new(false));
     let stop = Arc::clone(&shutdown);
     let denied_uid = nix::unistd::getuid().as_raw().wrapping_add(1);
-    let server = thread::spawn(move || serve(listener, target, denied_uid, stop));
+    let server = thread::spawn(move || serve(listener, target, denied_uid, stop, "test"));
     let mut client = UnixStream::connect(socket)?;
     client.write_all(b"POST /responses HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")?;
     thread::sleep(Duration::from_millis(150));
@@ -361,13 +360,15 @@ fn connection_headers_never_reach_curl_or_upstream() -> Result<(), Box<dyn std::
         ),
         ("CTX_PROVIDER_SECRET_VALUE".to_owned(), "secret".to_owned()),
     ];
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
         &environment,
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     )?;
     for (headers, status) in [
@@ -418,13 +419,15 @@ fn drop_stops_continuous_curl_within_one_second() -> Result<(), Box<dyn std::err
             thread::sleep(Duration::from_millis(10));
         }
     });
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     )?;
     let mut client = UnixStream::connect(egress.socket("fixture").ok_or("missing socket")?)?;

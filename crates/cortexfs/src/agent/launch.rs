@@ -12,213 +12,11 @@ use std::time::Duration;
 use crate::agent::create::AgentRollbackConflict;
 use crate::{AgentUnixIdentity, ChildContextRecordError};
 
-/// Persists receipt-bound cleanup evidence for one agent launch.
-pub fn persist_agent_launch_meta(
-    source: &Path,
-    name: &str,
-    terminal: &AgentLaunchReceipt,
-    system: &SystemAgentSocketReceipt,
-) -> Result<(), AgentLaunchError> {
-    let control = source.join("agent").join(format!("{name}.d"));
-    let control_meta =
-        fs::symlink_metadata(&control).map_err(|_error| AgentLaunchError::CannotExecute)?;
-    if !control_meta.is_dir() || control_meta.file_type().is_symlink() {
-        return Err(AgentLaunchError::CannotExecute);
-    }
-    let session = terminal
-        .socket
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(std::ffi::OsStr::to_str)
-        .filter(|session| crate::is_object_name(session))
-        .ok_or(AgentLaunchError::CannotExecute)?;
-    let meta_path = control.join("meta.json");
-    let (mut meta, create) = match crate::support::plain::read_small_text_file(&meta_path, 65_536) {
-        Ok(content) => {
-            let meta = serde_json::from_str::<serde_json::Value>(&content)
-                .ok()
-                .and_then(|value| value.as_object().cloned())
-                .ok_or(AgentLaunchError::CannotExecute)?;
-            (meta, false)
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => (serde_json::Map::new(), true),
-        Err(_error) => return Err(AgentLaunchError::CannotExecute),
-    };
-    meta.insert(
-        "runtime_receipt".to_owned(),
-        serde_json::json!({
-            "version": 1,
-            "control": { "dev": control_meta.dev(), "ino": control_meta.ino() },
-            "terminal": {
-                "session": session,
-                "unit": terminal.unit,
-                "invocation": terminal.invocation,
-                "pid": terminal.pid,
-                "identity": {
-                    "uid": terminal.identity.uid(),
-                    "gid": terminal.identity.gid(),
-                    "groups": terminal.identity.groups(),
-                }
-            },
-            "system": {
-                "unit": system.unit,
-                "invocation": system.invocation,
-                "owned_start": system.owned_start,
-            }
-        }),
-    );
-    let encoded = serde_json::to_string(&meta).map_err(|_error| AgentLaunchError::CannotExecute)?;
-    let recorded = if create {
-        crate::atomic_create_text_with_mode(&meta_path, &format!("{encoded}\n"), 0o644)
-    } else {
-        crate::atomic_replace_text_preserving_metadata(&meta_path, &format!("{encoded}\n"))
-    };
-    recorded.map_err(|_error| AgentLaunchError::CannotExecute)?;
-    let rebound =
-        fs::symlink_metadata(&control).map_err(|_error| AgentLaunchError::CannotExecute)?;
-    if (rebound.dev(), rebound.ino()) != (control_meta.dev(), control_meta.ino()) {
-        return Err(AgentLaunchError::StopConflict);
-    }
-    Ok(())
-}
+mod directory;
+mod meta;
 
-#[cfg(test)]
-mod launch_meta_tests {
-    use super::*;
-
-    fn receipts() -> (AgentLaunchReceipt, SystemAgentSocketReceipt) {
-        (
-            AgentLaunchReceipt {
-                unit: "terminal-unit".to_owned(),
-                pid: 42,
-                identity: AgentUnixIdentity::new(1000, 1000, [10, 20]),
-                invocation: "terminal-invocation".to_owned(),
-                socket: PathBuf::from("/run/user/1000/default/terminal.sock"),
-            },
-            SystemAgentSocketReceipt {
-                unit: "system-unit".to_owned(),
-                was_active: false,
-                owned_start: true,
-                invocation: "system-invocation".to_owned(),
-            },
-        )
-    }
-
-    #[test]
-    fn missing_agent_meta_is_created_with_runtime_receipt() {
-        let Ok(root) = tempfile::tempdir() else {
-            return;
-        };
-        let control = root.path().join("agent/child.d");
-        assert!(fs::create_dir_all(&control).is_ok());
-        let (terminal, system) = receipts();
-
-        assert_eq!(
-            persist_agent_launch_meta(root.path(), "child", &terminal, &system),
-            Ok(())
-        );
-        let meta_path = control.join("meta.json");
-        let value = fs::read_to_string(&meta_path)
-            .ok()
-            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
-        assert_eq!(
-            value
-                .as_ref()
-                .and_then(|value| value.pointer("/runtime_receipt/terminal/pid"))
-                .and_then(serde_json::Value::as_u64),
-            Some(42)
-        );
-        assert!(matches!(
-            fs::metadata(meta_path),
-            Ok(metadata) if metadata.permissions().mode() & 0o7777 == 0o644
-        ));
-    }
-
-    #[test]
-    fn malformed_or_non_object_agent_meta_is_rejected() {
-        let Ok(root) = tempfile::tempdir() else {
-            return;
-        };
-        let control = root.path().join("agent/child.d");
-        assert!(fs::create_dir_all(&control).is_ok());
-        let meta_path = control.join("meta.json");
-        let (terminal, system) = receipts();
-
-        for content in ["{malformed\n", "[]\n"] {
-            assert!(fs::write(&meta_path, content).is_ok());
-            assert_eq!(
-                persist_agent_launch_meta(root.path(), "child", &terminal, &system),
-                Err(AgentLaunchError::CannotExecute)
-            );
-            assert_eq!(
-                fs::read_to_string(&meta_path).ok().as_deref(),
-                Some(content)
-            );
-        }
-    }
-}
-
-pub(crate) fn ensure_terminal_runtime_dir(
-    runtime: &Path,
-    agent: &str,
-    session: &str,
-    identity: &AgentUnixIdentity,
-) -> io::Result<fs::File> {
-    let mut parent = crate::support::plain::open_plain_directory(runtime)?;
-    let runtime_meta = parent.metadata()?;
-    if runtime_meta.uid() != identity.uid() || runtime_meta.permissions().mode() & 0o7777 != 0o700 {
-        return Err(io::Error::from(io::ErrorKind::PermissionDenied));
-    }
-    for (name, mode) in [
-        ("cortexfs", 0o755),
-        ("terminal", 0o700),
-        (agent, 0o700),
-        (session, 0o700),
-    ] {
-        if !crate::is_object_name(name) {
-            return Err(io::Error::from(io::ErrorKind::InvalidInput));
-        }
-        let created = match nix::sys::stat::mkdirat(
-            &parent,
-            name,
-            nix::sys::stat::Mode::from_bits_truncate(mode),
-        ) {
-            Ok(()) => true,
-            Err(nix::errno::Errno::EEXIST) => false,
-            Err(error) => return Err(io::Error::from(error)),
-        };
-        let fd = nix::fcntl::openat(
-            &parent,
-            name,
-            nix::fcntl::OFlag::O_RDONLY
-                | nix::fcntl::OFlag::O_DIRECTORY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::empty(),
-        )
-        .map(fs::File::from)
-        .map_err(io::Error::from)?;
-        if created {
-            nix::unistd::fchown(
-                &fd,
-                Some(nix::unistd::Uid::from_raw(identity.uid())),
-                Some(nix::unistd::Gid::from_raw(identity.gid())),
-            )
-            .map_err(io::Error::from)?;
-            nix::sys::stat::fchmod(&fd, nix::sys::stat::Mode::from_bits_truncate(mode))
-                .map_err(io::Error::from)?;
-        }
-        let metadata = fd.metadata()?;
-        if metadata.uid() != identity.uid()
-            || metadata.gid() != identity.gid()
-            || metadata.permissions().mode() & 0o7777 != mode
-        {
-            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
-        }
-        parent = fd;
-    }
-    Ok(parent)
-}
+pub(crate) use directory::ensure_terminal_runtime_dir;
+pub use meta::persist_agent_launch_meta;
 
 /// Validated target user-manager endpoint, independent of caller environment.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -239,7 +37,7 @@ enum UserManagerCaller {
 impl UserManagerIdentity {
     /// Validates `/run/user/<uid>` and its user-bus socket without following links.
     pub fn fresh(identity: &AgentUnixIdentity) -> io::Result<Self> {
-        let runtime = PathBuf::from(format!("/run/user/{}", identity.uid()));
+        let runtime = cortexfs_paths::user_runtime_root(identity.uid());
         let metadata = fs::symlink_metadata(&runtime)?;
         if !metadata.is_dir()
             || metadata.file_type().is_symlink()
@@ -382,47 +180,50 @@ mod user_manager_tests {
         dispose_claimed_alias, ensure_terminal_runtime_dir, exact_alias_receipt,
         open_owned_alias_parent, parse_unit_state, prepare_exact_socket_alias,
         remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
-        system_agent_visible_socket, wait_system_agent_visible_socket,
+        wait_system_agent_visible_socket,
     };
     use crate::AgentUnixIdentity;
     use std::fs;
+    use std::io;
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
 
-    fn runtime_fixture(name: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()));
-        let _ignored = fs::remove_dir_all(&path);
-        assert!(fs::create_dir_all(&path).is_ok());
-        assert!(fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).is_ok());
-        path
+    fn runtime_fixture(name: &str) -> io::Result<tempfile::TempDir> {
+        let path = tempfile::Builder::new()
+            .prefix(&format!("cfs-{name}-"))
+            .tempdir()?;
+        fs::set_permissions(path.path(), fs::Permissions::from_mode(0o700))?;
+        Ok(path)
     }
 
     #[test]
-    fn terminal_runtime_chain_is_target_owned_and_reusable() {
-        let root = runtime_fixture("terminal-runtime-owner");
+    fn terminal_runtime_chain_is_target_owned_and_reusable() -> io::Result<()> {
+        let root = runtime_fixture("terminal-runtime-owner")?;
         let uid = nix::unistd::geteuid().as_raw();
         let gid = nix::unistd::getegid().as_raw();
         let identity = AgentUnixIdentity::new(uid, gid, []);
-        let first = ensure_terminal_runtime_dir(&root, "worker", "default", &identity);
+        let first = ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity);
         assert!(first.is_ok());
         let metadata = first.and_then(|file| file.metadata());
         assert!(
             matches!(metadata, Ok(ref metadata) if metadata.uid() == uid && metadata.gid() == gid && metadata.permissions().mode() & 0o7777 == 0o700)
         );
-        assert!(ensure_terminal_runtime_dir(&root, "worker", "default", &identity).is_ok());
+        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_ok());
+        Ok(())
     }
 
     #[test]
-    fn terminal_runtime_chain_rejects_symlink_component() {
-        let root = runtime_fixture("terminal-runtime-symlink");
-        let outside = runtime_fixture("terminal-runtime-outside");
-        assert!(std::os::unix::fs::symlink(&outside, root.join("cortexfs")).is_ok());
+    fn terminal_runtime_chain_rejects_symlink_component() -> io::Result<()> {
+        let root = runtime_fixture("terminal-runtime-symlink")?;
+        let outside = runtime_fixture("terminal-runtime-outside")?;
+        std::os::unix::fs::symlink(outside.path(), root.path().join("cortexfs"))?;
         let identity = AgentUnixIdentity::new(
             nix::unistd::geteuid().as_raw(),
             nix::unistd::getegid().as_raw(),
             [],
         );
-        assert!(ensure_terminal_runtime_dir(&root, "worker", "default", &identity).is_err());
+        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_err());
+        Ok(())
     }
 
     #[test]
@@ -445,7 +246,7 @@ mod user_manager_tests {
     fn nonroot_wrong_self_groups_fails_closed() {
         assert!(matches!(
             select_user_manager_caller(1000, 100, &[20], 1000, 100, &[20, 30]),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied
         ));
     }
 
@@ -481,7 +282,7 @@ mod user_manager_tests {
     #[test]
     fn system_socket_visible_path_matches_backing_agent_socket_abi() {
         assert_eq!(
-            system_agent_visible_socket(std::path::Path::new("/storage/root"), "child"),
+            cortexfs_paths::agent_backing_socket(std::path::Path::new("/storage/root"), "child"),
             std::path::Path::new("/storage/root/agent/child.sock")
         );
     }
@@ -768,21 +569,6 @@ pub struct SystemAgentSocketReceipt {
     pub invocation: String,
 }
 
-#[must_use]
-pub fn system_agent_socket_unit(agent: &str) -> String {
-    format!("cortexfs-agent@{agent}.socket")
-}
-
-#[must_use]
-pub fn system_agent_runtime_socket(agent: &str) -> PathBuf {
-    Path::new("/run/cortexfs/agent").join(format!("{agent}.sock"))
-}
-
-#[must_use]
-pub fn system_agent_visible_socket(source: &Path, agent: &str) -> PathBuf {
-    source.join("agent").join(format!("{agent}.sock"))
-}
-
 const BOOTSTRAP_SOCKET_MODE: u32 = 0o777;
 
 /// Replaces the trusted bootstrap socket with the exact systemd runtime alias.
@@ -794,7 +580,7 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     let _agent_dir = open_owned_alias_child(&source_dir, "agent")?;
     let view = crate::derive_agent_runtime_view(source, agent)
         .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
-    let executable = source.join("agent").join(agent);
+    let executable = cortexfs_paths::agent_path(source, agent);
     let executable_meta = fs::symlink_metadata(&executable)?;
     if !executable_meta.is_file()
         || executable_meta.file_type().is_symlink()
@@ -805,8 +591,8 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
             "agent executable is not a plain executable file",
         ));
     }
-    let runtime = system_agent_runtime_socket(agent);
-    let run_dir = open_owned_alias_parent(Path::new("/run"))?;
+    let runtime = cortexfs_paths::system_agent_runtime_socket(agent);
+    let run_dir = open_owned_alias_parent(&cortexfs_paths::system_run_root())?;
     let cortexfs_dir = open_owned_alias_child(&run_dir, "cortexfs")?;
     let runtime_dir = open_owned_alias_child(&cortexfs_dir, "agent")?;
     let runtime_name = runtime
@@ -828,7 +614,7 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
         Err(error) => return Err(io::Error::from(error)),
     }
     prepare_exact_socket_alias(
-        &system_agent_visible_socket(source, agent),
+        &cortexfs_paths::agent_backing_socket(source, agent),
         &runtime,
         (view.identity().uid(), view.identity().gid()),
         BOOTSTRAP_SOCKET_MODE,
@@ -845,8 +631,8 @@ pub fn cleanup_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     let view = crate::derive_agent_runtime_view(source, agent)
         .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
     cleanup_exact_socket_alias(
-        &system_agent_visible_socket(source, agent),
-        &system_agent_runtime_socket(agent),
+        &cortexfs_paths::agent_backing_socket(source, agent),
+        &cortexfs_paths::system_agent_runtime_socket(agent),
         (view.identity().uid(), view.identity().gid()),
         BOOTSTRAP_SOCKET_MODE,
     )
@@ -1271,7 +1057,7 @@ pub fn ensure_system_agent_socket(
     agent: &str,
     visible: &Path,
 ) -> Result<SystemAgentSocketReceipt, AgentLaunchError> {
-    let unit = system_agent_socket_unit(agent);
+    let unit = cortexfs_paths::system_agent_socket_unit(agent);
     let before = system_unit_state(&unit);
     let was_active = before
         .as_ref()
@@ -1307,7 +1093,7 @@ pub fn ensure_system_agent_socket(
         owned_start: !was_active,
         invocation: state.invocation,
     };
-    let runtime = system_agent_runtime_socket(agent);
+    let runtime = cortexfs_paths::system_agent_runtime_socket(agent);
     if wait_socket(&runtime, 50, Duration::from_millis(100)).is_err()
         || wait_system_agent_visible_socket(visible, &runtime, 50, Duration::from_millis(100))
             .is_err()
@@ -1511,60 +1297,6 @@ fn verify_launch_state(
     Ok(live)
 }
 
-#[cfg(test)]
-mod receipt {
-    use super::*;
-
-    fn sample() -> AgentLaunchReceipt {
-        AgentLaunchReceipt {
-            unit: "unit".to_owned(),
-            pid: 42,
-            identity: AgentUnixIdentity::new(1000, 1000, []),
-            invocation: "expected".to_owned(),
-            socket: PathBuf::new(),
-        }
-    }
-
-    #[test]
-    fn launch_receipt_rejects_invocation_and_live_pid_reuse_without_mutation() {
-        let receipt = sample();
-        assert_eq!(verify_launch_state(&receipt, None), Ok(false));
-        assert_eq!(
-            verify_launch_state(
-                &receipt,
-                Some(UnitState {
-                    pid: 42,
-                    invocation: "replaced".to_owned(),
-                    active: "active".to_owned(),
-                })
-            ),
-            Err(AgentLaunchError::StopConflict)
-        );
-        assert_eq!(
-            verify_launch_state(
-                &receipt,
-                Some(UnitState {
-                    pid: 99,
-                    invocation: "expected".to_owned(),
-                    active: "active".to_owned(),
-                })
-            ),
-            Err(AgentLaunchError::StopConflict)
-        );
-        assert_eq!(
-            verify_launch_state(
-                &receipt,
-                Some(UnitState {
-                    pid: 0,
-                    invocation: "expected".to_owned(),
-                    active: "inactive".to_owned(),
-                })
-            ),
-            Ok(false)
-        );
-    }
-}
-
 fn unit_state(identity: &AgentUnixIdentity, unit: &str) -> Option<UnitState> {
     let service = format!("{unit}.service");
     let output = systemctl_user(
@@ -1765,10 +1497,7 @@ fn require_placeholder_identity(
     }
 }
 
-/// Waits for a plain Unix socket created by a launched service.
-///
-/// The caller supplies the bounded retry policy so host and tool launches use
-/// the same readiness predicate without embedding CLI diagnostics here.
+/// Waits for a plain Unix socket using the caller's bounded retry policy.
 pub fn wait_socket(path: &Path, attempts: usize, delay: Duration) -> Result<(), AgentLaunchError> {
     for _ in 0..attempts {
         if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_socket()) {
@@ -1937,17 +1666,54 @@ pub fn terminal_command(
             "/etc/bash.bashrc".to_owned(),
         ]);
     }
+    command
+        .args
+        .extend(["--chdir".to_owned(), request.cwd.clone()]);
+    if let Some(events) = terminal_events_path(request, view) {
+        command.args.extend([
+            "--setenv".to_owned(),
+            "CTX_TERMINAL_EVENTS".to_owned(),
+            events,
+        ]);
+    }
     command.args.extend([
-        "--chdir".to_owned(),
-        request.cwd.clone(),
         crate::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
         "--no-stdio".to_owned(),
         "--".to_owned(),
-        "/ctx/bin/tsh".to_owned(),
+        cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+            .join("tsh")
+            .display()
+            .to_string(),
     ]);
     command
+}
+
+fn terminal_events_path(
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+) -> Option<String> {
+    let id = crate::runtime::terminal::terminal_id(&request.agent, &request.session);
+    let host = cortexfs_paths::session_terminal_from_home_path(
+        view.ctx_home(),
+        &request.agent,
+        &request.session,
+        &id,
+    );
+    if crate::support::plain::open_plain_directory(&host).is_err() {
+        return None;
+    }
+    Some(
+        Path::new("/home/agent")
+            .join("session")
+            .join(&request.session)
+            .join("terminal")
+            .join(id)
+            .join("events.jsonl")
+            .display()
+            .to_string(),
+    )
 }
 
 fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
@@ -1968,12 +1734,22 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         crate::ChildLifecycle::Temp => "temp",
     };
     let mut env = vec![
-        ("CTX_ROOT".to_owned(), "/ctx".to_owned()),
+        (
+            "CTX_ROOT".to_owned(),
+            cortexfs_paths::ctx_root().display().to_string(),
+        ),
         (
             "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-            "/ctx/shared/providers.d".to_owned(),
+            cortexfs_paths::shared_path(&cortexfs_paths::ctx_root(), "providers.d")
+                .display()
+                .to_string(),
         ),
-        ("CTX_HOME".to_owned(), format!("/ctx/home/{owner}")),
+        (
+            "CTX_HOME".to_owned(),
+            cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), owner)
+                .display()
+                .to_string(),
+        ),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
         ("CTX_AGENT_ROLE".to_owned(), "agent".to_owned()),
         ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
@@ -2018,7 +1794,8 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
 
 fn host_mount_source(root: &Path, source: &str) -> String {
     let source = Path::new(source);
-    source.strip_prefix("/ctx").map_or_else(
+    let ctx_root = cortexfs_paths::ctx_root();
+    source.strip_prefix(&ctx_root).map_or_else(
         |_| source.display().to_string(),
         |relative| root.join(relative).display().to_string(),
     )
@@ -2181,3 +1958,6 @@ fn system_unit_state(unit: &str) -> Option<SystemUnitState> {
         active: active?,
     })
 }
+
+#[cfg(test)]
+mod tests;

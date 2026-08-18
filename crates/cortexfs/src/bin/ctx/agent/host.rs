@@ -32,9 +32,11 @@ pub(crate) fn agent_new_host_fallback(
         .parent
         .clone()
         .unwrap_or_else(|| "agent:architect".to_owned());
-    let agent_home = format!("/ctx/home/{uid}/agent/{}", args.name);
+    let ctx_root = cortexfs_paths::ctx_root();
+    let agent_home = cortexfs_paths::agent_home_path(&ctx_root, &uid, &args.name);
     let mount = agent_new_mount_control(&uid, &args.name, &args.mounts);
     let policy = agent_new_policy(&subject, &model, &args.tools);
+    let permissions = cortexfs::AgentPermissions::for_tools(args.tools.iter().map(String::as_str));
     let system = args.instructions.clone().unwrap_or_else(|| {
         format!(
             "\
@@ -47,20 +49,25 @@ Ask for clarification only when the target path or scope is missing, or when the
         )
     });
     let meta = agent_profile_meta_json(args.description.as_deref());
-    let root_control = format!("{agent_home}/root");
-    let path = format!("/ctx/tool:/ctx/home/{uid}/tool");
+    let root_control = agent_home.join("root");
+    let path = format!(
+        "{}:{}",
+        cortexfs_paths::tool_root_path(&ctx_root).display(),
+        cortexfs_paths::home_tool_path(&ctx_root, &uid).display()
+    );
     let overrides = vec![
         ("owner", uid.clone()),
         ("uid", uid.clone()),
         ("gid", uid.clone()),
         ("groups", groups),
+        ("perm", permissions.control().trim_end().to_owned()),
         ("label", label),
         ("iso", "shared".to_owned()),
         ("parent", parent),
         ("life", life.to_owned()),
-        ("root", root_control),
+        ("root", root_control.display().to_string()),
         ("cwd", "/workspace".to_owned()),
-        ("env", "CTX_ROOT=/ctx".to_owned()),
+        ("env", format!("CTX_ROOT={CTX_ROOT}")),
         ("path", path),
         ("mount", mount),
         ("model", model.clone()),
@@ -118,7 +125,7 @@ Ask for clarification only when the target path or scope is missing, or when the
     Ok(ExitCode::SUCCESS)
 }
 
-fn current_supplementary_groups_control() -> Result<String, CliError> {
+pub(crate) fn current_supplementary_groups_control() -> Result<String, CliError> {
     let mut groups = nix::unistd::getgroups()
         .map_err(|error| {
             CliError::unavailable(format!("cannot read supplementary groups: {error}"))
@@ -149,9 +156,17 @@ pub(crate) fn agent_new_policy_subject(args: &AgentNewArgs) -> String {
 }
 
 pub(crate) fn agent_new_mount_control(uid: &str, name: &str, mounts: &[AgentMount]) -> String {
+    let ctx_root = cortexfs_paths::ctx_root();
+    let agent_home = cortexfs_paths::agent_home_path(&ctx_root, uid, name);
     let mut lines = vec![
-        "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
-        format!("/ctx/home/{uid}/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev"),
+        format!(
+            "{root}\t{root}\tro\trbind,nosuid,nodev",
+            root = ctx_root.display()
+        ),
+        format!(
+            "{}\t/home/agent\trw\trbind,nosuid,nodev",
+            agent_home.display()
+        ),
     ];
     for mount in mounts {
         lines.push(format!(

@@ -125,6 +125,9 @@ impl ProfileStringOrList {
 /// 3. Short name (no `/`) → search well-known host locations for
 ///    `<name>/agent.yaml` or `<name>.yaml`
 pub(crate) fn load_agent_profile(spec: &Path) -> Result<AgentProfile, CliError> {
+    if is_eve_project(spec) {
+        return load_eve_profile(spec);
+    }
     let path = resolve_agent_profile_path(spec)?;
     let text = fs::read_to_string(&path).map_err(|error| {
         CliError::usage(format!(
@@ -515,7 +518,7 @@ pub(crate) fn agent_apply(
 
     let model = profile.models.first().cloned();
     if let Some(ref model) = model {
-        require_plain_agent_control_target(&control.join("model"))?;
+        require_plain_agent_control_target(&cortexfs_paths::control_file_path(&control, "model"))?;
         writes.push(ProfileWrite {
             file: "model",
             content: ensure_profile_newline(model),

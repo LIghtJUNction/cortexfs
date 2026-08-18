@@ -33,6 +33,10 @@ mod provider_secret_file_tests {
             provider_host_from_base_url("http://127.0.0.1:8317/v1"),
             Some("127.0.0.1".to_owned())
         );
+        assert_eq!(
+            provider_name_from_config("https://api.githubcopilot.com", None),
+            Ok("github-copilot".to_owned())
+        );
         assert_eq!(provider_host_from_base_url("api.openai.com/v1"), None);
         assert_eq!(provider_host_from_base_url("https:///v1"), None);
         assert_eq!(

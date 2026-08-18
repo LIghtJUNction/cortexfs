@@ -52,11 +52,11 @@ pub(crate) use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, EventStreamIssue, MANUAL_INDEX, MANUAL_INDEX_FILE,
     MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES, MessageStreamIssue,
     ModelCapabilityIssue, ModelDriverRouteError, ModelEffort, ModelFallbackIssue, MountTable,
-    ObjectClass, ObjectLayoutIssue, PathLayoutIssue, PolicyV0, REFERENCE_TREE_VERSION,
-    ROOT_ENTRIES, SessionControlIssue, SessionIndexGuard, SessionIndexIssue, SessionIndexKind,
-    SessionLayoutIssue, SharedQueueLayoutIssue, SocketSessionScope, ToolPath, ToolSchemaIssue,
-    TrajectoryIssue, TrajectoryMapError, acquire_child_context_lease,
-    advance_agent_schedule_from_parent_context, agent_schedule_nodes,
+    ObjectClass, ObjectLayoutIssue, PathLayoutIssue, PolicyEvaluator, PolicyV0,
+    REFERENCE_TREE_VERSION, ROOT_ENTRIES, SessionControlIssue, SessionIndexGuard,
+    SessionIndexIssue, SessionIndexKind, SessionLayoutIssue, SharedQueueLayoutIssue,
+    SocketSessionScope, ToolPath, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError,
+    acquire_child_context_lease, advance_agent_schedule_from_parent_context, agent_schedule_nodes,
     bootstrap_state_matches_target, child_context_lease_status, child_handoff_receipt,
     claim_child_handoff_active_with_lease, classify_abi_path, collect_agent_rules,
     collect_skill_metadata, columnar, compare_and_update_session_index,
@@ -85,7 +85,7 @@ pub(crate) use basic::*;
 pub(crate) use check::*;
 pub(crate) use cortexfs::cli::json;
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use cortexfs::cli::terminal;
+pub(crate) use cortexfs::cli::terminal::*;
 pub(crate) use cortexfs::cli::uid;
 pub(crate) use cortexfs::support::plain::open_plain_directory;
 pub(crate) use create::*;
@@ -138,6 +138,8 @@ pub mod storage;
 
 pub(crate) mod install;
 
+pub(crate) mod package;
+
 pub(crate) mod residue;
 
 pub mod doctor;
@@ -153,6 +155,7 @@ pub mod format;
 
 pub mod util;
 
+pub mod terminal;
 #[cfg(test)]
 #[expect(unused_qualifications, reason = "tests use qualified paths")]
 mod tests {

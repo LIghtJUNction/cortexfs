@@ -199,13 +199,18 @@ fn fuse_projection_empty_history_write_preserves_offset_semantics() {
 }
 
 #[test]
-fn fuse_projection_first_history_marker_survives_mode_change() {
+fn fuse_projection_permission_and_history_modes_round_trip() {
     let root = reference_tree("fuse-first-history-marker-mode");
     let projection =
         FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
     let uid = nix::unistd::Uid::current().as_raw();
     let gid = nix::unistd::Gid::current().as_raw();
     assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let perm = "agent/coder.d/perm";
+    assert!(matches!(projection.getattr(perm), Ok(ref attr) if attr.mode() & 0o777 == 0o700));
+    assert_eq!(projection.set_layout_mode(perm, 0o500, uid), Ok(()));
+    assert_eq!(projection.read_to_string(perm).as_deref(), Ok("r-x\n"));
+    assert!(matches!(projection.getattr(perm), Ok(ref attr) if attr.mode() & 0o777 == 0o500));
 
     for (session_name, marker, peer) in [
         ("messages-first", "messages.jsonl", "events.jsonl"),
@@ -1259,6 +1264,25 @@ fn fuse_projection_cleans_only_new_socket_entries_after_chown_failure() {
 }
 
 #[test]
+fn socket_placeholder_creation_stays_with_held_parent() -> Result<(), Box<dyn std::error::Error>> {
+    let root = clean_test_dir("fuse-socket-held-parent");
+    let original = root.join("original");
+    let moved = root.join("moved");
+    fs::create_dir_all(&original)?;
+    let parent = crate::support::plain::open_plain_directory(&original)?;
+    fs::rename(&original, &moved)?;
+    fs::create_dir_all(&original)?;
+
+    crate::support::plain::ensure_socket_placeholder_at(&parent, "agent.sock", 0o600)?;
+    assert!(matches!(
+        fs::symlink_metadata(moved.join("agent.sock")),
+        Ok(metadata) if metadata.file_type().is_socket()
+    ));
+    assert!(fs::symlink_metadata(original.join("agent.sock")).is_err());
+    Ok(())
+}
+
+#[test]
 fn fuse_paths_reject_control_characters() {
     let root = Path::new("/ctx");
 
@@ -1327,7 +1351,8 @@ fn fuse_projection_exposes_reference_tree_ops() {
     assert_eq!(
         model_names,
         [
-            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
+            "code", "debug", "fast", "helper", "main", "qwen", "qwen.d", "reason", "route",
+            "vision"
         ]
     );
     let main_node = projection.lookup(&model_node, "main");
@@ -1339,20 +1364,19 @@ fn fuse_projection_exposes_reference_tree_ops() {
     ));
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
     assert_eq!(
         projection.readlink("model/helper"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6-sol"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
-    assert!(
-        projection
-            .set_model_alias("model/main", Path::new("api.test/gpt-5.6"))
-            .is_ok()
+    assert_eq!(
+        projection.set_model_alias("model/main", Path::new("api.test/gpt-5.6")),
+        Err(FuseError::InvalidPath)
     );
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
     assert_eq!(
         projection.set_model_alias("model/test", Path::new("api.test/gpt-5.6")),
@@ -1365,7 +1389,7 @@ fn fuse_projection_exposes_reference_tree_ops() {
     assert!(projection.remove_model_alias("model/main").is_ok());
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
     let debug_node = projection.lookup(&model_node, "debug");
     assert!(matches!(
@@ -1492,8 +1516,7 @@ fn fuse_projection_inspection_never_executes_object_wrapper() {
 #[test]
 fn fuse_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
     let root = reference_tree("fuse-model-alias-temp");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projection = configured_alias_projection(&root);
     let old_predictable_temp = root
         .join("model")
         .join(format!(".main.tmp.{}", std::process::id()));
@@ -1530,8 +1553,7 @@ fn fuse_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
 #[test]
 fn fuse_projection_renames_model_alias_symlink_atomically() {
     let root = reference_tree("fuse-model-alias-rename");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projection = configured_alias_projection(&root);
 
     assert!(
         projection
@@ -1559,12 +1581,11 @@ fn fuse_projection_model_alias_rejects_symlink_model_directory_without_touching_
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(symlink(&outside, root.join("model")).is_ok());
     assert!(symlink("/ctx/model/keep", outside.join("main")).is_ok());
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projection = configured_alias_projection(&root);
 
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
     );
     assert_eq!(
         projection.set_model_alias("model/main", Path::new("api.test/gpt-5.6")),
@@ -1590,6 +1611,19 @@ fn fuse_projection_model_alias_rejects_symlink_model_directory_without_touching_
             .count()
     });
     assert_eq!(temp_leftovers, 0);
+}
+
+fn configured_alias_projection(root: &Path) -> FuseProjection {
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    write_text_file(
+        &providers.join("api.test.json"),
+        r#"{"base_url":"https://api.test/v1","models":["gpt-5.6"]}"#,
+    );
+    assert!(fs::create_dir_all(&cache).is_ok());
+    FuseProjection::new(root)
+        .with_provider_config_dir(providers)
+        .with_provider_model_cache_dir(cache)
 }
 
 #[test]

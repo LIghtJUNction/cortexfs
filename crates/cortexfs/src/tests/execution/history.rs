@@ -121,11 +121,11 @@ fn successful_agent_without_done_gets_canonical_terminal_frame() {
     );
     set_file_mode(&executable, 0o755);
     let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(b"{\"op\":\"send\",\"id\":\"success-1\",\"session\":\"default\",\"input\":\"ok\"}\n")
-            .is_ok()
-    );
+    assert!(client
+        .write_all(
+            b"{\"op\":\"send\",\"id\":\"success-1\",\"session\":\"default\",\"input\":\"ok\"}\n"
+        )
+        .is_ok());
     assert!(client.shutdown(Shutdown::Write).is_ok());
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
@@ -162,11 +162,11 @@ fn duplicate_agent_done_is_rejected_before_terminal_delivery() {
     );
     set_file_mode(&executable, 0o755);
     let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(b"{\"op\":\"send\",\"id\":\"duplicate-1\",\"session\":\"default\",\"input\":\"x\"}\n")
-            .is_ok()
-    );
+    assert!(client
+        .write_all(
+            b"{\"op\":\"send\",\"id\":\"duplicate-1\",\"session\":\"default\",\"input\":\"x\"}\n"
+        )
+        .is_ok());
     assert!(client.shutdown(Shutdown::Write).is_ok());
     let outcome = ok!(serve_agent_executable_socket_stream_once(
         &mut socket,
@@ -284,6 +284,8 @@ fn sdk_envelope_cancel_stops_active_step_before_respawn() {
         "#!/bin/sh\ntrap 'printf term > \"$CTX_SOURCE/envelope-terminated\"; exit 0' TERM\nIFS= read -r envelope\ntouch \"$CTX_SOURCE/envelope-ready\"\nsleep 10\nprintf '{\"type\":\"message\",\"run\":\"%s\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"late\"}]}\\n' \"$CTX_RUN_ID\"\n",
     );
     set_file_mode(&executable, 0o755);
+    let cancel_root = session_root.clone();
+    let ready = root.join("envelope-ready");
     let (mut client, mut socket) = ok!(UnixStream::pair());
     assert!(
         client
@@ -293,23 +295,7 @@ fn sdk_envelope_cancel_stops_active_step_before_respawn() {
             .is_ok()
     );
     assert!(client.shutdown(Shutdown::Write).is_ok());
-    let cancel_root = session_root.clone();
-    let ready = root.join("envelope-ready");
-    let cancel = thread::spawn(move || {
-        for _ in 0..100 {
-            if ready.exists() {
-                return handle_socket_request_frame(
-                    &cancel_root,
-                    "/work",
-                    Some("debug/echo"),
-                    r#"{"op":"cancel","id":"r1"}"#,
-                )
-                .is_ok();
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        false
-    });
+    let cancel = thread::spawn(move || cancel_when_ready(&cancel_root, &ready));
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
@@ -366,26 +352,16 @@ fn sdk_envelope_cancel_during_tool_has_no_result_or_respawn() {
         "#!/bin/sh\nIFS= read -r envelope\nif [ \"$CTX_AGENT_STEP\" = 0 ]; then printf '{\"type\":\"tool_call\",\"run\":\"%s\",\"id\":\"long-1\",\"name\":\"long\",\"arguments\":{\"args\":[]}}\\n' \"$CTX_RUN_ID\"; else touch \"$CTX_SOURCE/respawned\"; fi\n",
     );
     set_file_mode(&executable, 0o755);
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(client.write_all(b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"cancel tool\"}\n").is_ok());
-    assert!(client.shutdown(Shutdown::Write).is_ok());
     let ready = root.join("tool-ready");
     let cancel_root = session_root.clone();
-    let cancel = thread::spawn(move || {
-        for _ in 0..100 {
-            if ready.exists() {
-                return handle_socket_request_frame(
-                    &cancel_root,
-                    "/work",
-                    Some("debug/echo"),
-                    r#"{"op":"cancel","id":"r1"}"#,
-                )
-                .is_ok();
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        false
-    });
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(client
+        .write_all(
+            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"cancel tool\"}\n"
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let cancel = thread::spawn(move || cancel_when_ready(&cancel_root, &ready));
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
@@ -421,18 +397,7 @@ exit 1
     );
     set_file_mode(&agent_executable, 0o755);
 
-    let pair = UnixStream::pair();
-    let (mut client, mut socket) = ok!(pair);
-
-    assert!(
-        client
-            .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
-"#,
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let (mut client, mut socket) = ok!(process_failure_socket());
 
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
@@ -445,13 +410,7 @@ exit 1
     assert!(!outcome.jsonl().contains("EHOSTDOWN"));
     assert!(outcome.jsonl().contains("\"status\":\"error\""));
 
-    let mut buffer = [0_u8; 512];
-    let read = client.read(&mut buffer);
-    let read = ok!(read);
-    let Some(bytes) = buffer.get(..read) else {
-        return;
-    };
-    let response = String::from_utf8_lossy(bytes);
+    let response = ok!(socket_response(&mut client));
     assert!(response.contains("agent process failed"));
 }
 
@@ -478,18 +437,7 @@ exit 1
     );
     set_file_mode(&failing_program, 0o755);
 
-    let pair = UnixStream::pair();
-    let (mut client, mut socket) = ok!(pair);
-
-    assert!(
-        client
-            .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
-"#,
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let (mut client, mut socket) = ok!(process_failure_socket());
 
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
@@ -517,14 +465,46 @@ exit 1
     assert!(outcome.jsonl().contains("agent process failed"));
     assert!(outcome.jsonl().contains("\"status\":\"error\""));
 
-    let mut buffer = [0_u8; 512];
-    let read = client.read(&mut buffer);
-    let read = ok!(read);
-    let Some(bytes) = buffer.get(..read) else {
-        return;
-    };
-    let response = String::from_utf8_lossy(bytes);
+    let response = ok!(socket_response(&mut client));
     assert!(response.contains("agent process failed"));
     assert!(!response.contains(r#""message":"EIO""#));
 }
+
+fn cancel_when_ready(session_root: &std::path::Path, ready: &std::path::Path) -> bool {
+    for _ in 0..100 {
+        if ready.exists() {
+            return handle_socket_request_frame(
+                session_root,
+                "/work",
+                Some("debug/echo"),
+                r#"{"op":"cancel","id":"r1"}"#,
+            )
+            .is_ok();
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+fn process_failure_socket() -> std::io::Result<(UnixStream, UnixStream)> {
+    let (mut client, socket) = UnixStream::pair()?;
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    Ok((client, socket))
+}
+
+fn socket_response(client: &mut UnixStream) -> std::io::Result<String> {
+    let mut buffer = [0_u8; 512];
+    client
+        .read(&mut buffer)
+        .map(|read| String::from_utf8_lossy(buffer.get(..read).unwrap_or_default()).into_owned())
+}
+
 use super::*;
