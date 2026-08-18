@@ -505,6 +505,66 @@ fn agent_prompt_template_controls_rendered_system_message() {
 
 #[cfg(unix)]
 #[test]
+fn provider_empty_reply_retries_transport_request() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::mpsc::TryRecvError;
+
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let mut requests = 0;
+        loop {
+            match stop_receiver.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            let (mut stream, _peer) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+            let mut request = [0_u8; 8 * 1024];
+            let _read = stream.read(&mut request)?;
+            requests += 1;
+            if requests == 1 {
+                continue;
+            }
+            let body = r#"{"ok":true}"#;
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes())?;
+            stream.write_all(body.as_bytes())?;
+            stream.flush()?;
+            break;
+        }
+        Ok(requests)
+    });
+    let target = runner::CurlJsonTarget {
+        url: format!("http://{address}"),
+        unix_socket: None,
+    };
+    let response = runner::run_curl_json_with_headers(&target, &[], "{}")?;
+    let _ignored = stop_sender.send(());
+    let requests = server
+        .join()
+        .map_err(|_panic| std::io::Error::other("provider retry server panicked"))??;
+
+    assert_eq!(requests, 2);
+    assert_eq!(response, br#"{"ok":true}"#);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn provider_partial_eof_is_nonfallback_without_retry() -> Result<(), Box<dyn std::error::Error>> {
     const CHILD_ENV: &str = "CORTEXFS_TEST_PROVIDER_PARTIAL_EOF";
     if std::env::var_os(CHILD_ENV).is_some() {

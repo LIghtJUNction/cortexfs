@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=162359
-prod=111095
+all=162468
+prod=111147
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 946 crates/cortexfs-agent-sdk/src/lib.rs
@@ -313,7 +313,7 @@ prod=111095
 120 crates/cortexfs/src/bin/channel/gmail.rs
 102 crates/cortexfs/src/bin/channel/gmail/api.rs
 24 crates/cortexfs/src/bin/channel/gmail/config.rs
-24 crates/cortexfs/src/bin/channel/main.rs
+40 crates/cortexfs/src/bin/channel/main.rs
 105 crates/cortexfs/src/bin/channel/web.rs
 52 crates/cortexfs/src/bin/channel/web/server.rs
 65 crates/cortexfs/src/bin/channel/web/socket.rs
@@ -574,14 +574,15 @@ prod=111095
 149 crates/cortexfs/src/object/residue/audit.rs
 482 crates/cortexfs/src/object/residue/cleanup.rs
 199 crates/cortexfs/src/object/residue/plan.rs
-36 crates/cortexfs/src/object/runner.rs
+38 crates/cortexfs/src/object/runner.rs
 409 crates/cortexfs/src/object/runner/completion.rs
 99 crates/cortexfs/src/object/runner/config.rs
 10 crates/cortexfs/src/object/runner/context.rs
 216 crates/cortexfs/src/object/runner/credentials.rs
-213 crates/cortexfs/src/object/runner/curl.rs
+221 crates/cortexfs/src/object/runner/curl.rs
 386 crates/cortexfs/src/object/runner/requests.rs
 311 crates/cortexfs/src/object/runner/responses.rs
+26 crates/cortexfs/src/object/runner/retry.rs
 384 crates/cortexfs/src/object/runner/routes.rs
 20 crates/cortexfs/src/object/runner/streaming.rs
 87 crates/cortexfs/src/object/runner/streaming/action.rs

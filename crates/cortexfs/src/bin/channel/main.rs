@@ -10,6 +10,7 @@ use std::io::Write as _;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    install_crypto_provider();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -19,6 +20,21 @@ fn main() -> ExitCode {
     }
 }
 
+fn install_crypto_provider() {
+    let _ignored = rustls::crypto::ring::default_provider().install_default();
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     commands::run(config::load()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::install_crypto_provider;
+
+    #[test]
+    fn channel_startup_installs_rustls_provider() {
+        install_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
 }
