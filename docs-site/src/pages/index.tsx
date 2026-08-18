@@ -156,7 +156,7 @@ const zh: Copy = {
   neutralLabel: '供应商中立',
   neutralTitle: '变化的 API 之上，保持一个稳定 ABI。',
   neutralText:
-    'CortexFS 负责路径、对象生命周期、权限与 session 语义；Rig 负责供应商连接和 API 事件适配。供应商细节不会膨胀成新的根目录。',
+    'CortexFS 负责路径、对象生命周期、权限与 session 语义；协议适配层负责供应商连接和 API 事件适配。供应商细节不会膨胀成新的根目录。',
   neutralFootnote: 'root 只包含稳定对象类别',
   quickLabel: '快速开始',
   quickTitle: '三步，从安装包到真实对话。',
@@ -266,7 +266,7 @@ const en: Copy = {
   neutralLabel: 'Provider-neutral by design',
   neutralTitle: 'One stable ABI above changing APIs.',
   neutralText:
-    'CortexFS owns paths, object lifecycle, permissions, and session semantics. Rig owns provider connections and API event adaptation. Provider details never expand into new root directories.',
+    'CortexFS owns paths, object lifecycle, permissions, and session semantics. Its protocol adapters own provider connections and API event adaptation. Provider details never expand into new root directories.',
   neutralFootnote: 'root contains stable object classes only',
   quickLabel: 'Quick start',
   quickTitle: 'From package to a live chat in three steps.',

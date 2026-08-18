@@ -35,10 +35,7 @@ fn main() -> ExitCode {
 
 fn run() -> io::Result<()> {
     let mut options = parse(env::args().skip(1))?;
-    let socket = options
-        .root
-        .join("agent")
-        .join(format!("{}.sock", options.agent));
+    let socket = cortexfs_paths::agent_socket_path(&options.root, &options.agent);
     let workspace = env::current_dir()?;
     if !io::stdin().is_terminal() {
         let mut input = String::new();
@@ -80,6 +77,14 @@ fn run() -> io::Result<()> {
             "/exit" | "/quit" => return Ok(()),
             "/help" => {
                 banner(&options, &workspace);
+            }
+            command if command.split_whitespace().next() == Some("/raw") => {
+                options.raw = raw_mode(command, options.raw)?;
+                writeln!(
+                    io::stderr().lock(),
+                    "ctxchat: raw={}",
+                    if options.raw { "on" } else { "off" }
+                )?;
             }
             "/clear" => {
                 render::clear()?;
@@ -185,21 +190,19 @@ fn helper(options: &Options, workspace: &Path) -> ChatHelper {
 
 fn session_dir(options: &Options) -> PathBuf {
     let uid = nix::unistd::Uid::effective().as_raw();
-    options
-        .root
-        .join("home")
-        .join(uid.to_string())
-        .join("agent")
-        .join(&options.agent)
-        .join("session")
-        .join(&options.session)
+    cortexfs_paths::agent_session_path(
+        &options.root,
+        &uid.to_string(),
+        &options.agent,
+        &options.session,
+    )
 }
 fn messages(options: &Options) -> PathBuf {
     session_dir(options).join("messages.jsonl")
 }
 fn tool_names(root: &Path) -> Vec<String> {
     const MAX_TOOLS: usize = 4096;
-    fs::read_dir(root.join("tool"))
+    fs::read_dir(cortexfs_paths::tool_root_path(root))
         .ok()
         .into_iter()
         .flatten()
@@ -248,7 +251,7 @@ fn validate_name(value: &str) -> io::Result<()> {
 }
 
 fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
-    let mut root = PathBuf::from("/ctx");
+    let mut root = cortexfs_paths::ctx_root();
     let mut agent = None;
     let mut session = "default".to_owned();
     let mut raw = false;
@@ -304,11 +307,38 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
 fn banner(options: &Options, workspace: &Path) {
     let _ignored = writeln!(
         io::stderr().lock(),
-        "ctxchat {}/{}  workspace={}\n/help /new /history /output /tools /status /paste /copy /clear /exit | :load :pin :loads | @path @history:N",
+        "ctxchat {}/{}  workspace={}  raw={}\n/help /raw [on|off] /new /history /output /tools /status /paste /copy /clear /exit | :load :pin :loads | @path @history:N",
         options.agent,
         options.session,
-        workspace.display()
+        workspace.display(),
+        if options.raw { "on" } else { "off" }
     );
+}
+
+fn raw_mode(command: &str, current: bool) -> io::Result<bool> {
+    let mut parts = command.split_whitespace();
+    if parts.next() != Some("/raw") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid /raw command",
+        ));
+    }
+    let next = parts.next();
+    if parts.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: /raw [on|off]",
+        ));
+    }
+    match next {
+        None | Some("toggle") => Ok(!current),
+        Some("on") => Ok(true),
+        Some("off") => Ok(false),
+        Some(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: /raw [on|off]",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -331,6 +361,16 @@ mod tests {
             .map(str::to_owned),
         )?;
         assert_eq!(options.approvals, ["example.echo", "fs.read"]);
+        Ok(())
+    }
+
+    #[test]
+    fn raw_command_toggles_or_selects_mode() -> io::Result<()> {
+        assert!(raw_mode("/raw", false)?);
+        assert!(!raw_mode("/raw", true)?);
+        assert!(raw_mode("/raw on", false)?);
+        assert!(!raw_mode("/raw off", true)?);
+        assert!(raw_mode("/raw nope", false).is_err());
         Ok(())
     }
 }

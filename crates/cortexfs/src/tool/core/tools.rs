@@ -34,11 +34,13 @@ pub struct TshConfigTool;
 
 pub mod config;
 pub mod files;
+pub mod inspect;
 pub mod schemas;
 pub mod shell;
 
 pub use config::*;
 pub(crate) use files::*;
+pub(crate) use inspect::{FsListTool, FsStatTool, run_fs_list_cli, run_fs_stat_cli};
 pub(crate) use schemas::*;
 pub(crate) use shell::*;
 
@@ -46,6 +48,8 @@ pub(crate) use shell::*;
 pub fn core_tool_specs() -> Vec<ToolSpec> {
     vec![
         FsReadTool.spec(),
+        FsListTool.spec(),
+        FsStatTool.spec(),
         FsWriteTool.spec(),
         FsReplaceTool.spec(),
         ShellExecTool.spec(),
@@ -62,6 +66,8 @@ pub fn run_core_tool(
 ) -> Result<bool, io::Error> {
     match name {
         "fs.read" => run_tool(&FsReadTool, invocation, writer).map(|_code| true),
+        "fs.list" => run_tool(&FsListTool, invocation, writer).map(|_code| true),
+        "fs.stat" => run_tool(&FsStatTool, invocation, writer).map(|_code| true),
         "fs.write" => run_tool(&FsWriteTool, invocation, writer).map(|_code| true),
         "fs.replace" => run_tool(&FsReplaceTool, invocation, writer).map(|_code| true),
         "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|_code| true),
@@ -88,6 +94,8 @@ pub fn run_core_tool_cli_with_root(
 ) -> Result<Option<ExitCode>, io::Error> {
     match name {
         "fs.read" => run_fs_read_cli(args, writer).map(Some),
+        "fs.list" => run_fs_list_cli(args, writer).map(Some),
+        "fs.stat" => run_fs_stat_cli(args, writer).map(Some),
         "fs.write" => run_fs_write_cli(args, writer).map(Some),
         "fs.replace" => run_fs_replace_cli(args, writer).map(Some),
         "shell.exec" => run_shell_exec_cli(args, writer).map(Some),

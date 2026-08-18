@@ -2,7 +2,7 @@
   <title id="title">/ctx</title>
   <desc id="desc">CortexFS path wordmark.</desc>
   <rect width="320" height="96" fill="#BCD1CA"/>
-  <path fill="#F9F4E8" d="M24 20C24 12 31 9 42 10l237 3c15 0 22 6 20 17l-3 43c0 10-9 15-20 14L42 85c-13 0-20-6-18-17l3-30c0-7-3-11-3-18Z"/>
-  <text x="58" y="68" fill="#141413" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="70" font-weight="700" letter-spacing="-6">/</text>
-  <text x="111" y="67" fill="#C65E40" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="59" font-weight="900" letter-spacing="-1">ctx</text>
+  <path fill="#FAF9F5" d="M24 20C24 12 31 9 42 10l237 3c15 0 22 6 20 17l-3 43c0 10-9 15-20 14L42 85c-13 0-20-6-18-17l3-30c0-7-3-11-3-18Z"/>
+  <text x="88" y="68" fill="#141413" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="70" font-weight="700" letter-spacing="-6">/</text>
+  <text x="112" y="67" fill="#D97757" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="59" font-weight="900" letter-spacing="-1">ctx</text>
 </svg>

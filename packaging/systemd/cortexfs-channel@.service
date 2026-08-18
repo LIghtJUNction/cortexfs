@@ -1,0 +1,22 @@
+[Unit]
+Description=CortexFS Discord channel adapter for %i
+Documentation=file:/usr/share/doc/cortexfs/docs/channels.md
+After=network-online.target cortexfs.service
+Wants=network-online.target
+Requires=cortexfs.service
+PartOf=cortexfs.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cortexfs-channel discord --config /etc/cortexfs/channels/%i.toml
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=128M
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cortexfs/channels
+
+[Install]
+WantedBy=multi-user.target

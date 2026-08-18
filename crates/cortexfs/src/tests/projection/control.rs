@@ -355,15 +355,22 @@ fn fuse_projection_refuses_to_read_through_symlink_directory() {
 }
 
 #[test]
-fn fuse_projection_refuses_symlink_model_route() {
+fn fuse_projection_hides_symlink_model_route_behind_default() {
     let root = clean_test_dir("fuse-projection-route-symlink");
     let outside = clean_test_dir("fuse-projection-route-symlink-outside");
     assert!(fs::create_dir_all(root.join("model")).is_ok());
-    write_text_file(&outside.join("route"), "fallback: direct\n");
+    write_text_file(&outside.join("route"), "fallback: leaked\n");
     assert!(symlink(outside.join("route"), root.join("model").join("route")).is_ok());
     let projection = FuseProjection::new(&root);
 
-    assert_eq!(projection.read_to_string("model/route"), Err(FuseError::Io));
+    assert_eq!(
+        projection.read_to_string("model/route"),
+        Ok(crate::DEFAULT_MODEL_ROUTE.to_owned())
+    );
+    assert!(matches!(
+        fs::read_to_string(outside.join("route")),
+        Ok(ref content) if content == "fallback: leaked\n"
+    ));
 }
 
 #[test]

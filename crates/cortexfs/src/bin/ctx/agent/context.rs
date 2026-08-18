@@ -44,13 +44,15 @@ pub(crate) fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>,
         format!(
             "uid={}",
             terminal_safe_text(
-                &read_optional_trimmed(&control.join("uid"))?.unwrap_or_else(|| "-".to_owned())
+                &read_optional_trimmed(&cortexfs_paths::control_file_path(&control, "uid"))?
+                    .unwrap_or_else(|| "-".to_owned())
             )
         ),
         format!(
             "gid={}",
             terminal_safe_text(
-                &read_optional_trimmed(&control.join("gid"))?.unwrap_or_else(|| "-".to_owned())
+                &read_optional_trimmed(&cortexfs_paths::control_file_path(&control, "gid"))?
+                    .unwrap_or_else(|| "-".to_owned())
             )
         ),
         format!(
@@ -60,7 +62,8 @@ pub(crate) fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>,
         format!(
             "root={}",
             terminal_safe_text(
-                &read_optional_trimmed(&control.join("root"))?.unwrap_or_else(|| "-".to_owned())
+                &read_optional_trimmed(&cortexfs_paths::control_file_path(&control, "root"))?
+                    .unwrap_or_else(|| "-".to_owned())
             )
         ),
         format!(
@@ -70,7 +73,8 @@ pub(crate) fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>,
         format!(
             "cwd={}",
             terminal_safe_text(
-                &read_optional_trimmed(&control.join("cwd"))?.unwrap_or_else(|| "-".to_owned())
+                &read_optional_trimmed(&cortexfs_paths::control_file_path(&control, "cwd"))?
+                    .unwrap_or_else(|| "-".to_owned())
             )
         ),
     ])
@@ -78,12 +82,13 @@ pub(crate) fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>,
 
 pub(crate) fn agent_status_workspace(root: &Path, name: &str) -> Result<String, CliError> {
     let session = agent_session_name(root, name, None)?;
-    let session_root = ctx_home(root)?
-        .join("agent")
-        .join(name)
-        .join("session")
-        .join(session);
-    Ok(read_optional_trimmed(&session_root.join("workspace"))?.unwrap_or_else(|| "-".to_owned()))
+    let session_root =
+        cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, name).join(session);
+    Ok(read_optional_trimmed(&cortexfs_paths::control_file_path(
+        &session_root,
+        "workspace",
+    ))?)
+    .map(|value| value.unwrap_or_else(|| "-".to_owned()))
 }
 
 pub(crate) fn agent_parent_live_pid(

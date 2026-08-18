@@ -52,6 +52,14 @@ ctx agent ps
 ctx agent chat reviewer
 ctx agent send reviewer --approve example.echo "run the declared echo tool"
 
+ctx terminal create coder [--session default] [--cwd /workspace]
+ctx terminal list
+ctx terminal status terminal-coder-default
+ctx terminal watch terminal-coder-default
+ctx terminal attach terminal-coder-default
+
+ctx provider auth methods PROVIDER
+
 ctx cat agent/coder.d/policy
 ctx set agent/coder.d/cwd /work
 ctx append agent/coder.d/path /ctx/tool
@@ -130,6 +138,15 @@ level socket commands and explicit raw agent modes.
 `ctx agent chat` is the human chat UI over the agent socket. It is not the agent
 terminal and does not enter `tsh`; humans use `ctx agent watch` or
 `ctx agent attach` for the persistent terminal.
+
+`ctx inspect agent/AGENT [--session SESSION]` is the consolidated read-only
+debug view. It prints the Agent definition and control paths, current instance
+summary and receipt presence, selected durable session, model hard limit and
+capabilities, policy and mount paths, and visible-tool count. It derives every
+field from existing controls, supervisor receipts, and session files; it does
+not create an instance, socket, session, or capability cache.
+`ctx agent inspect AGENT [--session SESSION]` is the equivalent agent-domain
+spelling.
 
 `ctx agent send` and `ctx agent chat` accept repeatable
 `--approve TOOL`. In non-raw mode the client answers a hosted SDK
@@ -391,6 +408,11 @@ grant. `ctx agent new --temp` records `life=temp` in either path. `--parent`
 records the ordinary `agent/<name>.d/parent` control value, such as
 `agent:coder session:default run:r1`, so a created worker child has a
 wait/stop-visible parent without adding a separate process table.
+
+Creation derives `agent/<name>.d/perm` from the requested core tools; installed
+legacy manifests without this control default to `rwx` for compatibility. Use
+ordinary Unix inspection and mutation on the marker, for example
+`ls -l /ctx/agent/coder.d/perm` and `chmod 500 /ctx/agent/coder.d/perm`.
 
 `--from` accepts a host-side `agent.yaml` file, a directory containing one,
 or a short profile name. New/apply validates profile fields before materializing
@@ -693,26 +715,49 @@ remaining count reported. Session-derived source/call identifiers are escaped
 for terminal output, field-bounded, and each rendered issue is capped at 256
 characters.
 
+## Terminals
+
+ctx terminal addresses a durable terminal resource rather than an Agent
+definition. list and status inspect session-local metadata, watch joins the PTY
+read-only, and attach joins it with input enabled. PTY bytes and process exit
+facts are appended to the resource events.jsonl stream for replay and debugging.
+
+The current create form is agent-backed so it reuses the existing supervised
+launch path. It does not yet claim a new root /ctx/terminal namespace or a
+detached create bash supervisor; those require a versioned terminal ABI revision.
+
 ## Provider OAuth
 
 `ctx provider oauth` is a host-side credential helper. It does not add a
 `/ctx/provider` namespace and does not expose tokens through model files.
 
 ```text
-ctx provider oauth login PROVIDER [--timeout SECONDS]
+ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]
 ctx provider oauth status PROVIDER
 ctx provider oauth refresh PROVIDER
 ```
 
-`login` reads `/etc/cortexfs/providers.d/*.json`, uses the provider `oauth`
-block, creates a PKCE `S256` authorization request, waits on the configured
-localhost `redirect_uri`, exchanges the authorization code for tokens, and
-stores tokens in the system keychain:
+`login` reads `/etc/cortexfs/providers.d/*.json` and uses the provider `oauth`
+block. The default browser flow creates a PKCE `S256` authorization request,
+waits on the configured localhost `redirect_uri`, and exchanges the code. With
+`--device`, it prints the provider's verification URI and code, then performs
+bounded device polling. Both flows store normalized tokens in the system
+keychain:
 
 ```text
 service=cortexfs:<provider> account=oauth:access
 service=cortexfs:<provider> account=oauth:refresh
 ```
+
+Provider authentication is declared in provider JSON rather than hardcoded in
+the model executable. Inspect the normalized declarations with:
+
+```text
+ctx provider auth methods PROVIDER
+```
+
+The output is `method<TAB>flow<TAB>slot`; it is a host-side projection and does
+not expose credential values or add an `/ctx/identity` namespace.
 
 ## Non-Goals
 
@@ -730,4 +775,5 @@ fallback to another model
 hide runtime errors behind product language
 ```
 
-Those jobs belong to Rig, the agent runtime, tools, or the CortexFS ABI itself.
+Those jobs belong to CortexFS protocol adapters, the agent runtime, tools, or
+the CortexFS ABI itself.

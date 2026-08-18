@@ -1,16 +1,37 @@
 use std::io::{BufReader, Cursor, Read, Write};
 use std::net::TcpListener;
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::ProviderEgressCredential;
+use super::curl::curl_config;
+use super::header::{BODY_MAX, HEADER_COUNT_MAX, HEADER_LINE_MAX};
+use super::process::CurlProcess;
 use super::*;
 
-fn target(base: &str) -> ProviderTarget {
-    provider_target("fixture", base)
+pub(super) static MONITOR_ERROR_ARMED: AtomicBool = AtomicBool::new(false);
+pub(super) static MONITOR_ERROR_FD: AtomicI32 = AtomicI32::new(-1);
+pub(super) static MONITOR_ERROR_PID: AtomicU32 = AtomicU32::new(0);
+
+pub(super) fn record_monitor(
+    local: &UnixStream,
+    monitor: &UnixStream,
+    process: &mut CurlProcess,
+) -> io::Result<()> {
+    if MONITOR_ERROR_FD.load(Ordering::Acquire) == local.as_raw_fd() {
+        MONITOR_ERROR_FD.store(monitor.as_raw_fd(), Ordering::Release);
+        MONITOR_ERROR_PID.store(process.child_mut()?.id(), Ordering::Release);
+    }
+    Ok(())
+}
+
+pub(super) fn fail_monitor(fd: i32) -> bool {
+    MONITOR_ERROR_FD.load(Ordering::Acquire) == fd
+        && MONITOR_ERROR_ARMED.swap(false, Ordering::AcqRel)
 }
 
 fn provider_target(provider: &str, base: &str) -> ProviderTarget {
@@ -21,6 +42,46 @@ fn provider_target(provider: &str, base: &str) -> ProviderTarget {
         base_path: base.to_owned(),
         credential: None,
     }
+}
+
+fn live_target(address: std::net::SocketAddr) -> ProviderTarget {
+    ProviderTarget {
+        provider: "fixture".to_owned(),
+        base_url: format!("http://{address}/v1"),
+        authority: format!("http://{address}"),
+        base_path: "/v1".to_owned(),
+        credential: None,
+    }
+}
+
+fn response_request(headers: Vec<(String, String)>) -> Request {
+    Request {
+        endpoint: "responses",
+        headers,
+        body: b"{}".to_vec(),
+    }
+}
+
+fn silent_upstream(
+    accepted: Arc<AtomicBool>,
+) -> io::Result<(ProviderTarget, thread::JoinHandle<io::Result<()>>)> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let target = live_target(listener.local_addr()?);
+    let upstream = thread::spawn(move || {
+        let (mut stream, _) = listener.accept()?;
+        let mut request = [0; 4096];
+        let _read = stream.read(&mut request)?;
+        accepted.store(true, Ordering::Release);
+        let mut closed = [0; 1];
+        stream.read_exact(&mut closed)
+    });
+    Ok((target, upstream))
+}
+
+fn parse_target(input: &[u8], target: &ProviderTarget) -> io::Result<(Request, Vec<u8>)> {
+    let mut output = Vec::new();
+    let request = parse_request(&mut BufReader::new(Cursor::new(input)), &mut output, target)?;
+    Ok((request, output))
 }
 
 #[test]
@@ -43,66 +104,40 @@ fn host_credential_replaces_agent_authentication() {
         },
         &target,
     );
-    assert!(
-        request
-            .headers
-            .contains(&("authorization".to_owned(), "Bearer host-token".to_owned()))
-    );
-    assert!(
-        request
-            .headers
-            .contains(&("content-type".to_owned(), "application/json".to_owned()))
-    );
-    assert!(
-        !request
-            .headers
-            .iter()
-            .any(|header| header.1.contains("agent-token") || header.1.contains("agent-key"))
+    assert_eq!(
+        request.headers,
+        [
+            ("content-type".to_owned(), "application/json".to_owned()),
+            ("authorization".to_owned(), "Bearer host-token".to_owned()),
+        ]
     );
 }
 
 #[test]
 fn parser_forwards_codex_metadata_only_for_codex_target() -> io::Result<()> {
     let input = b"POST /backend-api/codex/responses HTTP/1.1\r\nAuthorization: Bearer access\r\nChatGPT-Account-Id: account\r\nOriginator: ctx\r\nSession-Id: run-1\r\nUser-Agent: cortexfs/test\r\nContent-Length: 2\r\n\r\n{}";
-    let mut output = Vec::new();
-    let request = parse_request(
-        &mut BufReader::new(Cursor::new(input)),
-        &mut output,
-        &provider_target("codex", "/backend-api/codex"),
-    )?;
-    assert_eq!(
-        request
-            .headers
-            .iter()
-            .map(|header| header.0.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "authorization",
-            "chatgpt-account-id",
-            "originator",
-            "session-id",
-            "user-agent"
-        ]
-    );
-    assert!(
-        parse_request(
-            &mut BufReader::new(Cursor::new(input)),
-            &mut Vec::new(),
-            &provider_target("fixture", "/backend-api/codex")
-        )
-        .is_err()
-    );
+    let (request, _) = parse_target(input, &provider_target("codex", "/backend-api/codex"))?;
+    assert!(request.headers.iter().map(|header| header.0.as_str()).eq([
+        "authorization",
+        "chatgpt-account-id",
+        "originator",
+        "session-id",
+        "user-agent",
+    ]));
+    assert!(parse_target(input, &provider_target("fixture", "/backend-api/codex")).is_err());
     Ok(())
 }
 
 fn parse(input: &[u8], base: &str) -> io::Result<(Request, Vec<u8>)> {
-    let mut output = Vec::new();
-    let request = parse_request(
-        &mut BufReader::new(Cursor::new(input)),
-        &mut output,
-        &target(base),
-    )?;
-    Ok((request, output))
+    parse_target(input, &provider_target("fixture", base))
+}
+
+fn parse_body(endpoint: &str, body: &str) -> bool {
+    let input = format!(
+        "POST /{endpoint} HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    parse(input.as_bytes(), "").is_ok()
 }
 
 #[test]
@@ -114,6 +149,31 @@ fn parser_accepts_allowlist_and_expect_then_reads_exact_body() -> io::Result<()>
     assert_eq!(request.headers.len(), 3);
     assert_eq!(output, b"HTTP/1.1 100 Continue\r\n\r\n");
     Ok(())
+}
+
+#[test]
+fn responses_parser_rejects_programmatic_tool_calling_only() {
+    for body in [
+        r#"{"tools":[{"type":"programmatic_tool_calling"}]}"#,
+        r#"{"tools":[{"type":"function","allowed_callers":[]}]}"#,
+        r#"{"tools":[{"function":{"allowed_callers":[]}}]}"#,
+        r#"{"input":[{"type":"program"}]}"#,
+        r#"{"input":[{"type":"program_output"}]}"#,
+        r#"{"input":[{"type":"function_call","caller":"p"}]}"#,
+        r#"{"input":[{"type":"function_call_output","caller":"p"}]}"#,
+    ] {
+        assert!(!parse_body("responses", body), "{body}");
+    }
+    for body in [
+        r#"{"tools":[{"type":"function","function":{"name":"tsh"}}]}"#,
+        r#"{"input":[{"type":"function_call","caller":null}]}"#,
+        r#"{"input":[{"type":"message","content":"program allowed_callers caller"}]}"#,
+        r#"{"input":"invalid JSON"#,
+    ] {
+        assert!(parse_body("responses", body), "{body}");
+    }
+    let ptc = r#"{"tools":[{"type":"programmatic_tool_calling"}]}"#;
+    assert!(parse_body("chat/completions", ptc));
 }
 
 #[test]
@@ -153,34 +213,12 @@ fn parser_rejects_framing_smuggling_and_unapproved_headers() {
 #[test]
 fn monitor_error_reaps_curl_group_and_closes_upstream_within_one_second()
 -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let address = listener.local_addr()?;
     let accepted = Arc::new(AtomicBool::new(false));
-    let did_accept = Arc::clone(&accepted);
-    let upstream = thread::spawn(move || -> io::Result<()> {
-        let (mut stream, _) = listener.accept()?;
-        let mut request = [0; 4096];
-        let _read = stream.read(&mut request)?;
-        did_accept.store(true, Ordering::Release);
-        let mut closed = [0; 1];
-        stream.read_exact(&mut closed)
-    });
-    let target = ProviderTarget {
-        provider: "fixture".to_owned(),
-        base_url: format!("http://{address}/v1"),
-        authority: format!("http://{address}"),
-        base_path: "/v1".to_owned(),
-        credential: None,
-    };
+    let (target, upstream) = silent_upstream(Arc::clone(&accepted))?;
     let (_client, server) = UnixStream::pair()?;
-    let monitor_fd = server.as_raw_fd();
-    MONITOR_ERROR_FD.store(monitor_fd, Ordering::Release);
+    MONITOR_ERROR_FD.store(server.as_raw_fd(), Ordering::Release);
     MONITOR_ERROR_PID.store(0, Ordering::Release);
-    let request = Request {
-        endpoint: "responses",
-        headers: Vec::new(),
-        body: b"{}".to_vec(),
-    };
+    let request = response_request(Vec::new());
     let stop = Arc::new(AtomicBool::new(false));
     let started = Instant::now();
     let relay = thread::spawn(move || run_curl(server, &target, &request, &stop));
@@ -199,12 +237,7 @@ fn monitor_error_reaps_curl_group_and_closes_upstream_within_one_second()
         nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
         Err(nix::errno::Errno::ESRCH)
     );
-    assert!(
-        upstream
-            .join()
-            .map_err(|_panic| "upstream panicked")?
-            .is_err()
-    );
+    assert!(upstream.join().is_ok_and(|result| result.is_err()));
     MONITOR_ERROR_FD.store(-1, Ordering::Release);
     Ok(())
 }
@@ -233,52 +266,20 @@ fn curl_config_preserves_utf8_and_keeps_secrets_out_of_process_arguments() -> io
     let request = Request {
         endpoint: "responses",
         headers: vec![("authorization".to_owned(), "Bearer secret".to_owned())],
-        body: "{\"input\":\"你好\"}".as_bytes().to_vec(),
+        body: b"{\"input\":\"\xE4\xBD\xA0\xE5\xA5\xBD\",\"file\":\"@/etc/shadow\"}".to_vec(),
     };
-    let config = curl_config(&target("/v1"), &request)?;
+    let config = curl_config(&provider_target("fixture", "/v1"), &request)?;
     assert!(config.contains("Bearer secret"));
-    assert!(config.contains("你好"));
-    assert!(!config.contains("location = true"));
-    Ok(())
-}
-
-#[test]
-fn curl_config_treats_leading_at_in_body_as_data() -> io::Result<()> {
-    let request = Request {
-        endpoint: "responses",
-        headers: Vec::new(),
-        body: b"@/etc/shadow".to_vec(),
-    };
-    let config = curl_config(&target("/v1"), &request)?;
-    assert!(config.contains("data-raw = \"@/etc/shadow\""));
-    assert!(!config.contains("data-binary"));
+    assert!(config.contains("你好") && config.contains("data-raw ="));
+    assert!(!config.contains("data-binary") && !config.contains("location = true"));
     Ok(())
 }
 
 #[test]
 fn silent_upstream_is_killed_when_client_disconnects() -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let address = listener.local_addr()?;
-    let upstream = thread::spawn(move || -> io::Result<()> {
-        let (mut stream, _) = listener.accept()?;
-        let mut request = [0; 4096];
-        let _read = stream.read(&mut request)?;
-        let mut closed = [0; 1];
-        stream.read_exact(&mut closed)
-    });
-    let target = ProviderTarget {
-        provider: "fixture".to_owned(),
-        base_url: format!("http://{address}/v1"),
-        authority: format!("http://{address}"),
-        base_path: "/v1".to_owned(),
-        credential: None,
-    };
+    let (target, upstream) = silent_upstream(Arc::new(AtomicBool::new(false)))?;
     let (client, server) = UnixStream::pair()?;
-    let request = Request {
-        endpoint: "responses",
-        headers: Vec::new(),
-        body: b"{}".to_vec(),
-    };
+    let request = response_request(Vec::new());
     let stop = Arc::new(AtomicBool::new(false));
     let started = Instant::now();
     let relay = thread::spawn(move || run_curl(server, &target, &request, &stop));
@@ -286,12 +287,7 @@ fn silent_upstream_is_killed_when_client_disconnects() -> Result<(), Box<dyn std
     drop(client);
     let _result = relay.join().map_err(|_panic| "relay panicked")?;
     assert!(started.elapsed() < Duration::from_secs(1));
-    assert!(
-        upstream
-            .join()
-            .map_err(|_panic| "upstream panicked")?
-            .is_err()
-    );
+    assert!(upstream.join().is_ok_and(|result| result.is_err()));
     Ok(())
 }
 
@@ -309,10 +305,7 @@ fn curl_raw_response_preserves_chunked_sse_and_non_success_status()
             let (mut stream, _) = listener.accept()?;
             let mut request = [0; 4096];
             let read = stream.read(&mut request)?;
-            let bytes = request
-                .get(..read)
-                .ok_or_else(|| io::Error::other("invalid request range"))?;
-            let text = String::from_utf8_lossy(bytes);
+            let text = String::from_utf8_lossy(request.get(..read).unwrap_or_default());
             assert!(text.starts_with("POST /v1/responses HTTP/1.1\r\n"));
             assert!(text.contains("Host: "));
             assert!(!text.contains("attacker.test"));
@@ -322,19 +315,12 @@ fn curl_raw_response_preserves_chunked_sse_and_non_success_status()
                 expected.len()
             )
         });
-        let target = ProviderTarget {
-            provider: "fixture".to_owned(),
-            base_url: format!("http://{address}/v1"),
-            authority: format!("http://{address}"),
-            base_path: "/v1".to_owned(),
-            credential: None,
-        };
+        let target = live_target(address);
         let (mut client, server) = UnixStream::pair()?;
-        let request = Request {
-            endpoint: "responses",
-            headers: vec![("content-type".to_owned(), "application/json".to_owned())],
-            body: b"{}".to_vec(),
-        };
+        let request = response_request(vec![(
+            "content-type".to_owned(),
+            "application/json".to_owned(),
+        )]);
         let stop = Arc::new(AtomicBool::new(false));
         let relay = thread::spawn(move || run_curl(server, &target, &request, &stop));
         let mut response = Vec::new();

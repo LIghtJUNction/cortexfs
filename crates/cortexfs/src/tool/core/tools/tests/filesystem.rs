@@ -18,6 +18,65 @@ pub(crate) fn fs_read_tool_emits_file_content() {
 }
 
 #[test]
+pub(crate) fn fs_list_tool_emits_sorted_bounded_metadata() {
+    let dir = std::env::temp_dir().join(format!("cortexfs-fs-list-{}", std::process::id()));
+    let _ignored = fs::remove_dir_all(&dir);
+    assert!(fs::create_dir_all(&dir).is_ok());
+    assert!(fs::write(dir.join("b.txt"), "b").is_ok());
+    assert!(fs::create_dir_all(dir.join("a-dir")).is_ok());
+    let invocation = ToolInvocation::new(
+        "r1",
+        format!(r#"{{"path":"{}","max_entries":1}}"#, dir.display()),
+    );
+    let mut output = Vec::new();
+    assert!(run_tool(&FsListTool, &invocation, &mut output).is_ok());
+    let text = String::from_utf8(output).unwrap_or_default();
+    assert!(text.contains(r#""tool":"fs.list""#));
+    assert!(text.contains("a-dir"));
+    assert!(!text.contains("b.txt"));
+    let _ignored = fs::remove_dir_all(dir);
+}
+
+#[test]
+pub(crate) fn fs_list_tool_rejects_symlink_directory() {
+    let dir = std::env::temp_dir().join(format!("cortexfs-fs-list-link-{}", std::process::id()));
+    let outside =
+        std::env::temp_dir().join(format!("cortexfs-fs-list-outside-{}", std::process::id()));
+    let _ignored = fs::remove_dir_all(&dir);
+    let _ignored = fs::remove_dir_all(&outside);
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(symlink(&outside, &dir).is_ok() || fs::create_dir_all(&dir).is_ok());
+    let invocation = ToolInvocation::new("r1", format!(r#"{{"path":"{}"}}"#, dir.display()));
+    let mut output = Vec::new();
+    assert!(run_tool(&FsListTool, &invocation, &mut output).is_ok());
+    assert!(
+        String::from_utf8(output)
+            .unwrap_or_default()
+            .contains(r#""code":"EACCES""#)
+    );
+    let _ignored = fs::remove_dir_all(dir);
+    let _ignored = fs::remove_dir_all(outside);
+}
+
+#[test]
+pub(crate) fn fs_stat_tool_reports_symlink_without_following() {
+    let dir = std::env::temp_dir().join(format!("cortexfs-fs-stat-{}", std::process::id()));
+    let target = dir.join("target");
+    let link = dir.join("link");
+    let _ignored = fs::remove_dir_all(&dir);
+    assert!(fs::create_dir_all(&dir).is_ok());
+    assert!(fs::write(&target, "secret").is_ok());
+    assert!(symlink(&target, &link).is_ok());
+    let invocation = ToolInvocation::new("r1", format!(r#"{{"path":"{}"}}"#, link.display()));
+    let mut output = Vec::new();
+    assert!(run_tool(&FsStatTool, &invocation, &mut output).is_ok());
+    let text = String::from_utf8(output).unwrap_or_default();
+    assert!(text.contains(r#"\"type\":\"symlink\""#));
+    assert!(!text.contains("secret"));
+    let _ignored = fs::remove_dir_all(dir);
+}
+
+#[test]
 pub(crate) fn fs_read_tool_refuses_symlink_targets() {
     let dir = std::env::temp_dir().join(format!("cortexfs-fs-read-symlink-{}", std::process::id()));
     let outside = std::env::temp_dir().join(format!(

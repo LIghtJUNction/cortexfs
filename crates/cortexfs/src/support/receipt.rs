@@ -1,3 +1,7 @@
+#![expect(
+    unreachable_pub,
+    reason = "private receipt submodules expose items only through crate-visible reexports"
+)]
 #![cfg_attr(
     not(test),
     expect(
@@ -15,6 +19,15 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
 use super::plain::{open_directory_at, open_plain_directory, proc_fd_path};
+
+mod entry;
+#[cfg(test)]
+mod hook;
+mod park;
+pub(crate) use entry::{EntryKind, EntryReceipt, entry_matches, receipt_at};
+#[cfg(test)]
+pub(crate) use hook::{ParkHook, set_park_hook};
+pub(crate) use park::{park_entry, publish_entry, remove_parked_entry, restore_entry};
 
 const QUARANTINE_BYTES: usize = 32;
 const CHILD_BYTES: usize = 32;

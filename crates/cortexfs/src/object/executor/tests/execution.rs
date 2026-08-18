@@ -1,3 +1,25 @@
+struct OverlayTestDir(tempfile::TempDir);
+
+impl OverlayTestDir {
+    fn new() -> std::io::Result<Self> {
+        tempfile::Builder::new()
+            .prefix("cfs-atl-overlay-write-")
+            .tempdir()
+            .map(Self)
+    }
+
+    fn path(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+impl Drop for OverlayTestDir {
+    fn drop(&mut self) {
+        let work = self.0.path().join("work/work");
+        let _ignored = fs::set_permissions(work, fs::Permissions::from_mode(0o700));
+    }
+}
+
 #[test]
 fn agent_tool_call_executes_visible_tsh_for_search_and_load()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -214,10 +236,11 @@ fn tool_bwrap_has_no_control_environment_without_host_control()
 }
 
 #[test]
-fn agent_tool_process_cancellation_terminates_process_group() {
-    let root = short_unique_temp_path("tool-cancel");
-    assert!(fs::create_dir_all(&root).is_ok());
-    let leaked = root.join("leaked");
+fn agent_tool_process_cancellation_terminates_process_group() -> std::io::Result<()> {
+    let root = tempfile::Builder::new()
+        .prefix("cfs-tool-cancel-")
+        .tempdir()?;
+    let leaked = root.path().join("leaked");
     let mut command = std::process::Command::new("/bin/sh");
     command.args([
         "-c",
@@ -231,17 +254,17 @@ fn agent_tool_process_cancellation_terminates_process_group() {
     assert_eq!(result, Err(ExecError::new("tool cancelled")));
     thread::sleep(Duration::from_millis(100));
     assert!(!leaked.exists());
+    Ok(())
 }
 
 #[test]
 fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn std::error::Error>>
 {
-    let root = short_unique_temp_path("atl-overlay-write");
-    let _ignored = fs::remove_dir_all(&root);
-    let workspace = root.join("workspace-lower");
-    let source = root.join("source");
-    let upper = root.join("upper");
-    let work = root.join("work");
+    let root = OverlayTestDir::new()?;
+    let workspace = root.path().join("workspace-lower");
+    let source = root.path().join("source");
+    let upper = root.path().join("upper");
+    let work = root.path().join("work");
     fs::create_dir_all(&source)?;
     fs::create_dir_all(&workspace)?;
     fs::create_dir_all(&upper)?;
@@ -249,14 +272,14 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
     let home = source.join("home/1000/agent/coder");
     fs::create_dir_all(&home)?;
     fs::write(workspace.join("README.md"), "lower\n")?;
-    let tool = root.join("write-workspace");
+    let tool = root.path().join("write-workspace");
     write_executable_script(
         &tool,
         "#!/bin/sh\nprintf upper-write > /workspace/generated.txt\nprintf ok\n",
     )?;
     let tool_executable = open_executable_no_follow(&tool)?;
     let config = AgentModelRunConfig {
-        ctx_root: root.clone(),
+        ctx_root: root.path().to_path_buf(),
         source: source.clone(),
         ..test_agent_run_config()
     };
@@ -304,7 +327,6 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
     assert_eq!(fs::read_to_string(upper_file)?, "upper-write");
     assert_eq!(fs::read_to_string(workspace.join("README.md"))?, "lower\n");
 
-    let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -803,7 +825,31 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 }
 use super::runtime::test_agent_run_config;
 use super::*;
-use crate::object::executor::exec::{ToolStdout, authorized_tool_target, parse_tool_stdout};
+use crate::object::executor::exec::{
+    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout,
+};
+use std::process::Command;
+
+#[test]
+fn passthrough_tool_output_accepts_raw_stdout_and_reports_stderr()
+-> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg("printf 'workspace\\n'")
+        .output()?;
+    assert_eq!(finish_agent_tool_output(&output, "tsh")?, "workspace\n");
+
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg("printf 'missing tool\\n' >&2; exit 7")
+        .output()?;
+    let error = finish_agent_tool_output(&output, "tsh")
+        .err()
+        .ok_or_else(|| std::io::Error::other("failed tsh must be reported"))?;
+    assert!(error.message().contains("missing tool"));
+    assert!(error.message().contains("exit status: 7"));
+    Ok(())
+}
 
 #[test]
 fn authorized_tool_target_maps_backing_source_tiers_under_ctx() {

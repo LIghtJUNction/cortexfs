@@ -1,12 +1,10 @@
 use crate::object::bootstrap::validate_object_control_content;
-#[cfg(test)]
-use crate::object::metadata::tool_exec_metadata;
 use crate::object::present;
 use crate::object::receipt::{
-    EntryKind, EntryReceipt, InstallReceiptData, entry_matches, receipt_for, verify_executable,
-    write_install_receipt,
+    InstallReceiptData, receipt_for, verify_executable, write_install_receipt,
 };
 use crate::support::plain::{open_plain_directory, open_plain_file, write_text_file_at};
+use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches};
 use crate::{
     AgentWindowSetting, MountTable, ObjectClass, PolicyV0, is_model_alias, is_model_name,
     is_object_name, policy_subject_from_label,
@@ -15,8 +13,6 @@ use semver::{Version, VersionReq};
 use serde::Deserialize;
 use std::cell::Cell;
 use std::fs;
-#[cfg(test)]
-use std::io::Write;
 use std::io::{self, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -25,13 +21,15 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V1: &str = "cortexfs.object/v1";
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V2: &str = "cortexfs.object/v2";
 const MAX_OBJECT_MANIFEST_BYTES: u64 = 1024 * 1024;
-const TOOL_INSTALL_CONTROLS: &[&str] = &["description", "schema", "cap", "policy", "mcp"];
+const TOOL_INSTALL_CONTROLS: &[&str] =
+    &["description", "schema", "program", "cap", "policy", "mcp"];
 const TOOL_REQUIRED_CONTROLS: &[&str] = &["description", "schema", "cap", "policy"];
 const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "owner",
     "uid",
     "gid",
     "groups",
+    "perm",
     "label",
     "iso",
     "parent",
@@ -45,6 +43,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "window",
     "abi",
     "approval",
+    "loop",
     "tools",
     "system.md",
     "prompt.template.md",
@@ -286,7 +285,7 @@ fn publish_stage(
     let fault = take_install_fault();
     if fault == 1 {
         #[cfg(test)]
-        replace_published_control_for_test(class, control_name)?;
+        testhelpers::replace_published_control_for_test(class, control_name)?;
     }
     if !entry_matches(class, control_name, control_receipt, EntryKind::Directory) {
         return Err(InstallError::unavailable(
@@ -295,7 +294,7 @@ fn publish_stage(
     }
     if fault == 5 {
         #[cfg(test)]
-        replace_published_control_for_test(class, control_name)?;
+        testhelpers::replace_published_control_for_test(class, control_name)?;
     }
     let exec_result = if matches!(fault, 0 | 1 | 5 | 6 | 7) {
         rename_noreplace(&staged.directory, "executable", class, executable_name)
@@ -316,7 +315,7 @@ fn publish_stage(
     }
     if matches!(fault, 6 | 7) {
         #[cfg(test)]
-        replace_published_executable_for_test(class, executable_name)?;
+        testhelpers::replace_published_executable_for_test(class, executable_name)?;
     }
     if !entry_matches(
         class,
@@ -438,7 +437,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
             )));
         }
         let validated_value = if class == ObjectClass::Agent
-            && matches!(name.as_str(), "tools" | "window")
+            && matches!(name.as_str(), "tools" | "window" | "perm")
             && !value.ends_with('\n')
         {
             format!("{value}\n")
@@ -560,11 +559,18 @@ pub(crate) fn install_class_path(
     tier: InstallTier,
 ) -> Result<PathBuf, InstallError> {
     let directory = match (class, tier) {
-        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => root
-            .join("home")
-            .join(nix::unistd::Uid::effective().as_raw().to_string())
-            .join(class.as_str()),
-        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => root.join(class.as_str()),
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => {
+            cortexfs_paths::object_root_path(
+                &cortexfs_paths::ctx_home_path(
+                    root,
+                    &nix::unistd::Uid::effective().as_raw().to_string(),
+                ),
+                class.as_str(),
+            )
+        }
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => {
+            cortexfs_paths::object_root_path(root, class.as_str())
+        }
         (ObjectClass::Model, _) => {
             return Err(InstallError::invalid(
                 "model object installation is unsupported",
@@ -623,10 +629,16 @@ fn write_manifest_controls(
             InstallError::unavailable(format!("cannot write object control {name}: {error}"))
         })?;
     }
-    if class == ObjectClass::Agent && !manifest.controls.contains_key("window") {
-        write_text_file_at(control, "window", "auto\n", 0o644).map_err(|error| {
-            InstallError::unavailable(format!("cannot write object control window: {error}"))
-        })?;
+    if class == ObjectClass::Agent {
+        for (name, content) in [("window", "auto\n"), ("perm", "rwx\n")] {
+            if !manifest.controls.contains_key(name) {
+                write_text_file_at(control, name, content, 0o644).map_err(|error| {
+                    InstallError::unavailable(format!(
+                        "cannot write object control {name}: {error}"
+                    ))
+                })?;
+            }
+        }
     }
     let runtime: &[(&str, &str)] = if class == ObjectClass::Tool {
         &[("status", "idle\n"), ("log", "")]
@@ -785,7 +797,7 @@ fn rollback_control(
 ) -> Result<(), InstallError> {
     if fault == 2 {
         #[cfg(test)]
-        replace_published_control_for_test(class, name)?;
+        testhelpers::replace_published_control_for_test(class, name)?;
     }
     rename_noreplace(class, name, stage, "rolled-back-control").map_err(|error| {
         InstallError::unavailable(format!(
@@ -794,7 +806,7 @@ fn rollback_control(
     })?;
     if fault == 3 {
         #[cfg(test)]
-        replace_parked_control_for_test(stage)?;
+        testhelpers::replace_parked_control_for_test(stage)?;
     }
     if entry_matches(stage, "rolled-back-control", receipt, EntryKind::Directory) {
         return Ok(());
@@ -819,7 +831,7 @@ fn rollback_executable(
     })?;
     if fault == 7 {
         #[cfg(test)]
-        create_test_executable(class, name)?;
+        testhelpers::create_test_executable(class, name)?;
         #[cfg(test)]
         rename_noreplace(class, name, stage, "recreated-executable").map_err(|error| {
             InstallError::unavailable(format!(
@@ -840,59 +852,6 @@ fn rollback_executable(
     ))
 }
 
-#[cfg(test)]
-fn create_test_executable(class: &fs::File, name: &str) -> Result<(), InstallError> {
-    let fd = nix::fcntl::openat(
-        class,
-        name,
-        nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_EXCL
-            | nix::fcntl::OFlag::O_WRONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW,
-        nix::sys::stat::Mode::from_bits_truncate(0o755),
-    )
-    .map_err(|error| {
-        InstallError::unavailable(format!("cannot create test executable: {error}"))
-    })?;
-    let mut file = fs::File::from(fd);
-    file.write_all(b"#!/bin/sh\nprintf replacement\n")
-        .map_err(|error| {
-            InstallError::unavailable(format!("cannot write test executable: {error}"))
-        })
-}
-
-#[cfg(test)]
-fn replace_published_executable_for_test(class: &fs::File, name: &str) -> Result<(), InstallError> {
-    rename_noreplace(class, name, class, ".captured-executable").map_err(|error| {
-        InstallError::unavailable(format!("cannot capture test executable: {error}"))
-    })?;
-    create_test_executable(class, name)
-}
-
-#[cfg(test)]
-fn replace_published_control_for_test(class: &fs::File, name: &str) -> Result<(), InstallError> {
-    rename_noreplace(class, name, class, ".captured-controls").map_err(|error| {
-        InstallError::unavailable(format!("cannot capture test controls: {error}"))
-    })?;
-    nix::sys::stat::mkdirat(class, name, nix::sys::stat::Mode::from_bits_truncate(0o755)).map_err(
-        |error| InstallError::unavailable(format!("cannot create test replacement: {error}")),
-    )
-}
-
-#[cfg(test)]
-fn replace_parked_control_for_test(stage: &fs::File) -> Result<(), InstallError> {
-    rename_noreplace(
-        stage,
-        "rolled-back-control",
-        stage,
-        "captured-rolled-back-control",
-    )
-    .map_err(|error| {
-        InstallError::unavailable(format!("cannot capture parked controls: {error}"))
-    })?;
-    mkdirat(stage, "rolled-back-control", 0o700)
-}
-
 fn install_collision(error: &io::Error) -> InstallError {
     if error.kind() == io::ErrorKind::AlreadyExists {
         InstallError::unavailable("object already exists")
@@ -902,8 +861,13 @@ fn install_collision(error: &io::Error) -> InstallError {
 }
 
 #[cfg(test)]
+#[path = "install/tests/helpers.rs"]
+mod testhelpers;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::object::metadata::tool_exec_metadata;
     use crate::object::receipt::inspect_object;
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
@@ -995,18 +959,19 @@ mod tests {
         assert!(unknown.is_err());
 
         let (_root, executable, digest) = fixture()?;
-        let mut value: serde_json::Value =
+        let mut manifest: ObjectManifest =
             serde_json::from_str(&tool_manifest(&executable, &digest))?;
-        value
-            .get_mut("controls")
-            .and_then(serde_json::Value::as_object_mut)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing controls"))?
-            .insert(
-                "status".to_owned(),
-                serde_json::Value::String("idle".to_owned()),
-            );
-        let manifest: ObjectManifest = serde_json::from_value(value)?;
+        manifest
+            .controls
+            .insert("status".to_owned(), "idle".to_owned());
         assert!(validate_manifest(&manifest).is_err());
+        manifest.controls.remove("status");
+        for (program, valid) in [(r#"{"type":"object"}"#, true), ("{", false)] {
+            manifest
+                .controls
+                .insert("program".to_owned(), program.to_owned());
+            assert_eq!(validate_manifest(&manifest).is_ok(), valid);
+        }
 
         let mut missing: ObjectManifest =
             serde_json::from_str(&tool_manifest(&executable, &digest))?;

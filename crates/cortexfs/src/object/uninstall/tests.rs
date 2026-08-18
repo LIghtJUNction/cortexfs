@@ -1,9 +1,10 @@
 use super::{restore_exact, uninstall_object, uninstall_with};
 use crate::ObjectClass;
 use crate::object::install::{InstallTier, install_object};
-use crate::object::receipt::{EntryKind, EntryReceipt, inspect_object};
+use crate::object::receipt::inspect_object;
 use crate::object::residue::{ResidueOccupancy, audit_residue};
 use crate::support::plain::open_plain_directory;
+use crate::support::receipt::{EntryKind, EntryReceipt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;

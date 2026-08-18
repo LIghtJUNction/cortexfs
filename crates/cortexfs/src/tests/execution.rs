@@ -1,9 +1,14 @@
 use super::*;
+use crate::reference::bootstrap::ensure_runtime_models_from;
 use serde_json::Value;
 
 fn reference_tree(name: &str) -> TestDir {
     let root = super::reference_tree(name);
-    let models = crate::ensure_runtime_models(&root);
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    assert!(fs::create_dir_all(&providers).is_ok());
+    assert!(fs::create_dir_all(&cache).is_ok());
+    let models = ensure_runtime_models_from(&root, &providers, &cache);
     assert!(models.is_ok(), "{models:?}");
     root
 }

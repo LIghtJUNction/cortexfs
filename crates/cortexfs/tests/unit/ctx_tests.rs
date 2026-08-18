@@ -10,7 +10,8 @@ use super::{
     absolute_existing_path, adopt_default_source_root, agent_apply, agent_bwrap_args,
     agent_chat_request_socket,
     agent_chat_runtime_socket, agent_chat_socket_systemd_command, agent_chat_unit,
-    agent_child_rows, agent_env_lines, agent_host_mount_source, agent_lifecycle_tool_command,
+    agent_child_rows, agent_env_lines, agent_host_mount_source, agent_inspect_lines,
+    agent_lifecycle_tool_command,
     agent_lifecycle_tool_selected, agent_new, agent_new_args_from_profile, agent_new_host_fallback,
     agent_new_request_json, agent_runtime_context_matches_values, agent_send_request_json,
     agent_session_archive, agent_session_gc, agent_start_mounts_with_default_source,
@@ -49,8 +50,8 @@ use super::{
     set_gc_delete_fault_for_test, set_gc_delete_sync_fault_for_test,
     set_gc_list_publish_replacement_for_test, set_gc_list_rollback_replacement_for_test,
     set_gc_source_claim_fault_for_test, set_profile_tools_policy_fault, shell_quote_arg,
-    socket_bind_path, stream_socket_request, stream_terminal_socket, system_agent_runtime_socket,
-    system_agent_socket_command, system_agent_socket_unit, systemctl_user_command, temp_file_name,
+    socket_bind_path, stream_socket_request, stream_terminal_socket, system_agent_socket_command,
+    systemctl_user_command, temp_file_name,
     terminal_connect_cli_error, terminal_safe_text, terminal_socket_exists, waiting_diagnostic,
     write_agent_control_plain, write_agent_session_plain,
 };
@@ -63,7 +64,7 @@ use cortexfs::{
     DEFAULT_WORKER_MODEL, EventStreamIssue, MessageStreamIssue, ModelCapabilityIssue,
     ModelDriverRouteError, SESSION_REQUIRED_FILES, SessionControlKind, SessionIndexKind,
     ToolSchemaIssue, columnar, derive_agent_runtime_view, ensure_reference_tree,
-    ensure_runtime_models, install_executable_object_wrapper, parse_abi_path,
+    install_executable_object_wrapper, parse_abi_path,
 };
 use std::cell::Cell;
 use std::fs;

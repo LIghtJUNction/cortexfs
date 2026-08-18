@@ -38,7 +38,8 @@ fn socket_request_parser_accepts_stable_request_frames() {
             scope: SocketSessionScope::Shared,
             cwd: Some("/work".to_owned()),
             workspace: Some("/repo".to_owned()),
-            input: "hello".to_owned()
+            input: "hello".to_owned(),
+            event: None
         })
     );
     assert_eq!(
@@ -64,6 +65,12 @@ fn socket_request_parser_accepts_stable_request_frames() {
         parse_socket_request_frame(r#"{"op":"ping"}"#),
         Ok(SocketRequest::Ping)
     );
+    assert_eq!(
+        parse_socket_request_frame(r#"{"op":"status","session":"default"}"#),
+        Ok(SocketRequest::Status {
+            session: "default".to_owned()
+        })
+    );
 }
 
 #[test]
@@ -76,7 +83,8 @@ fn socket_request_parser_defaults_session_and_scope() {
             scope: SocketSessionScope::Private,
             cwd: None,
             workspace: None,
-            input: "hello".to_owned()
+            input: "hello".to_owned(),
+            event: None
         })
     );
     assert_eq!(
@@ -86,7 +94,46 @@ fn socket_request_parser_defaults_session_and_scope() {
             after: None
         })
     );
+    assert_eq!(
+        parse_socket_request_frame(r#"{"op":"status"}"#),
+        Ok(SocketRequest::Status {
+            session: "default".to_owned()
+        })
+    );
     assert_eq!(SocketSessionScope::Temp.as_str(), "temp");
+}
+
+#[test]
+fn socket_request_parser_accepts_interaction_input_frames() {
+    assert_eq!(
+        parse_socket_request_frame(
+            r#"{"abi":"cortexfs.interaction/v1","payload":{"direction":"request","value":{"type":"input","request_id":"web-1","session":"chat-1","scope":"private","input":"hello","origin":{"transport":"web"}}}}"#
+        ),
+        Ok(SocketRequest::Send {
+            id: "web-1".to_owned(),
+            session: "chat-1".to_owned(),
+            scope: SocketSessionScope::Private,
+            cwd: None,
+            workspace: None,
+            input: "hello".to_owned(),
+            event: None
+        })
+    );
+}
+
+#[test]
+fn socket_request_parser_preserves_external_event_payload() {
+    let parsed = parse_socket_request_frame(
+        r#"{"abi":"cortexfs.interaction/v1","payload":{"direction":"request","value":{"type":"input","request_id":"event-1","session":"chat-1","scope":"private","input":"event","event":{"type":"reaction","added":true},"origin":{"transport":"channel"}}}}"#,
+    );
+    let event = parsed.ok().and_then(|request| match request {
+        SocketRequest::Send { event, .. } => event,
+        _ => None,
+    });
+    assert_eq!(
+        event,
+        Some(serde_json::json!({"type": "reaction", "added": true}))
+    );
 }
 
 #[test]

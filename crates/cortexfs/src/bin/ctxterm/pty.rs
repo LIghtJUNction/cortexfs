@@ -1,5 +1,7 @@
 use crate::*;
 
+use cortexfs::runtime::terminal::{TerminalEvent, append_event, mark_state, next_sequence};
+
 pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -30,11 +32,22 @@ pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
         Some(path) => Some(open_log(&path)?),
         None => None,
     };
+    let events = env::var_os("CTX_TERMINAL_EVENTS").map(PathBuf::from);
+    let output_events = events.clone();
+    let initial_sequence = events
+        .as_deref()
+        .map(next_sequence)
+        .transpose()
+        .map_err(|error| {
+            CtxtermError::unavailable(format!("cannot read terminal event history: {error}"))
+        })?
+        .unwrap_or(1);
 
     let output_clients = Arc::clone(&clients);
     let output = thread::spawn(move || {
         let mut stdout = io::stdout().lock();
         let mut log = log;
+        let mut sequence = initial_sequence;
         let mut buffer = [0; 8192];
         loop {
             let read = reader.read(&mut buffer)?;
@@ -52,9 +65,19 @@ pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
                 file.write_all(chunk)?;
                 file.flush()?;
             }
+            if let Some(path) = output_events.as_deref() {
+                append_event(
+                    path,
+                    &TerminalEvent::output(sequence, cortexfs::current_time_unix(), chunk),
+                )
+                .map_err(|error| {
+                    io::Error::other(format!("cannot append terminal event: {error}"))
+                })?;
+                sequence = sequence.saturating_add(1);
+            }
             broadcast(&output_clients, chunk);
         }
-        Ok(())
+        Ok(sequence)
     });
     if config.stdio {
         let input_writer = Arc::clone(&writer);
@@ -64,10 +87,22 @@ pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
     let status = child
         .wait()
         .map_err(|error| CtxtermError::unavailable(format!("cannot wait for command: {error}")))?;
-    match output.join() {
-        Ok(Ok(())) => {}
+    let sequence = match output.join() {
+        Ok(Ok(sequence)) => sequence,
         Ok(Err(error)) => return Err(write_error_to_ctxterm(&error)),
         Err(_error) => return Err(CtxtermError::unavailable("pty output thread failed")),
+    };
+    if let Some(path) = events {
+        append_event(
+            &path,
+            &TerminalEvent::exit(sequence, cortexfs::current_time_unix(), status.exit_code()),
+        )
+        .map_err(|error| {
+            CtxtermError::unavailable(format!("cannot append terminal event: {error}"))
+        })?;
+        mark_state(&path, "exited").map_err(|error| {
+            CtxtermError::unavailable(format!("cannot update terminal state: {error}"))
+        })?;
     }
     if let Some(socket) = socket_path.as_deref() {
         let _ignored = remove_stale_socket(socket);

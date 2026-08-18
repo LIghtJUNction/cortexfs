@@ -38,13 +38,27 @@ pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), ExecError> 
     config.suppress_model_error_events = true;
     let outcome = run_agent_model_once(&config, envelope.input(), &mut stdout)?;
     if !outcome.success || frames_have_error(&outcome.frames) {
-        return Err(ExecError::new("agent model failed"));
+        return Err(ExecError::new(agent_model_failure_message(&outcome.frames)));
     }
     if let Some(tool_call) = first_tool_call(&outcome.frames)? {
         write_agent_frames_for_tool_iteration(&mut stdout, &config.run, &outcome.frames, &tool_call)
     } else {
         write_hosted_agent_frames(&mut stdout, &config.run, &outcome.frames, outcome.streamed)
     }
+}
+
+fn agent_model_failure_message(frames: &[String]) -> String {
+    frames
+        .iter()
+        .rev()
+        .find_map(|frame| {
+            let value = serde_json::from_str::<Value>(frame).ok()?;
+            (value.get("type").and_then(Value::as_str) == Some("error"))
+                .then(|| value.get("message").and_then(Value::as_str))
+                .flatten()
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "agent model failed".to_owned())
 }
 
 pub(crate) struct AgentModelRunConfig {
@@ -69,10 +83,9 @@ pub(crate) struct AgentModelRunConfig {
 
 impl AgentModelRunConfig {
     fn new(agent: &str) -> Result<Self, ExecError> {
-        let source =
-            env::var_os("CTX_SOURCE").map_or_else(|| PathBuf::from(DEFAULT_SOURCE), PathBuf::from);
-        let ctx_root =
-            env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+        let source = env::var_os("CTX_SOURCE")
+            .map_or_else(cortexfs_paths::storage_current_path, PathBuf::from);
+        let ctx_root = env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
         Self::new_with_paths(agent, source, ctx_root)
     }
 
@@ -83,7 +96,7 @@ impl AgentModelRunConfig {
     ) -> Result<Self, ExecError> {
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
         let agent_dir = agent_model_control_dir(&source, agent);
-        let model_path = agent_dir.join("model");
+        let model_path = cortexfs_paths::control_file_path(&agent_dir, "model");
         let configured_model =
             read_small_plain_text_file(&model_path, MAX_RUNNER_CONTROL_BYTES, "runner")
                 .map_or_else(
@@ -186,24 +199,33 @@ impl AgentModelRunConfig {
         self.history_messages.push_str(envelope.history_messages());
         self.tool_context.clear();
         self.tool_context.push_str(envelope.tool_context());
-        let Some(observation) = envelope.observation() else {
-            return;
-        };
-        if !self.tool_context.trim().is_empty() {
-            self.tool_context.push_str("\n\n");
+        if let Some(observation) = envelope.observation() {
+            if !self.tool_context.trim().is_empty() {
+                self.tool_context.push_str("\n\n");
+            }
+            self.tool_context.push_str("Tool result ");
+            self.tool_context.push_str(observation.tool_call_id());
+            self.tool_context.push_str(" from ");
+            self.tool_context.push_str(observation.name());
+            self.tool_context.push_str(" status ");
+            self.tool_context.push_str(observation.status());
+            if observation.truncated() {
+                self.tool_context.push_str(" (truncated)");
+            }
+            self.tool_context.push_str(":\n");
+            self.tool_context.push_str(observation.content());
+            trim_tool_context_to_limit(&mut self.tool_context);
         }
-        self.tool_context.push_str("Tool result ");
-        self.tool_context.push_str(observation.tool_call_id());
-        self.tool_context.push_str(" from ");
-        self.tool_context.push_str(observation.name());
-        self.tool_context.push_str(" status ");
-        self.tool_context.push_str(observation.status());
-        if observation.truncated() {
-            self.tool_context.push_str(" (truncated)");
+        if let Some(event) = envelope.event()
+            && let Ok(encoded) = serde_json::to_string(event)
+        {
+            if !self.tool_context.trim().is_empty() {
+                self.tool_context.push_str("\n\n");
+            }
+            self.tool_context.push_str("External channel event:\n");
+            self.tool_context.push_str(&encoded);
+            trim_tool_context_to_limit(&mut self.tool_context);
         }
-        self.tool_context.push_str(":\n");
-        self.tool_context.push_str(observation.content());
-        trim_tool_context_to_limit(&mut self.tool_context);
     }
 }
 
@@ -216,10 +238,7 @@ pub(crate) fn candidate_window_budget(
         .split_once('/')
         .ok_or_else(|| ExecError::new("invalid model candidate"))?;
     let content = read_small_plain_text_file(
-        &ctx_root
-            .join("model")
-            .join(provider)
-            .join(format!("{name}.d/limit")),
+        &cortexfs_paths::model_control_file_path(ctx_root, provider, name, "limit"),
         MAX_RUNNER_CONTROL_BYTES,
         "runner",
     )
@@ -229,7 +248,7 @@ pub(crate) fn candidate_window_budget(
     let effective = setting
         .resolve(limit)
         .map_err(|error| ExecError::new(format!("ineligible context limit: {error:?}")))?;
-    Ok(AgentWindowBudget::from_effective(effective))
+    Ok(budget_from_effective(effective))
 }
 
 pub(crate) fn parse_agent_context_budget(
@@ -254,7 +273,7 @@ pub(crate) fn parse_agent_context_budget(
         ));
     }
     let window = ModelContextLimit::known(token_value)
-        .and_then(AgentWindowBudget::from_effective)
+        .and_then(budget_from_effective)
         .ok_or_else(|| ExecError::new("invalid context window environment: token value is zero"))?;
     let char_value = chars.parse::<usize>().map_err(|_error| {
         ExecError::new(
@@ -303,7 +322,7 @@ pub(crate) fn agent_model_control_dir(source: &Path, agent: &str) -> PathBuf {
             return control;
         }
     }
-    source.join("agent").join(format!("{agent}.d"))
+    cortexfs_paths::agent_control_path(source, agent)
 }
 
 pub(crate) fn current_user_agent_model_control_dirs(source: &Path, agent: &str) -> Vec<PathBuf> {
@@ -311,13 +330,11 @@ pub(crate) fn current_user_agent_model_control_dirs(source: &Path, agent: &str) 
     if let Some(ctx_home) = env::var_os("CTX_HOME").map(PathBuf::from)
         && ctx_home.starts_with(source)
     {
-        controls.push(ctx_home.join("agent").join(format!("{agent}.d")));
+        controls.push(cortexfs_paths::agent_control_path(&ctx_home, agent));
     }
-    let uid_control = source
-        .join("home")
-        .join(nix::unistd::Uid::effective().as_raw().to_string())
-        .join("agent")
-        .join(format!("{agent}.d"));
+    let uid = nix::unistd::Uid::effective().as_raw().to_string();
+    let uid_control =
+        cortexfs_paths::agent_control_path(&cortexfs_paths::ctx_home_path(source, &uid), agent);
     if !controls.iter().any(|control| control == &uid_control) {
         controls.push(uid_control);
     }

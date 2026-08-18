@@ -23,12 +23,14 @@
 !/.env.example
 /tmp/
 /ctx
+/dist/
 /inspect_benchmark/tmp/
 *.log
 *.pid
 .codegraph
 /.tokensave/
 /.omo/
+/.codensity/
 SWAP.md
 scripts/__pycache__/
 

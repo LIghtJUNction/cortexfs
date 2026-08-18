@@ -76,6 +76,7 @@ pub(crate) enum Command {
         input: String,
     },
     Agent(AgentArgs),
+    Terminal(TerminalArgs),
     ObjectInstall {
         source: PathBuf,
         manifest: PathBuf,
@@ -103,6 +104,11 @@ pub(crate) enum Command {
     },
     ObjectCheck {
         manifest: PathBuf,
+    },
+    PackageInstall {
+        package: PathBuf,
+        source: Option<PathBuf>,
+        tier: InstallTier,
     },
     ObjectResidueAudit {
         source: PathBuf,
@@ -242,6 +248,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             },
         ),
         Command::Agent(args) => agent_command(&cli.root, &args),
+        Command::Terminal(args) => terminal_action(&cli.root, &args),
         Command::ObjectInstall {
             source,
             manifest,
@@ -272,6 +279,15 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             &source, class, &name, tier, yes,
         )),
         Command::ObjectCheck { manifest } => success(install::run_object_check(&manifest)),
+        Command::PackageInstall {
+            package,
+            source,
+            tier,
+        } => success(package::run_package_install(
+            &package,
+            source.as_deref(),
+            tier,
+        )),
         Command::ObjectResidueAudit { source } => {
             success(residue::run_object_residue_audit(&source))
         }
@@ -497,8 +513,22 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
                 input,
             })
         }
+        "inspect" => {
+            let (target, session) = parse_agent_session_option_args(values, "inspect")?;
+            let target = target
+                .strip_prefix(&format!("{CTX_ROOT}/"))
+                .unwrap_or(&target);
+            let name = target
+                .strip_prefix("agent/")
+                .filter(|name| is_object_name(name))
+                .ok_or_else(|| CliError::usage("inspect expects agent/NAME"))?
+                .to_owned();
+            Ok(Command::Agent(AgentArgs::Inspect { name, session }))
+        }
         "agent" => parse_agent_command(values.collect()),
+        "terminal" => parse_terminal_command(values.collect()),
         "object" => install::parse_object_command(values),
+        "install" => package::parse_package_install_command(values),
         "provider" => parse_provider_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
@@ -587,8 +617,11 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "history"
             | "resume"
             | "send"
+            | "inspect"
             | "agent"
+            | "terminal"
             | "object"
+            | "install"
             | "provider"
             | "ping"
             | "cancel"

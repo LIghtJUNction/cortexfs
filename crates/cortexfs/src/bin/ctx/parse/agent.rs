@@ -54,7 +54,7 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "agent requires new, apply, start, stop, status, env, ps, send, chat, resume, history, output, pack, trajectory, session, prompt, tools, children, wait, cancel, watch, or attach",
+        "agent requires new, apply, start, stop, status, inspect, env, ps, send, chat, resume, history, output, pack, trajectory, session, prompt, tools, children, wait, cancel, watch, or attach",
     )?;
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
@@ -77,6 +77,10 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
             let name = required_arg(&mut values, "agent status requires an agent name")?;
             no_extra_args(values)?;
             Ok(Command::Agent(AgentArgs::Status { name }))
+        }
+        "inspect" => {
+            let (name, session) = parse_agent_session_option_args(values, "agent inspect")?;
+            Ok(Command::Agent(AgentArgs::Inspect { name, session }))
         }
         "env" => {
             let name = required_arg(&mut values, "agent env requires an agent name")?;

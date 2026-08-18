@@ -7,7 +7,15 @@ const MAX_CTX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
 pub(crate) struct CtxProviderConfig {
     pub(crate) name: Option<String>,
     pub(crate) base_url: String,
+    #[serde(default)]
+    pub(crate) auth: Vec<cortexfs::ProviderAuthConfig>,
     pub(crate) oauth: Option<cortexfs::OAuthProviderConfig>,
+}
+
+impl CtxProviderConfig {
+    pub(crate) fn auth_methods(&self) -> Vec<cortexfs::ProviderAuthConfig> {
+        cortexfs::effective_auth_methods(&self.auth, self.oauth.is_some())
+    }
 }
 
 pub(crate) fn atomic_write_provider_config(path: &Path, content: &str) -> Result<(), CliError> {

@@ -18,13 +18,12 @@ pub(crate) fn agent_terminal_socket(
     name: &str,
     session: &str,
 ) -> Result<PathBuf, CliError> {
-    Ok(ctx_home(root)?
-        .join("agent")
-        .join(name)
-        .join("session")
-        .join(session)
-        .join("terminal")
-        .join("main.sock"))
+    Ok(cortexfs_paths::session_terminal_from_home_path(
+        &ctx_home(root)?,
+        name,
+        session,
+        "main.sock",
+    ))
 }
 
 pub(crate) fn agent_terminal_connect_socket(

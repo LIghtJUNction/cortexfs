@@ -9,6 +9,20 @@ fn unique_test_dir(name: &str) -> PathBuf {
     ))
 }
 
+const TEST_TEMP_PREFIX: &str = "cortexfs-ctx-";
+const TEST_TEMP_MAX_BYTES: u64 = 512 * 1024 * 1024;
+const TEST_TEMP_MAX_ENTRIES: usize = 256;
+const TEST_TEMP_MIN_FREE_BYTES: u64 = 256 * 1024 * 1024;
+const TEST_TEMP_STALE_AFTER: std::time::Duration = std::time::Duration::from_mins(30);
+
+#[derive(Debug)]
+struct TestTempEntry {
+    path: PathBuf,
+    modified: SystemTime,
+    bytes: u64,
+    owner_alive: bool,
+}
+
 struct TestDir(PathBuf);
 
 const NEUTRAL_FIXTURE_MODEL: &str = "api.test/gpt-5.6";
@@ -35,7 +49,8 @@ impl AsRef<std::ffi::OsStr> for TestDir {
 
 impl Drop for TestDir {
     fn drop(&mut self) {
-        // ponytail: best-effort test cleanup; stale startup cleanup covers killed test processes.
+        // These are disposable test artifacts: unlink them directly, never through a desktop
+        // trash implementation that would turn a cleanup into another unbounded data store.
         let _ignored = fs::remove_dir_all(&self.0);
     }
 }
@@ -44,35 +59,161 @@ fn clean_test_dir(name: &str) -> TestDir {
     remove_stale_test_dirs();
     let root = unique_test_dir(name);
     assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    assert_test_temp_budget();
     TestDir(root)
 }
 
+#[test]
+fn stale_ctx_test_directory_from_dead_process_is_reclaimed() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "{TEST_TEMP_PREFIX}recovery-{}-{nonce}",
+        u32::MAX
+    ));
+    assert!(fs::create_dir_all(&path).is_ok());
+
+    remove_stale_test_dirs();
+
+    assert!(!path.exists());
+}
+
 fn remove_stale_test_dirs() {
-    static CLEAN: std::sync::Once = std::sync::Once::new();
-    CLEAN.call_once(|| {
-        let Ok(entries) = fs::read_dir(std::env::temp_dir()) else {
-            return;
-        };
-        let stale_before = SystemTime::now()
-            .checked_sub(std::time::Duration::from_hours(1))
-            .unwrap_or(UNIX_EPOCH);
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !entry
+    static CLEANUP_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+        std::sync::OnceLock::new();
+    let lock = CLEANUP_LOCK.get_or_init(|| std::sync::Mutex::new(()));
+    let _guard = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    let stale_before = SystemTime::now()
+        .checked_sub(TEST_TEMP_STALE_AFTER)
+        .unwrap_or(UNIX_EPOCH);
+    let mut entries = test_temp_entries();
+
+    // A test process that was killed never runs `Drop`; its PID is the ownership lease for the
+    // directory. Reclaiming only entries whose owner is gone avoids deleting a long-running test.
+    for entry in &entries {
+        if !entry.owner_alive
+            && (entry.modified < stale_before || test_temp_owner_pid(&entry.path).is_some())
+        {
+            remove_test_temp_entry(&entry.path);
+        }
+    }
+
+    // Keep a second bound for malformed or very old entries that cannot be associated with a
+    // live owner. This is deliberately best-effort; the final budget assertion fails closed.
+    entries = test_temp_entries();
+    let (mut entry_count, mut bytes) = test_temp_usage(&entries);
+    let mut removable: Vec<&TestTempEntry> = entries
+        .iter()
+        .filter(|entry| !entry.owner_alive)
+        .collect();
+    removable.sort_by_key(|entry| entry.modified);
+    for entry in removable {
+        if entry_count <= TEST_TEMP_MAX_ENTRIES && bytes <= TEST_TEMP_MAX_BYTES {
+            break;
+        }
+        if remove_test_temp_entry(&entry.path) {
+            entry_count = entry_count.saturating_sub(1);
+            bytes = bytes.saturating_sub(entry.bytes);
+        }
+    }
+}
+
+fn test_temp_entries() -> Vec<TestTempEntry> {
+    let Ok(entries) = fs::read_dir(std::env::temp_dir()) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            entry
                 .file_name()
                 .to_str()
-                .is_some_and(|name| name.starts_with("cortexfs-ctx-"))
-            {
-                continue;
-            }
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            if metadata.modified().is_ok_and(|modified| modified < stale_before) {
-                let _ignored = fs::remove_dir_all(path);
-            }
-        }
-    });
+                .is_some_and(|name| name.starts_with(TEST_TEMP_PREFIX))
+        })
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).ok()?;
+            Some(TestTempEntry {
+                modified: metadata.modified().unwrap_or(UNIX_EPOCH),
+                bytes: test_temp_size(&path),
+                owner_alive: test_temp_owner_pid(&path).is_some_and(test_process_alive),
+                path,
+            })
+        })
+        .collect()
+}
+
+fn test_temp_owner_pid(path: &Path) -> Option<u32> {
+    let mut parts = path.file_name()?.to_str()?.rsplit('-');
+    let _nonce = parts.next()?;
+    parts.next()?.parse().ok()
+}
+
+fn test_process_alive(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).is_dir()
+}
+
+fn test_temp_size(path: &Path) -> u64 {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !metadata.file_type().is_dir() {
+        return metadata.len();
+    }
+    fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| test_temp_size(&entry.path()))
+        .sum()
+}
+
+fn remove_test_temp_entry(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if metadata.file_type().is_dir() {
+        fs::remove_dir_all(path).is_ok()
+    } else {
+        fs::remove_file(path).is_ok()
+    }
+}
+
+fn test_temp_usage(entries: &[TestTempEntry]) -> (usize, u64) {
+    entries.iter().fold((0, 0), |(count, bytes), entry| {
+        (count.saturating_add(1), bytes.saturating_add(entry.bytes))
+    })
+}
+
+fn test_temp_free_bytes() -> Option<u64> {
+    nix::sys::statvfs::statvfs(&std::env::temp_dir())
+        .ok()
+        .map(|stats| stats.blocks_available().saturating_mul(stats.fragment_size()))
+}
+
+fn assert_test_temp_budget() {
+    let entries = test_temp_entries();
+    let (entry_count, bytes) = test_temp_usage(&entries);
+    let max_mib = TEST_TEMP_MAX_BYTES / (1024 * 1024);
+    let used_mib = bytes / (1024 * 1024);
+    let min_free_mib = TEST_TEMP_MIN_FREE_BYTES / (1024 * 1024);
+    assert!(
+        entry_count <= TEST_TEMP_MAX_ENTRIES,
+        "cortexfs test temp directory count exceeded {TEST_TEMP_MAX_ENTRIES} (found {entry_count})"
+    );
+    assert!(
+        bytes <= TEST_TEMP_MAX_BYTES,
+        "cortexfs test temp usage exceeded {max_mib} MiB (found {used_mib} MiB)"
+    );
+    assert!(
+        test_temp_free_bytes().is_some_and(|free| free >= TEST_TEMP_MIN_FREE_BYTES),
+        "refusing to create cortexfs test data: /tmp has less than {min_free_mib} MiB free"
+    );
 }
 
 fn assert_path_matches(paths: &[&str], predicate: fn(&str) -> bool, expected: bool) {
@@ -211,8 +352,35 @@ fn create_complete_agent_control(root: &Path, name: &str) {
 }
 
 fn ensure_runtime_model_fixture(root: &Path) {
-    let models = ensure_runtime_models(root);
-    assert!(models.is_ok(), "{models:?}");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    assert!(fs::create_dir_all(&providers).is_ok());
+    assert!(fs::create_dir_all(&cache).is_ok());
+    let debug = install_executable_object_wrapper(
+        root,
+        ObjectClass::Model,
+        "debug/echo",
+        "/ctx/bin/cortexfs-object-runner",
+        &[
+            ("id", "debug/echo"),
+            ("driver", "default=debug\nexec=debug\nagent=debug"),
+            ("cap", "chat\nstream"),
+            ("effort", "auto"),
+            ("limit", "unknown"),
+            ("default", ""),
+            ("fallback", ""),
+            ("session", "none"),
+            ("status", "idle"),
+            ("log", ""),
+        ],
+    );
+    assert!(debug.is_ok(), "{debug:?}");
+    for alias in cortexfs::MODEL_ALIASES {
+        let path = root.join("model").join(alias);
+        if fs::symlink_metadata(&path).is_err() {
+            assert!(std::os::unix::fs::symlink("/ctx/model/debug/echo", path).is_ok());
+        }
+    }
     for model in [DEFAULT_WORKER_MODEL, NEUTRAL_FIXTURE_MODEL] {
         let model = Path::new(model);
         let limit = root
@@ -282,6 +450,7 @@ fn complete_agent_control_value(file: &str, name: &str) -> String {
         "owner" | "uid" => "1000".to_owned(),
         "gid" => "100".to_owned(),
         "groups" => "10\n20".to_owned(),
+        "perm" => "rwx".to_owned(),
         "label" => format!("user_u:agent_r:{subject}:s0"),
         "iso" => "shared".to_owned(),
         "parent" | "pid" | "log" | "system.md" | "prompt.template.md" => String::new(),
