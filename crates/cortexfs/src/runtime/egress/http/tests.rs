@@ -266,12 +266,12 @@ fn curl_config_preserves_utf8_and_keeps_secrets_out_of_process_arguments() -> io
     let request = Request {
         endpoint: "responses",
         headers: vec![("authorization".to_owned(), "Bearer secret".to_owned())],
-        body: "{\"input\":\"你好\"}".as_bytes().to_vec(),
+        body: b"{\"input\":\"\xE4\xBD\xA0\xE5\xA5\xBD\",\"file\":\"@/etc/shadow\"}".to_vec(),
     };
     let config = curl_config(&provider_target("fixture", "/v1"), &request)?;
     assert!(config.contains("Bearer secret"));
-    assert!(config.contains("你好"));
-    assert!(!config.contains("location = true"));
+    assert!(config.contains("你好") && config.contains("data-raw ="));
+    assert!(!config.contains("data-binary") && !config.contains("location = true"));
     Ok(())
 }
 
