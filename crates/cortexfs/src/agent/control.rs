@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ChildLifecycle, ControlLineIssue,
+    AgentPermissions, ChildLifecycle, ControlLineIssue,
     abi::path::is_object_name,
     authority::parent_ref_agent_name,
     support::control::{
@@ -21,6 +21,8 @@ pub enum AgentControlKind {
     Gid,
     /// `agent/<name>.d/groups`: supplementary groups, one gid per line.
     Groups,
+    /// `agent/<name>.d/perm`: coarse read, write, and shell permissions.
+    Perm,
     /// `agent/<name>.d/iso`: isolation profile.
     Iso,
     /// `agent/<name>.d/parent`: parent agent/session/run reference.
@@ -46,6 +48,7 @@ impl AgentControlKind {
             "uid" => Some(Self::Uid),
             "gid" => Some(Self::Gid),
             "groups" => Some(Self::Groups),
+            "perm" => Some(Self::Perm),
             "iso" => Some(Self::Iso),
             "parent" => Some(Self::Parent),
             "life" => Some(Self::Life),
@@ -77,6 +80,16 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
         AgentControlKind::Parent => inspect_optional_agent_parent_control(content),
         AgentControlKind::Pid => inspect_optional_agent_number_control(content),
         AgentControlKind::Window => inspect_agent_window_control(content),
+        AgentControlKind::Perm => AgentControlReport::new(
+            AgentPermissions::parse_control(content)
+                .is_none()
+                .then(|| ControlLineIssue::InvalidValue {
+                    line: 1,
+                    value: content.trim_end().to_owned(),
+                })
+                .into_iter()
+                .collect(),
+        ),
         AgentControlKind::Owner | AgentControlKind::Uid | AgentControlKind::Gid => {
             inspect_required_agent_number_control(content)
         }
@@ -219,6 +232,7 @@ pub(crate) fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
         | AgentControlKind::Gid
         | AgentControlKind::Groups
         | AgentControlKind::Parent
+        | AgentControlKind::Perm
         | AgentControlKind::Pid
         | AgentControlKind::Window => false,
     }

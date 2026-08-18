@@ -3,9 +3,9 @@ use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI};
 use nix::fcntl::{FcntlArg, fcntl};
 use std::os::fd::RawFd;
 
-const SOCKET_AGENT_EXECUTABLE_PATH: &str = "/run/cortexfs/agent-executable";
+const SOCKET_AGENT_EXECUTABLE_PATH: &str = cortexfs_paths::AGENT_EXECUTABLE_SOCKET;
 /// Fixed sandbox path for the receipt-bound per-run control socket.
-pub const SOCKET_RUN_CONTROL_PATH: &str = "/run/cortexfs/control.sock";
+pub const SOCKET_RUN_CONTROL_PATH: &str = cortexfs_paths::RUN_CONTROL_SOCKET;
 pub(crate) type RunControlCommand<'a> = (&'a Path, &'a [(String, String)], RawFd);
 
 pub(crate) fn agent_executable_socket_command(
@@ -169,10 +169,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--clearenv".to_owned(),
         "--setenv".to_owned(),
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-        request
-            .runtime
-            .ctx_root
-            .join("shared/providers.d")
+        cortexfs_paths::shared_path(request.runtime.ctx_root, "providers.d")
             .display()
             .to_string(),
         "--die-with-parent".to_owned(),
@@ -181,7 +178,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     bwrap.extend(support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
     bwrap.extend([
         "--dir".to_owned(),
-        "/run/cortexfs".to_owned(),
+        cortexfs_paths::SYSTEM_RUNTIME_DIR.to_owned(),
         "--perms".to_owned(),
         "0755".to_owned(),
         "--ro-bind-data".to_owned(),
@@ -280,10 +277,11 @@ fn append_bwrap_agent_environment(
 
 pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {
     let source_path = Path::new(source);
-    if source_path == Path::new(CTX_ROOT) {
+    let ctx_root = cortexfs_paths::ctx_root();
+    if source_path == ctx_root {
         return source_root.display().to_string();
     }
-    if let Ok(relative) = source_path.strip_prefix(CTX_ROOT) {
+    if let Ok(relative) = source_path.strip_prefix(&ctx_root) {
         return source_root.join(relative).display().to_string();
     }
     source.to_owned()

@@ -12,7 +12,7 @@ impl FuseProjection {
             return Err(FuseError::InvalidPath);
         }
         let target = normalize_model_alias_target(target).ok_or(FuseError::InvalidPath)?;
-        let path = self.resolve(&normalized)?;
+        let path = resolve_fuse_abi_path(&self.root, &normalized)?;
         let parent = path.parent().ok_or(FuseError::InvalidPath)?;
         ensure_model_alias_parent(parent)?;
         let parent_dir = open_model_alias_parent(parent)?;
@@ -29,22 +29,17 @@ impl FuseProjection {
             return Err(FuseError::NotControlFile);
         };
         let target = normalize_model_alias_target(target).ok_or(FuseError::InvalidPath)?;
-        let path = self.resolve(&format!("model/{alias}"))?;
+        let snapshot =
+            ProviderSnapshot::load(&self.provider_config_dir, &self.provider_model_cache_dir)
+                .map_err(|_error| FuseError::Io)?;
+        if !is_current_model_alias_target(&target, snapshot.models()) {
+            return Err(FuseError::InvalidPath);
+        }
+        let path = self.resolve_with_snapshot(&format!("model/{alias}"), Some(&snapshot))?;
         let parent = path.parent().ok_or(FuseError::InvalidPath)?;
         ensure_model_alias_parent(parent)?;
         let parent_dir = open_model_alias_parent(parent)?;
-        let temporary = create_unique_model_alias_symlink(&parent_dir, alias, &target)?;
-        if let Err(_error) =
-            nix::fcntl::renameat(&parent_dir, temporary.as_str(), &parent_dir, alias)
-        {
-            let _ignored = nix::unistd::unlinkat(
-                &parent_dir,
-                temporary.as_str(),
-                nix::unistd::UnlinkatFlags::NoRemoveDir,
-            );
-            return Err(FuseError::Io);
-        }
-        parent_dir.sync_all().map_err(|_error| FuseError::Io)
+        provider::replace_alias(parent, &parent_dir, alias, &target).map_err(|_error| FuseError::Io)
     }
 
     /// Removes a persisted model alias override, restoring the built-in target.
@@ -58,13 +53,14 @@ impl FuseProjection {
         ensure_model_alias_parent(&parent)?;
         let parent_dir = open_model_alias_parent(&parent)?;
         let file_name = model_alias_path_file_name(&path)?;
-        match nix::unistd::unlinkat(
+        match support::receipt::receipt_at(
             &parent_dir,
             file_name,
-            nix::unistd::UnlinkatFlags::NoRemoveDir,
+            support::receipt::EntryKind::Symlink,
         ) {
-            Ok(()) => parent_dir.sync_all().map_err(|_error| FuseError::Io),
-            Err(nix::errno::Errno::ENOENT) => Ok(()),
+            Ok(None) => Ok(()),
+            Ok(Some(receipt)) => provider::remove_alias(&parent, &parent_dir, file_name, receipt)
+                .map_err(|_error| FuseError::Io),
             Err(_error) => Err(FuseError::Io),
         }
     }
@@ -76,24 +72,24 @@ impl FuseProjection {
         if !is_model_alias_symlink_path(&from) || model_alias_name(&to).is_none() {
             return Err(FuseError::InvalidPath);
         }
-        let source = self.resolve(&from)?;
+        let source = resolve_fuse_abi_path(&self.root, &from)?;
         let source_parent = source.parent().ok_or(FuseError::InvalidPath)?;
         ensure_model_alias_parent(source_parent)?;
         let source_parent_dir = open_model_alias_parent(source_parent)?;
         let source_name = model_alias_path_file_name(&source)?;
-        let target = nix::fcntl::readlinkat(&source_parent_dir, source_name)
-            .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
-        let target = PathBuf::from(target);
+        let receipt = support::receipt::receipt_at(
+            &source_parent_dir,
+            source_name,
+            support::receipt::EntryKind::Symlink,
+        )
+        .map_err(|_error| FuseError::Io)?
+        .ok_or(FuseError::NotFound)?;
+        let target = support::plain::read_symlink_target_at(&source_parent_dir, source_name)
+            .map_err(|error| fuse_metadata_error(&error))?;
         self.set_model_alias(&to, &target)?;
         if from != to {
-            match nix::unistd::unlinkat(
-                &source_parent_dir,
-                source_name,
-                nix::unistd::UnlinkatFlags::NoRemoveDir,
-            ) {
-                Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
-                Err(_error) => return Err(FuseError::Io),
-            }
+            provider::remove_alias(source_parent, &source_parent_dir, source_name, receipt)
+                .map_err(|_error| FuseError::Io)?;
         }
         Ok(())
     }
@@ -178,42 +174,20 @@ pub(crate) fn open_model_alias_parent(parent: &Path) -> Result<fs::File, FuseErr
     Ok(directory)
 }
 
-pub(crate) fn create_unique_model_alias_symlink(
-    parent_dir: &fs::File,
-    alias: &str,
-    target: &Path,
-) -> Result<String, FuseError> {
-    for attempt in 0..32_u32 {
-        let temporary = format!(
-            ".{alias}.tmp-{}-{}-{attempt}",
-            std::process::id(),
-            monotonic_alias_nonce()
-        );
-        match nix::unistd::symlinkat(target, parent_dir, temporary.as_str()) {
-            Ok(()) => return Ok(temporary),
-            Err(nix::errno::Errno::EEXIST) => {}
-            Err(_error) => return Err(FuseError::Io),
-        }
-    }
-    Err(FuseError::Io)
-}
-
 pub(crate) fn model_alias_path_file_name(path: &Path) -> Result<&str, FuseError> {
     path.file_name()
         .and_then(|name| name.to_str())
         .ok_or(FuseError::InvalidPath)
 }
 
-pub(crate) fn monotonic_alias_nonce() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos())
-}
-
 pub(crate) fn normalize_model_alias_target(target: &Path) -> Option<PathBuf> {
     let raw = target.to_str()?;
-    let model = raw.strip_prefix("/ctx/model/").unwrap_or(raw);
-    is_model_name(model).then(|| PathBuf::from(format!("/ctx/model/{model}")))
+    let model = raw
+        .strip_prefix(&format!("{CTX_ROOT}/model/"))
+        .unwrap_or(raw);
+    let (provider, model_name) = model.split_once('/')?;
+    is_model_name(model)
+        .then(|| cortexfs_paths::model_path(&cortexfs_paths::ctx_root(), provider, model_name))
 }
 
 pub(crate) fn is_model_alias_symlink_path(abi_path: &str) -> bool {

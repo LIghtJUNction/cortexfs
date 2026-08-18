@@ -1,20 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
-  <title id="title">CortexFS — FUSE filesystem interface</title>
-  <desc id="desc">CortexFS social card stating that agent runtimes should not hide inside a database, with a terminal listing the seven stable CortexFS root names.</desc>
+  <title id="title">/ctx — CortexFS filesystem interface</title>
+  <desc id="desc">CortexFS social card with the /ctx path mark and a terminal listing the seven stable CortexFS root names.</desc>
 
   <rect width="1200" height="630" fill="#f7f5f1"/>
   <path d="M0 1h1200M0 629h1200" stroke="#ded8ca"/>
   <path d="M650 54v522" stroke="#ded8ca"/>
 
   <g transform="translate(70 54)">
-    <rect width="62" height="62" rx="6" fill="#ffffff" stroke="#ded8ca"/>
-    <path fill="#d8ff66" d="M30.5 8.2c.4-.2.9-.2 1.3 0l21.5 12.4c.4.3.7.7.7 1.2v24.8c0 .5-.3.9-.7 1.2L31.8 60.2c-.4.2-.9.2-1.3 0L9 47.8c-.4-.3-.7-.7-.7-1.2V21.8c0-.5.3-.9.7-1.2L30.5 8.2Z"/>
-    <path fill="#111312" d="M34.1 17.7h7L27.5 52.6h-7l13.6-34.9Z"/>
-    <path fill="#111312" fill-rule="evenodd" d="M14.1 22.2h10.7c.7 0 1.3.3 1.7.8l2 2.3h8c1.2 0 2 .8 2 2v7.4c0 1.2-.8 2-2 2H14.1c-1.2 0-2-.8-2-2V24.2c0-1.2.8-2 2-2Zm0 21.5c0-1 .9-1.9 1.9-1.9h6.3c1.1 0 2 .9 2 1.9V50c0 1.1-.9 2-2 2H16c-1 0-1.9-.9-1.9-2v-6.3Zm27.3 2.3a4.3 4.3 0 1 1 6.8 3.6v4.1h4.4v4H40.2v-4h4v-4a4.3 4.3 0 0 1-2.8-3.7Z" clip-rule="evenodd"/>
-    <path fill="#fffdfa" d="M16.5 44.4h5.3v5.3h-5.3z"/>
-    <text x="82" y="43" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="36" font-weight="700">Cor</text>
-    <text x="143" y="43" fill="#2a8f73" font-family="Georgia, 'Times New Roman', serif" font-size="36" font-style="italic" font-weight="700">TeX</text>
-    <text x="202" y="43" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="36" font-weight="700">fs</text>
+    <text x="0" y="49" fill="#141413" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="58" font-weight="700" letter-spacing="-5">/</text>
+    <text x="21" y="47" fill="#D97757" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="50" font-weight="900" letter-spacing="-1">ctx</text>
   </g>
 
   <g transform="translate(70 154)">
@@ -38,7 +32,7 @@
     <circle cx="24" cy="27" r="5" fill="#b65348"/>
     <circle cx="42" cy="27" r="5" fill="#d28a28"/>
     <circle cx="60" cy="27" r="5" fill="#2a8f73"/>
-    <text x="86" y="33" fill="#fffdfa" fill-opacity="0.72" font-family="ui-monospace, monospace" font-size="14" font-weight="800">cortexfs · /ctx</text>
+    <text x="86" y="33" fill="#fffdfa" fill-opacity="0.72" font-family="ui-monospace, monospace" font-size="14" font-weight="800">/ctx</text>
 
     <text x="28" y="94" fill="#d8ff66" font-family="ui-monospace, monospace" font-size="17" font-weight="900">$</text>
     <text x="54" y="94" fill="#fffdfa" font-family="ui-monospace, monospace" font-size="17" font-weight="900">ls /ctx</text>

@@ -1,11 +1,13 @@
 use crate::*;
 
+pub(crate) use auth::*;
 pub(crate) use callback::*;
 pub(crate) use config::*;
 pub(crate) use oauth::*;
 pub(crate) use presets::*;
 pub(crate) use secrets::*;
 
+pub mod auth;
 pub mod callback;
 pub mod config;
 pub mod oauth;
@@ -14,6 +16,9 @@ pub mod secrets;
 
 pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
     match *args {
+        ProviderArgs::AuthMethods { ref provider } => {
+            provider_auth_methods(provider).map(|()| ExitCode::SUCCESS)
+        }
         ProviderArgs::Login(ref provider, timeout, device) => {
             provider_oauth_login(provider, timeout, device).map(|()| ExitCode::SUCCESS)
         }

@@ -83,16 +83,13 @@ inst={{agent_instructions}}
         Ok(ref prompt) if prompt.contains("agent=coder")
             && prompt.contains("time=123")
             && prompt.contains("inst=Be precise.")
-            && prompt.contains("The CortexFS tool shell `tsh` is always native")
-            && prompt.contains(
-                "Tools statically declared by the agent `tools` control may also be exposed as direct-native calls."
-            )
-            && prompt.contains("When tool execution is useful")
-            && prompt.contains("Tool results include the original `arguments.args`")
-            && prompt.contains("If no concrete file path is provided")
-            && prompt.contains("For coding work")
-            && prompt.contains("inspect current files before editing")
-            && prompt.contains("Never run destructive git commands")
+            && prompt.contains("`tsh` is always native")
+            && prompt.contains("only tools statically declared by the agent `tools` control")
+            && prompt.contains("For useful tool work")
+            && prompt.contains("Results echo it with stdout/stderr")
+            && prompt.contains("Ask for a concrete path only when")
+            && prompt.contains("Before code changes, inspect")
+            && prompt.contains("Run `git reset --hard`, `git checkout --`, or `git clean`")
             && !prompt.contains("output this exact tool call")
             && !prompt.contains(r#"["fs.read","/workspace/PATH"]"#)
             && !prompt.contains("{{agent}}")
@@ -325,6 +322,19 @@ fn parses_provider_oauth_help_commands() {
     assert!(matches!(
         cmd!("provider", "oauth", "login", "--help"),
         Ok(Command::HelpTopic(ref topic)) if topic == "provider oauth login"
+    ));
+}
+
+#[test]
+fn parses_provider_auth_methods_command() {
+    assert!(matches!(
+        cmd!("provider", "auth", "methods", "openai"),
+        Ok(Command::Provider(ProviderArgs::AuthMethods { ref provider }))
+            if provider == "openai"
+    ));
+    assert!(matches!(
+        cmd!("provider", "auth", "methods", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider auth methods"
     ));
 }
 

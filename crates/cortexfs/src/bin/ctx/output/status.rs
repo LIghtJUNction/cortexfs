@@ -1,7 +1,7 @@
 use crate::*;
 
 pub(crate) fn print_abi() -> Result<(), CliError> {
-    print_line("root=/ctx")?;
+    print_line(&format!("root={CTX_ROOT}"))?;
     print_line("entries=status bin model agent tool home shared")?;
     print_line("exec=model agent tool")?;
     print_line("socket=name.sock")?;
@@ -26,9 +26,29 @@ pub(crate) fn env_exports(
     path_env: Option<&str>,
 ) -> [String; 4] {
     let root = root.display().to_string();
-    let home = home_env.map_or_else(|| format!("{root}/home/$(id -u)"), str::to_owned);
-    let path = path_env.map_or_else(|| format!("{root}/tool:{home}/tool"), str::to_owned);
-    let root_bin = format!("{root}/bin");
+    let root_path = PathBuf::from(&root);
+    let home = home_env.map_or_else(
+        || {
+            cortexfs_paths::home_root_path(&root_path)
+                .join("$(id -u)")
+                .display()
+                .to_string()
+        },
+        str::to_owned,
+    );
+    let path = path_env.map_or_else(
+        || {
+            format!(
+                "{}:{}",
+                cortexfs_paths::tool_root_path(&root_path).display(),
+                cortexfs_paths::home_tool_from_home_path(Path::new(&home)).display()
+            )
+        },
+        str::to_owned,
+    );
+    let root_bin = cortexfs_paths::bin_root_path(&root_path)
+        .display()
+        .to_string();
     [
         format!("export CTX_ROOT={}", shell_quote(&root)),
         format!("export CTX_HOME={}", shell_quote(&home)),
@@ -116,7 +136,9 @@ pub(crate) fn ctx_root_shape(root: &Path) -> (bool, bool) {
 }
 
 pub(crate) fn ctx_root_entry_present(root: &Path, entry: &str) -> bool {
-    fs::symlink_metadata(root.join(entry)).is_ok_and(|metadata| !metadata.file_type().is_symlink())
+    cortexfs_paths::root_entry_path(root, entry).is_some_and(|path| {
+        fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.file_type().is_symlink())
+    })
 }
 
 pub(crate) fn ctx_state(exists: bool, is_dir: bool, mounted: bool) -> &'static str {
@@ -132,7 +154,7 @@ pub(crate) fn ctx_state(exists: bool, is_dir: bool, mounted: bool) -> &'static s
 }
 
 pub(crate) fn read_ctx_status(root: &Path) -> String {
-    read_file_to_string(&root.join("status"))
+    read_file_to_string(&cortexfs_paths::status_path(root))
         .ok()
         .map(|content| content.trim().to_owned())
         .filter(|content| !content.is_empty())
@@ -143,9 +165,10 @@ pub(crate) fn read_status_agent_processes(root: &Path) -> Result<Vec<AgentProces
     match read_agent_processes(root) {
         Ok(processes) => Ok(processes),
         Err(error)
-            if error
-                .message
-                .starts_with(&format!("cannot read {}", root.join("agent").display())) =>
+            if error.message.starts_with(&format!(
+                "cannot read {}",
+                cortexfs_paths::agent_root_path(root).display()
+            )) =>
         {
             Ok(Vec::new())
         }

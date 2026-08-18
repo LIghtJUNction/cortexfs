@@ -41,6 +41,8 @@ pub struct AgentInvocation {
     run_id: String,
     /// User input payload.
     input: String,
+    /// Optional provider-neutral external event for this run.
+    event: Option<Value>,
     /// Agent name from environment binding.
     agent: Option<String>,
     /// Session name from environment binding.
@@ -51,6 +53,8 @@ pub struct AgentInvocation {
     source_root: Option<String>,
     /// Optional historical context for this run.
     history_messages: Option<String>,
+    /// Configured behavior loop from `CTX_AGENT_LOOP`.
+    loop_kind: Option<String>,
     /// Optional tool-context context for continuation.
     tool_context: Option<String>,
     /// Current continuation step.
@@ -66,11 +70,13 @@ impl AgentInvocation {
         Self {
             run_id: run_id.into(),
             input: input.into(),
+            event: None,
             agent: None,
             session: None,
             ctx_root: None,
             source_root: None,
             history_messages: None,
+            loop_kind: None,
             tool_context: None,
             step: 0,
             observation: None,
@@ -86,6 +92,12 @@ impl AgentInvocation {
     #[must_use]
     pub fn input(&self) -> &str {
         &self.input
+    }
+
+    /// Returns the structured external event that caused this run, if any.
+    #[must_use]
+    pub fn event(&self) -> Option<&Value> {
+        self.event.as_ref()
     }
     /// Returns the selected agent name, when supplied.
     #[must_use]
@@ -111,6 +123,14 @@ impl AgentInvocation {
     #[must_use]
     pub fn history_messages(&self) -> Option<&str> {
         self.history_messages.as_deref()
+    }
+    /// Returns the configured behavior loop, when supplied by the runtime.
+    ///
+    /// This is a behavior selector only. The host still owns tool execution,
+    /// filesystem authority, and the stdin/stdout envelope protocol.
+    #[must_use]
+    pub fn loop_kind(&self) -> Option<&str> {
+        self.loop_kind.as_deref()
     }
     /// Returns the runtime-owned tool context, when supplied.
     #[must_use]
@@ -364,6 +384,7 @@ where
     invocation.session = env_text("CTX_SESSION");
     invocation.ctx_root = env_text("CTX_ROOT");
     invocation.source_root = env_text("CTX_SOURCE");
+    invocation.loop_kind = env_text("CTX_AGENT_LOOP");
     if envelope.run() != invocation.run_id
         || env::var("CTX_AGENT_STEP").ok().as_deref() != Some(&envelope.step().to_string())
     {
@@ -371,6 +392,7 @@ where
     }
     invocation.history_messages = Some(envelope.history_messages().to_owned());
     invocation.tool_context = Some(envelope.tool_context().to_owned());
+    invocation.event = envelope.event().cloned();
     invocation.step = envelope.step();
     invocation.observation = envelope.observation().cloned();
     let Some(agent_name) = invocation.agent() else {

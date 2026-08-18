@@ -273,7 +273,7 @@ fn context_budget_parser_accepts_only_a_coherent_canonical_pair() {
 #[test]
 fn prompt_admission_accepts_exact_boundary_and_rejects_one_more_byte() {
     let mut config = test_agent_run_config();
-    config.context_budget = AgentWindowBudget::from_effective(
+    config.context_budget = budget_from_effective(
         ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
     );
     let base = serialized_agent_messages(&config, "")
@@ -291,7 +291,7 @@ fn prompt_admission_accepts_exact_boundary_and_rejects_one_more_byte() {
 #[test]
 fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
     let mut config = test_agent_run_config();
-    let budget = AgentWindowBudget::from_effective(
+    let budget = budget_from_effective(
         ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
     );
     config.context_budget = budget;

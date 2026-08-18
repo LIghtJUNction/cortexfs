@@ -9,14 +9,29 @@ pub(crate) fn provider_oauth_login(
     timeout_secs: u64,
     device: bool,
 ) -> Result<(), CliError> {
-    let config = provider_oauth_config(provider)?;
+    let provider_config = provider_config(provider)?;
+    let config = provider_config
+        .oauth
+        .clone()
+        .ok_or_else(|| CliError::usage("provider has no oauth config"))?;
+    let registry = cortexfs::configured_registry(
+        provider,
+        &provider_config.base_url,
+        provider_config.auth_methods(),
+        provider_config.oauth.clone(),
+    )
+    .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    let adapter = registry
+        .get(provider)
+        .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
     if device {
-        return provider_oauth_device_login(provider, &config, timeout_secs);
+        return provider_oauth_device_login(&config, adapter, timeout_secs);
     }
     let pkce = cortexfs::OAuthPkce::from_entropy(&read_system_entropy(32)?)
         .map_err(|_error| CliError::unavailable("cannot create oauth pkce verifier"))?;
     let state = hex_bytes(&read_system_entropy(16)?);
-    let auth_url = cortexfs::oauth_authorization_url(&config, &state, &pkce)
+    let auth_url = adapter
+        .authorization_url(&state, &pkce)
         .map_err(|_error| CliError::usage("invalid provider oauth config"))?;
     let callback = parse_oauth_redirect_uri(&config.redirect_uri)?;
     let listener =
@@ -79,36 +94,44 @@ pub(crate) fn provider_oauth_login(
         .write_all(response.as_bytes())
         .map_err(|error| CliError::unavailable(format!("cannot write oauth callback: {error}")))?;
 
-    let form = cortexfs::oauth_authorization_code_form(&config, &code, &pkce)
-        .map_err(|_error| CliError::usage("invalid oauth authorization code exchange"))?;
-    let token = cortexfs::exchange_oauth_token(&config, &form)
+    let mut transport = cortexfs::http_transport()
+        .map_err(|_error| CliError::unavailable("oauth transport unavailable"))?;
+    let credential = adapter
+        .login_with(
+            cortexfs::AuthRequest::AuthorizationCodePkce {
+                code,
+                verifier: pkce.verifier().to_owned(),
+            },
+            &mut transport,
+            current_time_unix(),
+        )
         .map_err(|_error| CliError::unavailable("oauth token exchange failed"))?;
-    persist_oauth_tokens(provider, &config, &token)?;
+    persist_adapter_credential(&config, adapter, &credential)?;
     print_line("oauth login ok")
 }
 
 fn provider_oauth_device_login(
-    provider: &str,
     config: &cortexfs::OAuthProviderConfig,
+    adapter: &dyn cortexfs::AuthProvider,
     timeout_secs: u64,
 ) -> Result<(), CliError> {
-    let post = |url: &str, body: &str| cortexfs::oauth_post(url, "application/json", body, 30);
-    let device = cortexfs::request_device_code_with(post)
-        .map_err(|_error| CliError::unavailable("oauth device code request failed"))?;
-    print_line(&format!(
-        "open {} and enter code {}",
-        cortexfs::CODEX_DEVICE_VERIFY_URL,
-        device.code
-    ))?;
-    let token = cortexfs::poll_device_code_with(
-        &device,
-        timeout_secs,
-        post,
-        |url, body| cortexfs::oauth_post(url, "application/x-www-form-urlencoded", body, 30),
-        |seconds| std::thread::sleep(Duration::from_secs(seconds)),
-    )
-    .map_err(|_error| CliError::unavailable("oauth device code login failed"))?;
-    persist_oauth_tokens(provider, config, &token)?;
+    let mut transport = cortexfs::http_transport()
+        .map_err(|_error| CliError::unavailable("oauth transport unavailable"))?;
+    let credential = adapter
+        .device_login_with(
+            timeout_secs,
+            &mut transport,
+            current_time_unix(),
+            &mut |challenge| {
+                let _ignored = print_line(&format!(
+                    "open {} and enter code {}",
+                    challenge.verification_uri, challenge.user_code
+                ));
+            },
+            &mut |seconds| std::thread::sleep(Duration::from_secs(seconds)),
+        )
+        .map_err(|_error| CliError::unavailable("oauth device code login failed"))?;
+    persist_adapter_credential(config, adapter, &credential)?;
     print_line("oauth login ok")
 }
 
@@ -124,11 +147,16 @@ pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
         .flatten()
         .is_some();
     let service = cortexfs::provider_keychain_service(provider);
+    let expiry_slot = if config.is_codex() {
+        "oauth:expires-at"
+    } else {
+        "oauth:expires"
+    };
     for (label, slot) in [
         ("access_token", config.access_account()),
         ("refresh_token", config.refresh_account()),
         ("account_id", "oauth:account"),
-        ("expires_at", "oauth:expires-at"),
+        ("expires_at", expiry_slot),
     ] {
         let present = if system {
             stored
@@ -146,54 +174,121 @@ pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
 }
 
 pub(crate) fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
-    let config = provider_oauth_config(provider)?;
-    let refresh = if oauth_uses_system_store(&config)? {
-        cortexfs::read_codex_system()
-            .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?
-            .map(|state| state.refresh_token)
-    } else {
-        cortexfs::oauth_keychain_secret(
-            &cortexfs::provider_keychain_service(provider),
-            config.refresh_account(),
-        )
-        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?
-    }
-    .ok_or_else(|| CliError::unavailable("oauth refresh token is not configured"))?;
-    let form = cortexfs::oauth_refresh_token_form(&config, &refresh)
-        .map_err(|_error| CliError::usage("invalid oauth refresh config"))?;
-    let token = cortexfs::exchange_oauth_token(&config, &form)
+    let provider_config = provider_config(provider)?;
+    let config = provider_config
+        .oauth
+        .clone()
+        .ok_or_else(|| CliError::usage("provider has no oauth config"))?;
+    let registry = cortexfs::configured_registry(
+        provider,
+        &provider_config.base_url,
+        provider_config.auth_methods(),
+        provider_config.oauth.clone(),
+    )
+    .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    let adapter = registry
+        .get(provider)
+        .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    let credential = stored_oauth_credential(provider, &config)?;
+    let mut transport = cortexfs::http_transport()
+        .map_err(|_error| CliError::unavailable("oauth transport unavailable"))?;
+    let refreshed = adapter
+        .refresh_with(&credential, &mut transport, current_time_unix())
         .map_err(|_error| CliError::unavailable("oauth token exchange failed"))?;
-    persist_oauth_tokens(provider, &config, &token)?;
+    persist_adapter_credential(&config, adapter, &refreshed)?;
     print_line("oauth refresh ok")
+}
+
+fn provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {
+    if !is_provider_name(provider) {
+        return Err(CliError::usage("invalid provider name"));
+    }
+    read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))
 }
 
 pub(crate) fn provider_oauth_config(
     provider: &str,
 ) -> Result<cortexfs::OAuthProviderConfig, CliError> {
-    if !is_provider_name(provider) {
-        return Err(CliError::usage("invalid provider name"));
-    }
-    let config = read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))?
+    let config = provider_config(provider)?
         .oauth
         .ok_or_else(|| CliError::usage(format!("provider has no oauth config: {provider}")))?;
     Ok(config)
 }
 
-fn persist_oauth_tokens(
+fn stored_oauth_credential(
     provider: &str,
     config: &cortexfs::OAuthProviderConfig,
-    token: &cortexfs::OAuthTokenResponse,
-) -> Result<(), CliError> {
-    let now = current_time_unix();
+) -> Result<cortexfs::Credential, CliError> {
     if oauth_uses_system_store(config)? {
+        let state = cortexfs::read_codex_system()
+            .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?
+            .ok_or_else(|| CliError::unavailable("oauth credential is not configured"))?;
+        return Ok(cortexfs::Credential::OAuth {
+            provider: provider.to_owned(),
+            access_token: state.access_token,
+            refresh_token: Some(state.refresh_token),
+            expires_at: Some(state.expires_at),
+            scopes: Vec::new(),
+        });
+    }
+    let service = cortexfs::provider_keychain_service(provider);
+    let access = cortexfs::oauth_keychain_secret(&service, config.access_account())
+        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?
+        .ok_or_else(|| CliError::unavailable("oauth access token is not configured"))?;
+    let refresh = cortexfs::oauth_keychain_secret(&service, config.refresh_account())
+        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?;
+    let expiry_slot = if config.is_codex() {
+        "oauth:expires-at"
+    } else {
+        "oauth:expires"
+    };
+    let expires_at = cortexfs::oauth_keychain_secret(&service, expiry_slot)
+        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?
+        .and_then(|value| value.parse().ok());
+    Ok(cortexfs::Credential::OAuth {
+        provider: provider.to_owned(),
+        access_token: access,
+        refresh_token: refresh,
+        expires_at,
+        scopes: Vec::new(),
+    })
+}
+
+fn persist_adapter_credential(
+    config: &cortexfs::OAuthProviderConfig,
+    adapter: &dyn cortexfs::AuthProvider,
+    credential: &cortexfs::Credential,
+) -> Result<(), CliError> {
+    if oauth_uses_system_store(config)? {
+        let &cortexfs::Credential::OAuth {
+            ref access_token,
+            ref refresh_token,
+            expires_at,
+            ref scopes,
+            ..
+        } = credential
+        else {
+            return Err(CliError::usage(
+                "oauth login returned an invalid credential",
+            ));
+        };
+        let token = cortexfs::OAuthTokenResponse {
+            access_token: access_token.clone(),
+            token_type: Some("Bearer".to_owned()),
+            expires_in: expires_at.and_then(|value| value.checked_sub(current_time_unix())),
+            refresh_token: refresh_token.clone(),
+            scope: (!scopes.is_empty()).then(|| scopes.join(" ")),
+            id_token: None,
+        };
         let retained = cortexfs::read_codex_system()
             .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?;
-        let state = cortexfs::oauth_token_state(token, retained.as_ref(), now)
+        let state = cortexfs::oauth_token_state(&token, retained.as_ref(), current_time_unix())
             .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?;
         return cortexfs::store_codex_system(&state)
             .map_err(|_error| CliError::unavailable("oauth credential store unavailable"));
     }
-    cortexfs::store_oauth_tokens(provider, config, token, now)
+    adapter
+        .persist(credential, current_time_unix())
         .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))
 }
 

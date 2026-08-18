@@ -3,7 +3,7 @@ use crate::*;
 const SESSION_ARCHIVE_DIR: &str = "archived_sessions";
 const MAX_SESSION_GC_STATE_BYTES: u64 = 64;
 const MAX_SESSION_GC_INDEX_BYTES: u64 = 64 * 1024;
-const SYSTEM_STORAGE_ROOT: &str = "/var/lib/cortexfs/storage/current";
+const SYSTEM_STORAGE_ROOT: &str = cortexfs_paths::SYSTEM_STORAGE_CURRENT;
 
 #[cfg(test)]
 thread_local! {
@@ -247,8 +247,8 @@ fn gc_rollback_error(error: CliError, rollback: Result<(), CliError>) -> CliErro
 }
 
 fn gc_session_root(root: &Path, name: &str) -> Result<PathBuf, CliError> {
-    let session_root = ctx_home(root)?.join("agent").join(name).join("session");
-    if root != Path::new("/ctx") {
+    let session_root = cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, name);
+    if root != Path::new(CTX_ROOT) {
         return Ok(session_root);
     }
     let Ok(relative) = session_root.strip_prefix(root) else {

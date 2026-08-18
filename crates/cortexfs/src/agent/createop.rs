@@ -27,7 +27,7 @@ pub(crate) const AGENT_CREATE_SCHEMA: &str = r#"{
     "window": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
   }
 }"#;
-const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
+const REFERENCE_OBJECT_RUNNER: &str = cortexfs_paths::CORTEXFS_OBJECT_RUNNER;
 #[cfg(test)]
 static FORCE_PRODUCTION_CLAIM_CONFLICT: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -175,8 +175,7 @@ impl Tool for AgentCreateTool {
         invocation: &ToolInvocation,
         output: &mut ToolEmitter<&mut dyn Write>,
     ) -> ToolResult<()> {
-        let value = serde_json::from_str::<serde_json::Value>(invocation.input())
-            .map_err(|_error| ToolError::invalid("invalid json input"))?;
+        let value = invocation.json()?;
         let object = value
             .as_object()
             .ok_or_else(|| ToolError::invalid("input must be a json object"))?;
@@ -410,12 +409,22 @@ pub(crate) fn create_child_context(
         ("uid".to_owned(), uid.clone()),
         ("gid".to_owned(), view.identity().gid().to_string()),
         ("groups".to_owned(), groups),
+        (
+            "perm".to_owned(),
+            view.permissions().control().trim_end().to_owned(),
+        ),
         ("label".to_owned(), label),
         ("parent".to_owned(), parent_ref),
         ("life".to_owned(), life.to_owned()),
-        ("root".to_owned(), "/ctx".to_owned()),
+        (
+            "root".to_owned(),
+            cortexfs_paths::ctx_root().display().to_string(),
+        ),
         ("cwd".to_owned(), cwd.to_owned()),
-        ("env".to_owned(), "CTX_ROOT=/ctx".to_owned()),
+        (
+            "env".to_owned(),
+            format!("CTX_ROOT={}", cortexfs_paths::CTX_ROOT),
+        ),
         ("path".to_owned(), path),
         ("mount".to_owned(), mount_text),
         ("model".to_owned(), view.model().to_owned()),
@@ -423,19 +432,8 @@ pub(crate) fn create_child_context(
         ("policy".to_owned(), policy_text),
         ("status".to_owned(), "idle".to_owned()),
     ];
-    let child_session_root = source
-        .join("home")
-        .join(&uid)
-        .join("agent")
-        .join(name)
-        .join("session");
-    let parent_session = source
-        .join("home")
-        .join(&uid)
-        .join("agent")
-        .join(parent)
-        .join("session")
-        .join(session);
+    let child_session_root = cortexfs_paths::agent_sessions_path(source, &uid, name);
+    let parent_session = cortexfs_paths::agent_session_path(source, &uid, parent, session);
     let model = view.model().to_owned();
     let mut ops = ProductionOps {
         source,
@@ -776,11 +774,9 @@ fn launch_child(
     session: &str,
 ) -> ChildCreateResult<ChildLaunch> {
     use std::time::Duration;
-    let runtime = PathBuf::from(format!("/run/user/{}", view.identity().uid()));
-    let terminal_dir = runtime
-        .join("cortexfs/terminal")
-        .join(view.agent_name())
-        .join(session);
+    let runtime = cortexfs_paths::user_runtime_root(view.identity().uid());
+    let terminal_socket =
+        cortexfs_paths::terminal_runtime_socket(&runtime, view.agent_name(), session);
     let terminal_fd = crate::agent::launch::ensure_terminal_runtime_dir(
         &runtime,
         view.agent_name(),
@@ -788,7 +784,6 @@ fn launch_child(
         view.identity(),
     )
     .map_err(|error| child_error("EIO", error.to_string()))?;
-    let terminal_socket = terminal_dir.join("main.sock");
     let startup = prepare_startup_stub(&terminal_fd, view.identity().uid(), view.identity().gid())
         .map_err(|error| child_error("EIO", error.to_string()))?;
     let terminal_unit = format!("cortexfs-agent-{}-{session}-terminal", view.agent_name());
@@ -837,7 +832,7 @@ fn launch_child(
                 )
             })?;
     let pid = terminal.pid;
-    let chat_visible = crate::agent::launch::system_agent_visible_socket(source, view.agent_name());
+    let chat_visible = cortexfs_paths::agent_backing_socket(source, view.agent_name());
     let system =
         match crate::agent::launch::ensure_system_agent_socket(view.agent_name(), &chat_visible) {
             Ok(receipt) => receipt,
@@ -851,14 +846,14 @@ fn launch_child(
                 return Err(startup_failure(&terminal_fd, startup, original));
             }
         };
-    let control = source
-        .join("agent")
-        .join(format!("{}.d", view.agent_name()));
     for (file, value) in [
         ("status", "ready\n".to_owned()),
         ("pid", format!("{pid}\n")),
     ] {
-        if let Err(error) = write_control(&control.join(file), &value) {
+        if let Err(error) = write_control(
+            &cortexfs_paths::agent_control_file_path(source, view.agent_name(), file),
+            &value,
+        ) {
             let launch = ChildLaunch {
                 terminal,
                 system,
@@ -902,7 +897,7 @@ fn dispatch_child_handoff(
     cwd: &str,
     handoff: &str,
 ) -> ChildCreateResult<()> {
-    let socket = crate::agent::launch::system_agent_visible_socket(source, child);
+    let socket = cortexfs_paths::agent_backing_socket(source, child);
     let run = format!("handoff-{session}");
     let request = serde_json::json!({
         "op": "send",
@@ -955,7 +950,6 @@ fn stop_child_with(
     system().map_err(|_error| child_error("EIO", "child system socket cleanup conflict"))
 }
 
-/// Rolls back partially created child resources and returns the original failure.
 fn rollback_create<T>(
     paths: crate::agent::create::AgentCreatePaths,
     error: AgentChildCreateError,
@@ -980,7 +974,8 @@ fn require_child_lifecycle_authority(
     view: &crate::AgentRuntimeView,
     name: &str,
 ) -> ChildCreateResult<()> {
-    if !view.policy().allows(
+    let policy: &dyn crate::PolicyEvaluator = view.policy();
+    if !policy.evaluate(
         view.policy_subject(),
         crate::PolicyObjectClass::Tool,
         "agent.create",
@@ -1001,7 +996,7 @@ fn require_child_lifecycle_authority(
             "parent policy denies child start",
         ),
     ] {
-        if !view.policy().allows(
+        if !policy.evaluate(
             view.policy_subject(),
             crate::PolicyObjectClass::Agent,
             name,
@@ -1018,7 +1013,7 @@ fn runtime_field(name: &str) -> ChildCreateResult<String> {
 }
 
 fn read_control(root: &Path, agent: &str, file: &str) -> ChildCreateResult<String> {
-    fs::read_to_string(root.join("agent").join(format!("{agent}.d")).join(file))
+    fs::read_to_string(cortexfs_paths::agent_control_file_path(root, agent, file))
         .map_err(|_error| child_error("EIO", format!("cannot read parent {file}")))
 }
 
@@ -2303,20 +2298,21 @@ allow coder_t agent:window-child start\n",
 
     #[test]
     fn startup_stub_accepts_valid_retry_and_rejects_hardlink() -> io::Result<()> {
-        let root = std::env::temp_dir().join(format!("cfs-startup-stub-{}", std::process::id()));
-        let _ignored = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root)?;
-        let parent = crate::support::plain::open_plain_directory(&root)?;
+        let root = tempfile::tempdir()?;
+        let parent = crate::support::plain::open_plain_directory(root.path())?;
         let uid = nix::unistd::geteuid().as_raw();
         let gid = nix::unistd::getegid().as_raw();
         let created = prepare_startup_stub(&parent, uid, gid)?;
         assert!(created.created);
         let retry = prepare_startup_stub(&parent, uid, gid)?;
         assert!(!retry.created);
-        fs::hard_link(root.join(".empty-shell-startup"), root.join("alias"))?;
+        fs::hard_link(
+            root.path().join(".empty-shell-startup"),
+            root.path().join("alias"),
+        )?;
         assert!(prepare_startup_stub(&parent, uid, gid).is_err());
         assert!(cleanup_created_startup_stub(&parent, created).is_err());
-        assert!(root.join(".empty-shell-startup").exists());
+        assert!(root.path().join(".empty-shell-startup").exists());
         Ok(())
     }
 }

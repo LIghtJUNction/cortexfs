@@ -1,0 +1,18 @@
+[package]
+name = "cortexfs-protocol"
+description = "Protocol-neutral intermediate representation for AI model requests and events."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["ai", "protocol-conversion", "openai", "gemini", "anthropic"]
+categories = ["api-bindings", "data-structures"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+
+[lints]
+workspace = true

@@ -130,6 +130,8 @@ pub(crate) struct EventLineJson {
     status: Option<JsonStringField>,
     input_tokens: Option<JsonU64Field>,
     output_tokens: Option<JsonU64Field>,
+    cached_tokens: Option<JsonU64Field>,
+    cache_write_tokens: Option<JsonU64Field>,
     id: Option<JsonStringField>,
     name: Option<JsonStringField>,
     args: Option<Value>,
@@ -208,7 +210,17 @@ pub(crate) fn inspect_usage_event(
     event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
-    if !is_json_u64(event.input_tokens.as_ref()) || !is_json_u64(event.output_tokens.as_ref()) {
+    if !is_json_u64(event.input_tokens.as_ref())
+        || !is_json_u64(event.output_tokens.as_ref())
+        || event
+            .cached_tokens
+            .as_ref()
+            .is_some_and(|_| !is_json_u64(event.cached_tokens.as_ref()))
+        || event
+            .cache_write_tokens
+            .as_ref()
+            .is_some_and(|_| !is_json_u64(event.cache_write_tokens.as_ref()))
+    {
         issues.push(EventStreamIssue::InvalidUsage(line_number));
     }
 }

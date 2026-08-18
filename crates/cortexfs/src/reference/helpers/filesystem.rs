@@ -196,38 +196,55 @@ pub(crate) const fn should_repair_reference_owner(effective_uid: u32) -> bool {
 
 pub(crate) fn ensure_reference_model_alias(
     path: &Path,
-    target: &Path,
+    alias: &str,
+    snapshot: &ProviderSnapshot,
 ) -> Result<(), ReferenceTreeError> {
-    if let Ok(existing) = read_reference_symlink(path) {
-        if existing == target || is_valid_ctx_model_symlink(&existing) {
-            return Ok(());
+    let parent = path.parent().ok_or(ReferenceTreeError::CannotLink)?;
+    create_reference_dir(parent)?;
+    let parent_dir = open_reference_dir(parent)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(ReferenceTreeError::CannotLink)?;
+    for _attempt in 0..4 {
+        match support::receipt::receipt_at(&parent_dir, name, support::receipt::EntryKind::Symlink)
+        {
+            Ok(None) => {
+                let target = current_model_alias_target(alias, None, snapshot);
+                match nix::unistd::symlinkat(&target, &parent_dir, name) {
+                    Ok(()) => {
+                        return parent_dir
+                            .sync_all()
+                            .map_err(|_error| ReferenceTreeError::CannotLink);
+                    }
+                    Err(nix::errno::Errno::EEXIST) => {}
+                    Err(_error) => return Err(ReferenceTreeError::CannotLink),
+                }
+            }
+            Ok(Some(receipt)) => {
+                let existing = read_reference_symlink(path)
+                    .map_err(|_error| ReferenceTreeError::CannotLink)?;
+                let target = current_model_alias_target(alias, Some(&existing), snapshot);
+                if target == existing {
+                    if support::receipt::receipt_at(
+                        &parent_dir,
+                        name,
+                        support::receipt::EntryKind::Symlink,
+                    )
+                    .ok()
+                    .flatten()
+                        == Some(receipt)
+                    {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                provider::replace_alias(parent, &parent_dir, name, &target)
+                    .map_err(|_error| ReferenceTreeError::CannotLink)?;
+                return Ok(());
+            }
+            Err(_error) => return Err(ReferenceTreeError::CannotLink),
         }
-        return Err(ReferenceTreeError::CannotLink);
-    } else if path.symlink_metadata().is_ok() {
-        return Err(ReferenceTreeError::CannotLink);
-    }
-    if let Some(parent) = path.parent() {
-        create_reference_dir(parent)?;
-        let parent_dir = open_reference_dir(parent)?;
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or(ReferenceTreeError::CannotLink)?;
-        nix::unistd::symlinkat(target, &parent_dir, name)
-            .map_err(|_error| ReferenceTreeError::CannotLink)?;
-        return parent_dir
-            .sync_all()
-            .map_err(|_error| ReferenceTreeError::CannotLink);
     }
     Err(ReferenceTreeError::CannotLink)
-}
-
-pub(crate) fn is_valid_ctx_model_symlink(target: &Path) -> bool {
-    let Some(target) = target.to_str() else {
-        return false;
-    };
-    let Some(model) = target.strip_prefix("/ctx/model/") else {
-        return false;
-    };
-    abi::path::is_model_reference(model)
 }

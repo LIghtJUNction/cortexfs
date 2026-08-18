@@ -1,0 +1,167 @@
+use std::path::Path;
+
+use serde_json::json;
+
+use crate::{RuntimeClientError, interaction};
+
+mod duplex;
+
+use duplex::send_json_stream;
+
+pub(super) const MAX_SESSION_FRAME_BYTES: usize = 256 * 1024;
+pub(super) const MAX_SESSION_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Stable `send` request fields for an agent session socket.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionSendRequest<'a> {
+    pub request_id: &'a str,
+    pub session: &'a str,
+    pub scope: &'a str,
+    pub cwd: Option<&'a str>,
+    pub workspace: Option<&'a str>,
+    pub input: &'a str,
+}
+
+/// Sends one session request and returns the runtime's canonical JSONL events.
+pub fn send(
+    socket: &Path,
+    request: SessionSendRequest<'_>,
+) -> Result<Vec<String>, RuntimeClientError> {
+    let mut frames = Vec::new();
+    send_stream(socket, request, |frame| {
+        frames.push(frame.to_owned());
+        Ok::<(), RuntimeClientError>(())
+    })?;
+    Ok(frames)
+}
+
+/// Sends one session request and invokes the callback for each event frame.
+pub fn send_stream<F, E>(
+    socket: &Path,
+    request: SessionSendRequest<'_>,
+    on_frame: F,
+) -> Result<(), E>
+where
+    F: FnMut(&str) -> Result<(), E>,
+    E: From<RuntimeClientError>,
+{
+    validate(&request).map_err(E::from)?;
+    let frame = json!({
+        "op": "send",
+        "id": request.request_id,
+        "session": request.session,
+        "scope": request.scope,
+        "cwd": request.cwd,
+        "workspace": request.workspace,
+        "input": request.input,
+    })
+    .to_string();
+    if frame.len() > MAX_SESSION_FRAME_BYTES {
+        return Err(E::from(RuntimeClientError::InvalidRequest));
+    }
+    send_json_stream(socket, &frame, on_frame)
+}
+
+/// Sends one provider-neutral interaction request through the agent socket.
+pub fn send_interaction_stream<F, E>(
+    socket: &Path,
+    request: interaction::InteractionRequest,
+    on_frame: F,
+) -> Result<(), E>
+where
+    F: FnMut(&str) -> Result<(), E>,
+    E: From<RuntimeClientError>,
+{
+    let frame = interaction::InteractionFrame::request(request);
+    frame
+        .validate()
+        .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
+    let frame = serde_json::to_string(&frame)
+        .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
+    send_json_stream(socket, &frame, on_frame)
+}
+
+/// Sends an interaction request and normalizes executable-agent events.
+pub fn send_interaction_events<F, E>(
+    socket: &Path,
+    request: interaction::InteractionRequest,
+    mut on_event: F,
+) -> Result<(), E>
+where
+    F: FnMut(interaction::InteractionEvent) -> Result<(), E>,
+    E: From<RuntimeClientError>,
+{
+    let request_id = request.request_id().to_owned();
+    send_interaction_stream(socket, request, |frame| {
+        if let Some(event) = interaction::interaction_event_from_agent_frame(&request_id, frame) {
+            on_event(event)?;
+        }
+        Ok::<(), E>(())
+    })
+}
+
+/// Sends an interaction request and answers runtime commands on the same socket.
+#[expect(
+    clippy::pattern_type_mismatch,
+    reason = "match ergonomics keep borrowed interaction events readable"
+)]
+pub fn send_interaction_events_with_commands<F, C, E>(
+    socket: &Path,
+    request: interaction::InteractionRequest,
+    mut on_event: F,
+    mut on_command: C,
+) -> Result<(), E>
+where
+    F: FnMut(interaction::InteractionEvent) -> Result<(), E>,
+    C: FnMut(&interaction::InteractionEvent) -> Result<interaction::InteractionResult, E>,
+    E: From<RuntimeClientError>,
+{
+    let request_id = request.request_id().to_owned();
+    let session = request.session().unwrap_or("default").to_owned();
+    let frame = interaction::InteractionFrame::request(request)
+        .encode()
+        .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
+    let frame =
+        String::from_utf8(frame).map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
+    duplex::send_json_stream_with(socket, frame.trim_end_matches('\n'), |stream, raw| {
+        let Some(event) = interaction::interaction_event_from_agent_frame(&request_id, raw) else {
+            return Ok(());
+        };
+        on_event(event.clone())?;
+        if let interaction::InteractionEvent::Command { command_id, .. } = &event {
+            let result = on_command(&event)?;
+            duplex::write_interaction_request(
+                stream,
+                interaction::InteractionRequest::CommandResult {
+                    request_id: request_id.clone(),
+                    session: session.clone(),
+                    command_id: command_id.clone(),
+                    result,
+                },
+            )
+            .map_err(E::from)?;
+        }
+        Ok(())
+    })
+}
+
+fn validate(request: &SessionSendRequest<'_>) -> Result<(), RuntimeClientError> {
+    if request.scope != "private" && request.scope != "shared" && request.scope != "temp" {
+        return Err(RuntimeClientError::InvalidRequest);
+    }
+    let fields = [
+        request.request_id,
+        request.session,
+        request.scope,
+        request.input,
+    ];
+    if fields
+        .iter()
+        .any(|field| field.is_empty() || field.contains('\0'))
+        || request.cwd.is_some_and(|value| value.contains('\0'))
+        || request.workspace.is_some_and(|value| value.contains('\0'))
+    {
+        return Err(RuntimeClientError::InvalidRequest);
+    }
+    Ok(())
+}

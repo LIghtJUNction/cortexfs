@@ -4,7 +4,7 @@ fn provider_text_tool_call_writes_canonical_event() {
     let result = write_model_text_or_tool_call(
         &mut output,
         "run-1",
-        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}I will use the result next."#,
     );
 
     assert!(result.is_ok());
@@ -27,47 +27,23 @@ fn cli_tool_mode_outputs_plain_text() {
 }
 
 #[test]
-fn openai_stream_event_extracts_chat_tool_call_delta() {
-    let event = openai_stream_event(r#"data: {"choices":[{"delta":{"content":"hel"}}]}"#)
-        .map(|frame| frame.event);
-    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
-
-    let event = openai_stream_event(
-        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\""}}]}}]}"#,
-    )
-    .map(|frame| frame.event);
-    assert!(matches!(
-        event,
-        Ok(OpenAiStreamEvent::ToolCallDelta(delta))
-            if delta.id.as_deref() == Some("call-abc")
-                && delta.name.as_deref() == Some("tsh")
-                && delta.arguments == r#"{"args""#
-    ));
-
-    assert!(matches!(
-        openai_stream_event(r#"data: {"choices":[{"finish_reason":"tool_calls"}]}"#)
-            .map(|frame| frame.event),
-        Ok(OpenAiStreamEvent::ToolCallsDone)
-    ));
-}
-
-#[test]
 fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = OpenAiToolCallStream::default();
-    let first = openai_stream_event(
+    let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(
         r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\""}}]}}]}"#,
     )?
-    .event;
-    let second = openai_stream_event(
+    .event else {
+        return Err("expected tool call delta".into());
+    };
+    assert_eq!(delta.id.as_deref(), Some("call-abc"));
+    assert_eq!(delta.name.as_deref(), Some("tsh"));
+    assert_eq!(delta.arguments, r#"{"args""#);
+    stream.push(delta);
+    if let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(
         r#"data: {"choices":[{"delta":{"tool_calls":[{"type":"function","function":{"arguments":":[\"tools\"]}"}}]}}]}"#,
     )?
-    .event;
-
-    if let OpenAiStreamEvent::ToolCallDelta(delta) = first {
-        stream.push(delta);
-    }
-    if let OpenAiStreamEvent::ToolCallDelta(delta) = second {
+    .event {
         stream.push(delta);
     }
 
@@ -78,65 +54,233 @@ fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
                 .to_owned()
         )
     );
+    for id in ["", r#""id":"call/invalid","#] {
+        let line = format!(
+            r#"data: {{"choices":[{{"delta":{{"tool_calls":[{{{id}"function":{{"name":"tsh","arguments":"{{\"args\":[\"tools\"]}}"}}}}]}}}}]}}"#
+        );
+        let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(&line)?.event else {
+            return Err("expected tool call delta".into());
+        };
+        let mut invalid = OpenAiToolCallStream::default();
+        invalid.push(delta);
+        assert!(invalid.finish().is_err());
+    }
     Ok(())
 }
 
 #[test]
-fn openai_stream_event_extracts_usage() {
-    let event =
-        openai_stream_event(r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#)
-            .map(|frame| frame.event);
-    assert!(matches!(
-        event,
-        Ok(OpenAiStreamEvent::Usage(TokenUsage {
-            input_tokens: 12,
-            output_tokens: 5
-        }))
-    ));
+fn openai_stream_tool_call_ignores_extra_provider_indices() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut stream = OpenAiToolCallStream::default();
+    for line in [
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-first","function":{"name":"tsh","arguments":"{\"args\":[\"pwd\"]}"}}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call-second","function":{"name":"tsh","arguments":"{\"args\":[\"ls\"]}"}}]}}]}"#,
+    ] {
+        let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(line)?.event else {
+            return Err("expected tool call delta".into());
+        };
+        stream.push(delta);
+    }
+    assert_eq!(
+        stream.finish()?,
+        Some(
+            r#"{"arguments":{"args":["pwd"]},"id":"call-first","name":"tsh","type":"tool_call"}"#
+                .to_owned()
+        )
+    );
+    Ok(())
 }
 
 #[test]
-fn openai_stream_event_accepts_done_marker() {
-    assert!(matches!(
-        openai_stream_event("data: [DONE]").map(|frame| frame.event),
-        Ok(OpenAiStreamEvent::Done)
-    ));
+fn model_usage_preserves_optional_cache_metrics() -> Result<(), Box<dyn std::error::Error>> {
+    let usage = |cached_tokens, cache_write_tokens| TokenUsage {
+        input_tokens: 12,
+        output_tokens: 5,
+        cached_tokens,
+        cache_write_tokens,
+    };
+    for (usage, expected) in [
+        (
+            usage(None, None),
+            r#"{"type":"usage","run":"run-1","input_tokens":12,"output_tokens":5}
+"#,
+        ),
+        (
+            usage(Some(8), Some(4)),
+            r#"{"type":"usage","run":"run-1","input_tokens":12,"output_tokens":5,"cached_tokens":8,"cache_write_tokens":4}
+"#,
+        ),
+    ] {
+        let mut output = Vec::new();
+        write_model_usage(&mut output, "run-1", usage)?;
+        assert_eq!(String::from_utf8(output)?, expected);
+    }
+    Ok(())
 }
 
 #[test]
-fn provider_stream_reader_rejects_oversized_line() {
-    let input = format!("{}\n", "x".repeat(MAX_PROVIDER_STREAM_LINE_BYTES));
-    let mut reader = Cursor::new(input.into_bytes());
-
-    let result = read_provider_stream_line(&mut reader);
-
-    assert!(result.is_err());
+fn responses_stream_function_calls_remain_direct_or_fail_closed() -> Result<(), String> {
+    let response = parse_openai_response_content(br#"{"output_text":"hello codex"}"#);
+    assert_eq!(response, Ok("hello codex".to_owned()));
+    for response in [br"{}".as_slice(), br#"{"output":{}}"#.as_slice()] {
+        assert_eq!(
+            parse_openai_response_content(response).err().as_deref(),
+            Some("provider response missing content")
+        );
+    }
+    assert_eq!(
+        parse_openai_response_content(
+            br#"{"output_text":"explanation","output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}"#,
+        ),
+        Ok(r#"{"arguments":{"args":["tools"]},"id":"call_123","name":"tsh","type":"tool_call"}"#.to_owned())
+    );
+    let OpenAiStreamEvent::ToolCall(frame) = openai_stream_event(
+        r#"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}"#,
+    )?.event else { return Err("expected tool call event".to_owned()) };
+    assert_eq!(
+        frame,
+        r#"{"arguments":{"args":["tools"]},"id":"call_123","name":"tsh","type":"tool_call"}"#
+    );
+    for event in ["added", "done"] {
+        for item in [
+            serde_json::json!({"type":"program"}),
+            serde_json::json!({"type":"program_output"}),
+            serde_json::json!({"type":"function_call","caller":"prog_123"}),
+        ] {
+            let line =
+                serde_json::json!({"type":format!("response.output_item.{event}"),"item":item});
+            assert_eq!(
+                openai_stream_event(&format!("data: {line}"))
+                    .err()
+                    .as_deref(),
+                Some("provider response requires host-owned program continuation")
+            );
+        }
+    }
+    for (line, expected) in [
+        (
+            r#"data: {"type":"response.failed","response":{"error":{"message":"quota exceeded"}}}"#,
+            "quota exceeded",
+        ),
+        (
+            r#"data: {"type":"response.failed","error":{"message":"legacy quota"}}"#,
+            "legacy quota",
+        ),
+        (
+            r#"data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}},"error":{"message":"incomplete fallback"}}"#,
+            "max_output_tokens",
+        ),
+        (
+            r#"data: {"type":"error","error":{"message":"generic fallback"},"message":"ignored"}"#,
+            "generic fallback",
+        ),
+    ] {
+        assert_eq!(openai_stream_event(line).err().as_deref(), Some(expected));
+    }
+    Ok(())
 }
 
 #[test]
-fn openai_stream_event_extracts_responses_delta_text() {
-    let event = openai_stream_event(r#"data: {"type":"response.output_text.delta","delta":"hel"}"#)
-        .map(|frame| frame.event);
-    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+fn openai_response_content_parses_output_parts() {
+    for (response, expected) in [
+        (br#"{"output":[{"content":[{"type":"output_text","text":"hello "},{"type":"output_text","text":"codex"}]}]}"#.as_slice(), Ok("hello codex")),
+        (br#"{"output":[{"content":[{"type":"refusal","refusal":"cannot comply"}]}]}"#.as_slice(), Ok("cannot comply")),
+        (br#"{"status":"failed","error":{"message":"quota"},"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[]}"}]}"#.as_slice(), Err("quota")),
+        (br#"{"status":"cancelled","output_text":"ignored"}"#.as_slice(), Err("provider response cancelled")),
+        (br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"content":[{"type":"output_text","text":"ignored"}]}]}"#.as_slice(), Err("max_output_tokens")),
+        (br#"{"status":"failed","output_text":"ignored"}"#.as_slice(), Err("provider response failed")),
+        (br#"{"status":"incomplete","output_text":"ignored"}"#.as_slice(), Err("provider response incomplete")),
+    ] {
+        assert_eq!(parse_openai_response_content(response), expected.map(str::to_owned).map_err(str::to_owned));
+    }
 }
 
 #[test]
-fn openai_stream_event_extracts_responses_done_text() {
-    let event = openai_stream_event(r#"data: {"type":"response.output_text.done","text":"hel"}"#)
-        .map(|frame| frame.event);
-    assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "hel"));
-
-    let event = openai_stream_event(
-        r#"data: {"type":"response.content_part.done","part":{"type":"output_text","text":"lo"}}"#,
-    )
-    .map(|frame| frame.event);
-    assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "lo"));
-
-    let event = openai_stream_event(
-        r#"data: {"type":"response.output_item.done","item":{"content":[{"type":"output_text","text":"ok"}]}}"#,
-    )
-    .map(|frame| frame.event);
-    assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "ok"));
+fn responses_stream_text_frames_preserve_terminal_events() -> Result<(), String> {
+    for (line, kind, text) in [
+        (
+            r#"data: {"choices":[{"delta":{"content":"hel"}}]}"#,
+            "delta",
+            "hel",
+        ),
+        (
+            r#"data: {"choices":[{"finish_reason":"tool_calls"}]}"#,
+            "done",
+            "",
+        ),
+        ("data: [DONE]", "done", ""),
+        (
+            r#"data: {"type":"response.output_text.delta","delta":"hel"}"#,
+            "delta",
+            "hel",
+        ),
+        (
+            r#"data: {"type":"response.output_text.done","text":"hel"}"#,
+            "final",
+            "hel",
+        ),
+        (
+            r#"data: {"type":"response.refusal.delta","delta":"cannot "}"#,
+            "delta",
+            "cannot ",
+        ),
+        (
+            r#"data: {"type":"response.refusal.done","refusal":"comply"}"#,
+            "final",
+            "comply",
+        ),
+        (
+            r#"data: {"type":"response.content_part.done","part":{"type":"output_text","text":"lo"}}"#,
+            "final",
+            "lo",
+        ),
+        (
+            r#"data: {"type":"response.content_part.done","part":{"type":"refusal","refusal":"no"}}"#,
+            "final",
+            "no",
+        ),
+        (
+            r#"data: {"type":"response.output_item.done","item":{"content":[{"type":"output_text","text":"ok"}]}}"#,
+            "final",
+            "ok",
+        ),
+        (r#"data: {"type":"response.completed"}"#, "completed", ""),
+        (
+            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":"invalid"}}}"#,
+            "completed",
+            "",
+        ),
+        (r#"data: {"type":"response.done"}"#, "response_done", ""),
+        (
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"{}"}"#,
+            "ignore",
+            "",
+        ),
+        (
+            r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#,
+            "delta",
+            "",
+        ),
+    ] {
+        let event = openai_stream_event(line)?.event;
+        let actual = match event {
+            OpenAiStreamEvent::Delta(value) => ("delta", value),
+            OpenAiStreamEvent::FinalText(value) => ("final", value),
+            OpenAiStreamEvent::ResponseCompleted(_) => ("completed", String::new()),
+            OpenAiStreamEvent::ResponseDone => ("response_done", String::new()),
+            OpenAiStreamEvent::Done => ("done", String::new()),
+            OpenAiStreamEvent::Ignore => ("ignore", String::new()),
+            _ => return Err("unexpected stream event".to_owned()),
+        };
+        assert_eq!(actual, (kind, text.to_owned()));
+    }
+    assert!(
+        read_provider_stream_line(&mut Cursor::new(
+            format!("{}\n", "x".repeat(MAX_PROVIDER_STREAM_LINE_BYTES)).into_bytes(),
+        ))
+        .is_err()
+    );
+    Ok(())
 }
 
 #[test]
@@ -166,102 +310,79 @@ fn responses_done_text_is_not_treated_as_stream_delta() -> Result<(), Box<dyn st
     }
     emitter.finish(&mut output)?;
 
-    let rendered = String::from_utf8(output)?;
-    assert_eq!(rendered.matches("Hi!").count(), 1);
+    assert_eq!(String::from_utf8(output)?.matches("Hi!").count(), 1);
     Ok(())
 }
 
 #[test]
-fn openai_stream_event_accepts_responses_completed_marker() {
-    assert!(matches!(
-        openai_stream_event(r#"data: {"type":"response.completed"}"#).map(|frame| frame.event),
-        Ok(OpenAiStreamEvent::Done)
-    ));
-}
-
-#[test]
-fn openai_stream_event_accepts_responses_done_marker() {
-    assert!(matches!(
-        openai_stream_event(r#"data: {"type":"response.done"}"#).map(|frame| frame.event),
-        Ok(OpenAiStreamEvent::Done)
-    ));
-}
-
-#[test]
-fn openai_stream_event_reports_responses_failed_marker() {
-    assert_eq!(
-        openai_stream_event(
-            r#"data: {"type":"response.failed","error":{"message":"quota exceeded"}}"#
-        )
-        .map(|frame| matches!(frame.event, OpenAiStreamEvent::Ignore)),
-        Err("quota exceeded".to_owned())
-    );
-}
-
-#[test]
-fn openai_stream_event_does_not_mix_reasoning_into_answer_text() {
-    let event =
-        openai_stream_event(r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#)
-            .map(|frame| frame.event);
-    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text.is_empty()));
-}
-
-#[test]
-fn openai_response_content_prefers_output_text() {
-    assert_eq!(
-        parse_openai_response_content(br#"{"output_text":"hello codex"}"#),
-        Ok("hello codex".to_owned())
-    );
-}
-
-#[test]
 fn provider_usage_accepts_openai_and_anthropic_shapes() {
-    assert_eq!(
-        token_usage_from_value(&serde_json::json!({
-            "usage": {"prompt_tokens": 10, "completion_tokens": 3}
-        })),
-        Some(TokenUsage {
-            input_tokens: 10,
-            output_tokens: 3,
-        })
-    );
-    assert_eq!(
-        token_usage_from_value(&serde_json::json!({
-            "usage": {"input_tokens": 7, "output_tokens": 2}
-        })),
-        Some(TokenUsage {
-            input_tokens: 7,
-            output_tokens: 2,
-        })
-    );
-    assert_eq!(
-        token_usage_from_value(&serde_json::json!({
-            "response": {
-                "usage": {"input_tokens": 9, "output_tokens": 4}
-            }
-        })),
-        Some(TokenUsage {
-            input_tokens: 9,
-            output_tokens: 4,
-        })
-    );
+    let usage = |input_tokens, output_tokens, cached_tokens, cache_write_tokens| TokenUsage {
+        input_tokens,
+        output_tokens,
+        cached_tokens,
+        cache_write_tokens,
+    };
+    for (value, expected) in [
+        (
+            serde_json::json!({"usage":{"prompt_tokens":10,"completion_tokens":3}}),
+            usage(10, 3, None, None),
+        ),
+        (
+            serde_json::json!({"usage":{"input_tokens":7,"output_tokens":2}}),
+            usage(7, 2, None, None),
+        ),
+        (
+            serde_json::json!({"response":{"usage":{"input_tokens":9,"output_tokens":4}}}),
+            usage(9, 4, None, None),
+        ),
+        (
+            serde_json::json!({"usage":{"input_tokens":11,"output_tokens":5,"input_tokens_details":{"cached_tokens":8,"cache_write_tokens":4}}}),
+            usage(11, 5, Some(8), Some(4)),
+        ),
+        (
+            serde_json::json!({"usage":{"prompt_tokens":11,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":8,"cache_write_tokens":4}}}),
+            usage(11, 5, Some(8), Some(4)),
+        ),
+    ] {
+        assert_eq!(token_usage_from_value(&value), Some(expected));
+    }
+    assert!(matches!(
+        openai_stream_event(r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#)
+            .map(|frame| frame.event),
+        Ok(OpenAiStreamEvent::Usage(TokenUsage {
+            input_tokens: 12,
+            output_tokens: 5,
+            cached_tokens: None,
+            cache_write_tokens: None
+        }))
+    ));
 }
 
 #[test]
-fn openai_request_bodies_include_non_auto_effort() {
+fn openai_request_bodies_include_effort_and_agent_tools() {
     let chat = openai_chat_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::High);
     let responses = openai_responses_body("gpt-5.6", "hello", true, cortexfs::ModelEffort::XHigh);
 
-    assert!(chat.contains(r#""reasoning":{"effort":"high"}"#));
+    assert!(chat.contains(r#""reasoning_effort":"high""#));
+    assert!(!chat.contains(r#""reasoning":"#));
     assert!(responses.contains(r#""reasoning":{"effort":"xhigh"}"#));
+    assert!(!responses.contains("reasoning_effort"));
+    let chat_none = openai_chat_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::None);
+    assert!(chat_none.contains(r#""reasoning_effort":"none""#));
+    assert!(!chat_none.contains(r#""reasoning":"#));
     assert!(
-        !openai_chat_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::Auto)
-            .contains("reasoning")
+        openai_responses_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::None)
+            .contains(r#""reasoning":{"effort":"none"}"#)
     );
-}
-
-#[test]
-fn openai_agent_chat_body_declares_tsh_tool() {
+    assert!(
+        openai_responses_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::Max)
+            .contains(r#""reasoning":{"effort":"max"}"#)
+    );
+    let chat_auto = openai_chat_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::Auto);
+    assert!(!chat_auto.contains("reasoning"));
+    let responses_auto =
+        openai_responses_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::Auto);
+    assert!(!responses_auto.contains("reasoning"));
     let body = openai_chat_body_with_agent_tools(
         "gpt-5.6",
         "what tools?",
@@ -271,6 +392,7 @@ fn openai_agent_chat_body_declares_tsh_tool() {
     );
     assert!(body.contains(r#""name":"tsh""#), "{body}");
     assert!(body.contains(r#""tool_choice":"auto""#), "{body}");
+    assert!(body.contains(r#""parallel_tool_calls":false"#), "{body}");
     assert!(
         body.contains(r#""stream_options":{"include_usage":true}"#),
         "{body}"
@@ -281,7 +403,7 @@ fn openai_agent_chat_body_declares_tsh_tool() {
 #[test]
 fn openai_chat_tool_call_response_parses_as_canonical_tool_call() {
     let content = parse_openai_chat_content(
-        br#"{"choices":[{"message":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]}}]}"#,
+        br#"{"choices":[{"message":{"content":"explanation","tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]}}]}"#,
     );
     assert_eq!(
         content,
@@ -290,16 +412,24 @@ fn openai_chat_tool_call_response_parses_as_canonical_tool_call() {
                 .to_owned()
         )
     );
-}
-
-#[test]
-fn openai_response_content_parses_output_parts() {
-    assert_eq!(
-        parse_openai_response_content(
-            br#"{"output":[{"content":[{"type":"output_text","text":"hello "},{"type":"output_text","text":"codex"}]}]}"#
-        ),
-        Ok("hello codex".to_owned())
-    );
+    for (reason, tool) in [("length", false), ("content_filter", true)] {
+        let content = if tool {
+            r#"{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]}"#
+        } else {
+            r#"{"content":"partial"}"#
+        };
+        let body = format!(r#"{{"choices":[{{"message":{content},"finish_reason":"{reason}"}}]}}"#);
+        assert_eq!(
+            parse_openai_chat_content(body.as_bytes()).err().as_deref(),
+            Some(format!("provider response finished with {reason}").as_str())
+        );
+        let line =
+            format!(r#"data: {{"choices":[{{"delta":{content},"finish_reason":"{reason}"}}]}}"#);
+        assert_eq!(
+            openai_stream_event(&line).err().as_deref(),
+            Some(format!("provider response finished with {reason}").as_str())
+        );
+    }
 }
 
 #[test]
@@ -314,19 +444,16 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         .pointer("/0/content")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    assert!(system.contains("`tsh` is always native"));
-    assert!(system.contains("tsh cache state never makes a tool direct-native"));
     assert!(system.contains("## AGENT Instructions"));
     assert!(system.contains("Always answer tersely."));
     assert!(system.contains("Project rule"));
     assert!(system.contains("name: rust"));
     assert!(system.contains("tool output"));
+    assert!(system.contains(r#"call `tsh` with `{"args":["..."]}`"#));
+    assert!(system.contains("Inspect and report for answer, explain, review, diagnose, or plan"));
+    assert!(system.contains("Require confirmation for external writes, destructive actions, or material scope expansion."));
+    assert!(system.contains("Answer concisely: lead with the outcome, retain required evidence, caveats, and next action, and omit repetition."));
     assert!(system.contains("previous message"));
-    assert!(system.contains("Do not claim direct access"));
-    assert!(!system.contains("output this exact tool call"));
-    assert!(system.contains("When tool execution is useful"));
-    assert!(system.contains("inspect current files before editing"));
-    assert!(default_agent_tool_context().contains("`/workspace`"));
     assert!(
         system.find("## Runtime Contract").unwrap_or(usize::MAX)
             < system.find("## AGENT Instructions").unwrap_or(usize::MAX)
@@ -340,7 +467,9 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
 
     let prompt = render_agent_system_prompt("coder", "", &test_prompt_context());
     assert!(prompt.contains("CortexFS agent `coder`"));
-    assert!(prompt.contains("Do not mention hidden platform tools such as `image_gen`"));
+    assert!(prompt.contains(
+        "Do not claim provider, host, assistant-platform, or hidden-platform access, including `image_gen`"
+    ));
 }
 
 #[test]
@@ -349,9 +478,15 @@ fn agent_prompt_context_renders_workspace_runtime_hint() {
     prompt_context.tool_injection = default_agent_tool_context();
     let prompt = render_agent_system_prompt("coder", "", &prompt_context);
 
-    assert!(prompt.contains("`/workspace`"));
-    assert!(prompt.contains("`CTX_SOURCE`"));
-    assert!(prompt.contains("`CTX_ROOT`"));
+    let expected = "\
+Runtime workspace:
+- `/workspace` is the agent's project workspace when mounted.
+- `CTX_SOURCE` points at the CortexFS source view that defines visible agents, tools, models, sessions, and policy.
+- `CTX_ROOT` points at the mounted CortexFS ABI root.
+- No tool facts, repo structure, search results, or file content have been injected yet.";
+    let tool_context = default_agent_tool_context();
+    assert_eq!(tool_context, expected);
+    assert!(prompt.contains(expected));
 }
 
 #[test]
@@ -366,6 +501,66 @@ fn agent_prompt_template_controls_rendered_system_message() {
     assert!(prompt.starts_with("agent=coder\ninstructions=custom identity\n"));
     assert!(prompt.contains("contract=You are CortexFS agent `coder`."));
     assert!(!prompt.contains("## Rules"));
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_empty_reply_retries_transport_request() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::mpsc::TryRecvError;
+
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let mut requests = 0;
+        loop {
+            match stop_receiver.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            let (mut stream, _peer) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+            let mut request = [0_u8; 8 * 1024];
+            let _read = stream.read(&mut request)?;
+            requests += 1;
+            if requests == 1 {
+                continue;
+            }
+            let body = r#"{"ok":true}"#;
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes())?;
+            stream.write_all(body.as_bytes())?;
+            stream.flush()?;
+            break;
+        }
+        Ok(requests)
+    });
+    let target = runner::CurlJsonTarget {
+        url: format!("http://{address}"),
+        unix_socket: None,
+    };
+    let response = runner::run_curl_json_with_headers(&target, &[], "{}")?;
+    let _ignored = stop_sender.send(());
+    let requests = server
+        .join()
+        .map_err(|_panic| std::io::Error::other("provider retry server panicked"))??;
+
+    assert_eq!(requests, 2);
+    assert_eq!(response, br#"{"ok":true}"#);
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -422,16 +617,17 @@ fn provider_partial_eof_is_nonfallback_without_retry() -> Result<(), Box<dyn std
 fn brokered_external_provider_stops_all_openai_drivers_before_request()
 -> Result<(), Box<dyn std::error::Error>> {
     const CHILD_ENV: &str = "CORTEXFS_TEST_BROKERED_PROVIDER_AUTH";
-    const PROVIDER: &str = "zztestegressauth";
+    const PROVIDER_ENV: &str = "CORTEXFS_TEST_BROKERED_PROVIDER_NAME";
     if std::env::var_os(CHILD_ENV).is_some() {
+        let provider = std::env::var(PROVIDER_ENV)?;
         assert!(matches!(
-            cortexfs::read_provider_system_secret(PROVIDER, "default"),
-            Ok(None)
+            cortexfs::read_provider_system_secret(&provider, "default"),
+            Ok(None) | Err(cortexfs::ProviderSystemSecretError::CannotRead)
         ));
         reset_provider_request_attempts();
         let mut output = Vec::new();
         let result = runner::provider_chat_completion(
-            &format!("{PROVIDER}/model"),
+            &format!("{provider}/model"),
             "hello",
             "run-1",
             &mut output,
@@ -441,7 +637,7 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
         };
         assert_eq!(
             error.message,
-            format!("missing provider credential: {PROVIDER}")
+            format!("missing provider credential: {provider}")
         );
         assert_eq!(provider_request_attempts(), 0);
         return Ok(());
@@ -449,13 +645,20 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
 
     let root = unique_temp_dir("runner-brokered-provider-auth")?;
     let providers = root.join("providers.d");
-    let control = root.join(format!("model/{PROVIDER}/model.d"));
+    let provider = format!(
+        "zztestegressauth{}{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    );
+    let control = root.join(format!("model/{provider}/model.d"));
     fs::create_dir_all(&providers)?;
     fs::create_dir_all(&control)?;
     fs::write(
-        providers.join(format!("{PROVIDER}.json")),
+        providers.join(format!("{provider}.json")),
         format!(
-            "{{\"name\":\"{PROVIDER}\",\"base_url\":\"https://api.example.test/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
+            "{{\"name\":\"{provider}\",\"base_url\":\"https://api.example.test/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
         ),
     )?;
     fs::write(
@@ -466,12 +669,9 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
         .arg("brokered_external_provider_stops_all_openai_drivers_before_request")
         .arg("--nocapture")
         .env(CHILD_ENV, "1")
+        .env(PROVIDER_ENV, &provider)
         .env("CTX_PROVIDER_CONFIG_DIR", &providers)
         .env("CTX_ROOT", &root)
-        .env(
-            cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
-            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
-        )
         .env_remove("CTX_AGENT")
         .env_remove("CTX_PROVIDER_SECRET_VALUE")
         .env_remove("CTX_PROVIDER_SECRET_FD")
@@ -603,120 +803,145 @@ fn spawn_driver_fallback_server() -> Result<DriverFallbackServer, Box<dyn std::e
 
 #[cfg(unix)]
 #[test]
-fn provider_chat_finish_reason_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
-    let (result, requests, _output) = call_test_provider_sse(concat!(
-        r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,
-        "\n\n",
-        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
-        "\n\n"
-    ))?;
-    assert_eq!(requests, 1);
-    if let Err(error) = result {
-        return Err(std::io::Error::other(error.message).into());
+fn provider_terminal_markers_preserve_payloads() -> Result<(), Box<dyn std::error::Error>> {
+    for (api, body, expected) in [
+        (
+            runner::OpenAiStreamApi::Chat,
+            concat!(
+                r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,
+                "\n\n",
+                r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+                "\n\n"
+            ),
+            "{\"type\":\"delta\",\"run\":\"run-1\",\"text\":\"complete\"}\n",
+        ),
+        (
+            runner::OpenAiStreamApi::Chat,
+            concat!(
+                r#"data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}"#,
+                "\n\n"
+            ),
+            "{\"type\":\"delta\",\"run\":\"run-1\",\"text\":\"complete\"}\n",
+        ),
+        (
+            runner::OpenAiStreamApi::Chat,
+            concat!(
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]},"finish_reason":"tool_calls"}]}"#,
+                "\n\n"
+            ),
+            r#"{"arguments":{"args":["tools"]},"id":"call-abc","name":"tsh","run":"run-1","type":"tool_call"}
+"#,
+        ),
+        (
+            runner::OpenAiStreamApi::Responses,
+            r#"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call-abc","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}
+
+data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":5,"input_tokens_details":{"cached_tokens":8,"cache_write_tokens":4}}}}
+
+"#,
+            r#"{"arguments":{"args":["tools"]},"id":"call-abc","name":"tsh","run":"run-1","type":"tool_call"}
+{"type":"usage","run":"run-1","input_tokens":12,"output_tokens":5,"cached_tokens":8,"cache_write_tokens":4}
+"#,
+        ),
+        (
+            runner::OpenAiStreamApi::Responses,
+            r#"data: {"type":"response.output_text.delta","delta":"plan"}
+
+data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call-abc","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}
+
+data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":5}}}
+
+"#,
+            r#"{"type":"delta","run":"run-1","text":"plan"}
+{"arguments":{"args":["tools"]},"id":"call-abc","name":"tsh","run":"run-1","type":"tool_call"}
+{"type":"usage","run":"run-1","input_tokens":12,"output_tokens":5}
+"#,
+        ),
+        (
+            runner::OpenAiStreamApi::Responses,
+            r#"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call-abc","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}
+
+data: {"type":"response.completed"}
+
+"#,
+            r#"{"arguments":{"args":["tools"]},"id":"call-abc","name":"tsh","run":"run-1","type":"tool_call"}
+"#,
+        ),
+        (
+            runner::OpenAiStreamApi::Chat,
+            concat!(
+                r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,
+                "\n\n",
+                "data: [DONE]\n\n"
+            ),
+            "{\"type\":\"delta\",\"run\":\"run-1\",\"text\":\"complete\"}\n",
+        ),
+    ] {
+        let path = if api == runner::OpenAiStreamApi::Chat {
+            "/v1/chat/completions"
+        } else {
+            "/v1/responses"
+        };
+        let (result, requests, output) = call_test_provider_sse_at(path, api, body)?;
+        assert_eq!(requests, 1);
+        result.map_err(|error| std::io::Error::other(error.message))?;
+        assert_eq!(output, expected);
     }
     Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn provider_chat_terminal_chunk_preserves_content() -> Result<(), Box<dyn std::error::Error>> {
-    let (result, requests, output) = call_test_provider_sse(concat!(
-        r#"data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}"#,
-        "\n\n"
-    ))?;
-    if let Err(error) = result {
-        return Err(std::io::Error::other(error.message).into());
-    }
-    let frames = output
-        .lines()
-        .map(serde_json::from_str::<serde_json::Value>)
-        .collect::<Result<Vec<_>, _>>()?;
+fn provider_responses_refusal_stream_emits_one_text() -> Result<(), Box<dyn std::error::Error>> {
+    let body = r#"data: {"type":"response.refusal.delta","delta":"cannot comply"}
+
+data: {"type":"response.refusal.done","refusal":"cannot comply"}
+
+data: {"type":"response.content_part.done","part":{"type":"refusal","refusal":"cannot comply"}}
+
+data: {"type":"response.output_item.done","item":{"content":[{"type":"refusal","refusal":"cannot comply"}]}}
+
+data: {"type":"response.completed"}
+
+"#;
+    let (result, requests, output) =
+        call_test_provider_sse_at("/v1/responses", runner::OpenAiStreamApi::Responses, body)?;
     assert_eq!(requests, 1);
+    result.map_err(|error| std::io::Error::other(error.message))?;
     assert_eq!(
-        frames,
-        [serde_json::json!({
-            "type": "delta",
-            "run": "run-1",
-            "text": "complete"
-        })]
+        output,
+        "{\"type\":\"delta\",\"run\":\"run-1\",\"text\":\"cannot comply\"}\n"
     );
     Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn provider_chat_terminal_chunk_preserves_tool_call() -> Result<(), Box<dyn std::error::Error>> {
-    let (result, requests, output) = call_test_provider_sse(concat!(
-        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]},"finish_reason":"tool_calls"}]}"#,
-        "\n\n"
-    ))?;
-    if let Err(error) = result {
-        return Err(std::io::Error::other(error.message).into());
+fn provider_responses_pending_calls_require_completion() -> Result<(), Box<dyn std::error::Error>> {
+    let call = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call-abc","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}"#;
+    for suffix in [
+        r#"data: {"type":"response.done"}"#,
+        r#"data: {"type":"response.failed","error":{"message":"quota"}}"#,
+        r#"data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"limit"}}}"#,
+        r#"data: {"type":"error","error":{"message":"failure"}}"#,
+        "",
+        call,
+        concat!(
+            r#"data: {"type":"response.done"}"#,
+            "\n\n",
+            r#"data: {"type":"response.completed"}"#
+        ),
+    ] {
+        let body = format!("{call}\n\n{suffix}\n\n");
+        let (result, requests, output) =
+            call_test_provider_sse_at("/v1/responses", runner::OpenAiStreamApi::Responses, &body)?;
+        let Err(error) = result else {
+            return Err(std::io::Error::other("non-terminal Responses stream succeeded").into());
+        };
+        assert_eq!(requests, 1);
+        assert!(error.can_fallback, "{}", error.message);
+        assert!(output.is_empty());
     }
-    let frames = output
-        .lines()
-        .map(serde_json::from_str::<serde_json::Value>)
-        .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(requests, 1);
-    assert_eq!(
-        frames,
-        [serde_json::json!({
-            "type": "tool_call",
-            "run": "run-1",
-            "id": "call-abc",
-            "name": "tsh",
-            "arguments": { "args": ["tools"] }
-        })]
-    );
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn provider_responses_completed_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
-    let (result, requests, _output) = call_test_provider_sse(concat!(
-        r#"data: {"type":"response.output_text.delta","delta":"complete"}"#,
-        "\n\n",
-        r#"data: {"type":"response.completed"}"#,
-        "\n\n"
-    ))?;
-    assert_eq!(requests, 1);
-    if let Err(error) = result {
-        return Err(std::io::Error::other(error.message).into());
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn provider_done_marker_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
-    let (result, requests, _output) = call_test_provider_sse(concat!(
-        r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,
-        "\n\n",
-        "data: [DONE]\n\n"
-    ))?;
-    assert_eq!(requests, 1);
-    if let Err(error) = result {
-        return Err(std::io::Error::other(error.message).into());
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn provider_responses_text_done_without_completion_is_rejected()
--> Result<(), Box<dyn std::error::Error>> {
-    let (result, requests, _output) = call_test_provider_sse(concat!(
-        r#"data: {"type":"response.output_text.delta","delta":"partial"}"#,
-        "\n\n",
-        r#"data: {"type":"response.output_text.done","text":"partial"}"#,
-        "\n\n"
-    ))?;
-    let Err(error) = result else {
-        return Err(std::io::Error::other("non-terminal Responses stream succeeded").into());
-    };
-    assert_eq!(requests, 1);
-    assert!(!error.can_fallback, "{}", error.message);
     Ok(())
 }
 
@@ -751,11 +976,6 @@ type ProviderSseServer = (
     std::sync::mpsc::Sender<()>,
     thread::JoinHandle<std::io::Result<usize>>,
 );
-
-#[cfg(unix)]
-fn call_test_provider_sse(body: &str) -> Result<ProviderSseOutcome, Box<dyn std::error::Error>> {
-    call_test_provider_sse_at("/v1/chat/completions", runner::OpenAiStreamApi::Chat, body)
-}
 
 #[cfg(unix)]
 fn call_test_provider_sse_at(

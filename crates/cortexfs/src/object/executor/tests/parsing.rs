@@ -32,25 +32,6 @@ fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
 }
 
 #[test]
-fn tool_call_text_parses_json_prefix_before_prose() {
-    let call = tool_call_from_text(
-        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["fs.read","tmp/agent_edit_smoke.txt"]}}我没有拿到 `tsh` 工具执行结果。"#,
-    );
-
-    assert!(matches!(
-        call,
-        Ok(Some(ref call))
-            if call.id == "call-1"
-                && call.name == "tsh"
-                && call.args
-                    == [
-                        OsString::from("fs.read"),
-                        OsString::from("tmp/agent_edit_smoke.txt")
-                    ]
-    ));
-}
-
-#[test]
 fn tool_call_arguments_accept_command_string() {
     let value = serde_json::json!({
         "type": "tool_call",
@@ -99,38 +80,41 @@ fn tool_call_arguments_reject_excessive_limits() {
 fn runtime_contract_describes_native_tsh_without_prompt_heuristics() {
     let contract = agent_runtime_contract("coder");
 
-    assert!(contract.contains("The CortexFS tool shell `tsh` is always native"));
-    assert!(contract.contains(
-        "Tools statically declared by the agent `tools` control may also be exposed as direct-native calls."
-    ));
-    assert!(contract.contains("hidden platform tools such as `image_gen`"));
-    assert!(contract.contains("When tool execution is useful"));
-    assert!(contract.contains("Tool results include the original `arguments.args`"));
-    assert!(contract.contains("If no concrete file path is provided"));
-    assert!(contract.contains("For coding work"));
-    assert!(contract.contains("inspect current files before editing"));
-    assert!(!contract.contains("you must call `tsh` immediately"));
-    assert!(!contract.contains("output this exact tool call"));
-    assert!(!contract.contains(r#""name":"tsh""#));
-    assert!(!contract.contains("git status --short"));
-    assert!(!contract.contains("find /workspace -name AGENTS.md -print"));
+    for required in [
+        "`tsh` is always native",
+        "only tools statically declared by the agent `tools` control may also be direct-native",
+        "Dynamically discovered, loaded, pinned, and cached tools stay `tsh`-only",
+        "Do not claim provider, host, assistant-platform, or hidden-platform access, including `image_gen`",
+        "request one native call and wait for its host result",
+        r#"call `tsh` with `{"args":["..."]}`, where `args` is the exact `tsh` argv"#,
+        "Results echo it with stdout/stderr or an ERROR line; use that output for the next action",
+        "only when a user-requested file path is unknown; otherwise inspect to locate relevant files",
+        "Before code changes, inspect; keep diffs small, write only needed files, and run focused verification",
+        "Run `git reset --hard`, `git checkout --`, or `git clean` only on the user's exact request",
+        "After results, continue the normal response",
+        "interactive shells and tools, including bash, tmux, and zellij, only through `tsh`",
+    ] {
+        assert!(contract.contains(required), "missing {required}");
+    }
+    assert!(
+        contract.contains("Never overwrite, revert, delete, or reformat unrelated user changes.")
+    );
+    for command in ["git reset --hard", "git checkout --", "git clean"] {
+        assert!(contract.contains(command));
+    }
 }
 
 #[test]
-fn deferred_tool_text_is_not_treated_as_a_tool_call() {
-    let frames = [
-        r#"{"type":"delta","text":"我先通过 `tsh` 查看可用工具，再测试 lazy load 机制。"}"#
-            .to_owned(),
-    ];
+fn assistant_delta_text_is_not_treated_as_a_tool_call() {
+    for text in [
+        "我先通过 `tsh` 查看可用工具，再测试 lazy load 机制。",
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}后续说明。"#,
+    ] {
+        let frames = [serde_json::json!({ "type": "delta", "text": text }).to_string()];
 
-    assert!(matches!(first_tool_call(&frames), Ok(None)));
-
-    let frames = [
-        r#"{"type":"reasoning_delta","text":"{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{\"args\":[\"tools\"]}}"}"#.to_owned(),
-        r#"{"type":"delta","text":"done"}"#.to_owned(),
-    ];
-
-    assert!(matches!(first_tool_call(&frames), Ok(None)));
+        assert!(matches!(first_tool_call(&frames), Ok(None)), "{text}");
+    }
 }
 
 #[test]

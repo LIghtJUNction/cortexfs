@@ -11,9 +11,24 @@ pub(crate) struct RunnerProviderConfig {
     #[serde(default)]
     pub(crate) name: Option<String>,
     pub(crate) base_url: String,
+    #[serde(default)]
+    pub(crate) auth: Vec<cortexfs::ProviderAuthConfig>,
     pub(crate) oauth: Option<cortexfs::OAuthProviderConfig>,
     #[serde(default)]
     pub(crate) formats: Vec<String>,
+}
+
+impl RunnerProviderConfig {
+    pub(crate) fn auth_methods(&self) -> Vec<cortexfs::ProviderAuthConfig> {
+        cortexfs::effective_auth_methods(&self.auth, self.oauth.is_some())
+    }
+
+    pub(crate) fn api_key_slot(&self) -> Option<String> {
+        self.auth_methods()
+            .into_iter()
+            .find(|method| method.method == cortexfs::AuthMethod::ApiKey)
+            .and_then(|method| (method.slot != "default").then_some(method.slot))
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ResolvedTransport {
@@ -33,12 +48,7 @@ pub(crate) struct CurlJsonTarget {
     pub(crate) unix_socket: Option<String>,
 }
 pub(crate) type CurlJsonOutputParts = (std::process::ExitStatus, Vec<u8>, Vec<u8>);
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ProviderRuntimeDriver {
-    OpenAiChat,
-    OpenAiResponses,
-    AnthropicMessages,
-}
+pub(crate) type ProviderRuntimeDriver = cortexfs_protocol::WireProtocol;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderCredential {
     Bearer(String),
@@ -60,9 +70,15 @@ impl ProviderCredential {
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "provider usage fields retain explicit token units at every call site"
+)]
 pub(crate) struct TokenUsage {
     pub(crate) input_tokens: u64,
     pub(crate) output_tokens: u64,
+    pub(crate) cached_tokens: Option<u64>,
+    pub(crate) cache_write_tokens: Option<u64>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ProviderTextCompletion {

@@ -78,7 +78,10 @@ impl ToolPath {
     /// Returns the default path: global tools first, then user tools.
     #[must_use]
     pub fn default(root: &Path, home: &Path) -> Self {
-        Self::new([root.join("tool"), home.join("tool")])
+        Self::new([
+            cortexfs_paths::tool_root_path(root),
+            cortexfs_paths::home_tool_from_home_path(home),
+        ])
     }
 
     /// Returns search directories in left-to-right lookup order.

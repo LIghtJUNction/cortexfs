@@ -39,7 +39,24 @@ pub fn ensure_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, Refe
 /// backing source tree aligned for runtime execution without making the pure
 /// reference-tree bootstrap depend on host provider state.
 pub fn ensure_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
-    ensure_reference_models(root)
+    ensure_runtime_models_from(
+        root,
+        Path::new(SYSTEM_PROVIDER_CONFIG_DIR),
+        Path::new(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
+    )
+}
+
+/// Materializes runtime-visible model wrappers from explicit provider
+/// configuration and cache directories.
+pub fn ensure_runtime_models_from(
+    root: &Path,
+    config_dir: &Path,
+    cache_dir: &Path,
+) -> Result<(), ReferenceTreeError> {
+    ensure_reference_debug_model(root)?;
+    let snapshot =
+        reference::reconcile::reconcile_provider_model_tree(root, config_dir, cache_dir)?;
+    ensure_reference_model_aliases(root, &snapshot)
 }
 
 pub(crate) struct ReferenceAgentSpec {
@@ -70,17 +87,7 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
         model: DEFAULT_WORKER_MODEL,
     },
 ];
-pub(crate) const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
-
-pub(crate) fn ensure_reference_models(root: &Path) -> Result<(), ReferenceTreeError> {
-    ensure_reference_debug_model(root)?;
-    let models = ensure_reference_provider_models_from(
-        root,
-        Path::new(SYSTEM_PROVIDER_CONFIG_DIR),
-        Path::new(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
-    )?;
-    ensure_reference_model_aliases(root, &models)
-}
+pub(crate) const REFERENCE_OBJECT_RUNNER: &str = CORTEXFS_OBJECT_RUNNER;
 
 pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(
@@ -105,118 +112,22 @@ pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceT
     .map_err(ReferenceTreeError::Object)
 }
 
-pub(crate) fn ensure_reference_provider_models_from(
-    root: &Path,
-    config_dir: &Path,
-    cache_dir: &Path,
-) -> Result<Vec<ProjectedProviderModel>, ReferenceTreeError> {
-    let models = projected_provider_models(config_dir, cache_dir)
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    for model in &models {
-        ensure_reference_provider_model(root, model)?;
-    }
-    Ok(models)
-}
-
-pub(crate) fn ensure_reference_provider_model(
-    root: &Path,
-    model: &ProjectedProviderModel,
-) -> Result<(), ReferenceTreeError> {
-    let name = format!("{}/{}", model.provider, model.model);
-    let controls = MODEL_CONTROL_FILES
-        .iter()
-        .filter_map(|file| {
-            provider_model_control_content(model, file).map(|content| (*file, content))
-        })
-        .collect::<Vec<_>>();
-    let overrides = controls
-        .iter()
-        .map(|entry| (entry.0, entry.1.as_str()))
-        .collect::<Vec<_>>();
-    install_executable_object_wrapper(
-        root,
-        ObjectClass::Model,
-        &name,
-        REFERENCE_OBJECT_RUNNER,
-        &overrides,
-    )
-    .map(|_object| ())
-    .map_err(ReferenceTreeError::Object)
-}
-
 pub(crate) fn ensure_reference_model_aliases(
     root: &Path,
-    models: &[ProjectedProviderModel],
+    snapshot: &ProviderSnapshot,
 ) -> Result<(), ReferenceTreeError> {
-    let main = reference_model_alias_target(root, DEFAULT_MODEL_ALIAS_TARGET, models, None);
-    let helper =
-        reference_model_alias_target(root, HELPER_MODEL_ALIAS_TARGET, models, Some("gpt-5.6-sol"));
-    for (alias, target) in MODEL_ALIASES.iter().copied().map(|alias| {
-        let target = match alias {
-            DEFAULT_MODEL_ALIAS => main.clone(),
-            HELPER_MODEL_ALIAS => helper.clone(),
-            alias => capability_model_alias_target(alias, models).unwrap_or_else(|| main.clone()),
-        };
-        (alias, target)
-    }) {
-        ensure_reference_model_alias(&root.join("model").join(alias), Path::new(&target))?;
+    for alias in MODEL_ALIASES {
+        ensure_reference_model_alias(
+            &cortexfs_paths::model_root_path(root).join(alias),
+            alias,
+            snapshot,
+        )?;
     }
     Ok(())
 }
 
-fn capability_model_alias_target(alias: &str, models: &[ProjectedProviderModel]) -> Option<String> {
-    models
-        .iter()
-        .find(|model| match alias {
-            "fast" => model_name_has_word(&model.model, "fast"),
-            "reason" => model.cap.lines().any(|cap| cap.trim() == "reasoning"),
-            "code" => ["code", "coder", "coding"]
-                .iter()
-                .any(|word| model_name_has_word(&model.model, word)),
-            "vision" => model
-                .cap
-                .lines()
-                .any(|cap| matches!(cap.trim(), "vision" | "image_input")),
-            _ => false,
-        })
-        .map(|model| format!("/ctx/model/{}/{}", model.provider, model.model))
-}
-
-fn model_name_has_word(model: &str, expected: &str) -> bool {
-    model
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .any(|word| word.eq_ignore_ascii_case(expected))
-}
-
-pub(crate) fn reference_model_alias_target(
-    root: &Path,
-    preferred: &str,
-    models: &[ProjectedProviderModel],
-    preferred_model: Option<&str>,
-) -> String {
-    if reference_model_target_exists(root, preferred) {
-        return preferred.to_owned();
-    }
-    if let Some(model_name) = preferred_model
-        && let Some(model) = models.iter().find(|model| model.model == model_name)
-    {
-        return format!("/ctx/model/{}/{}", model.provider, model.model);
-    }
-    models.first().map_or_else(
-        || format!("/ctx/model/{DEBUG_ECHO_MODEL}"),
-        |model| format!("/ctx/model/{}/{}", model.provider, model.model),
-    )
-}
-
-pub(crate) fn reference_model_target_exists(root: &Path, target: &str) -> bool {
-    let Some(model) = target.strip_prefix("/ctx/model/") else {
-        return false;
-    };
-    fs::symlink_metadata(root.join("model").join(model)).is_ok_and(|metadata| metadata.is_file())
-}
-
 pub(crate) fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
-    let docs = root.join("shared").join(MANUAL_SHARED_DIR);
+    let docs = cortexfs_paths::shared_path(root, MANUAL_SHARED_DIR);
     let man = docs.join(MANUAL_MAN_DIR);
     create_reference_dir(&docs)?;
     create_reference_dir(&man)?;
@@ -230,22 +141,25 @@ pub(crate) fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeErro
 pub(crate) fn create_reference_root(root: &Path) -> Result<(), ReferenceTreeError> {
     for entry in ROOT_ENTRIES {
         match *entry {
-            "status" => write_reference_text(&root.join("status"), "ready\n")?,
-            directory => create_reference_dir(&root.join(directory))?,
+            "status" => write_reference_text(&cortexfs_paths::status_path(root), "ready\n")?,
+            directory => create_reference_dir(
+                &cortexfs_paths::root_entry_path(root, directory)
+                    .ok_or(ReferenceTreeError::CannotCreate)?,
+            )?,
         }
     }
     Ok(())
 }
 
 pub(crate) fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
-    let ctx = root.join("bin").join("ctx");
+    let ctx = cortexfs_paths::bin_root_path(root).join("ctx");
     write_reference_text(
         &ctx,
         "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec /usr/bin/ctx \"$@\"\n",
     )?;
     set_reference_executable(&ctx)?;
     for name in ["ctxterm", "tsh", "cortexfs-object-runner"] {
-        let path = root.join("bin").join(name);
+        let path = cortexfs_paths::bin_root_path(root).join(name);
         write_reference_text(
             &path,
             &format!(
@@ -265,19 +179,36 @@ pub(crate) fn ensure_reference_agent(
 ) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(root, ObjectClass::Agent, name, support::command::FALSE, &[])
         .map_err(ReferenceTreeError::Object)?;
-    let control = root.join("agent").join(format!("{name}.d"));
+    let control = cortexfs_paths::agent_control_path(root, name);
     let label = format!("user_u:agent_r:{name}_t:s0\n");
-    let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
+    let ctx_root = cortexfs_paths::ctx_root();
+    let home_root = format!(
+        "{}\n",
+        cortexfs_paths::agent_home_path(&ctx_root, "1000", name)
+            .join("root")
+            .display()
+    );
     let policy_subject = format!("{name}_t");
     let policy = reference_agent_policy(&policy_subject, name);
     let mount = format!(
-        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n"
+        "{root}\t{root}\tro\trbind,nosuid,nodev\n{}\t/home/agent\trw\trbind,nosuid,nodev\n",
+        cortexfs_paths::agent_home_path(&ctx_root, "1000", name).display(),
+        root = ctx_root.display(),
     );
     let overrides = [
         ("owner", "1000\n".to_owned()),
         ("uid", "1000\n".to_owned()),
         ("gid", "1000\n".to_owned()),
         ("groups", groups.to_owned()),
+        (
+            "perm",
+            if reference_agent_can_write_source(name) {
+                "rwx\n"
+            } else {
+                "r--\n"
+            }
+            .to_owned(),
+        ),
         ("label", label),
         ("iso", "shared\n".to_owned()),
         (
@@ -287,8 +218,15 @@ pub(crate) fn ensure_reference_agent(
         ("life", "owned\n".to_owned()),
         ("root", home_root),
         ("cwd", "/workspace\n".to_owned()),
-        ("env", "CTX_ROOT=/ctx\n".to_owned()),
-        ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
+        ("env", format!("CTX_ROOT={CTX_ROOT}\n")),
+        (
+            "path",
+            format!(
+                "{}:{}\n",
+                cortexfs_paths::tool_root_path(&ctx_root).display(),
+                cortexfs_paths::home_tool_path(&ctx_root, "1000").display()
+            ),
+        ),
         ("mount", mount),
         ("model", format!("{}\n", reference_agent_model(name))),
         ("window", "auto\n".to_owned()),
@@ -304,16 +242,19 @@ pub(crate) fn ensure_reference_agent(
         ("meta.json", "{}\n".to_owned()),
     ];
     for (file, content) in overrides {
-        write_reference_text(&control.join(file), &content)?;
+        write_reference_text(
+            &cortexfs_paths::agent_control_file_path(root, name, file),
+            &content,
+        )?;
     }
     write_reference_text(
-        &root.join("agent").join(name),
+        &cortexfs_paths::agent_path(root, name),
         &reference_agent_wrapper_script(name),
     )?;
-    set_reference_executable(&root.join("agent").join(name))?;
-    let uid = read_reference_owner_id(&control.join("uid"))?;
-    let gid = read_reference_owner_id(&control.join("gid"))?;
-    ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")), uid, gid)?;
+    set_reference_executable(&cortexfs_paths::agent_path(root, name))?;
+    let uid = read_reference_owner_id(&cortexfs_paths::agent_control_file_path(root, name, "uid"))?;
+    let gid = read_reference_owner_id(&cortexfs_paths::agent_control_file_path(root, name, "gid"))?;
+    ensure_reference_socket(&cortexfs_paths::agent_socket_path(root, name), uid, gid)?;
     ensure_reference_agent_control_ownership(&control)
 }
 
@@ -412,6 +353,8 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
         "allow {policy_subject} model:{model} use\n\
          allow {policy_subject} tool:tsh execute\n\
          allow {policy_subject} tool:fs.read execute\n\
+         allow {policy_subject} tool:fs.list execute\n\
+         allow {policy_subject} tool:fs.stat execute\n\
          allow {policy_subject} tool:agent.update execute\n"
     );
     if reference_agent_can_write_source(name) {
@@ -558,14 +501,11 @@ pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), Reference
         )
         .map_err(ReferenceTreeError::Object)?;
         if let Some(script) = reference_tool_stub_script(tool.name) {
-            write_reference_text(&root.join("tool").join(tool.name), script)?;
-            set_reference_executable(&root.join("tool").join(tool.name))?;
+            write_reference_text(&cortexfs_paths::tool_path(root, tool.name), &script)?;
+            set_reference_executable(&cortexfs_paths::tool_path(root, tool.name))?;
         }
         if tool.name == "tsh" {
-            write_reference_text(
-                &root.join("tool").join("tsh.d").join("config"),
-                DEFAULT_TSH_CONFIG,
-            )?;
+            write_reference_text(&cortexfs_paths::tool_config_path(root), DEFAULT_TSH_CONFIG)?;
         }
     }
     Ok(())
@@ -574,6 +514,7 @@ pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), Reference
 #[cfg(test)]
 mod reference_model_tests {
     use super::*;
+    use crate::reference::reconcile::reconcile_provider_model_tree;
 
     #[test]
     fn user_manager_status_groups_require_matching_identity() {
@@ -621,7 +562,7 @@ mod reference_model_tests {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         ensure_reference_bin(root.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        ensure_reference_provider_models_from(root.path(), config_dir.path(), cache_dir.path())
+        reconcile_provider_model_tree(root.path(), config_dir.path(), cache_dir.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
         assert!(root.path().join("model/api.test/gpt-5.6-terra").is_file());
@@ -648,73 +589,16 @@ mod reference_model_tests {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         ensure_reference_debug_model(root.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        let models = vec![
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "gpt-main".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "gpt-5.6-sol".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "turbo-fast".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "deep".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nreasoning".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "code-pro".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "multimodal".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nvision".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-        ];
-        for model in &models {
-            ensure_reference_provider_model(root.path(), model)
+        let config_dir = tempfile::tempdir()?;
+        let cache_dir = tempfile::tempdir()?;
+        fs::write(
+            config_dir.path().join("api.test.json"),
+            r#"{"name":"api.test","base_url":"https://api.test/v1","default_model":"gpt-main","models":["gpt-5.6-sol","turbo-fast","deep","code-pro","multimodal"]}"#,
+        )?;
+        let snapshot =
+            reconcile_provider_model_tree(root.path(), config_dir.path(), cache_dir.path())
                 .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        }
-        ensure_reference_model_aliases(root.path(), &models)
+        ensure_reference_model_aliases(root.path(), &snapshot)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
         assert_eq!(
@@ -725,12 +609,7 @@ mod reference_model_tests {
             fs::read_link(root.path().join("model/helper"))?,
             PathBuf::from("/ctx/model/api.test/gpt-5.6-sol")
         );
-        for (alias, target) in [
-            ("fast", "turbo-fast"),
-            ("reason", "deep"),
-            ("code", "code-pro"),
-            ("vision", "multimodal"),
-        ] {
+        for (alias, target) in [("fast", "turbo-fast"), ("code", "code-pro")] {
             assert_eq!(
                 fs::read_link(root.path().join("model").join(alias))?,
                 PathBuf::from(format!("/ctx/model/api.test/{target}"))
@@ -740,7 +619,7 @@ mod reference_model_tests {
     }
 
     #[test]
-    fn runtime_model_aliases_fall_back_to_debug_model_without_provider_models()
+    fn runtime_model_aliases_fall_back_without_projected_provider_default()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
         create_reference_root(root.path())
@@ -749,7 +628,20 @@ mod reference_model_tests {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         ensure_reference_debug_model(root.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        ensure_reference_model_aliases(root.path(), &[])
+        let config_dir = tempfile::tempdir()?;
+        let cache_dir = tempfile::tempdir()?;
+        fs::write(
+            config_dir.path().join("missing.json"),
+            r#"{"name":"missing","base_url":"https://missing.test/v1"}"#,
+        )?;
+        fs::write(
+            config_dir.path().join("disabled.json"),
+            r#"{"name":"disabled","base_url":"https://disabled.test/v1","default_model":"ignored","enabled":false}"#,
+        )?;
+        let snapshot =
+            reconcile_provider_model_tree(root.path(), config_dir.path(), cache_dir.path())
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_model_aliases(root.path(), &snapshot)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
         assert_eq!(

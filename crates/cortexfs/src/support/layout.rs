@@ -1,5 +1,6 @@
 //! Shared path-kind model for layout inspection issues.
 
+use std::fs::Metadata;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -124,46 +125,41 @@ pub enum PlainPathKindCheck {
     WrongKind,
 }
 
-/// Checks that `path` is a regular file without following the final symlink.
-#[must_use]
-pub fn check_plain_file(path: &Path) -> PlainPathKindCheck {
-    match path_metadata_no_follow(path) {
-        Ok(metadata) if metadata.is_file() => PlainPathKindCheck::Ok,
+fn classify_path_metadata(
+    result: std::io::Result<Metadata>,
+    matches: fn(&Metadata) -> bool,
+) -> PlainPathKindCheck {
+    match result {
+        Ok(metadata) if matches(&metadata) => PlainPathKindCheck::Ok,
         Ok(_metadata) => PlainPathKindCheck::WrongKind,
         Err(_error) => PlainPathKindCheck::Missing,
     }
+}
+
+/// Checks that `path` is a regular file without following the final symlink.
+#[must_use]
+pub fn check_plain_file(path: &Path) -> PlainPathKindCheck {
+    classify_path_metadata(path_metadata_no_follow(path), Metadata::is_file)
 }
 
 /// Checks that `path` is a directory without following the final symlink.
 #[must_use]
 pub fn check_plain_dir(path: &Path) -> PlainPathKindCheck {
-    match path_metadata_no_follow(path) {
-        Ok(metadata) if metadata.is_dir() => PlainPathKindCheck::Ok,
-        Ok(_metadata) => PlainPathKindCheck::WrongKind,
-        Err(_error) => PlainPathKindCheck::Missing,
-    }
+    classify_path_metadata(path_metadata_no_follow(path), Metadata::is_dir)
 }
 
 /// Checks that `path` is an executable regular file without following the final symlink.
 #[must_use]
 pub fn check_plain_executable(path: &Path) -> PlainPathKindCheck {
-    match path_metadata_no_follow(path) {
-        Ok(metadata) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 => {
-            PlainPathKindCheck::Ok
-        }
-        Ok(_metadata) => PlainPathKindCheck::WrongKind,
-        Err(_error) => PlainPathKindCheck::Missing,
-    }
+    classify_path_metadata(path_metadata_no_follow(path), |metadata| {
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    })
 }
 
 /// Classifies a directory via `symlink_metadata`.
 #[must_use]
 pub fn check_symlink_dir(path: &Path) -> PlainPathKindCheck {
-    match path.symlink_metadata() {
-        Ok(metadata) if metadata.file_type().is_dir() => PlainPathKindCheck::Ok,
-        Ok(_metadata) => PlainPathKindCheck::WrongKind,
-        Err(_error) => PlainPathKindCheck::Missing,
-    }
+    classify_path_metadata(path.symlink_metadata(), Metadata::is_dir)
 }
 
 /// Pushes a missing / wrong-kind issue for a plain path role.

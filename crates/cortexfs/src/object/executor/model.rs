@@ -22,15 +22,18 @@ pub(crate) fn resolve_model_name(name: &str) -> Result<String, ExecError> {
     if !is_model_alias(name) {
         return Err(ExecError::new(format!("invalid model reference: {name}")));
     }
-    let ctx_root =
-        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let ctx_root = env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
     resolve_model_alias(&ctx_root, name)
 }
 
 pub(crate) fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String, ExecError> {
     let target = read_model_alias_target(ctx_root, name)
         .map_err(|_error| ExecError::new(format!("missing model alias: {name}")))?;
-    let Some(model) = target.strip_prefix("/ctx/model/") else {
+    let model_root = format!(
+        "{}/",
+        cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
+    );
+    let Some(model) = target.strip_prefix(&model_root) else {
         return Err(ExecError::new(format!(
             "invalid model alias target: {name}"
         )));
@@ -46,7 +49,10 @@ pub(crate) fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String,
 #[cfg(test)]
 pub(crate) fn resolved_model_path(ctx_root: &Path, model: &str) -> Result<PathBuf, ExecError> {
     let name = resolved_model_name(ctx_root, model)?;
-    Ok(ctx_root.join("model").join(name))
+    let (provider, model) = name
+        .split_once('/')
+        .ok_or_else(|| ExecError::new(format!("invalid model reference: {name}")))?;
+    Ok(cortexfs_paths::model_path(ctx_root, provider, model))
 }
 
 pub(crate) fn resolved_model_name(ctx_root: &Path, model: &str) -> Result<String, ExecError> {
@@ -61,8 +67,7 @@ pub(crate) fn resolved_model_name(ctx_root: &Path, model: &str) -> Result<String
 
 pub(crate) fn run_provider_model(name: &str, input: &str) -> Result<(), ExecError> {
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
-    let ctx_root =
-        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let ctx_root = env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let agent_window = match parse_agent_window_environment(
@@ -228,13 +233,14 @@ pub(crate) fn model_candidates(
             break;
         }
     }
-    Ok(names
+    names
         .into_iter()
-        .map(|name| ModelCandidate {
-            path: ctx_root.join("model").join(&name),
-            name,
+        .map(|name| {
+            let path = cortexfs_paths::model_reference_path(ctx_root, &name)
+                .ok_or_else(|| ExecError::new("invalid model candidate"))?;
+            Ok(ModelCandidate { name, path })
         })
-        .collect())
+        .collect()
 }
 
 pub(crate) fn push_model_candidate_name(
@@ -251,11 +257,7 @@ pub(crate) fn model_fallback_chain(ctx_root: &Path, model: &str) -> Vec<String> 
     let Some((provider, name)) = model.split_once('/') else {
         return Vec::new();
     };
-    let path = ctx_root
-        .join("model")
-        .join(provider)
-        .join(format!("{name}.d"))
-        .join("fallback");
+    let path = cortexfs_paths::model_control_file_path(ctx_root, provider, name, "fallback");
     let Ok(content) = read_small_plain_text_file(&path, MAX_RUNNER_CONTROL_BYTES, "runner") else {
         return Vec::new();
     };

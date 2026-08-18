@@ -30,10 +30,10 @@ impl AgentCreatePaths {
     #[must_use]
     pub(crate) fn new(root: &Path, uid: &str, name: &str) -> Self {
         Self {
-            executable: root.join("agent").join(name),
-            control: root.join("agent").join(format!("{name}.d")),
-            socket: root.join("agent").join(format!("{name}.sock")),
-            home: root.join("home").join(uid).join("agent").join(name),
+            executable: cortexfs_paths::agent_path(root, name),
+            control: cortexfs_paths::agent_control_path(root, name),
+            socket: cortexfs_paths::agent_socket_path(root, name),
+            home: cortexfs_paths::agent_home_path(root, uid, name),
             owned: Vec::new(),
         }
     }
@@ -288,11 +288,11 @@ pub(crate) fn create_agent_files_with_hook(
             Err(_) => return Err(AgentCreateError::CannotCreate),
         }
     }
-    crate::support::plain::create_plain_dir(&root.join("agent"))
+    crate::support::plain::create_plain_dir(&cortexfs_paths::agent_root_path(root))
         .map_err(|_error| AgentCreateError::CannotCreate)?;
-    let home_root = root.join("home");
+    let home_root = cortexfs_paths::home_root_path(root);
     let user_home = home_root.join(uid);
-    let agent_home = user_home.join("agent");
+    let agent_home = cortexfs_paths::home_agent_root_from_home_path(&user_home);
     for parent in [&home_root, &user_home, &agent_home] {
         crate::support::plain::create_plain_dir(parent)
             .map_err(|_error| AgentCreateError::CannotCreate)?;

@@ -27,15 +27,16 @@ use std::process::ExitCode;
 
 use cortexfs::{
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, AgentStopHandler, MountTable,
-    PolicyObjectClass, PolicyPermission, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
-    derive_agent_runtime_view, serve_agent_executable_socket_listener_once_with_stop,
+    NetworkConnectAuthority, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
+    authorize_network_connect, derive_agent_runtime_view,
+    serve_agent_executable_socket_listener_once_with_stop,
 };
 use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
+const DEFAULT_SOURCE: &str = cortexfs_paths::SYSTEM_STORAGE_CURRENT;
 const BWRAP_PROGRAM: &str = cortexfs::support::command::BWRAP;
-const RUN_CONTROL_DIR: &str = "/run/cortexfs/control";
+const RUN_CONTROL_DIR: &str = cortexfs_paths::SYSTEM_CONTROL_DIR;
 
 pub(crate) use cortexfs::cli::stderr;
 pub(crate) use stderr::*;
@@ -85,26 +86,22 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         );
     };
 
-    let session_root = view
-        .ctx_home()
-        .join("agent")
-        .join(view.agent_name())
-        .join("session");
+    let session_root =
+        cortexfs_paths::agent_sessions_from_home_path(view.ctx_home(), view.agent_name());
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid_or_root(view.identity().uid());
     let runtime_model = runtime_model(&config.source, view.model());
-    let network_allowed = view.policy().allows(
-        view.policy_subject(),
-        PolicyObjectClass::Network,
+    let network_allowed = authorize_network_connect(
         "default",
-        PolicyPermission::Connect,
-    );
+        NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
+    )
+    .is_ok();
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
     }
     runtime_env.extend(provider_runtime_env(&config.source, &runtime_model)?);
-    let agent_executable = config.source.join("agent").join(&config.agent);
+    let agent_executable = cortexfs_paths::agent_path(&config.source, &config.agent);
     let control_dir = Path::new(RUN_CONTROL_DIR);
     #[expect(
         clippy::create_dir,

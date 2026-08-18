@@ -43,13 +43,24 @@ pub(crate) fn projected_regular_file(
     })
 }
 
-pub(crate) fn projected_metadata_mode(abi_path: &str, metadata: &fs::Metadata) -> u32 {
+pub(crate) fn projected_metadata_mode(
+    abi_path: &str,
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<u32, FuseError> {
     let mode = metadata.permissions().mode();
     if abi_path.is_empty() && metadata.is_dir() {
-        return (mode & !0o7777) | 0o755;
+        return Ok((mode & !0o7777) | 0o755);
     }
     if abi_path == "agent" && metadata.is_dir() {
-        return (mode & !0o7777) | 0o1777;
+        return Ok((mode & !0o7777) | 0o1777);
     }
-    mode
+    if FuseProjection::agent_control_target(abi_path).is_some_and(|(_, file)| file == "perm") {
+        let content = support::plain::read_small_text_file(path, MAX_FUSE_SMALL_READ_BYTES)
+            .map_err(|_error| FuseError::Io)?;
+        let permissions =
+            AgentPermissions::parse_control(&content).ok_or(FuseError::InvalidContent)?;
+        return Ok((mode & !0o7777) | permissions.mode());
+    }
+    Ok(mode)
 }

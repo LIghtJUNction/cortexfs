@@ -1,5 +1,5 @@
 use super::install::{InstallError, InstallTier, create_stage, install_class_path};
-use super::receipt::{EntryKind, EntryReceipt, InspectedObject, inspect_object};
+use super::receipt::{InspectedObject, inspect_object};
 use super::residue::cleanup_residue;
 use super::swap::{
     PairProgress, PairStep, quarantine_pair, relative_stage, require_entry, restore_exact,
@@ -9,6 +9,7 @@ use super::swap::{
 use super::swap::{create_foreign_control, create_foreign_executable};
 use crate::ObjectClass;
 use crate::support::plain::{open_plain_directory, proc_fd_path};
+use crate::support::receipt::{EntryKind, EntryReceipt};
 
 use std::ffi::OsString;
 use std::fs;

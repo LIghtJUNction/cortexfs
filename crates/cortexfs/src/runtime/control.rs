@@ -626,6 +626,7 @@ pub fn ping_from_environment(agent: &str) -> Result<(), RunCapabilityError> {
 fn client_error(error: cortexfs_runtime_client::RuntimeClientError) -> RunCapabilityError {
     match error {
         cortexfs_runtime_client::RuntimeClientError::InvalidEnvironment
+        | cortexfs_runtime_client::RuntimeClientError::InvalidRequest
         | cortexfs_runtime_client::RuntimeClientError::InvalidFrame => {
             RunCapabilityError::InvalidFrame
         }
