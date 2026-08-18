@@ -3,67 +3,60 @@ use serde_json::json;
 use super::curl::run_curl_json_with_headers;
 use super::*;
 use cortexfs::{derive_agent_runtime_view, is_object_name};
-use serde_json::{Map, Value};
+use cortexfs_protocol::{
+    ModelRequest, ToolChoice, ToolDefinition, WireProtocol, encode_model_request,
+};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-pub(crate) struct OpenAiProviderRequest<'a> {
+pub(crate) struct ProviderRequest<'a> {
     pub(crate) model: &'a str,
     pub(crate) input: &'a str,
     pub(crate) credential: Option<&'a ProviderCredential>,
     pub(crate) effort: cortexfs::ModelEffort,
 }
-pub(crate) fn call_openai_chat(
+pub(crate) fn call_provider(
     transport: &ResolvedTransport,
-    request: &OpenAiProviderRequest<'_>,
+    protocol: WireProtocol,
+    request: &ProviderRequest<'_>,
     run: &str,
 ) -> Result<ProviderTextCompletion, String> {
-    let (target, headers) = openai_request_target(transport, request.credential, false, run)?;
-    let body = openai_chat_body(request.model, request.input, false, request.effort);
+    let (target, headers) = provider_request_target(transport, request.credential, protocol, run)?;
+    let agent_tools = protocol != WireProtocol::Anthropic && env::var_os("CTX_AGENT").is_some();
+    let body = provider_request_body(
+        protocol,
+        request.model,
+        request.input,
+        false,
+        request.effort,
+        agent_tools,
+    )?;
     let output = run_curl_json_with_headers(&target, &headers, &body)?;
     Ok(ProviderTextCompletion {
-        content: parse_openai_chat_content(&output)?,
+        content: parse_provider_content(protocol, &output)?,
         usage: parse_provider_usage(&output)?,
     })
 }
-pub(crate) fn call_openai_responses(
-    transport: &ResolvedTransport,
-    request: &OpenAiProviderRequest<'_>,
-    run: &str,
-) -> Result<ProviderTextCompletion, String> {
-    let (target, headers) = openai_request_target(transport, request.credential, true, run)?;
-    let body = openai_responses_body(request.model, request.input, false, request.effort);
-    let output = run_curl_json_with_headers(&target, &headers, &body)?;
-    Ok(ProviderTextCompletion {
-        content: parse_openai_response_content(&output)?,
-        usage: parse_provider_usage(&output)?,
-    })
-}
-pub(crate) fn call_anthropic_messages(
-    transport: &ResolvedTransport,
+pub(crate) fn provider_request_body(
+    protocol: WireProtocol,
     model: &str,
     input: &str,
-    credential: &ProviderCredential,
-) -> Result<ProviderTextCompletion, String> {
-    let target = provider_target(transport, "messages");
-    let body = json!({
-        "model": model,
-        "max_tokens": 4096,
-        "messages": [{"role": "user", "content": input}]
-    })
-    .to_string();
-    let headers = anthropic_headers(credential);
-    let output = run_curl_json_with_headers(&target, &headers, &body)?;
-    Ok(ProviderTextCompletion {
-        content: parse_anthropic_message_content(&output)?,
-        usage: parse_provider_usage(&output)?,
-    })
-}
-#[derive(Clone, Copy)]
-enum OpenAiEndpoint {
-    Chat,
-    Responses,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+    agent_tools: bool,
+) -> Result<String, String> {
+    let mut request = model_request(protocol, model, input, stream, effort, agent_tools);
+    if stream && protocol == WireProtocol::OpenAiChat {
+        request.option("stream_options", json!({ "include_usage": true }));
+    }
+    if !request.tools.is_empty() {
+        request.option("parallel_tool_calls", json!(false));
+    }
+    let bytes = encode_model_request(protocol, &request).map_err(|error| error.to_string())?;
+    String::from_utf8(bytes).map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())
 }
 
+#[cfg(test)]
 pub(crate) fn openai_chat_body(
     model: &str,
     input: &str,
@@ -78,6 +71,8 @@ pub(crate) fn openai_chat_body(
         env::var_os("CTX_AGENT").is_some(),
     )
 }
+
+#[cfg(test)]
 pub(crate) fn openai_chat_body_with_agent_tools(
     model: &str,
     input: &str,
@@ -85,15 +80,17 @@ pub(crate) fn openai_chat_body_with_agent_tools(
     effort: cortexfs::ModelEffort,
     agent_tools: bool,
 ) -> String {
-    openai_body(
+    test_request_body(
+        WireProtocol::OpenAiChat,
         model,
         input,
         stream,
         effort,
         agent_tools,
-        OpenAiEndpoint::Chat,
     )
 }
+
+#[cfg(test)]
 pub(crate) fn openai_responses_body(
     model: &str,
     input: &str,
@@ -108,6 +105,8 @@ pub(crate) fn openai_responses_body(
         env::var_os("CTX_AGENT").is_some(),
     )
 }
+
+#[cfg(test)]
 pub(crate) fn openai_responses_body_with_agent_tools(
     model: &str,
     input: &str,
@@ -115,79 +114,76 @@ pub(crate) fn openai_responses_body_with_agent_tools(
     effort: cortexfs::ModelEffort,
     agent_tools: bool,
 ) -> String {
-    openai_body(
+    test_request_body(
+        WireProtocol::OpenAiResponses,
         model,
         input,
         stream,
         effort,
         agent_tools,
-        OpenAiEndpoint::Responses,
     )
 }
-fn openai_body(
+
+#[cfg(test)]
+fn test_request_body(
+    protocol: WireProtocol,
     model: &str,
     input: &str,
     stream: bool,
     effort: cortexfs::ModelEffort,
     agent_tools: bool,
-    endpoint: OpenAiEndpoint,
 ) -> String {
-    let messages = provider_messages(input);
-    let mut body = match endpoint {
-        OpenAiEndpoint::Chat => json!({ "model": model, "messages": messages, "stream": stream }),
-        OpenAiEndpoint::Responses => json!({ "model": model, "input": messages, "stream": stream }),
-    };
-    let Some(fields) = body.as_object_mut() else {
-        return body.to_string();
-    };
-    if matches!(endpoint, OpenAiEndpoint::Chat) && stream {
-        fields.insert(
-            "stream_options".to_owned(),
-            json!({ "include_usage": true }),
-        );
-    }
+    provider_request_body(protocol, model, input, stream, effort, agent_tools)
+        .unwrap_or_else(|error| format!("protocol encoding error: {error}"))
+}
+
+fn model_request(
+    protocol: WireProtocol,
+    model: &str,
+    input: &str,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+    agent_tools: bool,
+) -> ModelRequest {
+    let agent = env::var("CTX_AGENT")
+        .ok()
+        .filter(|value| is_object_name(value));
+    let agent_system = env::var("CTX_AGENT_SYSTEM").unwrap_or_default();
+    let prompt_context = cortexfs::AgentPromptContext::from_env();
+    let mut request = ModelRequest::new(
+        model,
+        cortexfs::agent_prompt_messages(input, agent.as_deref(), &agent_system, &prompt_context),
+    );
+    request.stream = stream;
     if agent_tools {
-        let tools = current_agent_openai_tools()
+        request.tools = current_agent_openai_tools()
             .into_iter()
-            .map(|name| openai_direct_function_spec(&name, endpoint))
+            .map(protocol_tool)
             .collect();
-        fields.insert("tools".to_owned(), Value::Array(tools));
-        fields.insert("tool_choice".to_owned(), json!("auto"));
-        fields.insert("parallel_tool_calls".to_owned(), json!(false));
+        request.tool_choice = Some(ToolChoice::Auto);
     }
     if effort != cortexfs::ModelEffort::Auto {
-        match endpoint {
-            OpenAiEndpoint::Chat => {
-                fields.insert("reasoning_effort".to_owned(), json!(effort.to_string()));
+        let value = json!(effort.to_string());
+        match protocol {
+            WireProtocol::OpenAiChat => request.option("reasoning_effort", value),
+            WireProtocol::OpenAiResponses => {
+                request.option("reasoning", json!({ "effort": value }));
             }
-            OpenAiEndpoint::Responses => {
-                fields.insert(
-                    "reasoning".to_owned(),
-                    json!({ "effort": effort.to_string() }),
-                );
-            }
+            WireProtocol::Gemini | WireProtocol::Anthropic => {}
         }
     }
-    body.to_string()
+    request
 }
-fn openai_direct_function_spec(name: &str, endpoint: OpenAiEndpoint) -> Value {
-    let mut function = Map::from_iter([
-        ("name".to_owned(), json!(name)),
-        (
-            "description".to_owned(),
-            json!(openai_tool_description(name)),
-        ),
-        ("parameters".to_owned(), tsh_tool_parameters_schema()),
-        ("strict".to_owned(), json!(true)),
-    ]);
-    match endpoint {
-        OpenAiEndpoint::Chat => json!({ "type": "function", "function": function }),
-        OpenAiEndpoint::Responses => {
-            function.insert("type".to_owned(), json!("function"));
-            Value::Object(function)
-        }
+
+fn protocol_tool(name: String) -> ToolDefinition {
+    let description = openai_tool_description(&name);
+    ToolDefinition {
+        name,
+        description: Some(description),
+        parameters: tsh_tool_parameters_schema(),
     }
 }
+
 pub(crate) fn current_agent_openai_tools() -> Vec<String> {
     let agent = env::var("CTX_AGENT").ok();
     let root =
@@ -241,14 +237,7 @@ pub(crate) fn tsh_tool_parameters_schema() -> Value {
         "required": ["args"]
     })
 }
-pub(crate) fn provider_messages(input: &str) -> Value {
-    let agent = env::var("CTX_AGENT")
-        .ok()
-        .filter(|value| is_object_name(value));
-    let agent_system = env::var("CTX_AGENT_SYSTEM").unwrap_or_default();
-    let prompt_context = cortexfs::AgentPromptContext::from_env();
-    provider_messages_for_agent(input, agent.as_deref(), &agent_system, &prompt_context)
-}
+#[cfg(test)]
 pub(crate) fn provider_messages_for_agent(
     input: &str,
     agent: Option<&str>,
@@ -325,6 +314,7 @@ mod requests_tests {
         fs::write(control.join("uid"), "1000\n").expect("uid");
         fs::write(control.join("gid"), "1000\n").expect("gid");
         fs::write(control.join("groups"), "1000\n").expect("groups");
+        fs::write(control.join("perm"), "rwx\n").expect("perm");
         fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").expect("label");
         fs::write(control.join("iso"), "shared\n").expect("iso");
         fs::write(control.join("parent"), "\n").expect("parent");

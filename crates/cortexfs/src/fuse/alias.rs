@@ -182,8 +182,12 @@ pub(crate) fn model_alias_path_file_name(path: &Path) -> Result<&str, FuseError>
 
 pub(crate) fn normalize_model_alias_target(target: &Path) -> Option<PathBuf> {
     let raw = target.to_str()?;
-    let model = raw.strip_prefix("/ctx/model/").unwrap_or(raw);
-    is_model_name(model).then(|| PathBuf::from(format!("/ctx/model/{model}")))
+    let model = raw
+        .strip_prefix(&format!("{CTX_ROOT}/model/"))
+        .unwrap_or(raw);
+    let (provider, model_name) = model.split_once('/')?;
+    is_model_name(model)
+        .then(|| cortexfs_paths::model_path(&cortexfs_paths::ctx_root(), provider, model_name))
 }
 
 pub(crate) fn is_model_alias_symlink_path(abi_path: &str) -> bool {

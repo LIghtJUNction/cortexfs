@@ -502,6 +502,7 @@ pub(super) fn test_provider_config_with_formats(
     RunnerProviderConfig {
         name: None,
         base_url: base_url.to_owned(),
+        auth: Vec::new(),
         oauth: None,
         formats: formats.iter().map(|format| (*format).to_owned()).collect(),
     }

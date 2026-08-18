@@ -143,9 +143,9 @@ pub fn bind_file(path: &std::path::Path, write: bool) -> Result<StopFileReceipt,
 
 pub fn bind_control(control: &std::path::Path) -> Result<StopControlReceipts, StopError> {
     Ok(StopControlReceipts {
-        status: bind_file(&control.join("status"), true)?,
-        pid: bind_file(&control.join("pid"), true)?,
-        log: bind_file(&control.join("log"), true)?,
+        status: bind_file(&cortexfs_paths::control_file_path(control, "status"), true)?,
+        pid: bind_file(&cortexfs_paths::control_file_path(control, "pid"), true)?,
+        log: bind_file(&cortexfs_paths::control_file_path(control, "log"), true)?,
     })
 }
 
@@ -265,7 +265,7 @@ pub fn ordered_owned_agents(
     requested_agent: &str,
 ) -> Result<Vec<String>, StopError> {
     authorize(context, requested_agent)?;
-    let agent_root = context.source.join("agent");
+    let agent_root = cortexfs_paths::agent_root_path(&context.source);
     let entries = fs::read_dir(&agent_root).map_err(|error| {
         StopError::new(format!("cannot read {}: {error}", agent_root.display()))
     })?;
@@ -425,13 +425,13 @@ fn require_receipt_keys(value: &serde_json::Value, expected: &[&str]) -> Result<
 }
 
 pub fn plan_temp_cleanup(context: &StopContext, name: &str) -> Result<TempCleanupPlan, StopError> {
-    let agent_root = context.source.join("agent");
+    let agent_root = cortexfs_paths::agent_root_path(&context.source);
     plan_temp_cleanup_paths(
         context.owner_uid,
         &agent_root,
-        &agent_root.join(name),
-        &agent_root.join(format!("{name}.sock")),
-        &agent_root.join(format!("{name}.d")),
+        &cortexfs_paths::agent_path(&context.source, name),
+        &cortexfs_paths::agent_socket_path(&context.source, name),
+        &cortexfs_paths::agent_control_path(&context.source, name),
     )
 }
 
@@ -598,10 +598,7 @@ fn verify_temp_cleanup_entry(entry: &TempCleanupEntry) -> Result<(), StopError> 
 }
 
 fn context_home(context: &StopContext) -> PathBuf {
-    context
-        .source
-        .join("home")
-        .join(context.owner_uid.to_string())
+    cortexfs_paths::ctx_home_path(&context.source, &context.owner_uid.to_string())
 }
 
 fn read_directory_names(path: &std::path::Path) -> Result<Vec<String>, StopError> {
@@ -690,10 +687,8 @@ fn plan_parent_child_cancellations(
     child_agent: &str,
     parent: &StopParent,
 ) -> Result<Vec<PlannedCancellation>, StopError> {
-    let session_root = context_home(context)
-        .join("agent")
-        .join(&parent.agent)
-        .join("session");
+    let session_root =
+        cortexfs_paths::agent_sessions_from_home_path(&context_home(context), &parent.agent);
     let parent_sessions = if let Some(session) = parent.session.as_deref() {
         vec![session_root.join(session)]
     } else if session_root
@@ -736,11 +731,9 @@ fn plan_parent_child_cancellations(
             preflight_child_cancellation(&channel)?;
             let child_session = read_trimmed(&channel.join("session"))?
                 .ok_or_else(|| StopError::new("missing child session"))?;
-            let child_session_dir = context_home(context)
-                .join("agent")
-                .join(child_agent)
-                .join("session")
-                .join(&child_session);
+            let child_session_dir =
+                cortexfs_paths::agent_sessions_from_home_path(&context_home(context), child_agent)
+                    .join(&child_session);
             for path in [
                 parent_session.join("events.jsonl"),
                 child_session_dir.join("events.jsonl"),
@@ -794,10 +787,11 @@ pub fn plan_stop(
     let ordered = ordered_owned_agents(context, requested_agent)?;
     let mut entries = Vec::with_capacity(ordered.len());
     for name in ordered {
-        let control = context.source.join("agent").join(format!("{name}.d"));
-        let life = read_trimmed(&control.join("life"))?.unwrap_or_else(|| "owned".to_owned());
+        let control = cortexfs_paths::agent_control_path(&context.source, &name);
+        let life = read_trimmed(&cortexfs_paths::control_file_path(&control, "life"))?
+            .unwrap_or_else(|| "owned".to_owned());
         let temporary = life == "temp";
-        let parent = read_trimmed(&control.join("parent"))?
+        let parent = read_trimmed(&cortexfs_paths::control_file_path(&control, "parent"))?
             .filter(|value| !value.is_empty())
             .map(|value| parse_parent(&value))
             .transpose()?;

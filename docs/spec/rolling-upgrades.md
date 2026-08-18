@@ -38,6 +38,10 @@ entries do not grant authority and are not carried forward. Implementations
 MUST NOT reuse an identifier for different work or report a target version
 before its migrations and reconciliation have completed.
 
+Reference-tree version 8 records the `agent-permissions` migration and
+reconciles the required `perm` control for managed agents. Architect and
+reviewer default to `r--`; coder and worker default to `rwx`.
+
 ## Command modes
 
 `ctx bootstrap` has three modes over the same plan:

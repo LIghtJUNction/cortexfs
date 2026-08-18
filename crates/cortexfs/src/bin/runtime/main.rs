@@ -34,9 +34,9 @@ use cortexfs::{
 use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
+const DEFAULT_SOURCE: &str = cortexfs_paths::SYSTEM_STORAGE_CURRENT;
 const BWRAP_PROGRAM: &str = cortexfs::support::command::BWRAP;
-const RUN_CONTROL_DIR: &str = "/run/cortexfs/control";
+const RUN_CONTROL_DIR: &str = cortexfs_paths::SYSTEM_CONTROL_DIR;
 
 pub(crate) use cortexfs::cli::stderr;
 pub(crate) use stderr::*;
@@ -86,11 +86,8 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         );
     };
 
-    let session_root = view
-        .ctx_home()
-        .join("agent")
-        .join(view.agent_name())
-        .join("session");
+    let session_root =
+        cortexfs_paths::agent_sessions_from_home_path(view.ctx_home(), view.agent_name());
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid_or_root(view.identity().uid());
     let runtime_model = runtime_model(&config.source, view.model());
@@ -104,7 +101,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
     }
     runtime_env.extend(provider_runtime_env(&config.source, &runtime_model)?);
-    let agent_executable = config.source.join("agent").join(&config.agent);
+    let agent_executable = cortexfs_paths::agent_path(&config.source, &config.agent);
     let control_dir = Path::new(RUN_CONTROL_DIR);
     #[expect(
         clippy::create_dir,

@@ -57,6 +57,14 @@ pub fn verify(directory: &File) -> io::Result<()> {
     Ok(())
 }
 
+pub fn has_manifest(directory: &File) -> io::Result<bool> {
+    match receipt_at(directory, MANIFEST, EntryKind::File) {
+        Ok(Some(_)) => Ok(true),
+        Ok(None) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 pub fn legacy_matches(existing: &File, desired: &File) -> io::Result<bool> {
     Ok(collect_tree(existing, MANIFEST)? == collect_tree(desired, MANIFEST)?)
 }

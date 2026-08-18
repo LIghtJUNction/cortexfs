@@ -37,7 +37,7 @@ enum UserManagerCaller {
 impl UserManagerIdentity {
     /// Validates `/run/user/<uid>` and its user-bus socket without following links.
     pub fn fresh(identity: &AgentUnixIdentity) -> io::Result<Self> {
-        let runtime = PathBuf::from(format!("/run/user/{}", identity.uid()));
+        let runtime = cortexfs_paths::user_runtime_root(identity.uid());
         let metadata = fs::symlink_metadata(&runtime)?;
         if !metadata.is_dir()
             || metadata.file_type().is_symlink()
@@ -180,47 +180,50 @@ mod user_manager_tests {
         dispose_claimed_alias, ensure_terminal_runtime_dir, exact_alias_receipt,
         open_owned_alias_parent, parse_unit_state, prepare_exact_socket_alias,
         remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
-        system_agent_visible_socket, wait_system_agent_visible_socket,
+        wait_system_agent_visible_socket,
     };
     use crate::AgentUnixIdentity;
     use std::fs;
+    use std::io;
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
 
-    fn runtime_fixture(name: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()));
-        let _ignored = fs::remove_dir_all(&path);
-        assert!(fs::create_dir_all(&path).is_ok());
-        assert!(fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).is_ok());
-        path
+    fn runtime_fixture(name: &str) -> io::Result<tempfile::TempDir> {
+        let path = tempfile::Builder::new()
+            .prefix(&format!("cfs-{name}-"))
+            .tempdir()?;
+        fs::set_permissions(path.path(), fs::Permissions::from_mode(0o700))?;
+        Ok(path)
     }
 
     #[test]
-    fn terminal_runtime_chain_is_target_owned_and_reusable() {
-        let root = runtime_fixture("terminal-runtime-owner");
+    fn terminal_runtime_chain_is_target_owned_and_reusable() -> io::Result<()> {
+        let root = runtime_fixture("terminal-runtime-owner")?;
         let uid = nix::unistd::geteuid().as_raw();
         let gid = nix::unistd::getegid().as_raw();
         let identity = AgentUnixIdentity::new(uid, gid, []);
-        let first = ensure_terminal_runtime_dir(&root, "worker", "default", &identity);
+        let first = ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity);
         assert!(first.is_ok());
         let metadata = first.and_then(|file| file.metadata());
         assert!(
             matches!(metadata, Ok(ref metadata) if metadata.uid() == uid && metadata.gid() == gid && metadata.permissions().mode() & 0o7777 == 0o700)
         );
-        assert!(ensure_terminal_runtime_dir(&root, "worker", "default", &identity).is_ok());
+        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_ok());
+        Ok(())
     }
 
     #[test]
-    fn terminal_runtime_chain_rejects_symlink_component() {
-        let root = runtime_fixture("terminal-runtime-symlink");
-        let outside = runtime_fixture("terminal-runtime-outside");
-        assert!(std::os::unix::fs::symlink(&outside, root.join("cortexfs")).is_ok());
+    fn terminal_runtime_chain_rejects_symlink_component() -> io::Result<()> {
+        let root = runtime_fixture("terminal-runtime-symlink")?;
+        let outside = runtime_fixture("terminal-runtime-outside")?;
+        std::os::unix::fs::symlink(outside.path(), root.path().join("cortexfs"))?;
         let identity = AgentUnixIdentity::new(
             nix::unistd::geteuid().as_raw(),
             nix::unistd::getegid().as_raw(),
             [],
         );
-        assert!(ensure_terminal_runtime_dir(&root, "worker", "default", &identity).is_err());
+        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_err());
+        Ok(())
     }
 
     #[test]
@@ -243,7 +246,7 @@ mod user_manager_tests {
     fn nonroot_wrong_self_groups_fails_closed() {
         assert!(matches!(
             select_user_manager_caller(1000, 100, &[20], 1000, 100, &[20, 30]),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied
         ));
     }
 
@@ -279,7 +282,7 @@ mod user_manager_tests {
     #[test]
     fn system_socket_visible_path_matches_backing_agent_socket_abi() {
         assert_eq!(
-            system_agent_visible_socket(std::path::Path::new("/storage/root"), "child"),
+            cortexfs_paths::agent_backing_socket(std::path::Path::new("/storage/root"), "child"),
             std::path::Path::new("/storage/root/agent/child.sock")
         );
     }
@@ -566,21 +569,6 @@ pub struct SystemAgentSocketReceipt {
     pub invocation: String,
 }
 
-#[must_use]
-pub fn system_agent_socket_unit(agent: &str) -> String {
-    format!("cortexfs-agent@{agent}.socket")
-}
-
-#[must_use]
-pub fn system_agent_runtime_socket(agent: &str) -> PathBuf {
-    Path::new("/run/cortexfs/agent").join(format!("{agent}.sock"))
-}
-
-#[must_use]
-pub fn system_agent_visible_socket(source: &Path, agent: &str) -> PathBuf {
-    source.join("agent").join(format!("{agent}.sock"))
-}
-
 const BOOTSTRAP_SOCKET_MODE: u32 = 0o777;
 
 /// Replaces the trusted bootstrap socket with the exact systemd runtime alias.
@@ -592,7 +580,7 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     let _agent_dir = open_owned_alias_child(&source_dir, "agent")?;
     let view = crate::derive_agent_runtime_view(source, agent)
         .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
-    let executable = source.join("agent").join(agent);
+    let executable = cortexfs_paths::agent_path(source, agent);
     let executable_meta = fs::symlink_metadata(&executable)?;
     if !executable_meta.is_file()
         || executable_meta.file_type().is_symlink()
@@ -603,8 +591,8 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
             "agent executable is not a plain executable file",
         ));
     }
-    let runtime = system_agent_runtime_socket(agent);
-    let run_dir = open_owned_alias_parent(Path::new("/run"))?;
+    let runtime = cortexfs_paths::system_agent_runtime_socket(agent);
+    let run_dir = open_owned_alias_parent(&cortexfs_paths::system_run_root())?;
     let cortexfs_dir = open_owned_alias_child(&run_dir, "cortexfs")?;
     let runtime_dir = open_owned_alias_child(&cortexfs_dir, "agent")?;
     let runtime_name = runtime
@@ -626,7 +614,7 @@ pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
         Err(error) => return Err(io::Error::from(error)),
     }
     prepare_exact_socket_alias(
-        &system_agent_visible_socket(source, agent),
+        &cortexfs_paths::agent_backing_socket(source, agent),
         &runtime,
         (view.identity().uid(), view.identity().gid()),
         BOOTSTRAP_SOCKET_MODE,
@@ -643,8 +631,8 @@ pub fn cleanup_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     let view = crate::derive_agent_runtime_view(source, agent)
         .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
     cleanup_exact_socket_alias(
-        &system_agent_visible_socket(source, agent),
-        &system_agent_runtime_socket(agent),
+        &cortexfs_paths::agent_backing_socket(source, agent),
+        &cortexfs_paths::system_agent_runtime_socket(agent),
         (view.identity().uid(), view.identity().gid()),
         BOOTSTRAP_SOCKET_MODE,
     )
@@ -1069,7 +1057,7 @@ pub fn ensure_system_agent_socket(
     agent: &str,
     visible: &Path,
 ) -> Result<SystemAgentSocketReceipt, AgentLaunchError> {
-    let unit = system_agent_socket_unit(agent);
+    let unit = cortexfs_paths::system_agent_socket_unit(agent);
     let before = system_unit_state(&unit);
     let was_active = before
         .as_ref()
@@ -1105,7 +1093,7 @@ pub fn ensure_system_agent_socket(
         owned_start: !was_active,
         invocation: state.invocation,
     };
-    let runtime = system_agent_runtime_socket(agent);
+    let runtime = cortexfs_paths::system_agent_runtime_socket(agent);
     if wait_socket(&runtime, 50, Duration::from_millis(100)).is_err()
         || wait_system_agent_visible_socket(visible, &runtime, 50, Duration::from_millis(100))
             .is_err()
@@ -1678,17 +1666,58 @@ pub fn terminal_command(
             "/etc/bash.bashrc".to_owned(),
         ]);
     }
+    command
+        .args
+        .extend(["--chdir".to_owned(), request.cwd.clone()]);
+    if let Some((host, guest)) = terminal_resource_mount(request, view) {
+        command.args.extend([
+            "--bind".to_owned(),
+            host.display().to_string(),
+            guest.clone(),
+            "--setenv".to_owned(),
+            "CTX_TERMINAL_EVENTS".to_owned(),
+            format!("{guest}/events.jsonl"),
+        ]);
+    }
     command.args.extend([
-        "--chdir".to_owned(),
-        request.cwd.clone(),
         crate::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
         "--no-stdio".to_owned(),
         "--".to_owned(),
-        "/ctx/bin/tsh".to_owned(),
+        cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+            .join("tsh")
+            .display()
+            .to_string(),
     ]);
     command
+}
+
+fn terminal_resource_mount(
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+) -> Option<(PathBuf, String)> {
+    let id = crate::runtime::terminal::terminal_id(&request.agent, &request.session);
+    let host = cortexfs_paths::session_terminal_from_home_path(
+        view.ctx_home(),
+        &request.agent,
+        &request.session,
+        &id,
+    );
+    if crate::support::plain::open_plain_directory(&host).is_err() {
+        return None;
+    }
+    let owner = view.ctx_home().file_name()?.to_str()?;
+    let guest = cortexfs_paths::session_terminal_path(
+        &cortexfs_paths::ctx_root(),
+        owner,
+        &request.agent,
+        &request.session,
+        &id,
+    )
+    .display()
+    .to_string();
+    Some((host, guest))
 }
 
 fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
@@ -1709,12 +1738,22 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         crate::ChildLifecycle::Temp => "temp",
     };
     let mut env = vec![
-        ("CTX_ROOT".to_owned(), "/ctx".to_owned()),
+        (
+            "CTX_ROOT".to_owned(),
+            cortexfs_paths::ctx_root().display().to_string(),
+        ),
         (
             "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-            "/ctx/shared/providers.d".to_owned(),
+            cortexfs_paths::shared_path(&cortexfs_paths::ctx_root(), "providers.d")
+                .display()
+                .to_string(),
         ),
-        ("CTX_HOME".to_owned(), format!("/ctx/home/{owner}")),
+        (
+            "CTX_HOME".to_owned(),
+            cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), owner)
+                .display()
+                .to_string(),
+        ),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
         ("CTX_AGENT_ROLE".to_owned(), "agent".to_owned()),
         ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
@@ -1759,7 +1798,8 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
 
 fn host_mount_source(root: &Path, source: &str) -> String {
     let source = Path::new(source);
-    source.strip_prefix("/ctx").map_or_else(
+    let ctx_root = cortexfs_paths::ctx_root();
+    source.strip_prefix(&ctx_root).map_or_else(
         |_| source.display().to_string(),
         |relative| root.join(relative).display().to_string(),
     )

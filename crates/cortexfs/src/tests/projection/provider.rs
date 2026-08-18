@@ -233,7 +233,7 @@ fn fuse_projection_projects_configured_provider_models() -> std::io::Result<()> 
     );
     assert_eq!(
         projection.read_to_string("model/api.test/gpt-5.6-terra.d/fallback"),
-        Ok("api.test/gpt-5.6\napi.test/gpt-5.6-sol\napi.test/gpt-5.6-luna\n".to_owned())
+        Ok("api.test/gpt-5.6-terra\n".to_owned())
     );
     assert_eq!(
         projection.write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n"),

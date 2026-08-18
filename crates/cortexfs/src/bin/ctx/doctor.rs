@@ -11,7 +11,8 @@ pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     }
 
     for entry in ROOT_ENTRIES {
-        let path = root.join(entry);
+        let path = cortexfs_paths::root_entry_path(root, entry)
+            .ok_or_else(|| CliError::unavailable("unknown root entry"))?;
         let entry_shape_matches = if entry == &"status" {
             doctor_is_file(&path)
         } else {
@@ -51,7 +52,7 @@ pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
 pub(crate) fn doctor_retired_reference_agents(root: &Path) -> Result<bool, CliError> {
     let retired = list_present_retired_reference_agents(root);
     for name in &retired {
-        let exec = root.join("agent").join(name);
+        let exec = cortexfs_paths::agent_path(root, name);
         let status = if is_managed_reference_agent_wrapper(&exec) {
             "stale"
         } else {
@@ -106,7 +107,7 @@ pub(crate) fn doctor_bootstrap_state(root: &Path) -> Result<bool, CliError> {
 pub(crate) fn doctor_objects(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for class in [ObjectClass::Model, ObjectClass::Agent, ObjectClass::Tool] {
-        let dir = root.join(class.as_str());
+        let dir = cortexfs_paths::object_root_path(root, class.as_str());
         if !doctor_is_dir(&dir) {
             continue;
         }
@@ -135,7 +136,7 @@ pub(crate) fn object_names_for_doctor(
         if !is_object_name(&provider) {
             continue;
         }
-        let provider_dir = dir.join(&provider);
+        let provider_dir = cortexfs_paths::model_provider_path(dir, &provider);
         if !doctor_is_dir(&provider_dir) {
             continue;
         }
@@ -187,7 +188,7 @@ pub(crate) fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
 /// Inspect all shared queue directories and aggregate shared-queue validation state.
 pub(crate) fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
-    let shared = root.join("shared");
+    let shared = cortexfs_paths::shared_root_path(root);
     if !doctor_is_dir(&shared) {
         return Ok(ok);
     }
@@ -195,7 +196,7 @@ pub(crate) fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
         if !is_object_name(&space) {
             continue;
         }
-        let queue = shared.join(&space).join("queue");
+        let queue = cortexfs_paths::shared_path(root, &space).join("queue");
         if !doctor_exists(&queue) {
             continue;
         }
@@ -271,7 +272,7 @@ pub(crate) fn collect_home_sessions(
     root: &Path,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
-    let home = root.join("home");
+    let home = cortexfs_paths::home_root_path(root);
     if !doctor_is_dir(&home) {
         return Ok(());
     }
@@ -286,7 +287,7 @@ pub(crate) fn collect_shared_sessions(
     root: &Path,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
-    let shared = root.join("shared");
+    let shared = cortexfs_paths::shared_root_path(root);
     if !doctor_is_dir(&shared) {
         return Ok(());
     }
@@ -306,12 +307,12 @@ pub(crate) fn collect_space_sessions(
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
     collect_agent_sessions(
-        &root.join("agent"),
+        &cortexfs_paths::agent_root_path(root),
         &format!("{label_prefix}/agent"),
         sessions,
     )?;
     collect_model_sessions(
-        &root.join("model"),
+        &cortexfs_paths::model_root_path(root),
         &format!("{label_prefix}/model"),
         sessions,
     )

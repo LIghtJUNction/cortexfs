@@ -24,6 +24,9 @@
 
 extern crate self as cortexfs;
 
+/// Provider-neutral static module API and external wire contract.
+pub use cortexfs_module as module;
+
 pub mod imports;
 pub use imports::*;
 
@@ -63,6 +66,8 @@ pub mod abi;
 pub mod agent;
 /// L2 — identity and authority helpers.
 pub mod authority;
+/// L5 — channel adapters bridged into existing durable agent sessions.
+pub mod channel;
 /// L2 — context packs and working-set construction.
 pub mod context;
 /// L4 — mount table types and parsing.
@@ -87,6 +92,15 @@ pub mod support;
 
 pub use abi::authority::*;
 pub use abi::request::*;
+pub use provider::auth::anthropic::AnthropicAdapter;
+pub use provider::auth::copilot::GitHubCopilotAdapter;
+pub use provider::auth::openai::OpenAiAdapter;
+pub use provider::auth::{
+    AuthMethod, AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport,
+    Credential, CredentialKind, DeviceChallenge, OAuthFlow, ProviderAuthConfig, ProviderRegistry,
+    ProviderRegistryError, configured_adapter, configured_registry, default_device_login,
+    device_request, effective_auth_methods, http_transport, refresh_oauth_result,
+};
 pub use provider::discovery::*;
 pub(crate) use provider::{
     ProjectedProviderModel, ProviderConfig, ProviderModelCache, ProviderSnapshot,
@@ -140,8 +154,7 @@ pub use policy::subject::*;
 
 use abi::constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
-    DEFAULT_MODEL_ALIAS_TARGET, DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
-    MODEL_ROUTE_FILE, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
+    DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, MODEL_ROUTE_FILE, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi::path::is_object_name_for_class;
 use support::plain::{open_plain_directory, plain_file_name};
@@ -265,6 +278,11 @@ pub fn ensure_durable_session_layout(
         record_text(&session_dir.join("events.jsonl"), "", &mut receipts)?;
         record_text(&session_dir.join("latest.md"), "", &mut receipts)?;
         record_text(&session_dir.join("state"), "idle\n", &mut receipts)?;
+        record_text(
+            &session_dir.join("state.json"),
+            &RuntimeState::idle(model, &now).json(),
+            &mut receipts,
+        )?;
         record_text(&session_dir.join("cwd"), &format!("{cwd}\n"), &mut receipts)?;
         record_text(&session_dir.join("created_at"), &now, &mut receipts)?;
         record_text(&session_dir.join("updated_at"), &now, &mut receipts)?;
@@ -301,12 +319,12 @@ pub fn ensure_durable_session_layout(
         }
 
         record_text(
-            &session_root.join("index").join("list"),
+            &cortexfs_paths::session_index_file_path(session_root, "list"),
             &format!("{session_name}\n"),
             &mut receipts,
         )?;
         record_text(
-            &session_root.join("index").join("current"),
+            &cortexfs_paths::session_index_file_path(session_root, "current"),
             &format!("{session_name}\n"),
             &mut receipts,
         )?;

@@ -44,6 +44,7 @@ pub fn handle_socket_request(
             ref session,
             ref after,
         } => handle_socket_resume(session_root, session, after.as_deref()),
+        SocketRequest::Status { ref session } => handle_socket_status(session_root, model, session),
         SocketRequest::Cancel { ref id } => handle_socket_cancel(session_root, id),
         SocketRequest::Tsh { .. } | SocketRequest::Stop { .. } => Err(SocketRuntimeError::Record(
             SocketSessionRecordError::UnsupportedRequest,
@@ -191,12 +192,14 @@ pub mod bwrap;
 pub mod events;
 pub mod exec;
 pub mod session;
+pub mod status;
 pub mod stream;
 
 pub(crate) use bwrap::*;
 pub(crate) use events::*;
 pub(crate) use exec::*;
 pub(crate) use session::*;
+pub(crate) use status::*;
 pub(crate) use stream::*;
 
 #[cfg(test)]

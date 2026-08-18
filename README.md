@@ -8,6 +8,7 @@
   <a href="https://github.com/LIghtJUNction/cortexfs/actions/workflows/pages.yml"><img alt="Pages deployment" src="https://img.shields.io/github/actions/workflow/status/LIghtJUNction/cortexfs/pages.yml?branch=main&amp;label=pages"></a>
   <a href="https://lightjunction.github.io/cortexfs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-live-2A8F73"></a>
   <a href="https://crates.io/crates/cortexfs"><img alt="crates.io" src="https://img.shields.io/crates/v/cortexfs"></a>
+  <a href="https://crates.io/crates/cortexfs-paths"><img alt="cortexfs-paths on crates.io" src="https://img.shields.io/crates/v/cortexfs-paths"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust 1.91 or newer" src="https://img.shields.io/badge/rust-1.91%2B-000000?logo=rust"></a>
   <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img alt="Rust edition 2024" src="https://img.shields.io/badge/edition-2024-000000?logo=rust"></a>
   <a href="https://www.kernel.org/doc/html/latest/filesystems/fuse.html"><img alt="Linux FUSE" src="https://img.shields.io/badge/platform-Linux%20%7C%20FUSE-FCC624?logo=linux&amp;logoColor=black"></a>
@@ -33,6 +34,12 @@ can `ls`, `cat`, execute, secure, and audit.
 - **Small, explicit authority.** Static direct-native declarations never grant
   authority, and dynamic tool context never expands it.
 
+## OpenAI-Compatible Model Access
+
+CortexFS supports custom provider base URLs, so an OpenAI-compatible gateway can be used without changing the `/ctx` model ABI. [LMM API Gateway](https://api.lmm.best) is one available multi-model endpoint maintained by the CortexFS author. Configure it through host-side provider JSON and the system secret store as described in the [model ABI](docs/spec/model-abi.md#provider-presets).
+
+API purchases help cover the model usage behind CortexFS development. Substantive issues, pull requests, and testing may also receive API credits; using LMM is optional and CortexFS remains provider-neutral.
+
 ---
 
 ## Install
@@ -49,6 +56,18 @@ The installer audits prerequisites and asks for typed confirmation before each
 mutation. Continue with the [quick start](#quick-start), or read the
 [getting-started guide](docs/getting-started.md) for supported systems,
 recovery, and the full runtime model.
+
+For native packages, see the [multi-distribution packaging guide](https://github.com/LIghtJUNction/cortexfs/blob/main/docs/packaging.md)
+for `.deb`, `.rpm`, Arch Linux packages, and portable tarballs.
+
+For Telegram, Discord, Slack, and Feishu/Lark integration, see the
+[multi-IM channel guide](docs/channels.md) and the normative
+[channel ABI](docs/spec/channel-abi.md).
+
+For integrations that need to derive CortexFS locations, use the published
+[`cortexfs-paths`](https://crates.io/crates/cortexfs-paths) ABI crate and the
+[path ABI guide](docs/paths.md); do not copy `/ctx` or host runtime path
+literals into adapters.
 
 [Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
 
@@ -384,6 +403,7 @@ Agents live under `/ctx/agent`:
   uid
   gid
   groups
+  perm
   label
   root
   cwd
@@ -456,10 +476,24 @@ agent.d/cwd
 agent.d/mount
 agent.d/path
 agent.d/model
+agent.d/perm
 agent.d/policy
 uid/gid/groups
 mode bits
 ```
+
+The coarse agent ceiling is visible like a Unix permission marker:
+
+```bash
+ls -l /ctx/agent/coder.d/perm
+chmod 500 /ctx/agent/coder.d/perm   # r-x: read tools plus shell execution
+```
+
+Its owner triplet maps `r` to `fs.read`/`fs.list`/`fs.stat`, `w` to
+`fs.write`/`fs.replace`, and `x` to shell or host-like terminal tools. It is an
+additional ceiling; Linux mode bits, mounts, agent policy, and tool policy must
+still allow every operation. The executable bit on `/ctx/agent/coder` remains
+reserved for invoking the agent object itself.
 
 CLI `--mount` arguments are validated, but runtime execution uses the derived
 agent view. Terminal startup cannot bypass the policy and mount files that
@@ -693,6 +727,7 @@ The security stack is layered:
 ```text
 Linux uid/gid/groups
 file mode bits
+agent permission ceiling
 chroot + bind mounts
 CortexFS label
 agent policy

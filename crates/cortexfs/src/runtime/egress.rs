@@ -21,7 +21,7 @@ use target::ProviderTarget;
 const ACCEPT_PAUSE: Duration = Duration::from_millis(10);
 
 /// Fixed path where a sandboxed provider runner sees its run-scoped relay sockets.
-pub const PROVIDER_EGRESS_SANDBOX_PATH: &str = "/run/cortexfs/provider-egress";
+pub use cortexfs_paths::PROVIDER_EGRESS_SANDBOX_PATH;
 /// Environment variable advertising the fixed provider relay directory.
 pub const PROVIDER_EGRESS_DIR_ENV: &str = "CTX_PROVIDER_EGRESS_DIR";
 

@@ -31,9 +31,8 @@ groups = [0]
 "#,
     )?;
 
-    let error = match manifest::load_package(root.path()) {
-        Ok(_) => panic!("package-controlled identity was accepted"),
-        Err(error) => error,
+    let Err(error) = manifest::load_package(root.path()) else {
+        return Err("package-controlled identity was accepted".into());
     };
     assert!(error.message.contains("unknown field `identity`"));
     Ok(())

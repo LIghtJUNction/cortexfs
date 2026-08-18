@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::authority::helpers::{AtomicCommit, atomic_write_owned};
 use crate::support::plain::{
     open_plain_directory, open_plain_file, path_metadata_no_follow, plain_file_name,
     read_symlink_target,
@@ -75,7 +76,7 @@ impl FuseProjection {
         }
         let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
-        let mode = projected_metadata_mode(&normalized, &metadata);
+        let mode = projected_metadata_mode(&normalized, &path, &metadata)?;
         let size = if metadata.is_file() {
             if let Some(stream) = columnar::Stream::from_abi_path(&normalized) {
                 let session = path.parent().ok_or(FuseError::InvalidPath)?;
@@ -481,12 +482,7 @@ impl FuseProjection {
             }
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
-        self.write_control_file_at_with_snapshot(&normalized, 0, content, snapshot.as_ref())?;
-        Self::chown_fuse_plain_path(
-            &self.resolve_with_snapshot(&normalized, snapshot.as_ref())?,
-            uid,
-            gid,
-        )
+        self.write_control_file_at_with_snapshot(&normalized, 0, content, snapshot.as_ref())
     }
 
     pub(crate) fn append_plain_file_at_end(
@@ -577,13 +573,8 @@ impl FuseProjection {
         let content = std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
         let path = self.resolve(normalized)?;
         if Self::is_session_append_path(normalized) {
-            return atomic_create_text_with_mode(&path, content, 0o600).map_err(|error| {
-                if error.kind() == std::io::ErrorKind::AlreadyExists {
-                    FuseError::AlreadyExists
-                } else {
-                    FuseError::Io
-                }
-            });
+            return atomic_create_text_with_mode(&path, content, 0o600)
+                .map_err(|error| fuse_metadata_error(&error));
         }
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
@@ -601,19 +592,18 @@ impl FuseProjection {
         uid: u32,
         gid: u32,
     ) -> Result<(), FuseError> {
-        self.replace_session_plain_file(normalized, content)?;
-        Self::chown_fuse_plain_path(&self.resolve(normalized)?, uid, gid)
-    }
-
-    pub(crate) fn chown_fuse_plain_path(path: &Path, uid: u32, gid: u32) -> Result<(), FuseError> {
-        nix::unistd::fchownat(
-            nix::fcntl::AT_FDCWD,
-            path,
-            Some(nix::unistd::Uid::from_raw(uid)),
-            Some(nix::unistd::Gid::from_raw(gid)),
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        )
-        .map_err(|_error| FuseError::Io)
+        let content = std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
+        let path = self.resolve(normalized)?;
+        let owner = (uid, gid);
+        if Self::is_session_append_path(normalized) {
+            return atomic_write_owned(&path, content, 0o600, owner, AtomicCommit::NoReplace)
+                .map_err(|error| fuse_metadata_error(&error));
+        }
+        if fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink()) {
+            return Err(FuseError::Io);
+        }
+        atomic_write_owned(&path, content, 0o600, owner, AtomicCommit::Replace)
+            .map_err(|_error| FuseError::Io)
     }
 
     /// Creates one whitelisted session or agent-lifecycle directory.
@@ -653,8 +643,9 @@ impl FuseProjection {
             return Err(FuseError::NotControlFile);
         }
         self.authorize_layout_path(&normalized, uid)?;
-        self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)?;
-        Self::set_plain_mode(&self.resolve(&normalized)?, mode)
+        let path = self.resolve(&normalized)?;
+        atomic_write_owned(&path, "", mode, (uid, gid), AtomicCommit::NoReplace)
+            .map_err(|error| fuse_metadata_error(&error))
     }
 
     /// Renames one whitelisted same-directory atomic temp file.
@@ -760,6 +751,15 @@ impl FuseProjection {
             return Err(FuseError::NotControlFile);
         }
         self.authorize_layout_path(&normalized, uid)?;
+        if Self::agent_control_target(&normalized).is_some_and(|(_, file)| file == "perm") {
+            let bits =
+                u8::try_from((mode >> 6) & 0o7).map_err(|_error| FuseError::InvalidContent)?;
+            return atomic_replace_text_preserving_metadata(
+                &path,
+                AgentPermissions(bits).control(),
+            )
+            .map_err(|_error| FuseError::Io);
+        }
         Self::set_plain_mode(&path, mode)
     }
 
@@ -797,13 +797,8 @@ impl FuseProjection {
         gid: u32,
         mode: u32,
     ) -> Result<(), FuseError> {
-        let created = support::plain::create_plain_dir_exclusive(path, mode).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                FuseError::AlreadyExists
-            } else {
-                FuseError::Io
-            }
-        })?;
+        let created = support::plain::create_plain_dir_exclusive(path, mode)
+            .map_err(|error| fuse_metadata_error(&error))?;
         let result = nix::unistd::fchown(
             &created,
             Some(nix::unistd::Uid::from_raw(uid)),
@@ -881,7 +876,7 @@ impl FuseProjection {
     ) -> Result<(), FuseError> {
         let candidate =
             std::str::from_utf8(candidate).map_err(|_error| FuseError::InvalidContent)?;
-        let control_dir = self.root.join("agent").join(format!("{agent}.d"));
+        let control_dir = cortexfs_paths::agent_control_path(&self.root, agent);
         // During initial agent materialization the peer control does not exist
         // yet; a missing peer takes its creation default instead of failing.
         let read_peer = |file: &str| match support::plain::read_small_text_file(
@@ -917,9 +912,13 @@ impl FuseProjection {
             .ok_or(FuseError::InvalidContent)?;
         let model_name = if is_model_alias(model) {
             let target = self.default_model_alias_target(model, snapshot)?;
+            let model_root = format!(
+                "{}/",
+                cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
+            );
             target
                 .to_str()
-                .and_then(|target| target.strip_prefix("/ctx/model/"))
+                .and_then(|target| target.strip_prefix(&model_root))
                 .filter(|target| is_model_name(target))
                 .ok_or(FuseError::InvalidContent)?
                 .to_owned()
@@ -951,8 +950,9 @@ impl FuseProjection {
         if !matches!(control, "model" | "window") {
             return Ok(None);
         }
-        let control_dir = open_plain_directory(&self.root.join("agent").join(format!("{agent}.d")))
-            .map_err(|_error| FuseError::Io)?;
+        let control_dir =
+            open_plain_directory(&cortexfs_paths::agent_control_path(&self.root, agent))
+                .map_err(|_error| FuseError::Io)?;
         #[cfg(test)]
         AGENT_WINDOW_LOCK_HOOK.with(|hook| {
             if let Some(sender) = hook.borrow_mut().take() {
@@ -972,7 +972,7 @@ impl FuseProjection {
     }
 
     pub(crate) fn authorize_agent_owner(&self, agent: &str, uid: u32) -> Result<(), FuseError> {
-        let control = self.root.join("agent").join(format!("{agent}.d"));
+        let control = cortexfs_paths::agent_control_path(&self.root, agent);
         let metadata = fs::symlink_metadata(&control).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 FuseError::NotFound
@@ -983,7 +983,7 @@ impl FuseProjection {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(FuseError::InvalidPath);
         }
-        let owner = control.join("owner");
+        let owner = cortexfs_paths::agent_control_file_path(&self.root, agent, "owner");
         match support::plain::read_small_text_file(&owner, 64) {
             Ok(owner) => owner
                 .trim()
@@ -1037,7 +1037,7 @@ impl FuseProjection {
         Self::agent_wrapper_name(normalized).is_some()
     }
 
-    fn agent_control_target(normalized: &str) -> Option<(&str, &str)> {
+    pub(crate) fn agent_control_target(normalized: &str) -> Option<(&str, &str)> {
         let mut parts = normalized.split('/');
         let (Some("agent"), Some(control), Some(file), None) =
             (parts.next(), parts.next(), parts.next(), parts.next())

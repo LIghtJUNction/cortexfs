@@ -199,13 +199,18 @@ fn fuse_projection_empty_history_write_preserves_offset_semantics() {
 }
 
 #[test]
-fn fuse_projection_first_history_marker_survives_mode_change() {
+fn fuse_projection_permission_and_history_modes_round_trip() {
     let root = reference_tree("fuse-first-history-marker-mode");
     let projection =
         FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
     let uid = nix::unistd::Uid::current().as_raw();
     let gid = nix::unistd::Gid::current().as_raw();
     assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let perm = "agent/coder.d/perm";
+    assert!(matches!(projection.getattr(perm), Ok(ref attr) if attr.mode() & 0o777 == 0o700));
+    assert_eq!(projection.set_layout_mode(perm, 0o500, uid), Ok(()));
+    assert_eq!(projection.read_to_string(perm).as_deref(), Ok("r-x\n"));
+    assert!(matches!(projection.getattr(perm), Ok(ref attr) if attr.mode() & 0o777 == 0o500));
 
     for (session_name, marker, peer) in [
         ("messages-first", "messages.jsonl", "events.jsonl"),
@@ -1256,6 +1261,25 @@ fn fuse_projection_cleans_only_new_socket_entries_after_chown_failure() {
         fs::read_link(root.join("agent/coder.sock")),
         Ok(existing) if existing == target
     ));
+}
+
+#[test]
+fn socket_placeholder_creation_stays_with_held_parent() -> Result<(), Box<dyn std::error::Error>> {
+    let root = clean_test_dir("fuse-socket-held-parent");
+    let original = root.join("original");
+    let moved = root.join("moved");
+    fs::create_dir_all(&original)?;
+    let parent = crate::support::plain::open_plain_directory(&original)?;
+    fs::rename(&original, &moved)?;
+    fs::create_dir_all(&original)?;
+
+    crate::support::plain::ensure_socket_placeholder_at(&parent, "agent.sock", 0o600)?;
+    assert!(matches!(
+        fs::symlink_metadata(moved.join("agent.sock")),
+        Ok(metadata) if metadata.file_type().is_socket()
+    ));
+    assert!(fs::symlink_metadata(original.join("agent.sock")).is_err());
+    Ok(())
 }
 
 #[test]

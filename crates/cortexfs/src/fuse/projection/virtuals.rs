@@ -39,7 +39,7 @@ impl FuseProjection {
         let mut entries = match abi_path {
             "model" => {
                 let mut provider_names = HashSet::from([DEBUG_ECHO_PROVIDER.to_owned()]);
-                let model_root = self.root.join("model");
+                let model_root = cortexfs_paths::model_root_path(&self.root);
                 provider_names.extend(snapshot.active().iter().cloned());
                 let mut entries = provider_names
                     .iter()
@@ -163,7 +163,7 @@ impl FuseProjection {
     }
 
     fn physical_model_entry_is_nonfile(&self, provider: &str) -> Result<bool, FuseError> {
-        match fs::symlink_metadata(self.root.join("model").join(provider)) {
+        match fs::symlink_metadata(cortexfs_paths::model_root_path(&self.root).join(provider)) {
             Ok(metadata) => Ok(!metadata.is_file()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(fuse_metadata_error(&error)),

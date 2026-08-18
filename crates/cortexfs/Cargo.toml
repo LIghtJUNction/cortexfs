@@ -14,17 +14,26 @@ categories.workspace = true
 arrow-array = "59.1.0"
 arrow-schema = "59.1.0"
 base64 = "0.22.1"
+cortexfs-channels = { version = "0.1.16", path = "../cortexfs-channels" }
+cortexfs-context = { version = "0.1.7", path = "../cortexfs-context" }
+cortexfs-module = { version = "0.1.7", path = "../cortexfs-module" }
+cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
+cortexfs-protocol = { version = "0.1.7", path = "../cortexfs-protocol" }
 cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
 cortexfs-tool-sdk = { version = "0.1.0", path = "../cortexfs-tool-sdk" }
 fuser = "0.17.0"
+getrandom = "0.3"
+imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }
 jsonschema = { version = "0.47.0", default-features = false }
 keyring = "4.1.4"
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "rustls-tls"] }
 listenfd = "1.0.2"
 models-dev = { version = "0.1.1", default-features = false, features = ["rustls-tls"] }
 nix = { version = "0.31.3", features = ["fs", "signal", "socket", "term", "user"] }
 parquet = { version = "59.1.0", default-features = false, features = ["arrow"] }
 portable-pty = "0.9.0"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+rustls = { version = "0.23.42", default-features = false, features = ["ring"] }
 rustyline = "18.0.1"
 semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -37,7 +46,9 @@ tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = { version = "1", default-features = false, features = ["rt", "time"] }
 toml = "1.1.4"
+tungstenite = { version = "0.30.0", default-features = false, features = ["rustls-tls-native-roots", "handshake"] }
 url = "2.5.8"
+webpki-roots = "1.0.8"
 xattr = "1.6.1"
 
 [lints]
@@ -70,3 +81,7 @@ path = "src/bin/runner/main.rs"
 [[bin]]
 name = "cortexfs-agent-runtime"
 path = "src/bin/runtime/main.rs"
+
+[[bin]]
+name = "cortexfs-channel"
+path = "src/bin/channel/main.rs"

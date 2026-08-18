@@ -160,7 +160,11 @@ pub(crate) fn run_visible_tool_with_writer(
 
 pub(crate) fn path_shared(root: &Path, name: &str) -> Result<(), CliError> {
     require_cli_name("shared name", name)?;
-    print_line(&root.join("shared").join(name).display().to_string())
+    print_line(
+        &cortexfs_paths::shared_path(root, name)
+            .display()
+            .to_string(),
+    )
 }
 
 pub(crate) fn history(root: &Path, agent: &str, session: Option<&str>) -> Result<(), CliError> {

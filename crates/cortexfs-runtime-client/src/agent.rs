@@ -88,6 +88,9 @@ pub struct AgentInvocationEnvelope {
     step: u8,
     /// User input for the current invocation.
     input: String,
+    /// Optional provider-neutral external event that caused the invocation.
+    #[serde(default)]
+    event: Option<serde_json::Value>,
     /// History context snapshot for this invocation.
     history_messages: String,
     /// Tool context snapshot for this invocation.
@@ -149,6 +152,12 @@ impl AgentInvocationEnvelope {
     #[must_use]
     pub fn input(&self) -> &str {
         &self.input
+    }
+
+    /// Structured external event, when this invocation came from a channel.
+    #[must_use]
+    pub fn event(&self) -> Option<&serde_json::Value> {
+        self.event.as_ref()
     }
 
     /// Historical message payload carried in this invocation.

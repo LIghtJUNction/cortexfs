@@ -12,7 +12,7 @@ pub(crate) fn provider_runtime_driver(
         .iter()
         .any(|format| format.trim() == "anthropic.messages")
     {
-        ProviderRuntimeDriver::AnthropicMessages
+        ProviderRuntimeDriver::Anthropic
     } else if config
         .formats
         .iter()
@@ -37,28 +37,27 @@ pub(crate) fn provider_chat_completion(
     let (provider, model) = name.split_once('/').ok_or_else(|| {
         ProviderCompletionError::fallback(format!("invalid provider model: {name}"))
     })?;
-    let ctx_root =
-        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let ctx_root = env::var_os("CTX_ROOT").map_or_else(cortexfs_paths::ctx_root, PathBuf::from);
     let config = provider_config(provider)
         .or_else(|| provider_config_from_model_control(&ctx_root, provider, model))
         .ok_or_else(|| {
             ProviderCompletionError::fallback(format!("missing provider: {provider}"))
         })?;
     let route = read_small_plain_text_file(
-        &ctx_root.join("model").join("route"),
+        &cortexfs_paths::model_route_path(&ctx_root),
         MAX_RUNNER_CONTROL_BYTES,
         "runner",
     )
     .ok();
     let mut route = provider_route(&config, provider, model, route.as_deref())
         .map_err(ProviderCompletionError::fallback)?;
-    let allow_unauthenticated = transport_allows_unauthenticated(&route.transport);
     route.transport = provider_egress_transport(
         provider,
         route.transport,
         env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV).as_deref(),
     )
     .map_err(ProviderCompletionError::fallback)?;
+    let allow_unauthenticated = transport_allows_unauthenticated(&route.transport);
     let effort = model_effort(&ctx_root, provider, model);
     let agent_call = env::var_os("CTX_AGENT").is_some();
     let drivers = model_runtime_drivers(&ctx_root, provider, model, agent_call)
@@ -126,11 +125,7 @@ fn model_runtime_drivers(
     model: &str,
     agent_call: bool,
 ) -> Result<Option<Vec<ProviderRuntimeDriver>>, String> {
-    let control = ctx_root
-        .join("model")
-        .join(provider)
-        .join(format!("{model}.d"))
-        .join("driver");
+    let control = cortexfs_paths::model_control_path(ctx_root, provider, model).join("driver");
     let content = match read_small_plain_text_file(&control, MAX_RUNNER_CONTROL_BYTES, "runner") {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -158,7 +153,7 @@ fn model_runtime_drivers(
         .map(|driver| match driver.as_str() {
             "openai-chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
             "openai-responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
-            "anthropic-messages" => Ok(ProviderRuntimeDriver::AnthropicMessages),
+            "anthropic-messages" => Ok(ProviderRuntimeDriver::Anthropic),
             _ => Err(format!("unsupported model driver adapter: {driver}")),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -187,7 +182,7 @@ fn call_provider_driver(
         ProviderRuntimeDriver::OpenAiChat => {
             let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
-            let request = OpenAiProviderRequest {
+            let request = ProviderRequest {
                 model,
                 input,
                 credential: credential.as_ref(),
@@ -195,7 +190,7 @@ fn call_provider_driver(
             };
             stream_or_complete(
                 OpenAiStreamApi::Chat.call_streaming(&route.transport, &request, run, stdout),
-                || call_openai_chat(&route.transport, &request, run),
+                || call_provider(&route.transport, driver, &request, run),
                 run,
                 stdout,
             )
@@ -203,7 +198,7 @@ fn call_provider_driver(
         ProviderRuntimeDriver::OpenAiResponses => {
             let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
-            let request = OpenAiProviderRequest {
+            let request = ProviderRequest {
                 model,
                 input,
                 credential: credential.as_ref(),
@@ -211,23 +206,32 @@ fn call_provider_driver(
             };
             stream_or_complete(
                 OpenAiStreamApi::Responses.call_streaming(&route.transport, &request, run, stdout),
-                || call_openai_responses(&route.transport, &request, run),
+                || call_provider(&route.transport, driver, &request, run),
                 run,
                 stdout,
             )
         }
-        ProviderRuntimeDriver::AnthropicMessages => {
+        ProviderRuntimeDriver::Anthropic => {
             let credential = credential.ok_or_else(|| {
                 ProviderCompletionError::fallback(format!(
                     "missing provider credential: {provider}"
                 ))
             })?;
-            let completion = call_anthropic_messages(&route.transport, model, input, &credential)
+            let request = ProviderRequest {
+                model,
+                input,
+                credential: Some(&credential),
+                effort,
+            };
+            let completion = call_provider(&route.transport, driver, &request, run)
                 .map_err(ProviderCompletionError::fallback)?;
             write_text_completion(stdout, run, &completion).map_err(|error| {
                 ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
             })
         }
+        ProviderRuntimeDriver::Gemini => Err(ProviderCompletionError::fallback(
+            "Gemini runner adapter is not implemented".to_owned(),
+        )),
     }
 }
 

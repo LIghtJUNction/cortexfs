@@ -13,10 +13,7 @@ pub(crate) fn provider_config_from_model_control(
     provider: &str,
     model: &str,
 ) -> Option<RunnerProviderConfig> {
-    let control = ctx_root
-        .join("model")
-        .join(provider)
-        .join(format!("{model}.d"));
+    let control = cortexfs_paths::model_control_path(ctx_root, provider, model);
     let default =
         read_small_plain_text_file(&control.join("default"), MAX_RUNNER_CONTROL_BYTES, "runner")
             .ok()?;
@@ -27,6 +24,7 @@ pub(crate) fn provider_config_from_model_control(
     Some(RunnerProviderConfig {
         name: Some(provider.to_owned()),
         base_url,
+        auth: Vec::new(),
         oauth: None,
         formats: model_driver_formats(&driver),
     })

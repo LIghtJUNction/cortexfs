@@ -19,6 +19,13 @@ enabled repositories supply the required packages:
 curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
 ```
 
+For native `.deb`, `.rpm`, Arch Linux, or portable tar packages, see the
+[Linux packages guide](packaging.md).
+
+To connect an agent to Telegram, Discord, Slack, or Feishu/Lark, see the
+[multi-IM channel guide](channels.md). The guide uses the existing agent socket
+and durable session ABI, so each conversation remains multi-turn.
+
 It checks the distribution, systemd, FUSE, bubblewrap 0.10+, and Rust MSRV
 before building the downloaded source snapshot locally with `Cargo.lock`.
 Every persistent mutation has an exact typed confirmation. Re-running is

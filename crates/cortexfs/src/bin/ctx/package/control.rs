@@ -11,11 +11,16 @@ pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, St
     let groups = current_supplementary_groups_control()?;
     let model = agent.model.as_deref().unwrap_or("main");
     let subject = format!("{}_t", agent.name);
+    let permissions = cortexfs::AgentPermissions::for_tools(agent.tools.iter().map(String::as_str));
     Ok(BTreeMap::from([
         ("owner".to_owned(), uid.clone()),
         ("uid".to_owned(), uid.clone()),
         ("gid".to_owned(), gid),
         ("groups".to_owned(), groups),
+        (
+            "perm".to_owned(),
+            permissions.control().trim_end().to_owned(),
+        ),
         ("label".to_owned(), format!("user_u:agent_r:{subject}:s0")),
         ("iso".to_owned(), "shared".to_owned()),
         (
@@ -28,11 +33,24 @@ pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, St
         ("life".to_owned(), "owned".to_owned()),
         (
             "root".to_owned(),
-            format!("/ctx/home/{uid}/agent/{}/root", agent.name),
+            cortexfs_paths::agent_home_path(&cortexfs_paths::ctx_root(), &uid, &agent.name)
+                .join("root")
+                .display()
+                .to_string(),
         ),
         ("cwd".to_owned(), "/workspace".to_owned()),
-        ("env".to_owned(), "CTX_ROOT=/ctx".to_owned()),
-        ("path".to_owned(), format!("/ctx/tool:/ctx/home/{uid}/tool")),
+        (
+            "env".to_owned(),
+            format!("CTX_ROOT={}", cortexfs_paths::CTX_ROOT),
+        ),
+        (
+            "path".to_owned(),
+            format!(
+                "{}:{}",
+                cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root()).display(),
+                cortexfs_paths::home_tool_path(&cortexfs_paths::ctx_root(), &uid).display()
+            ),
+        ),
         (
             "mount".to_owned(),
             agent_new_mount_control(&uid, &agent.name, &[]),

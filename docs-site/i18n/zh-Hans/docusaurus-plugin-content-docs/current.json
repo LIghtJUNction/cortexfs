@@ -1,6 +1,6 @@
 {
   "version.label": {
-    "message": "Next",
+    "message": "当前版本",
     "description": "The label for version current"
   },
   "sidebar.docs.category.Further Reading": {
@@ -36,7 +36,7 @@
     "description": "The label for the doc item 'agent.sh' in sidebar 'docs', linking to the doc agent-sh"
   },
   "sidebar.docs.doc.Chat UI ABI": {
-    "message": "Chat UI ABI",
+    "message": "聊天界面 ABI",
     "description": "The label for the doc item 'Chat UI ABI' in sidebar 'docs', linking to the doc chatui"
   },
   "sidebar.docs.doc.AIMock Testing": {

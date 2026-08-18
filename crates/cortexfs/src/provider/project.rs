@@ -105,13 +105,9 @@ fn capability_text(formats: &[String], configured: Option<&[String]>) -> String 
 }
 
 fn fallback(provider: &str, default: Option<&str>) -> String {
-    ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
-        .iter()
-        .filter(|model| default != Some(**model))
-        .fold(String::new(), |mut output, model| {
-            let _ignored = writeln!(output, "{provider}/{model}");
-            output
-        })
+    default
+        .filter(|model| is_object_name(model))
+        .map_or_else(String::new, |model| format!("{provider}/{model}\n"))
 }
 
 pub fn projected_control_content(model: &ProjectedProviderModel, file: &str) -> Option<String> {

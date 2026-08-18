@@ -102,7 +102,9 @@ pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(S
         ("CTX_ROOT".to_owned(), CTX_ROOT.to_owned()),
         (
             "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-            format!("{CTX_ROOT}/shared/providers.d"),
+            cortexfs_paths::shared_path(&cortexfs_paths::ctx_root(), "providers.d")
+                .display()
+                .to_string(),
         ),
         ("CTX_HOME".to_owned(), sandbox_ctx_home),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
@@ -281,7 +283,10 @@ pub(crate) fn agent_bwrap_args(
         socket.display().to_string(),
         "--no-stdio".to_owned(),
         "--".to_owned(),
-        "/ctx/bin/tsh".to_owned(),
+        cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+            .join("tsh")
+            .display()
+            .to_string(),
     ]);
     bwrap
 }
@@ -292,19 +297,18 @@ pub(crate) fn sandbox_ctx_home(view: &AgentRuntimeView) -> String {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("1000");
-    Path::new(CTX_ROOT)
-        .join("home")
-        .join(owner)
+    cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), owner)
         .display()
         .to_string()
 }
 
 pub(crate) fn agent_host_mount_source(root: &Path, source: &str) -> String {
     let source = Path::new(source);
-    if source == Path::new(CTX_ROOT) {
+    let ctx_root = cortexfs_paths::ctx_root();
+    if source == ctx_root {
         return root.display().to_string();
     }
-    if let Ok(relative) = source.strip_prefix(CTX_ROOT) {
+    if let Ok(relative) = source.strip_prefix(&ctx_root) {
         return root.join(relative).display().to_string();
     }
     source.display().to_string()
@@ -460,7 +464,7 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
 
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
     const PROTECTED_TARGETS: &[&str] = &[
-        "/", "/bin", "/ctx", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run", "/usr",
+        "/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run", "/usr",
     ];
 
     PROTECTED_TARGETS
@@ -515,15 +519,15 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
         Some(path) => PathBuf::from(path),
-        None => PathBuf::from("/run")
+        None => cortexfs_paths::system_run_root()
             .join("user")
             .join(current_uid_for_ctx(root)?),
     };
-    Ok(runtime_root
-        .join("cortexfs")
-        .join("agent")
-        .join(stable_path_hash(root))
-        .join(format!("{name}.sock")))
+    Ok(cortexfs_paths::user_agent_runtime_socket(
+        &runtime_root,
+        &stable_path_hash(root),
+        name,
+    ))
 }
 
 pub(crate) fn reset_agent_chat_unit(unit: &str) {

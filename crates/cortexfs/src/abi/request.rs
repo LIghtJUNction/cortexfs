@@ -4,6 +4,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{MAX_SOCKET_FRAME_BYTES, is_stable_chroot_absolute_path, validate_socket_object_field};
+use cortexfs_runtime_client::interaction::{
+    INTERACTION_ABI, InteractionFrame, InteractionPayload, InteractionRequest,
+};
 
 /// Stable socket session scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,6 +59,8 @@ pub enum SocketRequest {
         workspace: Option<String>,
         /// User input text.
         input: String,
+        /// Optional provider-neutral external event that caused this input.
+        event: Option<Value>,
     },
     /// Execute one tsh command through the authoritative agent runtime.
     Tsh {
@@ -69,6 +74,11 @@ pub enum SocketRequest {
         session: String,
         /// Optional event id cursor.
         after: Option<String>,
+    },
+    /// Read a bounded runtime status projection for a session.
+    Status {
+        /// `CortexFS` session name. Defaults to `default` when omitted.
+        session: String,
     },
     /// Cancel a run.
     Cancel {
@@ -129,12 +139,61 @@ pub fn parse_socket_request_frame(frame: &str) -> Result<SocketRequest, SocketRe
     if !frame.trim_start().starts_with('{') {
         return Err(SocketRequestError::RequestNotObject);
     }
-    serde_json::from_str::<Value>(frame).map_err(|_error| SocketRequestError::InvalidJson)?;
+    let value =
+        serde_json::from_str::<Value>(frame).map_err(|_error| SocketRequestError::InvalidJson)?;
+    if value.get("abi").and_then(Value::as_str) == Some(INTERACTION_ABI) {
+        return parse_interaction_request(frame);
+    }
     let request = serde_path_to_error::deserialize::<_, SocketRequestFrame>(
         &mut serde_json::Deserializer::from_str(frame),
     )
     .map_err(|error| socket_request_deserialize_error(&error, frame))?;
     request.try_into()
+}
+
+fn parse_interaction_request(frame: &str) -> Result<SocketRequest, SocketRequestError> {
+    let frame = serde_json::from_str::<InteractionFrame>(frame)
+        .map_err(|_error| SocketRequestError::InvalidJson)?;
+    frame
+        .validate()
+        .map_err(|field| SocketRequestError::InvalidField {
+            field: "interaction",
+            value: field.to_owned(),
+        })?;
+    let InteractionPayload::Request(request) = frame.payload else {
+        return Err(SocketRequestError::InvalidField {
+            field: "interaction",
+            value: "event".to_owned(),
+        });
+    };
+    match request {
+        InteractionRequest::Input {
+            request_id,
+            session,
+            scope,
+            input,
+            event,
+            cwd,
+            workspace,
+            ..
+        } => {
+            let scope =
+                SocketSessionScope::parse(&scope).ok_or(SocketRequestError::InvalidField {
+                    field: "scope",
+                    value: scope,
+                })?;
+            parse_socket_send_request(request_id, session, scope, cwd, workspace, input, event)
+        }
+        InteractionRequest::Resume { session, after, .. } => {
+            parse_socket_resume_request(session, after)
+        }
+        InteractionRequest::Status { session, .. } => parse_socket_status_request(session),
+        InteractionRequest::Cancel { run, .. } => parse_socket_cancel_request(run),
+        InteractionRequest::CommandResult { .. } => Err(SocketRequestError::InvalidField {
+            field: "interaction",
+            value: "command_result".to_owned(),
+        }),
+    }
 }
 
 pub(crate) fn trim_jsonl_frame(frame: &str) -> Result<&str, SocketRequestError> {
@@ -161,6 +220,8 @@ enum SocketRequestFrame {
         cwd: Option<String>,
         workspace: Option<String>,
         input: String,
+        #[serde(default)]
+        event: Option<Value>,
     },
     #[serde(rename = "tsh")]
     Tsh {
@@ -174,6 +235,11 @@ enum SocketRequestFrame {
         #[serde(default = "default_socket_session")]
         session: String,
         after: Option<String>,
+    },
+    #[serde(rename = "status")]
+    Status {
+        #[serde(default = "default_socket_session")]
+        session: String,
     },
     #[serde(rename = "cancel")]
     Cancel { id: String },
@@ -214,7 +280,8 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
                 cwd,
                 workspace,
                 input,
-            } => parse_socket_send_request(id, session, scope.into(), cwd, workspace, input),
+                event,
+            } => parse_socket_send_request(id, session, scope.into(), cwd, workspace, input, event),
             SocketRequestFrame::Tsh { id, session, args } => {
                 validate_socket_object_field("id", &id)?;
                 validate_socket_object_field("session", &session)?;
@@ -234,6 +301,7 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
             SocketRequestFrame::Resume { session, after } => {
                 parse_socket_resume_request(session, after)
             }
+            SocketRequestFrame::Status { session } => parse_socket_status_request(session),
             SocketRequestFrame::Cancel { id } => parse_socket_cancel_request(id),
             SocketRequestFrame::Stop { agent } => {
                 if is_object_name(&agent) {
@@ -250,6 +318,10 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "socket send fields mirror the stable JSON request ABI"
+)]
 pub(crate) fn parse_socket_send_request(
     id: String,
     session: String,
@@ -257,6 +329,7 @@ pub(crate) fn parse_socket_send_request(
     cwd: Option<String>,
     workspace: Option<String>,
     input: String,
+    event: Option<Value>,
 ) -> Result<SocketRequest, SocketRequestError> {
     validate_socket_object_field("id", &id)?;
     validate_socket_object_field("session", &session)?;
@@ -276,6 +349,7 @@ pub(crate) fn parse_socket_send_request(
         cwd,
         workspace,
         input,
+        event,
     })
 }
 
@@ -291,6 +365,13 @@ pub(crate) fn parse_socket_resume_request(
 pub(crate) fn parse_socket_cancel_request(id: String) -> Result<SocketRequest, SocketRequestError> {
     validate_socket_object_field("id", &id)?;
     Ok(SocketRequest::Cancel { id })
+}
+
+pub(crate) fn parse_socket_status_request(
+    session: String,
+) -> Result<SocketRequest, SocketRequestError> {
+    validate_socket_object_field("session", &session)?;
+    Ok(SocketRequest::Status { session })
 }
 
 pub(crate) fn default_socket_session() -> String {

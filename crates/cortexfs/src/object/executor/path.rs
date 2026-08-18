@@ -86,8 +86,19 @@ pub(crate) fn object_path_from_exec_metadata(path: &Path) -> Option<PathBuf> {
     let class = class?;
     let name = name?;
     match class {
-        "model" if is_model_name(name) => Some(Path::new("/ctx").join(class).join(name)),
-        "agent" | "tool" if is_object_name(name) => Some(Path::new("/ctx").join(class).join(name)),
+        "model" if is_model_name(name) => {
+            let (provider, model) = name.split_once('/')?;
+            Some(cortexfs_paths::model_path(
+                &cortexfs_paths::ctx_root(),
+                provider,
+                model,
+            ))
+        }
+        "agent" | "tool" if is_object_name(name) => Some(cortexfs_paths::object_path(
+            &cortexfs_paths::ctx_root(),
+            class,
+            name,
+        )),
         _ => None,
     }
 }

@@ -152,6 +152,7 @@ pub(crate) fn validate_agent_bootstrap_control_content(
 ) -> Result<(), ObjectBootstrapError> {
     let valid = match file {
         "abi" => is_agent_launch_abi(content),
+        "loop" => AgentLoop::parse(content).is_some(),
         "tools" => inspect_agent_tools_control(content).is_ok(),
         "meta.json" => serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()),
         "system.md" | "prompt.template.md" => !content.contains('\0'),
@@ -210,13 +211,23 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
     match file {
         "abi" => AGENT_LAUNCH_ABI.to_owned(),
         "owner" | "uid" | "gid" => "0".to_owned(),
+        "perm" => AgentPermissions::ALL.control().to_owned(),
         "label" => format!("user_u:agent_r:{object_name}_t:s0"),
         "iso" => "shared".to_owned(),
         "life" => "owned".to_owned(),
         "root" | "cwd" => "/".to_owned(),
-        "env" => "CTX_ROOT=/ctx".to_owned(),
-        "path" => "/ctx/tool".to_owned(),
-        "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
+        "env" => format!("CTX_ROOT={CTX_ROOT}"),
+        "path" => cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root())
+            .display()
+            .to_string(),
+        "mount" => {
+            let root = cortexfs_paths::ctx_root();
+            format!(
+                "{}\t{}\tro\trbind,nosuid,nodev",
+                root.display(),
+                root.display()
+            )
+        }
         "window" => "auto".to_owned(),
         "status" => "idle".to_owned(),
         "system.md" => format!("You are CortexFS agent `{object_name}`."),
@@ -267,7 +278,11 @@ pub(crate) fn stage_generated_model_pair(
     }
     validate_control_overrides(ObjectClass::Model, control_overrides)?;
     let control_name = format!("{model}.d");
-    let control = support::plain::create_plain_dir_at(provider_dir, &control_name, 0o700)
+    // Agent sandboxes execute as the agent uid while reading model controls
+    // from the backing tree; model controls contain no provider secret.
+    let control = support::plain::create_plain_dir_at(provider_dir, &control_name, 0o755)
+        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
+    nix::sys::stat::fchmod(&control, nix::sys::stat::Mode::from_bits_truncate(0o755))
         .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for file in MODEL_CONTROL_FILES {
         let content = object_control_content(ObjectClass::Model, id, file, control_overrides)?;

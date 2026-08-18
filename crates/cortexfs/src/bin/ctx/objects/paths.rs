@@ -10,11 +10,7 @@ pub(crate) fn agent_session_dir(
     session: Option<&str>,
 ) -> Result<PathBuf, CliError> {
     let session = agent_session_name(root, agent, session)?;
-    Ok(ctx_home(root)?
-        .join("agent")
-        .join(agent)
-        .join("session")
-        .join(session))
+    Ok(cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, agent).join(session))
 }
 
 pub(crate) fn agent_session_name(
@@ -27,7 +23,8 @@ pub(crate) fn agent_session_name(
         require_cli_name("session name", session)?;
     }
 
-    let session_root = ctx_home(root)?.join("agent").join(agent).join("session");
+    let home = ctx_home(root)?;
+    let session_root = cortexfs_paths::agent_sessions_from_home_path(&home, agent);
     Ok(match session {
         Some(name) => name.to_owned(),
         None => current_session_name(&session_root)?,
@@ -40,9 +37,10 @@ pub(crate) fn agent_socket_path(root: &Path, agent: &str) -> Result<PathBuf, Cli
         .as_deref()
         .is_some_and(is_plain_dir)
     {
-        return Ok(ctx_home(root)?.join("agent").join(format!("{agent}.sock")));
+        let home = ctx_home(root)?;
+        return Ok(cortexfs_paths::agent_socket_path(&home, agent));
     }
-    Ok(root.join("agent").join(format!("{agent}.sock")))
+    Ok(cortexfs_paths::agent_socket_path(root, agent))
 }
 
 pub(crate) fn require_cli_name(label: &str, value: &str) -> Result<(), CliError> {
@@ -62,7 +60,16 @@ pub(crate) fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, Cli
             "socket command requires model/NAME or agent/NAME: {path}"
         )));
     };
-    Ok(root.join(class.as_str()).join(format!("{name}.sock")))
+    Ok(match class {
+        ObjectClass::Model => {
+            let (provider, model) = name
+                .split_once('/')
+                .ok_or_else(|| CliError::usage(format!("invalid model socket path: {name}")))?;
+            cortexfs_paths::model_socket_path(root, provider, model)
+        }
+        ObjectClass::Agent => cortexfs_paths::agent_socket_path(root, &name),
+        ObjectClass::Tool => return Err(CliError::usage("tool objects have no socket")),
+    })
 }
 
 pub(crate) fn current_session_name(session_root: &Path) -> Result<String, CliError> {
@@ -109,9 +116,10 @@ pub(crate) fn ctx_home(root: &Path) -> Result<PathBuf, CliError> {
         return Ok(PathBuf::from(home));
     }
 
-    Ok(root
-        .join("home")
-        .join(current_uid_text().map_err(CliError::unavailable)?))
+    Ok(cortexfs_paths::ctx_home_path(
+        root,
+        &current_uid_text().map_err(CliError::unavailable)?,
+    ))
 }
 
 #[cfg(test)]

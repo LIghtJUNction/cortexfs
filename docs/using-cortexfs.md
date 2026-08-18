@@ -111,8 +111,32 @@ ctx provider preset install anthropic
 ctx provider preset install google
 ```
 
+Provider authentication methods are declared alongside those presets. Inspect
+the methods without exposing credentials:
+
+```bash
+ctx provider auth methods codex
+```
+
+The output lists the method, OAuth flow, and logical slot. Credentials remain in
+the root-owned secret store; no identity tree is added to `/ctx`.
+
+The provider library resolves those declarations through one registry. OpenAI
+and Codex use the OpenAI-compatible adapter, Claude uses the Anthropic adapter,
+and a GitHub Copilot adapter can be registered with a host-owned OAuth client
+configuration. Login, device login, refresh, persistence, and model discovery
+run through the same adapter boundary and normalized credential/model shapes;
+the Agent does not branch on OAuth endpoints or API-key headers. Copilot's
+`--device` login displays its
+verification URI and user code, then polls with a bounded timeout.
+Host-configured providers can declare an OAuth `device` block with request,
+token, and verification endpoints; this keeps device-code flow provider-neutral
+without adding another `/ctx` namespace.
+
 Canonical provider names are `openai`, `anthropic`, and `google`. `codex` is
 an alias for the `openai` preset; `gemini` is an alias for the `google` preset.
+The host-configured GitHub Copilot endpoint uses `github-copilot` as its
+canonical provider name and accepts `copilot` as an adapter alias.
 After installing `codex`, models are still projected under the canonical
 `/ctx/model/openai/<model>` path. CortexFS does not add a
 `/ctx/model/codex` namespace.
@@ -162,6 +186,17 @@ ctx agent status reviewer
 ctx agent ps
 ctx agent stop reviewer
 ```
+
+Inspect or change the agent's coarse file/shell ceiling with normal Unix tools:
+
+```bash
+ls -l /ctx/agent/reviewer.d/perm
+chmod 400 /ctx/agent/reviewer.d/perm  # read tools only
+chmod 700 /ctx/agent/reviewer.d/perm  # read, write, and shell families
+```
+
+The marker adds a ceiling to existing mount, Linux, agent-policy, and
+tool-policy checks; it does not replace them.
 
 Host-side `agent.yaml` files (also `agent.yml` and `agent.json`) are
 authoring inputs. `ctx agent new --from` and `ctx agent apply --from`

@@ -42,9 +42,15 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+        "  ctx [--root PATH] terminal list",
+        "  ctx [--root PATH] terminal status TERMINAL",
+        "  ctx [--root PATH] terminal watch TERMINAL",
+        "  ctx [--root PATH] terminal attach TERMINAL",
         "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
         "  ctx provider oauth status PROVIDER",
         "  ctx provider oauth refresh PROVIDER",
+        "  ctx provider auth methods PROVIDER",
         "  ctx provider secret set PROVIDER [--slot SLOT]",
         "  ctx provider secret status PROVIDER [--slot SLOT]",
         "  ctx provider preset list",
@@ -101,9 +107,7 @@ pub(crate) fn print_shared_or_builtin_man(
     file_name: &str,
     fallback: &str,
 ) -> Result<(), CliError> {
-    let shared = root
-        .join("shared")
-        .join(MANUAL_SHARED_DIR)
+    let shared = cortexfs_paths::shared_path(root, MANUAL_SHARED_DIR)
         .join(if file_name == MANUAL_INDEX_FILE {
             ""
         } else {
@@ -486,11 +490,44 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "usage:",
             "  ctx [--root PATH] agent attach NAME [--session SESSION]",
         ]),
+        "terminal" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+            "  ctx [--root PATH] terminal list",
+            "  ctx [--root PATH] terminal status TERMINAL",
+            "  ctx [--root PATH] terminal watch TERMINAL",
+            "  ctx [--root PATH] terminal attach TERMINAL",
+            "",
+            "create is currently an Agent-backed terminal resource",
+            "watch is read-only; attach forwards input to the PTY",
+        ]),
+        "terminal create" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal create AGENT [--session SESSION] [--cwd PATH]",
+            "",
+            "creates the session-local terminal resource and starts the Agent terminal",
+        ]),
+        "terminal list" => print_help_lines(&[
+            "usage:",
+            "  ctx [--root PATH] terminal list",
+            "",
+            "prints TERMINAL<TAB>STATE<TAB>AGENT<TAB>SESSION<TAB>PATH",
+        ]),
+        "terminal status" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal status TERMINAL"])
+        }
+        "terminal watch" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal watch TERMINAL"])
+        }
+        "terminal attach" => {
+            print_help_lines(&["usage:", "  ctx [--root PATH] terminal attach TERMINAL"])
+        }
         "provider" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
+            "  ctx provider auth methods PROVIDER",
             "  ctx provider secret set PROVIDER [--slot SLOT]",
             "  ctx provider secret status PROVIDER [--slot SLOT]",
             "  ctx provider preset list",
@@ -509,6 +546,15 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
         ]),
+        "provider auth" => print_help_lines(&[
+            "usage:",
+            "  ctx provider auth methods PROVIDER",
+            "",
+            "prints provider-neutral auth method, flow, and logical slot",
+        ]),
+        "provider auth methods" => {
+            print_help_lines(&["usage:", "  ctx provider auth methods PROVIDER"])
+        }
         "provider oauth login" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",

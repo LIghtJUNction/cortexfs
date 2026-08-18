@@ -7,7 +7,51 @@ the `tsh` tool shell, prompt construction, and sandbox execution.
 It does not add a root namespace. Everything here is derived from existing stable
 objects and files.
 
+The durable terminal resource used by this runtime is specified in
+[terminal-abi.md](terminal-abi.md). In this first slice an Agent start
+materializes one terminal resource below its session; the resource id and event
+history remain after the live PTY socket exits.
+
+## Definition, Instance, Session, And Run
+
+The word `agent` does not name one daemon. The runtime distinguishes four
+layers:
+
+```text
+definition  /ctx/agent/<name> + /ctx/agent/<name>.d/
+instance    supervisor unit and receipt-bound invocation
+session     /ctx/home/<uid>/agent/<name>/session/<session>/
+run         one run id recorded in that session's event stream
+```
+
+An Agent definition is durable configuration and policy. Starting it may create
+more than one process role: the system Agent socket service and an optional
+per-session terminal unit. Those processes are runtime instances; their unit,
+invocation, pid, identity, socket, and session facts are bound by launch
+receipts. The latest cleanup receipt may be projected in
+`agent/<name>.d/meta.json`, while durable `agent.start` and run events preserve
+correlation facts in ordinary logs and session history.
+
+A session is not a process and survives instance exit. A run is not a session
+and cannot silently acquire authority from previous runs. Restarting a runtime
+may resume a private or shared session without preserving a process identity.
+
+There is deliberately no parallel `instances/` control plane. systemd owns live
+process truth, receipt metadata proves which generation CortexFS may stop, and
+session files own durable history. Copying those facts into another mutable
+directory would introduce conflicting lifecycle authorities.
+
+The Agent socket and terminal socket are transports for an active instance.
+Their stable `/ctx` paths may be aliases to endpoints under `/run`, and their
+absence never deletes the Agent definition or a private/shared session.
+
 ## Runtime Surfaces
+
+The equivalent resource commands are ctx terminal status, ctx terminal watch,
+and ctx terminal attach. ctx terminal create AGENT is currently an agent-backed
+compatibility create: it starts the Agent session and records the terminal
+resource. A detached command supervisor is reserved for a later terminal ABI
+revision.
 
 There are three separate surfaces:
 
@@ -35,6 +79,11 @@ the same PTY used by the agent-facing shell.
 `tsh` is the agent-facing tool shell. It is a tool and a standalone binary, but
 it is not a host shell. It resolves commands through `CTX_PATH`, never through
 host `PATH`.
+
+Every tool execution also intersects `agent/<name>.d/perm`: `r` admits the
+built-in read/list/stat family, `w` admits write/replace, and `x` admits shell
+and host-like terminal tools. `tsh` remains the routing shell and does not by
+itself consume `x`; the selected capability does.
 
 ## Default Human Entry
 
@@ -254,6 +303,7 @@ agent/<name>.d/policy
 agent/<name>.d/uid
 agent/<name>.d/gid
 agent/<name>.d/groups
+agent/<name>.d/perm
 agent/<name>.d/label
 ```
 
@@ -265,6 +315,7 @@ Actual authority is the intersection of:
 ```text
 mount/chroot visibility
 Linux uid/gid/groups and mode bits
+agent `perm` capability ceiling
 CortexFS label and policy
 CTX_PATH tool visibility
 tool executable metadata and noexec placement
@@ -352,6 +403,10 @@ policy, tool policy, mount, Linux permission, schema, and nofollow checks on
 every call. Other tools are dynamically discovered, loaded, pinned, and
 invoked through `tsh`; dynamic tsh cache state never expands the direct-native
 set.
+
+The permission control is re-read into the runtime view together with identity,
+mount, path, and policy controls. Changing it affects subsequent executions;
+it never expands policy, mount, or Linux authority.
 
 `tsh` resolves tools by `CTX_PATH`. For standalone human sessions, it reads the
 data-only startup file before inherited process `CTX_PATH` when the file exists:

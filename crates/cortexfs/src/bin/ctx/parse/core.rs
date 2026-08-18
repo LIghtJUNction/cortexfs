@@ -76,6 +76,7 @@ pub(crate) enum Command {
         input: String,
     },
     Agent(AgentArgs),
+    Terminal(TerminalArgs),
     ObjectInstall {
         source: PathBuf,
         manifest: PathBuf,
@@ -247,6 +248,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             },
         ),
         Command::Agent(args) => agent_command(&cli.root, &args),
+        Command::Terminal(args) => terminal_action(&cli.root, &args),
         Command::ObjectInstall {
             source,
             manifest,
@@ -513,7 +515,9 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         "inspect" => {
             let (target, session) = parse_agent_session_option_args(values, "inspect")?;
-            let target = target.strip_prefix("/ctx/").unwrap_or(&target);
+            let target = target
+                .strip_prefix(&format!("{CTX_ROOT}/"))
+                .unwrap_or(&target);
             let name = target
                 .strip_prefix("agent/")
                 .filter(|name| is_object_name(name))
@@ -522,6 +526,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             Ok(Command::Agent(AgentArgs::Inspect { name, session }))
         }
         "agent" => parse_agent_command(values.collect()),
+        "terminal" => parse_terminal_command(values.collect()),
         "object" => install::parse_object_command(values),
         "install" => package::parse_package_install_command(values),
         "provider" => parse_provider_command(values.collect()),
@@ -614,6 +619,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "send"
             | "inspect"
             | "agent"
+            | "terminal"
             | "object"
             | "install"
             | "provider"

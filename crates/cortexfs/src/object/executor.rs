@@ -28,6 +28,7 @@ use std::process::{Child, Command, ExitCode, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) use crate::budget_from_effective;
 use crate::{
     AgentPromptContext, AgentWindowBudget, AgentWindowSetting, DEFAULT_AGENT_PROMPT_TEMPLATE,
     MAX_SKILL_METADATA_CHARS, ModelContextLimit, ModelUseAuthority, ModelUseDenial,
@@ -43,8 +44,6 @@ use nix::libc;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
-pub(crate) const DEFAULT_CTX_ROOT: &str = "/ctx";
 const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;
 const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
 pub(crate) const MAX_CHILD_STDERR_BYTES: usize = 64 * 1024;

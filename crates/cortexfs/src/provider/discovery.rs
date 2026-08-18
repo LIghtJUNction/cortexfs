@@ -1,5 +1,9 @@
 use crate::*;
 
+use crate::provider::auth::AuthMethod;
+use crate::provider::auth::{
+    AuthProvider, AuthProviderError, AuthResponse, AuthTransport, Credential, configured_registry,
+};
 use crate::provider::name::is_reserved_provider_name;
 use crate::support::command::CURL;
 use crate::support::plain::{create_plain_dir, open_plain_directory, read_small_text_file};
@@ -21,10 +25,22 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         if !config.enabled {
             continue;
         }
-        let Some(api_key) = provider_bearer_token(config, provider) else {
+        let Some(registry) = configured_registry(
+            provider,
+            &config.base_url,
+            config.auth_methods(),
+            config.oauth.clone(),
+        ) else {
             continue;
         };
-        let Ok(models) = fetch_provider_models(&config.base_url, &api_key) else {
+        let Some(adapter) = registry.get(provider) else {
+            continue;
+        };
+        let Some(credential) = provider_credential(config, provider, adapter) else {
+            continue;
+        };
+        let mut transport = ModelDiscoveryTransport;
+        let Ok(models) = adapter.models_with(Some(&credential), &mut transport) else {
             continue;
         };
         let models = provider_model_names(models);
@@ -40,6 +56,37 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         support::plain::sync_plain_dir(cache_dir).map_err(|_error| FuseError::Io)?;
     }
     Ok(())
+}
+
+struct ModelDiscoveryTransport;
+
+impl AuthTransport for ModelDiscoveryTransport {
+    fn post(
+        &mut self,
+        _url: &str,
+        _content_type: &str,
+        _body: &str,
+    ) -> Result<AuthResponse, AuthProviderError> {
+        Err(AuthProviderError::UnsupportedMethod)
+    }
+
+    fn get(
+        &mut self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<AuthResponse, AuthProviderError> {
+        let headers = headers
+            .iter()
+            .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        run_curl_json(url, &headers)
+            .map(|body| AuthResponse { status: 200, body })
+            .map_err(|error| match error {
+                FuseError::TooLarge => AuthProviderError::InvalidResponse,
+                FuseError::InvalidContent => AuthProviderError::InvalidConfig,
+                _ => AuthProviderError::Unavailable,
+            })
+    }
 }
 
 fn prune_inactive_provider_model_caches(
@@ -133,38 +180,52 @@ pub(crate) fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> Pat
     cache_dir.join(format!("{provider}.models.json"))
 }
 
-pub(crate) fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> Option<String> {
-    let api_key = read_provider_system_secret(provider, "default")
-        .ok()
-        .flatten();
-    if api_key.is_some() {
-        return api_key;
+fn provider_credential(
+    config: &ProviderConfig,
+    provider: &str,
+    adapter: &dyn AuthProvider,
+) -> Option<Credential> {
+    let methods = config.auth_methods();
+    let api_key = methods
+        .iter()
+        .find(|method| method.method == AuthMethod::ApiKey)
+        .and_then(|method| {
+            read_provider_system_secret(provider, &method.slot)
+                .ok()
+                .flatten()
+        });
+    if let Some(key) = api_key {
+        return Some(Credential::ApiKey {
+            provider: provider.to_owned(),
+            key,
+            slot: methods
+                .iter()
+                .find(|method| method.method == AuthMethod::ApiKey)
+                .map(|method| method.slot.clone()),
+        });
+    }
+    if !methods
+        .iter()
+        .any(|method| method.method == AuthMethod::OAuth)
+    {
+        return None;
     }
     let oauth = config.oauth.as_ref()?;
-    resolve_oauth_access_token(provider, oauth).ok().flatten()
+    resolve_oauth_credential_with(provider, oauth, |request| {
+        refresh_oauth_result(provider, request, adapter)
+    })
+    .ok()
+    .flatten()
+    .map(|(access_token, _account)| Credential::OAuth {
+        provider: provider.to_owned(),
+        access_token,
+        refresh_token: None,
+        expires_at: None,
+        scopes: Vec::new(),
+    })
 }
 
-#[derive(Deserialize)]
-struct ProviderModelList {
-    data: Vec<ProviderModelListItem>,
-}
-
-#[derive(Deserialize)]
-struct ProviderModelListItem {
-    id: String,
-}
-
-pub(crate) fn fetch_provider_models(
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<String>, FuseError> {
-    let output = run_curl_json(&provider_models_url(base_url), api_key)?;
-    let list =
-        serde_json::from_slice::<ProviderModelList>(&output).map_err(|_error| FuseError::Io)?;
-    Ok(list.data.into_iter().map(|model| model.id).collect())
-}
-
-pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseError> {
+pub(crate) fn run_curl_json(url: &str, headers: &[(String, String)]) -> Result<Vec<u8>, FuseError> {
     let mut child = curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -174,11 +235,15 @@ pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseErr
     let Some(mut stdin) = child.stdin.take() else {
         return Err(FuseError::Io);
     };
-    let config = format!(
-        "fail\nsilent\nshow-error\nmax-time = 20\nurl = {}\nheader = {}\n",
-        curl_config_quote(url)?,
-        curl_config_quote(&format!("Authorization: Bearer {api_key}"))?
+    let mut config = format!(
+        "fail\nsilent\nshow-error\nmax-time = 20\nurl = {}\n",
+        curl_config_quote(url)?
     );
+    for header in headers {
+        config.push_str("header = ");
+        config.push_str(&curl_config_quote(&format!("{}: {}", header.0, header.1))?);
+        config.push('\n');
+    }
     stdin
         .write_all(config.as_bytes())
         .map_err(|_error| FuseError::Io)?;
@@ -233,10 +298,6 @@ pub(crate) fn curl_config_quote(value: &str) -> Result<String, FuseError> {
     }
     quoted.push('"');
     Ok(quoted)
-}
-
-pub(crate) fn provider_models_url(base_url: &str) -> String {
-    format!("{}/models", super::effective_base_url(base_url))
 }
 
 #[cfg(test)]
