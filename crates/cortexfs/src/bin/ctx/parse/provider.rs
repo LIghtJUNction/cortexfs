@@ -2,6 +2,7 @@ use crate::*;
 
 #[derive(Debug)]
 pub(crate) enum ProviderArgs {
+    AuthMethods { provider: String },
     Login(String, u64, bool),
     Status { provider: String },
     Refresh { provider: String },
@@ -14,7 +15,10 @@ pub(crate) enum ProviderArgs {
 
 pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
-    let command = required_arg(&mut values, "provider requires oauth, preset, or secret")?;
+    let command = required_arg(
+        &mut values,
+        "provider requires auth, oauth, preset, or secret",
+    )?;
     let rest = values.collect::<Vec<_>>();
     if is_help_args(&rest) {
         return Ok(Command::HelpTopic(format!("provider {command}")));
@@ -29,6 +33,11 @@ pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliEr
         };
         return Ok(Command::HelpTopic(format!("provider oauth {subcommand}")));
     }
+    if command == "auth"
+        && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && subcommand == "methods")
+    {
+        return Ok(Command::HelpTopic("provider auth methods".to_owned()));
+    }
     if command == "secret"
         && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && matches!(subcommand.as_str(), "set" | "status"))
     {
@@ -41,8 +50,23 @@ pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliEr
         "oauth" => parse_provider_oauth_command(rest.into_iter()),
         "preset" => parse_provider_preset_command(rest.into_iter()),
         "secret" => parse_provider_secret_command(rest.into_iter()),
-        _ => Err(CliError::usage("provider expects oauth, preset, or secret")),
+        "auth" => parse_provider_auth_command(rest.into_iter()),
+        _ => Err(CliError::usage(
+            "provider expects auth, oauth, preset, or secret",
+        )),
     }
+}
+
+pub(crate) fn parse_provider_auth_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "provider auth requires methods")?;
+    if command != "methods" {
+        return Err(CliError::usage("provider auth expects methods"));
+    }
+    let provider = required_arg(&mut values, "provider auth methods requires a provider")?;
+    no_extra_args(values)?;
+    Ok(Command::Provider(ProviderArgs::AuthMethods { provider }))
 }
 
 pub(crate) fn parse_provider_oauth_command(

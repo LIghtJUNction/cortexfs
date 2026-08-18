@@ -32,6 +32,7 @@ const PROVIDER_PRESETS: &[ProviderPreset] = &[
             "models": ["gpt-5.6"],
             "enabled": true,
             "formats": ["openai.responses"],
+            "auth": [{"type": "oauth", "flow": "authorization_code", "slot": "subscription"}],
             "oauth": {
                 "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
                 "auth_url": "https://auth.openai.com/oauth/authorize",

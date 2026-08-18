@@ -28,13 +28,15 @@ use std::process::{Child, Command, ExitCode, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) use crate::budget_from_effective;
 use crate::{
     AgentPromptContext, AgentWindowBudget, AgentWindowSetting, DEFAULT_AGENT_PROMPT_TEMPLATE,
-    MAX_SKILL_METADATA_CHARS, ModelContextLimit, PolicyObjectClass, PolicyPermission, PolicyV0,
-    ToolExecutionAuthority, ToolExecutionDenial, agent_provider_messages, authorize_tool_execution,
-    collect_agent_rules, collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
-    inspect_event_stream_jsonl, is_model_alias, is_model_name, is_object_name,
-    parse_model_fallback, run_core_tool, run_core_tool_cli, run_echo_model,
+    MAX_SKILL_METADATA_CHARS, ModelContextLimit, ModelUseAuthority, ModelUseDenial,
+    NetworkConnectAuthority, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
+    agent_provider_messages, authorize_model_use, authorize_network_connect,
+    authorize_tool_execution, collect_agent_rules, collect_skill_metadata, current_time_unix,
+    derive_agent_runtime_view, inspect_event_stream_jsonl, is_model_alias, is_model_name,
+    is_object_name, parse_model_fallback, run_core_tool, run_core_tool_cli, run_echo_model,
     skill_metadata_budget_from_env, write_run_snapshot,
 };
 use cortexfs_tool_sdk::ToolInvocation;
@@ -42,8 +44,6 @@ use nix::libc;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
-pub(crate) const DEFAULT_CTX_ROOT: &str = "/ctx";
 const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;
 const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
 pub(crate) const MAX_CHILD_STDERR_BYTES: usize = 64 * 1024;
@@ -54,6 +54,8 @@ const MAX_AGENT_TOOL_ARGC: usize = 64;
 const MAX_AGENT_TOOL_ARG_BYTES: usize = 8 * 1024;
 const MAX_AGENT_MODEL_FRAME_BYTES: usize = 256 * 1024;
 const MAX_AGENT_MODEL_FRAMES: usize = 1024;
+const MAX_AGENT_MODEL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_AGENT_MODEL_QUEUE_FRAMES: usize = 16;
 const MAX_RUNNER_STDIN_INPUT_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_RUNNER_CONTROL_BYTES: u64 = 64 * 1024;
 const AGENT_TOOL_TIMEOUT_SECONDS: u64 = 20;

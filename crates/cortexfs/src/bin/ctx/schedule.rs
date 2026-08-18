@@ -477,7 +477,7 @@ pub(crate) fn schedule_delegated_child_node(
 fn schedule_delegated_child_node_from(
     json: &str,
     parent_subject: &str,
-    parent_policy: &PolicyV0,
+    parent_policy: &dyn PolicyEvaluator,
     child: &str,
     command: &str,
 ) -> Result<AgentScheduleNode, CliError> {

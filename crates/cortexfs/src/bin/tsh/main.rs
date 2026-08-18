@@ -595,6 +595,7 @@ pub(crate) fn validate_tsh_runtime_context(
     }
     require_same!("owner", projected.owner(), backing.owner());
     require_same!("identity", projected.identity(), backing.identity());
+    require_same!("perm", projected.permissions(), backing.permissions());
     require_same!("label", projected.label(), backing.label());
     require_same!("iso", projected.iso(), backing.iso());
     require_same!("model", projected.model(), backing.model());
@@ -627,14 +628,13 @@ pub(crate) fn validate_tsh_runtime_context(
         projected.mount_table(),
         backing.mount_table()
     );
-    let current_run = source
-        .join("home")
-        .join(backing.owner().to_string())
-        .join("agent")
-        .join(agent)
-        .join("session")
-        .join(session)
-        .join("current_run");
+    let current_run = cortexfs_paths::session_file_path(
+        source,
+        &backing.owner().to_string(),
+        agent,
+        session,
+        "current_run",
+    );
     let recorded = read_small_plain_text_file(&current_run, MAX_TSH_CONTROL_BYTES, "tsh")
         .map_err(|_error| TshError::unavailable("agent runtime context session mismatch"))?;
     if recorded.trim() != run {
@@ -694,6 +694,7 @@ pub(crate) fn authorize_tsh_tool_execution(
             view.policy_subject(),
             view.policy(),
             &tool_policy,
+            view.permissions(),
         ),
     )
     .map_err(|denial| tool_execution_denial_to_tsh(name, denial))?;

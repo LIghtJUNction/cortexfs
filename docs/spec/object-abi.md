@@ -8,6 +8,12 @@ name.sock   socket entry: stateful, multi-turn, streaming
 name.d/     control directory: config, state, permissions, logs
 ```
 
+This triple describes discoverable object surfaces, not three independent
+identities. `name` and `name.d/` identify and describe the object. `name.sock`
+is an optional transport entry for a live stateful service; it may be an alias
+to a runtime-owned socket and must not be treated as the object's lifecycle
+record or implementation ABI.
+
 If an object does not support stateful interaction, do not expose `name.sock`.
 A socket that only reports errors is bad ABI.
 
@@ -24,9 +30,16 @@ name.d/
 hooks that run after the object action. This is an object-local convention under
 `agent` and `tool`; it does not create a `/ctx/hook` root namespace. Model
 control directories stay limited to provider/model controls and do not carry
-empty hook trees. The stable ABI defines the directory shape only. Implementations may keep
-compiled hook state in process memory, but development refresh is still a Git
-commit/runtime restart boundary; CortexFS does not define background
+empty hook trees. For an executable Agent, the runtime executes the sorted
+regular executable files in these directories around the model action. Each
+hook receives one `cortexfs.hook/v1` JSON object on stdin containing only
+phase, action, Agent, run, step, tool, and status fields; prompt text, message
+text, and credentials are never injected. A hook must exit zero to continue.
+The runtime rejects symlinks and non-executable files, caps the list at 32,
+caps captured output at 16 KiB, and applies a two-second timeout. Hook output
+is diagnostic-only and is not forwarded to the client. Implementations may
+keep compiled hook state in process memory, but development refresh is still a
+Git commit/runtime restart boundary; CortexFS does not define background
 watchers, polling, or hot reload.
 
 Do not expand one object into `profile/`, `runtime/`, `policy/`, `control/`,
@@ -100,6 +113,12 @@ symlink overlay:
 Executable agents use the required `agent/<name>.d/abi` control. Its accepted
 value is `sdk-envelope-v1`; the runtime supplies the typed invocation described
 by the [Agent Runtime specification](agent-runtime.md).
+
+The executable mode of `agent/<name>` continues to mean that the agent object
+can be invoked. It MUST NOT be overloaded to mean shell permission, because
+clearing that bit would also make the agent ABI itself non-executable. The
+separate `agent/<name>.d/perm` marker carries the inspectable `rwx` capability
+ceiling.
 
 `model/<provider>/<model>` and `tool/<name>` are executable files that accept
 argv or stdin input. Agent executables are host-launched through the SDK

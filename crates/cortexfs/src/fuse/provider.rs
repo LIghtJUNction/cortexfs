@@ -42,289 +42,67 @@ pub(crate) fn debug_model_control_content(model: &str, file: &str) -> Option<Str
     }
 }
 
-pub(crate) fn default_provider_enabled() -> bool {
-    true
-}
-
-const MAX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
-
-pub(crate) fn projected_provider_models(
-    config_dir: &Path,
-    cache_dir: &Path,
-) -> Result<Vec<ProjectedProviderModel>, FuseError> {
-    let configs = read_provider_configs(config_dir)?;
-    let catalog_limits = provider::catalog::cached_model_limits(cache_dir);
-    let mut projected = Vec::new();
-    let mut seen = HashSet::new();
-    for entry in configs {
-        let config = entry.config;
-        if !config.enabled {
-            continue;
-        }
-        let provider = projected_provider_name(&config)?;
-        let driver = provider_driver_route_table(&config.formats);
-        let cap = provider_capability_text(&config.formats);
-        for model in provider_config_models(&config, cache_dir, &provider) {
-            let key = format!("{provider}/{model}");
-            if seen.insert(key) {
-                let limit = config
-                    .model_limits
-                    .get(&model)
-                    .copied()
-                    .and_then(ModelContextLimit::known)
-                    .or_else(|| {
-                        catalog_limits
-                            .get(&format!("{provider}/{model}"))
-                            .copied()
-                            .and_then(ModelContextLimit::known)
-                    })
-                    .unwrap_or(ModelContextLimit::Unknown);
-                projected.push(ProjectedProviderModel {
-                    provider: provider.clone(),
-                    model,
-                    base_url: normalize_provider_base_url(&config.base_url),
-                    driver: driver.clone(),
-                    cap: cap.clone(),
-                    effort: "auto".to_owned(),
-                    fallback: default_provider_model_fallback(
-                        &provider,
-                        config.default_model.as_deref(),
-                    ),
-                    limit,
-                });
-            }
-        }
+pub(crate) const fn provider_error(error: provider::ProviderError) -> FuseError {
+    match error {
+        provider::ProviderError::Invalid => FuseError::InvalidContent,
+        provider::ProviderError::Io => FuseError::Io,
     }
-    projected.sort_by(|left, right| {
-        left.provider
-            .cmp(&right.provider)
-            .then_with(|| left.model.cmp(&right.model))
-    });
-    Ok(projected)
-}
-
-pub(crate) struct ProviderConfigEntry {
-    pub(crate) config: ProviderConfig,
-}
-
-pub(crate) fn read_provider_configs(
-    config_dir: &Path,
-) -> Result<Vec<ProviderConfigEntry>, FuseError> {
-    let directory = match open_plain_directory(config_dir) {
-        Ok(directory) => directory,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseError::Io),
-    };
-    let entries = match fs::read_dir(support::plain::proc_fd_path(&directory)) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseError::Io),
-    };
-    let mut configs = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|_error| FuseError::Io)?;
-        let name = entry
-            .file_name()
-            .into_string()
-            .map_err(|_error| FuseError::InvalidPath)?;
-        let Some(extension) = Path::new(&name)
-            .extension()
-            .and_then(|value| value.to_str())
-        else {
-            continue;
-        };
-        if extension != "json" {
-            continue;
-        }
-        let Ok(content) = support::plain::read_small_text_file_at(
-            &directory,
-            &name,
-            MAX_PROVIDER_CONFIG_BYTES,
-            "provider config file is invalid",
-        ) else {
-            continue;
-        };
-        let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
-            continue;
-        };
-        if !valid_provider_model_limits(&config) {
-            continue;
-        }
-        configs.push(ProviderConfigEntry { config });
-    }
-    Ok(configs)
-}
-
-fn valid_provider_model_limits(config: &ProviderConfig) -> bool {
-    config.model_limits.iter().all(|(model, limit)| {
-        *limit > 0
-            && (config.default_model.as_ref() == Some(model) || config.models.contains(model))
-    })
-}
-
-pub(crate) fn projected_provider_models_for_provider(
-    config_dir: &Path,
-    cache_dir: &Path,
-    provider: &str,
-) -> Result<Vec<ProjectedProviderModel>, FuseError> {
-    Ok(projected_provider_models(config_dir, cache_dir)?
-        .into_iter()
-        .filter(|model| model.provider == provider)
-        .collect())
 }
 
 pub(crate) fn projected_provider_models_for_provider_path(
-    config_dir: &Path,
-    cache_dir: &Path,
+    snapshot: &ProviderSnapshot,
     abi_path: &str,
-) -> Result<Option<Vec<ProjectedProviderModel>>, FuseError> {
-    let Some(provider) = abi_path.strip_prefix("model/") else {
-        return Ok(None);
-    };
-    if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER {
-        return Ok(None);
+) -> Option<Vec<ProjectedProviderModel>> {
+    let provider = abi_path.strip_prefix("model/")?;
+    if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER || !is_object_name(provider) {
+        return None;
     }
-    let models = projected_provider_models_for_provider(config_dir, cache_dir, provider)?;
-    if models.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(models))
-    }
+    snapshot.active().contains(provider).then(|| {
+        snapshot
+            .models()
+            .iter()
+            .filter(|model| model.provider == provider)
+            .cloned()
+            .collect()
+    })
 }
 
 pub(crate) fn projected_provider_model_for_exec(
-    config_dir: &Path,
-    cache_dir: &Path,
+    snapshot: &ProviderSnapshot,
     abi_path: &str,
-) -> Result<Option<ProjectedProviderModel>, FuseError> {
-    let Some(model_name) = model_exec_name(abi_path) else {
-        return Ok(None);
-    };
-    Ok(projected_provider_models(config_dir, cache_dir)?
-        .into_iter()
-        .find(|model| format!("{}/{}", model.provider, model.model) == model_name))
+) -> Option<ProjectedProviderModel> {
+    let model_name = model_exec_name(abi_path)?;
+    snapshot
+        .models()
+        .iter()
+        .find(|model| format!("{}/{}", model.provider, model.model) == model_name)
+        .cloned()
 }
 
 pub(crate) fn projected_provider_model_control_dir(
-    config_dir: &Path,
-    cache_dir: &Path,
+    snapshot: &ProviderSnapshot,
     abi_path: &str,
-) -> Result<Option<ProjectedProviderModel>, FuseError> {
-    let Some(model_name) = abi_path
+) -> Option<ProjectedProviderModel> {
+    let model_name = abi_path
         .strip_prefix("model/")
-        .and_then(|path| path.strip_suffix(".d"))
-    else {
-        return Ok(None);
-    };
+        .and_then(|path| path.strip_suffix(".d"))?;
     if !is_model_name(model_name) {
-        return Ok(None);
+        return None;
     }
-    Ok(projected_provider_models(config_dir, cache_dir)?
-        .into_iter()
-        .find(|model| format!("{}/{}", model.provider, model.model) == model_name))
+    snapshot
+        .models()
+        .iter()
+        .find(|model| format!("{}/{}", model.provider, model.model) == model_name)
+        .cloned()
 }
 
 pub(crate) fn projected_provider_model_control_file<'a>(
-    config_dir: &Path,
-    cache_dir: &Path,
+    snapshot: &ProviderSnapshot,
     abi_path: &'a str,
-) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseError> {
-    let Some((dir, file)) = abi_path.rsplit_once('/') else {
-        return Ok(None);
-    };
-    let Some(model) = projected_provider_model_control_dir(config_dir, cache_dir, dir)? else {
-        return Ok(None);
-    };
-    Ok(Some((model, file)))
-}
-
-pub(crate) fn provider_config_models(
-    config: &ProviderConfig,
-    cache_dir: &Path,
-    provider: &str,
-) -> Vec<String> {
-    let mut models = Vec::new();
-    let mut seen = HashSet::new();
-    if let Some(model) = config.default_model.as_deref() {
-        append_provider_model_name(model, &mut models, &mut seen);
-    }
-    for model in &config.models {
-        append_provider_model_name(model, &mut models, &mut seen);
-    }
-    for model in provider_cached_models(cache_dir, provider) {
-        append_provider_model_name(&model, &mut models, &mut seen);
-    }
-    models
-}
-
-pub(crate) fn append_provider_model_name(
-    model: &str,
-    models: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-) {
-    let model = model.trim();
-    if !is_object_name(model) {
-        return;
-    }
-    if seen.insert(model.to_owned()) {
-        models.push(model.to_owned());
-    }
-}
-
-pub(crate) fn projected_provider_name(config: &ProviderConfig) -> Result<String, FuseError> {
-    provider_name_from_config(&config.base_url, config.name.as_deref())
-        .map_err(|_error| FuseError::InvalidContent)
-}
-
-pub(crate) fn normalize_provider_base_url(base_url: &str) -> String {
-    base_url.trim().to_owned()
-}
-
-pub(crate) fn provider_driver_route_table(formats: &[String]) -> String {
-    let drivers = provider_drivers(formats);
-    let default = drivers
-        .iter()
-        .find(|driver| driver.as_str() == "openai-chat")
-        .or_else(|| drivers.first())
-        .map_or("openai-chat", String::as_str);
-    let agent = if drivers.iter().any(|driver| driver == "openai-responses")
-        && drivers.iter().any(|driver| driver == "openai-chat")
-    {
-        "openai-responses,openai-chat".to_owned()
-    } else {
-        default.to_owned()
-    };
-    format!("default={default}\nexec={default}\nagent={agent}\n")
-}
-
-pub(crate) fn provider_drivers(formats: &[String]) -> Vec<String> {
-    let mut drivers = Vec::new();
-    let mut seen = HashSet::new();
-    for format in formats {
-        let driver = match format.trim() {
-            "openai.responses" => "openai-responses",
-            "openai.chat" => "openai-chat",
-            _ => continue,
-        };
-        if seen.insert(driver) {
-            drivers.push(driver.to_owned());
-        }
-    }
-    if drivers.is_empty() {
-        drivers.push("openai-chat".to_owned());
-    }
-    drivers
-}
-
-pub(crate) fn provider_capability_text(formats: &[String]) -> String {
-    let mut capabilities = vec!["chat", "stream"];
-    if formats
-        .iter()
-        .any(|format| format.trim() == "openai.responses")
-    {
-        capabilities.push("tool_call_syntax");
-    }
-    capabilities.join("\n") + "\n"
+) -> Option<(ProjectedProviderModel, &'a str)> {
+    let (dir, file) = abi_path.rsplit_once('/')?;
+    let model = projected_provider_model_control_dir(snapshot, dir)?;
+    Some((model, file))
 }
 
 pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String {
@@ -361,50 +139,11 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
     )
 }
 
-pub(crate) fn provider_model_control_content(
-    model: &ProjectedProviderModel,
-    file: &str,
-) -> Option<String> {
-    match file {
-        "id" => Some(format!("{}/{}\n", model.provider, model.model)),
-        "driver" => Some(model.driver.clone()),
-        "cap" => Some(model.cap.clone()),
-        "effort" => Some(format!("{}\n", model.effort)),
-        "fallback" => Some(model.fallback.clone()),
-        "limit" => Some(format!("{}\n", model.limit)),
-        "default" => Some(format!("base_url={}\n", model.base_url)),
-        "session" => Some("none\n".to_owned()),
-        "status" => Some("configured\n".to_owned()),
-        "log" => Some("\n".to_owned()),
-        _ => None,
-    }
-}
-
-pub(crate) fn default_provider_model_fallback(
-    provider: &str,
-    default_model: Option<&str>,
-) -> String {
-    let requested = ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
-    let mut fallback = String::new();
-    for model in requested {
-        if default_model == Some(model) {
-            continue;
-        }
-        if is_object_name(model) {
-            fallback.push_str(provider);
-            fallback.push('/');
-            fallback.push_str(model);
-            fallback.push('\n');
-        }
-    }
-    fallback
-}
-
-pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseError> {
+pub(crate) fn read_flat_model_entries(model_root: &Path) -> Result<Vec<FuseDirEntry>, FuseError> {
     let directory = open_plain_directory(model_root).map_err(|_error| FuseError::Io)?;
     let entries =
         fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseError::Io)?;
-    let mut names = Vec::new();
+    let mut flat = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_error| FuseError::Io)?;
         let name = entry
@@ -417,13 +156,17 @@ pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>,
             nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
         )
         .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
-        if stat.st_mode & libc::S_IFMT != libc::S_IFDIR {
-            continue;
-        }
-        if is_object_name(&name) {
-            names.push(name);
+        let kind = stat.st_mode & libc::S_IFMT;
+        let is_flat_model = kind == libc::S_IFREG && is_object_name(&name);
+        let is_flat_control =
+            kind == libc::S_IFDIR && name.strip_suffix(".d").is_some_and(is_object_name);
+        if is_flat_model || is_flat_control {
+            flat.push(FuseDirEntry::new(
+                name,
+                fuse_file_type_from_mode(stat.st_mode),
+            ));
         }
     }
-    names.sort();
-    Ok(names)
+    flat.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(flat)
 }

@@ -6,6 +6,7 @@ pub(crate) fn canonical_provider_name_from_host(host: &str) -> &str {
     match host {
         "api.openai.com" => "openai",
         "api.anthropic.com" => "anthropic",
+        "api.githubcopilot.com" => "github-copilot",
         "generativelanguage.googleapis.com" => "google",
         _ => host,
     }
@@ -58,7 +59,7 @@ pub fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
     }
     let target = read_model_alias_target(ctx_root, model).ok()?;
     let target = target
-        .strip_prefix("/ctx/model/")
+        .strip_prefix(&format!("{CTX_ROOT}/model/"))
         .or_else(|| target.strip_prefix("model/"))
         .unwrap_or(&target);
     target.split_once('/').and_then(|(provider, model)| {
@@ -67,7 +68,7 @@ pub fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
 }
 
 pub(crate) fn read_model_alias_target(ctx_root: &Path, alias: &str) -> std::io::Result<String> {
-    let model_dir = open_plain_directory(&ctx_root.join("model"))?;
+    let model_dir = open_plain_directory(&cortexfs_paths::model_root_path(ctx_root))?;
     let target = nix::fcntl::readlinkat(&model_dir, alias).map_err(std::io::Error::from)?;
     Ok(target.to_string_lossy().into_owned())
 }

@@ -135,6 +135,14 @@ fn context_jsonl_preserves_field_issue_order() {
     }
 }
 
+fn invalid_context_field(line: usize, field: &str, value: &str) -> ContextJsonlIssue {
+    ContextJsonlIssue::InvalidField {
+        line,
+        field: field.to_owned(),
+        value: value.to_owned(),
+    }
+}
+
 #[test]
 fn context_jsonl_rejects_invalid_records() {
     let facts = inspect_context_jsonl(
@@ -147,11 +155,7 @@ fn context_jsonl_rejects_invalid_records() {
             ContextJsonlIssue::InvalidJson(1),
             ContextJsonlIssue::RecordNotObject(2),
             ContextJsonlIssue::InvalidJson(3),
-            ContextJsonlIssue::InvalidField {
-                line: 4,
-                field: "id".to_owned(),
-                value: "bad/id".to_owned()
-            },
+            invalid_context_field(4, "id", "bad/id"),
             ContextJsonlIssue::MissingStringField {
                 line: 4,
                 field: "source".to_owned()
@@ -173,16 +177,8 @@ fn context_jsonl_rejects_invalid_records() {
     assert_eq!(
         refs.issues(),
         [
-            ContextJsonlIssue::InvalidField {
-                line: 1,
-                field: "path".to_owned(),
-                value: "../secret".to_owned()
-            },
-            ContextJsonlIssue::InvalidField {
-                line: 1,
-                field: "kind".to_owned(),
-                value: "provider_thread".to_owned()
-            }
+            invalid_context_field(1, "path", "../secret"),
+            invalid_context_field(1, "kind", "provider_thread")
         ]
     );
 
@@ -192,11 +188,7 @@ fn context_jsonl_rejects_invalid_records() {
     );
     assert_eq!(
         control_path.issues(),
-        [ContextJsonlIssue::InvalidField {
-            line: 1,
-            field: "path".to_owned(),
-            value: "context/\u{1b}hidden.md".to_owned()
-        }]
+        [invalid_context_field(1, "path", "context/\u{1b}hidden.md")]
     );
 
     let dedup = inspect_context_jsonl(
@@ -207,11 +199,7 @@ fn context_jsonl_rejects_invalid_records() {
     assert_eq!(
         dedup.issues(),
         [
-            ContextJsonlIssue::InvalidField {
-                line: 1,
-                field: "hash".to_owned(),
-                value: "md5-old".to_owned()
-            },
+            invalid_context_field(1, "hash", "md5-old"),
             ContextJsonlIssue::MissingStringArrayField {
                 line: 1,
                 field: "refs".to_owned()
@@ -231,7 +219,7 @@ fn event_stream_accepts_canonical_model_jsonl() {
 {"type":"delta","run":"r1","text":"hello"}
 {"type":"message","run":"r1","role":"assistant","content":[{"type":"text","text":"hello"}]}
 {"type":"tool_call","run":"r1","id":"call-1","name":"fs.read","arguments":{"path":"README.md"}}
-{"type":"usage","run":"r1","input_tokens":10,"output_tokens":1}
+{"type":"usage","run":"r1","input_tokens":10,"output_tokens":1,"cached_tokens":8,"cache_write_tokens":4}
 {"type":"done","run":"r1","status":"ok"}
 "#,
     );
@@ -341,7 +329,7 @@ fn event_stream_rejects_invalid_shape_and_specialized_frames() {
 {"type":"delta","text":"missing run"}
 {"type":"error","run":"r1","code":"PROVIDER_DENIED"}
 {"type":"done","run":"r1","status":"maybe"}
-{"type":"usage","run":"r1","input_tokens":"10","output_tokens":1}
+{"type":"usage","run":"r1","input_tokens":10,"output_tokens":1,"cached_tokens":"8"}
 {"type":"tool_call","run":"r1","id":"bad/id","name":"fs.read"}
 {"type":"agent.child.cancel","parent":"bad/parent","child":"rev-1","reason":"manual"}
 {"type":"agent.stop","agent":"rev-1","status":"dead"}

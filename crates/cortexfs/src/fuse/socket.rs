@@ -16,13 +16,14 @@ impl FuseProjection {
         self.authorize_agent_owner(agent, uid)?;
         let path = self.resolve(&normalized)?;
         let parent = path.parent().ok_or(FuseError::InvalidPath)?;
+        support::plain::create_plain_dir(parent).map_err(|_error| FuseError::Io)?;
         let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
         let name = plain_file_name(&path).map_err(|_error| FuseError::InvalidPath)?;
-        let created = support::plain::ensure_socket_placeholder(&path, mode)
+        let created = support::plain::ensure_socket_placeholder_at(&parent_dir, name, mode)
             .map_err(|_error| FuseError::Io)?;
         if chown_socket_entry(&parent_dir, name, uid, gid).is_err() {
             if created {
-                let _ignored = self.remove_socket_alias(&normalized, uid);
+                remove_created_socket_entry(&parent_dir, name, true);
             }
             return Err(FuseError::Io);
         }
@@ -30,7 +31,7 @@ impl FuseProjection {
             Ok(node) => Ok(node),
             Err(error) => {
                 if created {
-                    let _ignored = self.remove_socket_alias(&normalized, uid);
+                    remove_created_socket_entry(&parent_dir, name, true);
                 }
                 Err(error)
             }

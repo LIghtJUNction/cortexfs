@@ -9,7 +9,11 @@ pub(crate) fn write_hosted_agent_frames(
     for frame in frames {
         let kind = event_type(frame);
         if matches!(kind.as_deref(), Some("start" | "error" | "done"))
-            || streamed && matches!(kind.as_deref(), Some("delta" | "reasoning_delta" | "usage"))
+            || streamed
+                && matches!(
+                    kind.as_deref(),
+                    Some("delta" | "reasoning_delta" | "usage" | "error")
+                )
         {
             continue;
         }
@@ -114,9 +118,15 @@ pub(crate) fn write_model_usage(
     run: &str,
     usage: TokenUsage,
 ) -> io::Result<()> {
+    let cached_tokens = usage
+        .cached_tokens
+        .map_or_else(String::new, |value| format!(r#","cached_tokens":{value}"#));
+    let cache_write_tokens = usage.cache_write_tokens.map_or_else(String::new, |value| {
+        format!(r#","cache_write_tokens":{value}"#)
+    });
     writeln!(
         stdout,
-        r#"{{"type":"usage","run":{},"input_tokens":{},"output_tokens":{}}}"#,
+        r#"{{"type":"usage","run":{},"input_tokens":{},"output_tokens":{}{cached_tokens}{cache_write_tokens}}}"#,
         json_string(run),
         usage.input_tokens,
         usage.output_tokens

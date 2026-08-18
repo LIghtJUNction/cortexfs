@@ -4,6 +4,7 @@ use super::install::{
 };
 use super::present;
 use crate::support::plain::{read_file_to_string, write_text_file_at};
+use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches};
 use crate::{ObjectClass, is_object_name};
 
 use semver::{Version, VersionReq};
@@ -19,20 +20,6 @@ const INSTALL_RECEIPT_FILE: &str = ".cortexfs-receipt.json";
 const INSTALL_RECEIPT_SCHEMA_V1: &str = "cortexfs.object-install/v1";
 const INSTALL_RECEIPT_SCHEMA_V2: &str = "cortexfs.object-install/v2";
 const MAX_INSTALL_RECEIPT_BYTES: u64 = 16 * 1024;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EntryKind {
-    Directory,
-    File,
-    Executable,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct EntryReceipt {
-    pub(crate) dev: u64,
-    pub(crate) ino: u64,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FileSnapshot {
@@ -460,6 +447,7 @@ pub(crate) fn receipt_for(file: &fs::File, kind: EntryKind) -> Result<EntryRecei
         EntryKind::Directory => metadata.is_dir(),
         EntryKind::File => metadata.is_file(),
         EntryKind::Executable => metadata.is_file() && metadata.permissions().mode() & 0o111 != 0,
+        EntryKind::Symlink => metadata.file_type().is_symlink(),
     };
     if !valid || metadata.file_type().is_symlink() {
         return Err(InstallError::unavailable("object entry has wrong type"));
@@ -468,27 +456,6 @@ pub(crate) fn receipt_for(file: &fs::File, kind: EntryKind) -> Result<EntryRecei
         dev: metadata.dev(),
         ino: metadata.ino(),
     })
-}
-
-pub(crate) fn entry_matches(
-    directory: &fs::File,
-    name: &str,
-    receipt: EntryReceipt,
-    kind: EntryKind,
-) -> bool {
-    nix::sys::stat::fstatat(directory, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW).is_ok_and(
-        |stat| {
-            let file_kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
-            let kind_matches = match kind {
-                EntryKind::Directory => file_kind.contains(nix::sys::stat::SFlag::S_IFDIR),
-                EntryKind::File => file_kind.contains(nix::sys::stat::SFlag::S_IFREG),
-                EntryKind::Executable => {
-                    file_kind.contains(nix::sys::stat::SFlag::S_IFREG) && stat.st_mode & 0o111 != 0
-                }
-            };
-            kind_matches && (stat.st_dev, stat.st_ino) == (receipt.dev, receipt.ino)
-        },
-    )
 }
 
 pub(crate) fn verify_executable(

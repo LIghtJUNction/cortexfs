@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop cortexfs.service >/dev/null 2>&1 || true
+        if command -v deb-systemd-helper >/dev/null 2>&1; then
+            deb-systemd-helper disable cortexfs.service >/dev/null || true
+        else
+            systemctl disable cortexfs.service >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
+exit 0

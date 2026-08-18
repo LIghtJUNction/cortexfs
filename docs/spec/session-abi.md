@@ -63,6 +63,7 @@ messages.jsonl  conversation messages
 events.jsonl    tool calls, errors, and state changes
 latest.md       latest assistant text
 state           active, idle, done, error
+state.json      structured non-secret runtime projection (optional for legacy sessions)
 cwd             session working directory
 created_at      creation time
 updated_at      update time
@@ -133,6 +134,7 @@ session/
     events.jsonl
     latest.md
     state
+    state.json
     cwd
     created_at
     updated_at
@@ -208,4 +210,7 @@ The chroot root is only the runtime environment:
 Rebuilding the root, cleaning it, or switching runtime environment must not
 destroy session history.
 
-See `context-abi.md` for context packs, compression, swap, and dedup rules.
+Context-window limits, rebuildable prompt working sets, and context compaction
+rules are defined in [agent-runtime.md](agent-runtime.md#context-window-control).
+Child handoff channels and their durable result files are defined in
+[ctx-coreutils.md](ctx-coreutils.md#core-commands).

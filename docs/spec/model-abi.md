@@ -51,10 +51,10 @@ secrets never appear in model metadata or `.d/` files.
 
 Bottom-layer AI API formats do not enter the ABI. OpenAI Responses, Anthropic
 Messages, Gemini GenerateContent, OpenAI-compatible chat, local runtimes, and
-aggregator-specific request formats are Rig or provider-adapter details.
-Bottom-layer stateful/stateless behavior does not enter the ABI. Rig adapts
-provider connections, API compatibility, and streaming into the canonical
-CortexFS request and JSONL event stream.
+aggregator-specific request formats are protocol-adapter details.
+Bottom-layer stateful/stateless behavior does not enter the ABI. CortexFS
+protocol adapters convert provider connections, API compatibility, and
+streaming into the canonical CortexFS request and JSONL event stream.
 
 Example:
 
@@ -105,7 +105,7 @@ Control files:
 id       provider-native model id or runtime-internal model id
 driver   driver route table; see below
 cap      capability list, one per line
-effort   provider-neutral reasoning effort: auto, low, medium, high, or xhigh
+effort   provider-neutral reasoning effort: auto, none, low, medium, high, xhigh, or max
 default  default parameters, KEY=VALUE, one per line
 fallback ordered fallback model chain, one provider/model name per line
 limit    maximum hard context size in tokens, or unknown
@@ -172,6 +172,27 @@ Each `model_limits` key must be a model listed by `default_model` or `models`,
 and each value must be in `1..=4294967295`. Invalid local limit declarations
 make that provider config invalid; they are not silently ignored. A local
 entry overrides catalog data for the same projected model.
+
+Provider configuration may also override stable semantic capabilities for
+individual declared models:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["text-model", "vision-model"],
+  "model_capabilities": {
+    "text-model": ["chat", "stream"],
+    "vision-model": ["chat", "stream", "vision"]
+  }
+}
+```
+
+Each key must name `default_model` or an entry in `models`. Values must be
+unique stable capability words from the list below. Provider-private, unknown,
+or duplicate words make the provider configuration invalid. An explicit empty
+list is valid and projects an empty `cap` file. Models without an override use
+the adapter-derived capability projection.
 
 CortexFS obtains catalog limits through the external `models-dev` library.
 Catalog provider and model map keys are matched exactly to the projected
@@ -267,7 +288,12 @@ declare OAuth Authorization Code + PKCE metadata:
     "auth_url": "https://auth.example.com/oauth/authorize",
     "token_url": "https://auth.example.com/oauth/token",
     "redirect_uri": "http://127.0.0.1:8765/callback",
-    "scopes": ["model.read", "offline_access"]
+    "scopes": ["model.read", "offline_access"],
+    "device": {
+      "request_url": "https://auth.example.com/device/code",
+      "token_url": "https://auth.example.com/device/token",
+      "verification_uri": "https://auth.example.com/device"
+    }
   }
 }
 ```
@@ -282,6 +308,85 @@ uses `S256`; the verifier and callback state are short-lived local flow state
 and must not be written into `/ctx/model`.
 `ctx provider oauth login PROVIDER` is the host-side helper that performs this
 PKCE login flow and writes tokens to the system keychain.
+
+## Provider Authentication Framework
+
+Provider JSON may advertise more than one authentication method without
+coupling a model to a provider-specific login command:
+
+```json
+{
+  "base_url": "https://api.example.com/v1",
+  "auth": [
+    {"type": "api_key", "slot": "default"},
+    {"type": "oauth", "flow": "authorization_code", "slot": "subscription"}
+  ],
+  "oauth": {
+    "client_id": "cortexfs-example",
+    "auth_url": "https://auth.example.com/authorize",
+    "token_url": "https://auth.example.com/token",
+    "redirect_uri": "http://127.0.0.1:8765/callback",
+    "scopes": ["model.read", "offline_access"],
+    "device": {
+      "request_url": "https://auth.example.com/device/code",
+      "token_url": "https://auth.example.com/device/token",
+      "verification_uri": "https://auth.example.com/device"
+    }
+  }
+}
+```
+
+`type` is `api_key` or `oauth`; OAuth `flow` is `authorization_code` or
+`device_code`. `slot` is a logical credential slot and is not a keychain
+account name. When `auth` is absent, CortexFS retains the compatibility
+defaults of an API-key `default` slot plus an authorization-code OAuth method
+when the legacy `oauth` block is present. Invalid slots or an OAuth method
+without OAuth metadata fail closed during provider snapshot loading.
+
+Adapters implement one provider-neutral boundary (`id`, supported methods,
+authorization URL, login, device challenge, refresh, persistence, and model
+listing) and return the normalized credential shape. The host can inject the
+HTTP transport, clock, challenge notifier, and sleep callback for deterministic
+tests; Agents never receive that transport or provider-native response types.
+The built-in registry provides concrete OpenAI/Codex and Anthropic/Claude
+adapters, plus a GitHub Copilot adapter when the host supplies its OAuth app
+metadata. Claude and Copilot client registrations remain host configuration;
+no provider client id is compiled into the Agent path.
+
+```json
+{
+  "type": "oauth",
+  "provider": "example",
+  "access_token": "…",
+  "refresh_token": "…",
+  "expires_at": 123456789,
+  "scopes": ["model.read"]
+}
+```
+
+API-key credentials use `type: "api_key"`, `provider`, and `key`. These are
+in-memory adapter envelopes only. Raw credentials never enter `/ctx`, model
+objects, `.d/` controls, or model history; the existing root-owned secret
+store remains the persistence boundary. Inspect the declared methods with:
+
+```text
+ctx provider auth methods PROVIDER
+```
+
+The command prints `method<TAB>flow<TAB>slot` and never prints secret material.
+Model listing remains provider-neutral and feeds the existing model projection
+and bounded host caches; it does not create an `/ctx/identity` namespace. The
+existing hardened host discovery request is issued through the selected
+adapter's model transport and parser, so provider-specific model envelopes do
+not leak into the model ABI.
+`device_code` is part of the shared declaration grammar. An OAuth `device`
+block supplies standard device-code endpoints for host-configured adapters.
+The built-in GitHub Copilot adapter supplies its documented defaults when that
+block is omitted; `api.githubcopilot.com` also maps to the stable
+`github-copilot` provider name when no explicit host name is supplied. Adapters
+implement the standard device challenge, bounded
+polling, and normalized credential persistence. The CLI prints the
+verification URI and user code but never stores the device code in `/ctx`.
 
 ## Provider Presets
 
@@ -319,7 +424,7 @@ CortexFS metadata text for that model. Executing it performs one-shot
 inference through CortexFS/Rust runtime code or a provider adapter; model
 objects must not be shell-script implementations.
 
-The first metadata keys mirror Rig 0.39 model listing fields:
+The first metadata keys mirror common model-listing fields:
 
 ```text
 id
@@ -493,6 +598,10 @@ Example:
 {"type":"usage","run":"r1","input_tokens":10,"output_tokens":1}
 {"type":"done","run":"r1","status":"ok"}
 ```
+
+`usage` requires `input_tokens` and `output_tokens`. When reported by a
+provider, optional `cached_tokens` and `cache_write_tokens` record cache reads
+and writes without changing those totals.
 
 Error example:
 

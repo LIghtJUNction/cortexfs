@@ -1,0 +1,24 @@
+[Unit]
+Description=CortexFS Slack Socket Mode channel driver
+Documentation=file:/usr/share/doc/cortexfs/docs/channels.md
+After=network-online.target cortexfs-channel-driver@slack.service
+Wants=network-online.target
+Requires=cortexfs-channel-driver@slack.service
+PartOf=cortexfs.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/cortexfs/channels/slack.env
+ExecStart=/usr/bin/cortexfs-channel-slack
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=128M
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cortexfs/channels
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

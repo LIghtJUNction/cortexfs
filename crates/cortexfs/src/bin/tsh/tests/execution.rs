@@ -87,6 +87,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
             ("uid", "1000\n"),
             ("gid", "1000\n"),
             ("groups", "1000\n"),
+            ("perm", "rwx\n"),
             ("label", "user_u:agent_r:coder_t:s0\n"),
             ("iso", "shared\n"),
             ("parent", "\n"),
@@ -226,6 +227,7 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
             ("uid", "1000\n"),
             ("gid", "1000\n"),
             ("groups", "1000\n"),
+            ("perm", "rwx\n"),
             ("label", "user_u:agent_r:coder_t:s0\n"),
             ("iso", "shared\n"),
             ("parent", "\n"),
@@ -310,6 +312,7 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     assert!(fs::write(control.join("uid"), "1000\n").is_ok());
     assert!(fs::write(control.join("gid"), "1000\n").is_ok());
     assert!(fs::write(control.join("groups"), "1000\n").is_ok());
+    assert!(fs::write(control.join("perm"), "rwx\n").is_ok());
     assert!(fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").is_ok());
     assert!(fs::write(control.join("iso"), "shared\n").is_ok());
     assert!(fs::write(control.join("parent"), "\n").is_ok());
@@ -435,6 +438,7 @@ exit 0
         ("env", "MISMATCH=1\n"),
         ("path", "/mismatch/tool\n"),
         ("mount", "/mismatch\t/workspace\tro\trbind,nosuid,nodev\n"),
+        ("perm", "r--\n"),
         ("root", "/mismatch\n"),
     ] {
         let path = backing_control.join(file);

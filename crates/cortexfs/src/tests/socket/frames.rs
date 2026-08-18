@@ -1,4 +1,10 @@
 #[test]
+fn socket_response_jsonl_preserves_empty_frames() {
+    let response = crate::SocketRuntimeResponse::new(vec![String::new(), "second".to_owned()]);
+    assert_eq!(response.jsonl(), "\nsecond\n");
+}
+
+#[test]
 fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let root = clean_test_dir("socket-runtime");
     let session_root = root.join("session");
@@ -12,6 +18,16 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let ping = ok!(ping);
     assert_eq!(ping.jsonl(), "{\"type\":\"pong\"}\n");
 
+    let idle = handle_socket_request_frame(
+        &session_root,
+        "/work",
+        Some("debug/echo"),
+        r#"{"op":"status","session":"default"}"#,
+    );
+    let idle = ok!(idle);
+    assert!(idle.jsonl().contains("\"type\":\"status\""));
+    assert!(idle.jsonl().contains("\"status\":\"idle\""));
+
     let send = handle_socket_request_frame(
         &session_root,
         "/work",
@@ -24,6 +40,19 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let run_1 = ok!(canonical_run(&send.jsonl()).ok_or("missing first canonical run"));
     assert_ne!(run_1, "msg-1");
     assert!(inspect_session_layout(&session_root.join("default")).is_ok());
+    let state = ok!(fs::read_to_string(
+        session_root.join("default").join("state.json")
+    ));
+    assert!(state.contains("\"status\":\"active\""));
+
+    let active = handle_socket_request_frame(
+        &session_root,
+        "/work",
+        Some("debug/echo"),
+        r#"{"op":"status","session":"default"}"#,
+    );
+    let active = ok!(active);
+    assert!(active.jsonl().contains(&format!("\"run\":\"{run_1}\"")));
 
     let second = handle_socket_request_frame(
         &session_root,
@@ -74,6 +103,32 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let cancel = ok!(cancel);
     assert!(cancel.jsonl().contains("\"status\":\"cancelled\""));
     assert_file_text(&session_root.join("default").join("state"), "cancelled\n");
+    let state = ok!(fs::read_to_string(
+        session_root.join("default").join("state.json")
+    ));
+    assert!(state.contains("\"status\":\"cancelled\""));
+}
+
+#[test]
+fn socket_runtime_status_whitelists_structured_state_fields() {
+    let root = clean_test_dir("socket-runtime-status-sanitizes-state");
+    let session_root = root.join("session");
+    let session = session_root.join("default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    write_text_file(
+        &session.join("state.json"),
+        r#"{"status":"active","phase":"running","step":3,"updated_at":"now","secret":"do-not-return"}"#,
+    );
+
+    let status = handle_socket_request_frame(
+        &session_root,
+        "/work",
+        Some("debug/echo"),
+        r#"{"op":"status","session":"default"}"#,
+    );
+    let status = ok!(status);
+    assert!(status.jsonl().contains("\"step\":3"));
+    assert!(!status.jsonl().contains("do-not-return"));
 }
 
 #[test]

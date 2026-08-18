@@ -1,5 +1,11 @@
 pub mod control;
 pub mod egress;
+pub mod hookabi;
+pub(crate) mod hookexec;
+pub(crate) mod hooks;
+pub mod observation;
 pub mod record;
 pub mod socket;
+pub mod state;
+pub mod terminal;
 pub mod types;

@@ -23,6 +23,12 @@ pub(crate) fn read_symlink_target(path: &Path) -> Result<PathBuf> {
         .map_err(std::io::Error::from)
 }
 
+pub(crate) fn read_symlink_target_at(parent: &fs::File, name: &str) -> Result<PathBuf> {
+    nix::fcntl::readlinkat(parent, name)
+        .map(PathBuf::from)
+        .map_err(std::io::Error::from)
+}
+
 #[doc(hidden)]
 pub fn read_small_text_file(path: &Path, max_bytes: u64) -> Result<String> {
     let file = open_plain_file(path)?;
@@ -97,6 +103,13 @@ pub(crate) fn plain_file_name(path: &Path) -> Result<&str> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))
 }
 
+fn validate_plain_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    Ok(())
+}
+
 pub(crate) fn proc_fd_path(file: &fs::File) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
@@ -142,9 +155,7 @@ pub fn create_plain_dir_exclusive(path: &Path, mode: u32) -> Result<fs::File> {
 }
 
 pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> Result<fs::File> {
-    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
+    validate_plain_name(name)?;
     nix::sys::stat::mkdirat(
         parent,
         name,
@@ -167,9 +178,7 @@ pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> R
 }
 
 pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u32) -> Result<()> {
-    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
+    validate_plain_name(name)?;
     let fd = nix::fcntl::openat(
         parent,
         name,
@@ -200,9 +209,7 @@ pub fn write_file_atomic_at(
     content: &[u8],
     mode: u32,
 ) -> Result<()> {
-    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
+    validate_plain_name(name)?;
     let temp = format!(".{name}.tmp-{}", std::process::id());
     let fd = nix::fcntl::openat(
         parent,
@@ -265,19 +272,29 @@ pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
     create_plain_dir(parent)?;
     let parent_dir = open_plain_directory(parent)?;
     let name = plain_file_name(path)?;
-    match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
+    ensure_socket_placeholder_at(&parent_dir, name, mode)
+}
+
+/// Ensures a Unix socket placeholder relative to an already-held directory fd.
+pub(crate) fn ensure_socket_placeholder_at(
+    parent: &fs::File,
+    name: &str,
+    mode: u32,
+) -> Result<bool> {
+    validate_plain_name(name)?;
+    match nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
         Ok(stat)
             if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
                 .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
         {
-            set_socket_mode(&parent_dir, name, mode)?;
+            set_socket_mode(parent, name, mode)?;
             return Ok(false);
         }
         Ok(stat)
             if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
                 .contains(nix::sys::stat::SFlag::S_IFLNK) =>
         {
-            match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::empty()) {
+            match nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::empty()) {
                 Ok(target)
                     if nix::sys::stat::SFlag::from_bits_truncate(target.st_mode)
                         .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
@@ -285,12 +302,8 @@ pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
                     return Ok(false);
                 }
                 Err(nix::errno::Errno::ENOENT) => {
-                    nix::unistd::unlinkat(
-                        &parent_dir,
-                        name,
-                        nix::unistd::UnlinkatFlags::NoRemoveDir,
-                    )
-                    .map_err(std::io::Error::from)?;
+                    nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+                        .map_err(std::io::Error::from)?;
                 }
                 Ok(_) | Err(_) => {
                     return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
@@ -301,10 +314,10 @@ pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
         Err(nix::errno::Errno::ENOENT) => {}
         Err(error) => return Err(std::io::Error::from(error)),
     }
-    UnixListener::bind(path)?;
-    if let Err(error) = set_socket_mode(&parent_dir, name, mode) {
-        let _ignored =
-            nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir);
+    let socket_path = proc_fd_path(parent).join(name);
+    UnixListener::bind(socket_path)?;
+    if let Err(error) = set_socket_mode(parent, name, mode) {
+        let _ignored = nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::NoRemoveDir);
         return Err(error);
     }
     Ok(true)
@@ -334,8 +347,7 @@ pub fn create_plain_dir_with(path: &Path, messages: CreatePlainDirMessages) -> R
     }
 
     let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
+    for current in path.ancestors() {
         match fs::symlink_metadata(current) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
                 return Err(std::io::Error::new(
@@ -346,21 +358,20 @@ pub fn create_plain_dir_with(path: &Path, messages: CreatePlainDirMessages) -> R
             Ok(_metadata) => break,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing.push(current.to_path_buf());
-                cursor = current.parent();
             }
             Err(error) => return Err(error),
         }
     }
-
-    let existing_parent = missing
-        .last()
-        .and_then(|path| path.parent())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                messages.invalid_name_message,
-            )
-        })?;
+    let existing_parent = match missing.last() {
+        Some(path) => path.parent(),
+        None => return sync_plain_dir(path),
+    }
+    .ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            messages.invalid_name_message,
+        )
+    })?;
     let mut parent_dir = open_plain_directory(existing_parent)?;
     for directory in missing.iter().rev() {
         let name = plain_file_name(directory).map_err(|_error| {

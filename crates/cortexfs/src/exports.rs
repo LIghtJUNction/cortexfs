@@ -22,9 +22,10 @@ pub use agent::control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
     inspect_agent_tools_control,
 };
+pub use agent::loopconfig::AgentLoop;
 pub use agent::prompt::{
     AgentPromptContext, MAX_HISTORY_MESSAGES_CHARS, MAX_SKILL_METADATA_CHARS, SkillMetadata,
-    agent_provider_messages, agent_runtime_contract, collect_agent_rules,
+    agent_prompt_messages, agent_provider_messages, agent_runtime_contract, collect_agent_rules,
     collect_agent_rules_from_paths, collect_history_messages_from_session, collect_skill_metadata,
     current_time_unix, default_agent_tool_context, format_history_messages_jsonl,
     format_skill_metadata_with_budget, render_agent_system_prompt, skill_metadata_budget_from_env,
@@ -38,13 +39,16 @@ pub use agent::schedule::{
 };
 pub use agent::window::{
     AgentEffectiveWindow, AgentWindowBudget, AgentWindowError, AgentWindowSetting,
+    budget_from_effective,
 };
 pub use context::pack::{
     ContextPackIssue, ContextPackReport, ContextPackSourceError, inspect_context_pack_json,
     validate_context_pack_source,
 };
 pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTable};
-pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
+pub use policy::{
+    PolicyError, PolicyEvaluator, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0,
+};
 pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelContextLimit, ModelDriverRouteError, ModelDriverRoutingTable,
@@ -63,20 +67,22 @@ pub use provider::name::{
 };
 pub use provider::oauth::{
     CODEX_CLIENT_ID, CODEX_DEVICE_REDIRECT_URI, CODEX_DEVICE_TOKEN_URL, CODEX_DEVICE_USER_URL,
-    CODEX_DEVICE_VERIFY_URL, DeviceCode, OAuthCredential, OAuthError, OAuthPkce,
-    OAuthProviderConfig, OAuthTokenResponse, OAuthTokenState, codex_oauth_config,
+    CODEX_DEVICE_VERIFY_URL, DeviceCode, OAuthCredential, OAuthCredentialMaterial,
+    OAuthDeviceConfig, OAuthError, OAuthPkce, OAuthProviderConfig, OAuthRefreshRequest,
+    OAuthRefreshResult, OAuthTokenResponse, OAuthTokenState, codex_oauth_config,
     exchange_oauth_token, exchange_oauth_token_with, oauth_account_id,
     oauth_authorization_code_form, oauth_authorization_url, oauth_keychain_secret,
     oauth_needs_refresh, oauth_post, oauth_refresh_token_form, oauth_token_state,
     parse_oauth_token_response, poll_device_code_with, read_codex_system, request_device_code_with,
     resolve_codex_system, resolve_codex_with, resolve_oauth_access_token,
-    resolve_oauth_access_token_with, resolve_oauth_credential, store_codex_system,
-    store_codex_with, store_oauth_tokens,
+    resolve_oauth_access_token_with, resolve_oauth_credential, resolve_oauth_credential_with,
+    store_codex_system, store_codex_with, store_oauth_credential, store_oauth_tokens,
 };
 pub use reference::storage::{
     SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR, StorageUpdateError, pin_storage_source,
     update_storage_generation, update_storage_generation_with_prune,
 };
+pub use runtime::state::RuntimeState;
 pub use support::control::ControlLineIssue;
 pub use support::index::{
     SessionIndexGuard, SessionIndexIssue, SessionIndexKind, SessionIndexReport,
@@ -109,6 +115,7 @@ pub use support::trajectory::{
     TrajectoryStep, TrajectoryToolCall, trajectory_from_session_dir, trajectory_from_session_jsonl,
     validate_trajectory, write_trajectory_json,
 };
+pub use tool::core::tools::inspect::{FsListTool, FsStatTool};
 pub use tool::core::tools::{
     FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
     run_core_tool_cli, run_core_tool_cli_with_root,

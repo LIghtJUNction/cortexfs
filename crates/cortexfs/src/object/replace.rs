@@ -2,7 +2,7 @@ use super::install::{
     CheckedObject, InstallError, InstallTier, OBJECT_MANIFEST_SCHEMA_V2, check_object,
     install_class_path, prepare_stage, validate_install_tier,
 };
-use super::receipt::{EntryKind, EntryReceipt, InspectedObject, entry_matches, inspect_object};
+use super::receipt::{InspectedObject, inspect_object};
 use super::residue::cleanup_residue;
 use super::swap::{
     PairProgress, move_exact, quarantine_pair, relative_stage, require_entry, require_missing,
@@ -12,6 +12,7 @@ use super::swap::{
 use super::swap::{create_foreign_control, create_foreign_executable, set_recreated_source};
 use crate::ObjectClass;
 use crate::support::plain::open_plain_directory;
+use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches};
 
 use semver::Version;
 use std::fs;

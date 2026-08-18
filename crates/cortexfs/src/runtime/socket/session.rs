@@ -13,6 +13,7 @@ pub(crate) fn handle_socket_send(
         scope,
         ref cwd,
         ref input,
+        ref event,
         ..
     } = request
     else {
@@ -42,6 +43,7 @@ pub(crate) fn handle_socket_send(
         cwd: Some(effective_cwd.to_owned()),
         workspace: None,
         input: input.to_owned(),
+        event: event.clone(),
     };
     let outcome = preparation
         .map_or_else(

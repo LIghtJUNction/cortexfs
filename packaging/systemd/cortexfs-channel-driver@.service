@@ -1,0 +1,26 @@
+[Unit]
+Description=CortexFS channel runtime driver for %i
+Documentation=file:/usr/share/doc/cortexfs/docs/channels.md
+After=network-online.target cortexfs.service
+Wants=network-online.target
+Requires=cortexfs.service
+PartOf=cortexfs.service
+
+[Service]
+Type=simple
+Environment=CORTEXFS_CHANNEL_ID=%i
+EnvironmentFile=-/etc/cortexfs/channels/%i-driver.env
+ExecStart=/usr/bin/cortexfs-channel driver
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=cortexfs/channel
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=96M
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cortexfs/channels
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

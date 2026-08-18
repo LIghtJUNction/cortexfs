@@ -1,3 +1,63 @@
+const P: AgentPermissions = AgentPermissions::ALL;
+
+#[derive(Debug)]
+struct FixedPolicy(bool);
+
+impl crate::policy::PolicyEvaluator for FixedPolicy {
+    fn evaluate(
+        &self,
+        _subject_type: &str,
+        _object_class: PolicyObjectClass,
+        _object_name: &str,
+        _permission: PolicyPermission,
+    ) -> bool {
+        self.0
+    }
+}
+
+#[test]
+fn model_selection_accepts_replaceable_policy_evaluators() {
+    let allow = FixedPolicy(true);
+    let deny = FixedPolicy(false);
+
+    assert_eq!(
+        crate::authorize_model_use(
+            "main",
+            "openai/gpt",
+            "openai/gpt",
+            crate::ModelUseAuthority::new("custom_t", &allow),
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        crate::authorize_model_use(
+            "main",
+            "openai/gpt",
+            "openai/gpt",
+            crate::ModelUseAuthority::new("custom_t", &deny),
+        ),
+        Err(crate::ModelUseDenial::PrimaryFallback)
+    );
+}
+
+#[test]
+fn network_gate_accepts_replaceable_policy_evaluators() {
+    assert_eq!(
+        crate::authorize_network_connect(
+            "default",
+            crate::NetworkConnectAuthority::new("custom_t", &FixedPolicy(true)),
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        crate::authorize_network_connect(
+            "default",
+            crate::NetworkConnectAuthority::new("custom_t", &FixedPolicy(false)),
+        ),
+        Err(crate::NetworkConnectDenial::Policy)
+    );
+}
+
 #[test]
 fn tool_listing_ignores_non_executable_and_control_entries() {
     let root = clean_test_dir("tool-list");
@@ -37,7 +97,7 @@ fn tool_lookup_rejects_executable_symlink() {
     let denied = authorize_tool_execution(
         &tool_path,
         "fs.read",
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy),
+        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy, P),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
 }
@@ -61,7 +121,7 @@ fn tool_lookup_rejects_symlink_tool_directory() {
     let denied = authorize_tool_execution(
         &tool_path,
         "fs.read",
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy),
+        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy, P),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
 }
@@ -78,11 +138,62 @@ fn tool_execution_authority_requires_all_layers() {
     let agent_policy = allow_tool_policy("coder_t", "fs.read");
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
     let tool_path = ToolPath::new([tools.clone()]);
-    let authority =
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &agent_policy, &tool_policy);
+    let mut authority = ToolExecutionAuthority::new(
+        &identity,
+        &mounts,
+        "coder_t",
+        &agent_policy,
+        &tool_policy,
+        P,
+    );
 
     let grant = authorize_tool_execution(&tool_path, "fs.read", authority);
     assert!(matches!(grant, Ok(ref grant) if grant.hit().path() == tools.join("fs.read")));
+    authority.permissions = AgentPermissions(0);
+    assert_eq!(
+        authorize_tool_execution(&tool_path, "fs.read", authority),
+        Err(ToolExecutionDenial::AgentPermission)
+    );
+}
+
+#[test]
+fn tool_mechanism_accepts_replaceable_policy_evaluators() {
+    let root = clean_test_dir("tool-authority-policy-boundary");
+    let tools = root.join("tool");
+    assert!(fs::create_dir_all(&tools).is_ok());
+    write_fixture_file(&tools.join("fs.read"), 0o755);
+
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
+    let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
+    let noexec = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev,noexec");
+    let tool_path = ToolPath::new([tools]);
+    let allow = FixedPolicy(true);
+    let deny = FixedPolicy(false);
+
+    assert!(
+        authorize_tool_execution(
+            &tool_path,
+            "fs.read",
+            ToolExecutionAuthority::new(&identity, &mounts, "custom_t", &allow, &allow, P),
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        authorize_tool_execution(
+            &tool_path,
+            "fs.read",
+            ToolExecutionAuthority::new(&identity, &mounts, "custom_t", &deny, &allow, P),
+        ),
+        Err(ToolExecutionDenial::AgentPolicy)
+    );
+    assert_eq!(
+        authorize_tool_execution(
+            &tool_path,
+            "fs.read",
+            ToolExecutionAuthority::new(&identity, &noexec, "custom_t", &allow, &allow, P),
+        ),
+        Err(ToolExecutionDenial::NoExecMount)
+    );
 }
 
 #[test]
@@ -148,7 +259,14 @@ fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
     let denied = authorize_tool_execution(
         &tool_path,
         "fs.read",
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &tool_policy),
+        ToolExecutionAuthority::new(
+            &identity,
+            &mounts,
+            "coder_t",
+            &empty_policy,
+            &tool_policy,
+            P,
+        ),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
 }
@@ -182,6 +300,7 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
             "coder_t",
             &agent_policy,
             &tool_policy,
+            P,
         ),
     );
     assert_eq!(denied_by_noexec, Err(ToolExecutionDenial::NoExecMount));
@@ -195,6 +314,7 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
             "coder_t",
             &empty_policy,
             &tool_policy,
+            P,
         ),
     );
     assert_eq!(
@@ -211,6 +331,7 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
             "coder_t",
             &agent_policy,
             &empty_policy,
+            P,
         ),
     );
     assert_eq!(denied_by_tool_policy, Err(ToolExecutionDenial::ToolPolicy));
@@ -224,6 +345,7 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
             "coder_t",
             &agent_policy,
             &tool_policy,
+            P,
         ),
     );
     assert_eq!(denied_when_unmounted, Err(ToolExecutionDenial::NotMounted));
@@ -250,7 +372,7 @@ fn project_tools_are_visible_only_through_ctx_path_order() {
     let identity = ok!(unix_identity_for(&project.join("project.test")));
     let mounts = mount_table_for_target(&project, "rw", "bind,nosuid,nodev");
     let policy = allow_tool_policy("coder_t", "project.test");
-    let authority = ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy);
+    let authority = ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy, P);
     assert!(authorize_tool_execution(&with_project, "project.test", authority).is_ok());
 }
 
@@ -282,14 +404,14 @@ fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
     let denied = authorize_tool_execution(
         &tool_path,
         "mcp.github.search_issues",
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &allow_mcp),
+        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &allow_mcp, P),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
 
     let allowed = authorize_tool_execution(
         &tool_path,
         "mcp.github.search_issues",
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &allow_mcp, &allow_mcp),
+        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &allow_mcp, &allow_mcp, P),
     );
     assert!(allowed.is_ok());
 }
@@ -315,7 +437,14 @@ fn tool_schema_cannot_grant_execution_authority() {
     let denied = authorize_tool_execution(
         &tool_path,
         "fs.read",
-        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &tool_policy),
+        ToolExecutionAuthority::new(
+            &identity,
+            &mounts,
+            "coder_t",
+            &empty_policy,
+            &tool_policy,
+            P,
+        ),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
 }
@@ -343,7 +472,7 @@ fn tool_execution_authority_checks_linux_identity_mode_bits() {
         authorize_tool_execution(
             &tool_path,
             "owner-only",
-            ToolExecutionAuthority::new(&owner_identity, &mounts, "coder_t", &policy, &policy),
+            ToolExecutionAuthority::new(&owner_identity, &mounts, "coder_t", &policy, &policy, P),
         )
         .is_ok()
     );
@@ -351,7 +480,7 @@ fn tool_execution_authority_checks_linux_identity_mode_bits() {
         authorize_tool_execution(
             &tool_path,
             "owner-only",
-            ToolExecutionAuthority::new(&other_identity, &mounts, "coder_t", &policy, &policy),
+            ToolExecutionAuthority::new(&other_identity, &mounts, "coder_t", &policy, &policy, P),
         ),
         Err(ToolExecutionDenial::LinuxPermission)
     );

@@ -4,7 +4,7 @@
     "description": "The title of the footer links column with title=Core in the footer"
   },
   "link.title.Clients": {
-    "message": "Clients",
+    "message": "客户端",
     "description": "The title of the footer links column with title=Clients in the footer"
   },
   "link.title.Project": {
@@ -28,11 +28,11 @@
     "description": "The label of footer link with label=Design linking to /docs/DESIGN"
   },
   "link.item.label.Root ABI": {
-    "message": "Root ABI",
+    "message": "根 ABI",
     "description": "The label of footer link with label=Root ABI linking to /docs/spec/root-abi"
   },
   "link.item.label.Object ABI": {
-    "message": "Object ABI",
+    "message": "对象 ABI",
     "description": "The label of footer link with label=Object ABI linking to /docs/spec/object-abi"
   },
   "link.item.label.ctx coreutils": {
@@ -44,11 +44,11 @@
     "description": "The label of footer link with label=agent.sh linking to /docs/agent-sh"
   },
   "link.item.label.Chat UI ABI": {
-    "message": "Chat UI ABI",
+    "message": "聊天界面 ABI",
     "description": "The label of footer link with label=Chat UI ABI linking to /docs/chatui"
   },
   "link.item.label.Session ABI": {
-    "message": "Session ABI",
+    "message": "会话 ABI",
     "description": "The label of footer link with label=Session ABI linking to /docs/spec/session-abi"
   },
   "link.item.label.GitHub": {
