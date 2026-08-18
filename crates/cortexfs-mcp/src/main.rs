@@ -79,7 +79,7 @@ fn run() -> io::Result<ExitCode> {
         config.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "--config required"))?;
     let server_name =
         server.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "--server required"))?;
-    let server = config::read(&config_path, &server_name)?;
+    let server = config::read(&config_path, &server_name, None)?;
     let mut client = client::Client::start(&server)?;
     let tools = client.tools()?;
     if verb == "list" {
