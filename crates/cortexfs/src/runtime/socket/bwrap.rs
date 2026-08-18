@@ -184,7 +184,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--clearenv".to_owned(),
         "--setenv".to_owned(),
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-        cortexfs_paths::shared_path(request.runtime.ctx_root, "providers.d")
+        cortexfs_paths::shared_path(Path::new(CTX_ROOT), "providers.d")
             .display()
             .to_string(),
         "--die-with-parent".to_owned(),
@@ -216,8 +216,12 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
         ]);
     }
-    append_bwrap_agent_environment(&mut bwrap, request.environment, request.control_environment);
-    bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
+    append_bwrap_agent_environment(
+        &mut bwrap,
+        request.runtime.source_root,
+        request.environment,
+        request.control_environment,
+    );
     if let Some(socket) = request.control_socket {
         bwrap.extend([
             "--bind".to_owned(),
@@ -269,6 +273,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
 
 fn append_bwrap_agent_environment(
     bwrap: &mut Vec<String>,
+    source_root: &Path,
     environment: &[(String, String)],
     control_environment: Option<&[(String, String)]>,
 ) {
@@ -280,7 +285,11 @@ fn append_bwrap_agent_environment(
         ) {
             continue;
         }
-        bwrap.extend(["--setenv".to_owned(), name.clone(), value.clone()]);
+        bwrap.extend([
+            "--setenv".to_owned(),
+            name.clone(),
+            sandbox_agent_environment_value(source_root, name, value),
+        ]);
     }
     for entry in control_environment.unwrap_or_default() {
         let (name, value) = (&entry.0, &entry.1);
@@ -288,6 +297,29 @@ fn append_bwrap_agent_environment(
             bwrap.extend(["--setenv".to_owned(), name.clone(), value.clone()]);
         }
     }
+}
+
+fn sandbox_agent_environment_value(source_root: &Path, name: &str, value: &str) -> String {
+    match name {
+        "CTX_ROOT" | "CTX_SOURCE" => CTX_ROOT.to_owned(),
+        "HOME" => "/home/agent".to_owned(),
+        "CTX_PATH" => value
+            .split(':')
+            .map(|entry| sandbox_source_path(source_root, entry))
+            .collect::<Vec<_>>()
+            .join(":"),
+        _ => sandbox_source_path(source_root, value),
+    }
+}
+
+fn sandbox_source_path(source_root: &Path, value: &str) -> String {
+    let path = Path::new(value);
+    if source_root != Path::new("/")
+        && let Ok(relative) = path.strip_prefix(source_root)
+    {
+        return Path::new(CTX_ROOT).join(relative).display().to_string();
+    }
+    value.to_owned()
 }
 
 pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {
@@ -300,18 +332,4 @@ pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str)
         return source_root.join(relative).display().to_string();
     }
     source.to_owned()
-}
-
-pub(crate) fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
-    let Some(source_root) = source_root.to_str() else {
-        return Vec::new();
-    };
-    if !source_root.starts_with('/') || source_root == "/" {
-        return Vec::new();
-    }
-    let mut args = support::bwrap::dir_args_for_parent(source_root);
-    args.push("--ro-bind".to_owned());
-    args.push(source_root.to_owned());
-    args.push(source_root.to_owned());
-    args
 }
