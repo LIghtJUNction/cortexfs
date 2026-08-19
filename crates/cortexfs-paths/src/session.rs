@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::home_root_path;
 
+/// Stable child name for the attach-channel index below an agent session root.
+pub const SESSION_CHANNEL_INDEX: &str = "channel";
+
 #[must_use]
 pub fn ctx_home_path(root: &Path, uid: &str) -> PathBuf {
     home_root_path(root).join(uid)
@@ -88,6 +91,16 @@ pub fn session_file_path(
 #[must_use]
 pub fn session_index_file_path(session: &Path, file: &str) -> PathBuf {
     session.join("index").join(file)
+}
+
+#[must_use]
+pub fn session_channel_index_path(session: &Path) -> PathBuf {
+    session.join("index").join(SESSION_CHANNEL_INDEX)
+}
+
+#[must_use]
+pub fn session_channel_path(session: &Path, channel: &str) -> PathBuf {
+    session_channel_index_path(session).join(channel)
 }
 
 #[must_use]

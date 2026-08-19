@@ -1,3 +1,4 @@
+use cortexfs_metadatas::MetadataCatalog;
 use cortexfs_runtime_client::agent::{
     AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI, AgentInvocationEnvelope, read_agent_invocation,
 };
@@ -245,10 +246,34 @@ pub(crate) fn candidate_window_budget(
     .map_err(|error| ExecError::with_io("cannot read model context limit", &error))?;
     let limit = ModelContextLimit::parse_control(&content)
         .ok_or_else(|| ExecError::new("invalid model context limit"))?;
-    let effective = setting
-        .resolve(limit)
-        .map_err(|error| ExecError::new(format!("ineligible context limit: {error:?}")))?;
+    let effective = match setting {
+        AgentWindowSetting::Auto => recommended_window(ctx_root, provider, name, limit),
+        AgentWindowSetting::Explicit(_) => setting
+            .resolve(limit)
+            .map_err(|error| ExecError::new(format!("ineligible context limit: {error:?}")))?,
+    };
     Ok(budget_from_effective(effective))
+}
+
+fn recommended_window(
+    _ctx_root: &Path,
+    provider: &str,
+    model: &str,
+    hard_limit: ModelContextLimit,
+) -> ModelContextLimit {
+    let Some(max_tokens) = hard_limit.tokens() else {
+        return hard_limit;
+    };
+    let catalog =
+        MetadataCatalog::from_cache_or_builtins(&cortexfs_paths::provider_model_cache_path());
+    let Some(recommended) = catalog
+        .resolve(model)
+        .or_else(|| catalog.resolve_for(provider, model))
+        .and_then(|metadata| metadata.context_policy().recommended_tokens)
+    else {
+        return hard_limit;
+    };
+    ModelContextLimit::known(recommended.min(max_tokens)).unwrap_or(hard_limit)
 }
 
 pub(crate) fn parse_agent_context_budget(

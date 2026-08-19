@@ -231,8 +231,9 @@ pub fn peer_credentials(stream: &UnixStream) -> Result<PeerCredentials, PeerCred
 /// Ensures `session_root/<session>/` has the durable session layout.
 ///
 /// This creates only documented session files, context directories, and the
-/// reserved `session/index` files. Existing files are preserved; the helper
-/// does not start a model, run an agent, or synthesize hidden history.
+/// reserved `session/index` files and the attach channel directory. Existing
+/// files are preserved; the helper does not start a model, run an agent, or
+/// synthesize hidden history.
 pub fn ensure_durable_session_layout(
     session_root: &Path,
     session_name: &str,
@@ -272,10 +273,15 @@ pub fn ensure_durable_session_layout(
         create_dir(&index.join("by-cwd"), &mut receipts)?;
         create_dir(&index.join("by-hash"), &mut receipts)?;
         create_dir(&index.join("by-uuid"), &mut receipts)?;
+        create_dir(
+            &cortexfs_paths::session_channel_index_path(session_root),
+            &mut receipts,
+        )?;
 
         let now = unix_timestamp_text();
         record_text(&session_dir.join("messages.jsonl"), "", &mut receipts)?;
         record_text(&session_dir.join("events.jsonl"), "", &mut receipts)?;
+        record_text(&session_dir.join("raw"), "", &mut receipts)?;
         record_text(&session_dir.join("latest.md"), "", &mut receipts)?;
         record_text(&session_dir.join("state"), "idle\n", &mut receipts)?;
         record_text(

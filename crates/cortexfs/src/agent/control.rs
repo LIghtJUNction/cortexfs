@@ -37,6 +37,8 @@ pub enum AgentControlKind {
     Approval,
     /// `agent/<name>.d/window`: context-window setting in tokens.
     Window,
+    /// `agent/<name>.d/compact`: context-compaction threshold in tokens.
+    Compact,
 }
 
 impl AgentControlKind {
@@ -56,6 +58,7 @@ impl AgentControlKind {
             "pid" => Some(Self::Pid),
             "approval" => Some(Self::Approval),
             "window" => Some(Self::Window),
+            "compact" => Some(Self::Compact),
             _ => None,
         }
     }
@@ -79,7 +82,9 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
         AgentControlKind::Groups => inspect_agent_groups_control(content),
         AgentControlKind::Parent => inspect_optional_agent_parent_control(content),
         AgentControlKind::Pid => inspect_optional_agent_number_control(content),
-        AgentControlKind::Window => inspect_agent_window_control(content),
+        AgentControlKind::Window | AgentControlKind::Compact => {
+            inspect_agent_window_control(content)
+        }
         AgentControlKind::Perm => AgentControlReport::new(
             AgentPermissions::parse_control(content)
                 .is_none()
@@ -234,6 +239,7 @@ pub(crate) fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
         | AgentControlKind::Parent
         | AgentControlKind::Perm
         | AgentControlKind::Pid
-        | AgentControlKind::Window => false,
+        | AgentControlKind::Window
+        | AgentControlKind::Compact => false,
     }
 }

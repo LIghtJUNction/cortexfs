@@ -14,6 +14,7 @@ pub(crate) fn handle_socket_send(
         ref cwd,
         ref input,
         ref event,
+        ref origin,
         ..
     } = request
     else {
@@ -36,6 +37,11 @@ pub(crate) fn handle_socket_send(
     let _receipts =
         ensure_durable_session_layout(session_root, session, effective_cwd, model, scope)
             .map_err(SocketRuntimeError::SessionLayout)?;
+    if let Some(origin) = origin.as_ref() {
+        runtime::channel::register_channel(session_root, session, scope, origin).map_err(
+            |_error| SocketRuntimeError::SessionLayout(DurableSessionLayoutError::CannotCreate),
+        )?;
+    }
     let durable_request = SocketRequest::Send {
         id: id.to_owned(),
         session: session.to_owned(),
@@ -44,6 +50,7 @@ pub(crate) fn handle_socket_send(
         workspace: None,
         input: input.to_owned(),
         event: event.clone(),
+        origin: origin.clone(),
     };
     let outcome = preparation
         .map_or_else(

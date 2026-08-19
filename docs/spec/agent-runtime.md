@@ -329,6 +329,7 @@ agent/<name>.d/path
 agent/<name>.d/mount
 agent/<name>.d/model
 agent/<name>.d/window
+agent/<name>.d/compact
 agent/<name>.d/policy
 agent/<name>.d/uid
 agent/<name>.d/gid
@@ -361,6 +362,12 @@ Every Agent, including a dynamically created child, has one durable setting:
 agent/<name>.d/window
 ```
 
+It has a second durable context policy setting:
+
+```text
+agent/<name>.d/compact
+```
+
 The file contains exactly one canonical LF-terminated line:
 
 ```text
@@ -376,9 +383,15 @@ session history or context files.
 `window` stores the setting, not a stale copied maximum. Its effective value is:
 
 ```text
-auto       selected execution candidate's known model limit, otherwise unknown
+auto       selected model's metadata recommended window, bounded by limit
 number     that exact number
 ```
+
+`compact` uses the same syntax. Its `auto` value follows the selected model's
+metadata compaction threshold and is bounded by the effective `window`; an
+explicit number is a deliberate smaller threshold. The model's read-only
+`limit`, `recommended`, and `compact` files remain the source of defaults, so
+switching an Agent model does not leave stale copied values in `agent.d`.
 
 An explicit number is valid only when the selected model maximum is known and
 the number is not greater than that maximum. Changing `model` must atomically
@@ -387,7 +400,7 @@ model maximum or the new maximum is unknown. It must not silently clamp or
 reset the setting.
 
 Fallback selection re-evaluates the same invariant for each candidate. With
-`auto`, the effective value follows the actual candidate's known maximum. With
+`auto`, the effective value follows the actual candidate's recommendation. With
 an explicit number, a fallback whose maximum is unknown or smaller is
 ineligible and produces an auditable candidate error rather than silently
 changing the Agent setting.
@@ -399,6 +412,11 @@ with the conservative estimate of four UTF-8 characters per token. This
 conversion is only a bounded prompt-budget estimate; it does not change the
 token unit of `window` or `limit`. Arithmetic saturates at the receiving
 budget's bound.
+
+When known, the effective compaction threshold is supplied as
+`CTX_CONTEXT_COMPACTION_TOKENS`; the selected durable setting is available as
+`CTX_AGENT_COMPACT_SETTING`. These values tell a context compiler when to
+rebuild its working set; they never delete `messages.jsonl` or the `raw` view.
 
 The host reserves `min(4096, max(1, effective_tokens / 4))` output tokens.
 Prompt input admission therefore uses `effective_tokens * 4` total characters

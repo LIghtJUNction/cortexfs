@@ -404,6 +404,7 @@ fn handle_agent_tsh_request(
         workspace: None,
         input: format!(":tsh {input}"),
         event: None,
+        origin: None,
     };
     let recorder = match handle_socket_send(
         runtime.session_root,

@@ -1,6 +1,7 @@
 use crate::support::plain::{open_plain_directory, path_metadata_no_follow, proc_fd_path};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
@@ -38,8 +39,8 @@ impl Tool for FsListTool {
             .map_err(|error| ToolError::denied(format!("directory open failed: {error}")))?;
         let entries = fs::read_dir(proc_fd_path(&directory))
             .map_err(|error| ToolError::denied(format!("directory read failed: {error}")))?;
-        let mut values = Vec::new();
-        for entry in entries.take(max) {
+        let mut values = BTreeMap::new();
+        for entry in entries {
             let entry = entry.map_err(|error| {
                 ToolError::denied(format!("directory entry read failed: {error}"))
             })?;
@@ -47,12 +48,15 @@ impl Tool for FsListTool {
                 .path()
                 .symlink_metadata()
                 .map_err(|error| ToolError::denied(format!("entry stat failed: {error}")))?;
-            values.push(metadata_value(
-                entry.file_name().to_string_lossy().as_ref(),
-                &metadata,
-            ));
+            let name = entry.file_name().to_string_lossy().into_owned();
+            values.insert(name.clone(), metadata_value(&name, &metadata));
+            if values.len() > MAX_FS_LIST_ENTRIES
+                && let Some(last) = values.keys().next_back().cloned()
+            {
+                values.remove(&last);
+            }
         }
-        values.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+        let values = values.into_values().take(max).collect::<Vec<_>>();
         output
             .json_message(&Value::Array(values))
             .map_err(|error| ToolError::new("EIO", error.to_string()))

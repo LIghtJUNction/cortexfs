@@ -45,14 +45,6 @@ pub(crate) fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
         };
     }
 
-    if parsed.model_control_file() == Some("fallback") {
-        let content = read_file_to_string(&resolved)?;
-        let (_fallback, report) = parse_model_fallback(&content);
-        return check_report("model fallback", report.is_ok(), || {
-            format_model_fallback_issues(report.issues())
-        });
-    }
-
     if file_check_model_driver(parsed, &resolved)? {
         return Ok(());
     }
@@ -299,19 +291,4 @@ pub(crate) fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<S
             label_path.display()
         ))),
     }
-}
-
-pub(crate) fn format_model_fallback_issues(issues: &[ModelFallbackIssue]) -> String {
-    issues
-        .iter()
-        .map(|issue| match *issue {
-            ModelFallbackIssue::InvalidLine { line, ref value } => {
-                format!("line {line}: invalid model {value}")
-            }
-            ModelFallbackIssue::DuplicateModel { line, ref value } => {
-                format!("line {line}: duplicate model {value}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
 }

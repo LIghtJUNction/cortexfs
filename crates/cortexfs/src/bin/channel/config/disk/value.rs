@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use cortexfs::channel::discord::DiscordConfig;
-use cortexfs_channels::ChannelId;
+use cortexfs_channels::{ChannelId, ChannelProgressPolicy};
 
 const DEFAULT_API_BASE: &str = "https://discord.com/api/v10";
 const DEFAULT_GATEWAY: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -27,6 +27,8 @@ pub(super) struct RawDiscordConfig {
     gateway_url: String,
     #[serde(default = "default_intents")]
     intents: u64,
+    #[serde(default)]
+    progress: ChannelProgressPolicy,
 }
 
 impl RawDiscordConfig {
@@ -42,6 +44,7 @@ impl RawDiscordConfig {
             api_base: self.api_base,
             gateway_url: self.gateway_url,
             intents: self.intents,
+            progress: self.progress,
         }
     }
 }

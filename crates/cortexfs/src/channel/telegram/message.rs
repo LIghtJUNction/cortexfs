@@ -43,11 +43,12 @@ pub(super) fn create(
     config: &TelegramConfig,
     chat: &str,
     source: &str,
+    text: &str,
     thread: Option<&str>,
 ) -> Result<String, TelegramError> {
     let mut fields = Map::new();
     fields.insert("chat_id".to_owned(), json!(chat));
-    fields.insert("text".to_owned(), json!("⏳ 思考中…"));
+    fields.insert("text".to_owned(), json!(text));
     fields.insert("reply_to_message_id".to_owned(), json!(source));
     if let Some(thread) = thread {
         fields.insert("message_thread_id".to_owned(), json!(thread));

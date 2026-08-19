@@ -92,12 +92,13 @@ fn canonical_debug(directory: &fs::File) -> bool {
         return false;
     };
     MODEL_CONTROL_FILES.iter().all(|file| {
-        let expected = if matches!(*file, "default" | "fallback" | "log") {
+        let expected = if matches!(*file, "default" | "log") {
             Some(String::new())
         } else {
             debug_model_control_content(DEBUG_ECHO_MODEL, file)
         };
-        matches!(receipt_at(&control, file, EntryKind::File), Ok(Some(_)))
-            && read_small_text_file_at(&control, file, 64 * 1024, "invalid").ok() == expected
+        let receipt = matches!(receipt_at(&control, file, EntryKind::File), Ok(Some(_)));
+        let actual = read_small_text_file_at(&control, file, 64 * 1024, "invalid").ok();
+        receipt && actual == expected
     })
 }

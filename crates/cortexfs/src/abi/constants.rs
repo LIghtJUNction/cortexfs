@@ -14,7 +14,18 @@ pub const MAX_OBJECT_NAME_LEN: usize = 64;
 
 /// Required model control files.
 pub const MODEL_CONTROL_FILES: &[&str] = &[
-    "id", "driver", "cap", "effort", "default", "fallback", "limit", "session", "status", "log",
+    "id",
+    "metadata.json",
+    "driver",
+    "cap",
+    "effort",
+    "default",
+    "limit",
+    "recommended",
+    "compact",
+    "session",
+    "status",
+    "log",
 ];
 /// Required hook directory inside every executable object's `.d/` control tree.
 pub const OBJECT_HOOK_DIR: &str = "hooks";
@@ -23,6 +34,7 @@ pub const OBJECT_HOOK_PHASE_DIRS: &[&str] = &["pre.d", "post.d"];
 pub(crate) const MODEL_ROUTE_FILE: &str = "route";
 pub(crate) const DEFAULT_MODEL_ROUTE: &str = "\
 # Global CortexFS model egress route.
+# model-fallback(provider/model) -> provider/backup-model
 # Rules are evaluated top to bottom. A group selects both transport and key slot.
 # group(proxy) -> http(http://127.0.0.1:8080/v1), key(default)
 # group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock), key(local)
@@ -74,8 +86,17 @@ pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
     "stream",
     "session",
     "vision",
+    "image_input",
+    "image_output",
     "audio_input",
     "audio_output",
+    "video_input",
+    "video_output",
+    "pdf_input",
+    "pdf_output",
+    "attachment",
+    "temperature",
+    "interleaved",
     "json_schema",
     "tool_call_syntax",
     "reasoning",
@@ -112,6 +133,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "mount",
     "model",
     "window",
+    "compact",
     "system.md",
     "prompt.template.md",
     "policy",
@@ -177,6 +199,7 @@ pub const TOOL_CONTROL_FILES: &[&str] = &[
 
 /// Required durable files in an agent session directory.
 pub const SESSION_REQUIRED_FILES: &[&str] = &[
+    "raw",
     "messages.jsonl",
     "events.jsonl",
     "latest.md",

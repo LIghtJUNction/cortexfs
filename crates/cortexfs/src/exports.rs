@@ -52,9 +52,8 @@ pub use policy::{
 pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelContextLimit, ModelDriverRouteError, ModelDriverRoutingTable,
-    ModelDriverUseCase, ModelEffort, ModelFallbackIssue, ModelFallbackReport, ModelFallbackTable,
-    ModelRegistryError, inspect_model_capabilities, parse_model_driver_routes,
-    parse_model_fallback,
+    ModelDriverUseCase, ModelEffort, ModelRegistryError, inspect_model_capabilities,
+    parse_model_driver_routes,
 };
 pub use provider::name::{
     ProviderNameError, ProviderSystemSecret, ProviderSystemSecretError, ProviderSystemSecretHandle,

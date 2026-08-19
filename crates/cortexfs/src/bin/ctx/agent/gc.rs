@@ -912,11 +912,101 @@ fn preflight_gc_index(session_root: &Path, candidates: &[String]) -> Result<GcIn
             }
         }
     }
+    preflight_gc_channels(session_root, &candidate_set, &mut entries)?;
     Ok(GcIndex {
         list_path,
         list,
         entries,
     })
+}
+
+fn preflight_gc_channels(
+    session_root: &Path,
+    candidates: &HashSet<&str>,
+    entries: &mut Vec<GcIndexEntry>,
+) -> Result<(), CliError> {
+    let directory = cortexfs_paths::session_channel_index_path(session_root);
+    let directory_fd = match open_plain_directory(&directory) {
+        Ok(directory) => directory,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot open session channel index dir {}: {error}",
+                directory.display()
+            )));
+        }
+    };
+    for entry in fs::read_dir(proc_fd_path(&directory_fd)).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", directory.display()))
+    })? {
+        let entry = entry.map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", directory.display()))
+        })?;
+        let name = entry.file_name().into_string().map_err(|_name| {
+            CliError::unavailable(format!(
+                "invalid session channel index path under {}",
+                directory.display()
+            ))
+        })?;
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = directory.join(&name);
+        let stat = nix::sys::stat::fstatat(
+            &directory_fd,
+            name.as_str(),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+        })?;
+        if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFREG)
+        {
+            continue;
+        }
+        let content = cortexfs::support::plain::read_small_text_file_at(
+            &directory_fd,
+            &name,
+            MAX_SESSION_GC_INDEX_BYTES,
+            "invalid session channel index file",
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+        })?;
+        let session = inspect_gc_channel(&content, &name).ok_or_else(|| {
+            CliError::unavailable(format!("invalid session channel index: {}", path.display()))
+        })?;
+        if candidates.contains(session.as_str()) {
+            entries.push(GcIndexEntry {
+                path,
+                name,
+                content,
+                session,
+                dev: stat.st_dev,
+                ino: stat.st_ino,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn inspect_gc_channel(content: &str, filename: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(content).ok()?;
+    let object = value.as_object()?;
+    (object.get("version").and_then(serde_json::Value::as_u64) == Some(1)).then_some(())?;
+    (object.get("name").and_then(serde_json::Value::as_str) == Some(filename)).then_some(())?;
+    object
+        .get("agent")
+        .and_then(serde_json::Value::as_str)
+        .filter(|agent| is_object_name(agent))?;
+    let scope = object.get("scope").and_then(serde_json::Value::as_str)?;
+    matches!(scope, "private" | "shared").then_some(())?;
+    object
+        .get("session")
+        .and_then(serde_json::Value::as_str)
+        .filter(|session| is_object_name(session))
+        .map(str::to_owned)
 }
 
 fn read_gc_list(path: &Path) -> Result<GcListReceipt, CliError> {

@@ -1,7 +1,6 @@
 use std::{collections::HashMap, num::NonZeroU32};
 
 use crate::abi::constants::{FORBIDDEN_MODEL_CAPABILITIES, STABLE_MODEL_CAPABILITIES};
-use crate::abi::path::is_model_name;
 use crate::support::control::{parse_canonical_control_value, parse_canonical_positive_u32};
 
 /// Model capability control-file validation issue.
@@ -42,10 +41,24 @@ pub enum Capability {
     ImageInput,
     /// Model can produce image output.
     ImageOutput,
+    /// Model can consume video input.
+    VideoInput,
+    /// Model can produce video output.
+    VideoOutput,
     /// Model can consume audio input.
     AudioInput,
     /// Model can produce audio output.
     AudioOutput,
+    /// Model can consume PDF input.
+    PdfInput,
+    /// Model can produce PDF output.
+    PdfOutput,
+    /// Model accepts file attachments.
+    Attachment,
+    /// Model accepts temperature control.
+    Temperature,
+    /// Model exposes interleaved reasoning content.
+    Interleaved,
 }
 
 /// Provider-neutral model capability declaration.
@@ -61,8 +74,15 @@ pub struct ModelCapabilities {
     pub json_mode: bool,
     pub image_input: bool,
     pub image_output: bool,
+    pub video_input: bool,
+    pub video_output: bool,
     pub audio_input: bool,
     pub audio_output: bool,
+    pub pdf_input: bool,
+    pub pdf_output: bool,
+    pub attachment: bool,
+    pub temperature: bool,
+    pub interleaved: bool,
 }
 
 /// Provider-neutral model capability lookup table.
@@ -215,90 +235,6 @@ impl ModelEffort {
     }
 }
 
-/// Problems while parsing and validating model-fallback references.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ModelFallbackIssue {
-    /// A referenced line is empty or contains non-model text.
-    InvalidLine { line: usize, value: String },
-    /// The fallback chain contains a repeated model reference.
-    DuplicateModel { line: usize, value: String },
-}
-
-impl_issue_report!(ModelFallbackReport, ModelFallbackIssue);
-
-/// Parsed `model/<provider>/<model>.d/fallback` contents.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ModelFallbackTable {
-    models: Vec<String>,
-}
-
-/// Parsed `model/<provider>/<model>.d/fallback` content report.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ModelFallbackReport {
-    issues: Vec<ModelFallbackIssue>,
-}
-
-impl ModelFallbackTable {
-    /// Returns the ordered fallback models.
-    #[must_use]
-    pub fn models(&self) -> &[String] {
-        &self.models
-    }
-}
-
-/// Parses and validates model fallback lines.
-#[must_use]
-pub fn parse_model_fallback(content: &str) -> (ModelFallbackTable, ModelFallbackReport) {
-    let mut models = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut issues = Vec::new();
-
-    for (index, line) in content.lines().enumerate() {
-        let line_number = index + 1;
-        let raw = line.trim();
-        if raw.is_empty() || raw.starts_with('#') {
-            continue;
-        }
-
-        let normalized = raw.split_once('#').map_or(raw, |(head, _)| head).trim();
-        if normalized.is_empty() {
-            continue;
-        }
-        if !is_model_name(normalized) {
-            issues.push(ModelFallbackIssue::InvalidLine {
-                line: line_number,
-                value: normalized.to_owned(),
-            });
-            continue;
-        }
-        if !seen.insert(normalized.to_owned()) {
-            issues.push(ModelFallbackIssue::DuplicateModel {
-                line: line_number,
-                value: normalized.to_owned(),
-            });
-            continue;
-        }
-        models.push(normalized.to_owned());
-    }
-
-    (
-        ModelFallbackTable { models },
-        ModelFallbackReport { issues },
-    )
-}
-
-impl ModelFallbackTable {
-    /// Parses fallback text into a table.
-    pub fn parse(content: &str) -> Result<Self, ModelFallbackReport> {
-        let (table, report) = parse_model_fallback(content);
-        if report.is_ok() {
-            Ok(table)
-        } else {
-            Err(report)
-        }
-    }
-}
-
 pub mod routes;
 pub use routes::*;
 
@@ -314,8 +250,15 @@ impl ModelCapabilities {
             Capability::JsonMode => self.json_mode,
             Capability::ImageInput => self.image_input,
             Capability::ImageOutput => self.image_output,
+            Capability::VideoInput => self.video_input,
+            Capability::VideoOutput => self.video_output,
             Capability::AudioInput => self.audio_input,
             Capability::AudioOutput => self.audio_output,
+            Capability::PdfInput => self.pdf_input,
+            Capability::PdfOutput => self.pdf_output,
+            Capability::Attachment => self.attachment,
+            Capability::Temperature => self.temperature,
+            Capability::Interleaved => self.interleaved,
         }
     }
 }
@@ -433,36 +376,6 @@ mod tests {
         assert_eq!(ModelEffort::parse("max"), Some(ModelEffort::Max));
         assert_eq!(ModelEffort::parse(""), Some(ModelEffort::Auto));
         assert_eq!(ModelEffort::parse("bad"), None);
-    }
-
-    #[test]
-    fn model_fallback_parses_one_model_per_line() {
-        let (fallback, report) =
-            parse_model_fallback("\n# comment\nopenai/gpt-5.6\nopenai/gpt-5.6-terra\n");
-        assert!(report.is_ok());
-        assert_eq!(
-            fallback.models(),
-            ["openai/gpt-5.6", "openai/gpt-5.6-terra"]
-        );
-    }
-
-    #[test]
-    fn model_fallback_rejects_duplicate_or_invalid_model() {
-        let (_fallback, report) =
-            parse_model_fallback("openai/gpt-5.6\nbad/name/extra\nopenai/gpt-5.6\n");
-        assert_eq!(
-            report.issues(),
-            &[
-                ModelFallbackIssue::InvalidLine {
-                    line: 2,
-                    value: "bad/name/extra".to_owned()
-                },
-                ModelFallbackIssue::DuplicateModel {
-                    line: 3,
-                    value: "openai/gpt-5.6".to_owned()
-                },
-            ]
-        );
     }
 
     #[test]

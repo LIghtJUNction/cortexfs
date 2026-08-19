@@ -125,6 +125,29 @@ impl AgentWindowSetting {
             }
         }
     }
+
+    /// Resolves `auto` to a trusted metadata recommendation, bounded by a ceiling.
+    pub const fn resolve_with_recommendation(
+        self,
+        ceiling: ModelContextLimit,
+        recommendation: ModelContextLimit,
+    ) -> Result<ModelContextLimit, AgentWindowError> {
+        match self {
+            Self::Auto => match (ceiling, recommendation) {
+                (ModelContextLimit::Known(ceiling), ModelContextLimit::Known(recommendation)) => {
+                    let selected = if ceiling.get() < recommendation.get() {
+                        ceiling
+                    } else {
+                        recommendation
+                    };
+                    Ok(ModelContextLimit::Known(selected))
+                }
+                (ModelContextLimit::Unknown, _) => Ok(ModelContextLimit::Unknown),
+                (ceiling, ModelContextLimit::Unknown) => Ok(ceiling),
+            },
+            Self::Explicit(_) => self.resolve(ceiling),
+        }
+    }
 }
 
 #[cfg(test)]

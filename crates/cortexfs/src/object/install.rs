@@ -41,6 +41,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "mount",
     "model",
     "window",
+    "compact",
     "abi",
     "approval",
     "loop",
@@ -437,7 +438,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
             )));
         }
         let validated_value = if class == ObjectClass::Agent
-            && matches!(name.as_str(), "tools" | "window" | "perm")
+            && matches!(name.as_str(), "tools" | "window" | "compact" | "perm")
             && !value.ends_with('\n')
         {
             format!("{value}\n")
@@ -468,6 +469,11 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
                 if AgentWindowSetting::parse_control(&validated_value).is_none() =>
             {
                 return Err(InstallError::invalid("invalid control value: window"));
+            }
+            (ObjectClass::Agent, "compact")
+                if AgentWindowSetting::parse_control(&validated_value).is_none() =>
+            {
+                return Err(InstallError::invalid("invalid control value: compact"));
             }
             (ObjectClass::Agent, "root" | "cwd") if !Path::new(value.trim()).is_absolute() => {
                 return Err(InstallError::invalid(format!(
@@ -630,7 +636,11 @@ fn write_manifest_controls(
         })?;
     }
     if class == ObjectClass::Agent {
-        for (name, content) in [("window", "auto\n"), ("perm", "rwx\n")] {
+        for (name, content) in [
+            ("window", "auto\n"),
+            ("compact", "auto\n"),
+            ("perm", "rwx\n"),
+        ] {
             if !manifest.controls.contains_key(name) {
                 write_text_file_at(control, name, content, 0o644).map_err(|error| {
                     InstallError::unavailable(format!(

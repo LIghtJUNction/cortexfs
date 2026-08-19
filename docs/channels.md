@@ -33,7 +33,22 @@ agent = "coder"
 session_prefix = "discord"
 # Optional complete instance id; omit for the base `discord` id.
 # channel = "discord.primary"
+
+# Optional progress presentation. Omit a value to disable that effect.
+[progress]
+reaction = "👀"
+error_reaction = "❌"
+placeholder = "⏳ 思考中…"
+error_prefix = "⚠️ "
+typing = true
+edit_interval_ms = 700
+edit_chunk_bytes = 512
 ```
+
+The progress values are configuration, not Discord ABI constants. The same
+policy can use any reaction or text, or disable the preview entirely by
+omitting the corresponding values. Without `progress.placeholder`, CortexFS
+sends the final reply normally and does not create a temporary message.
 
 Start the low-memory synchronous Gateway adapter after enabling the Discord
 `MESSAGE_CONTENT` privileged intent in the Discord Developer Portal:
@@ -74,6 +89,15 @@ Telegram uses long polling:
 export CORTEXFS_TELEGRAM_TOKEN='...'
 cortexfs-channel telegram
 ```
+
+Telegram's optional progress presentation uses the same generic environment
+variables: `CORTEXFS_CHANNEL_PROGRESS_REACTION`,
+`CORTEXFS_CHANNEL_PROGRESS_ERROR_REACTION`,
+`CORTEXFS_CHANNEL_PROGRESS_PLACEHOLDER`,
+`CORTEXFS_CHANNEL_PROGRESS_ERROR_PREFIX`,
+`CORTEXFS_CHANNEL_PROGRESS_TYPING`,
+`CORTEXFS_CHANNEL_PROGRESS_EDIT_INTERVAL_MS`, and
+`CORTEXFS_CHANNEL_PROGRESS_EDIT_CHUNK_BYTES`.
 
 Bluesky uses the AT Protocol notification API with an app password. It polls
 mentions and replies, maps the sender DID through the same identity-isolated

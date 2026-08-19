@@ -60,6 +60,7 @@ model/<provider>/<model>.sock      dynamic socket; existence means session=socke
 model/<provider>/<model>.d/status  dynamic
 model/<provider>/<model>.d/log     dynamic or durable, implementation choice
 model/<provider>/<model>.d/id      durable or config projection
+model/<provider>/<model>.d/metadata.json  read-only JSON metadata projection
 agent/<name>           dynamic executable entry
 agent/<name>.sock      dynamic socket
 agent/<name>.d/status  dynamic
@@ -169,6 +170,7 @@ user.cortexfs.kind                   stable ctx.* path classification
 user.cortexfs.origin                 virtual, disk, or overlay
 user.cortexfs.storage                memory or disk
 user.cortexfs.virtual                true or false
+user.cortexfs.mime_type              stable MIME type for the projected node
 user.cortexfs.backing_exists         true or false
 user.cortexfs.backing_path           implementation path, when one exists
 user.cortexfs.bytes                  projected byte size
@@ -179,6 +181,11 @@ user.cortexfs.cache_bytes            cached bytes known to CortexFS; 0 when none
 user.cortexfs.cache_entries          cache entry count; 0 when none
 user.cortexfs.cache_state            none, partial, warm, or stale
 user.cortexfs.tokenizer              tokenizer/estimator id
+user.cortexfs.context_length         current raw-session token estimate
+user.cortexfs.context_recommended    model metadata working-window recommendation
+user.cortexfs.context_compact_threshold model metadata compaction trigger
+user.cortexfs.context_max            model metadata hard maximum
+user.cortexfs.context_policy          model-metadata when policy is available
 ```
 
 `origin=virtual storage=memory` means the file is projected by CortexFS rather
@@ -190,6 +197,11 @@ Token counts are estimates unless a runtime later writes exact tokenizer
 metadata. The default estimator is `byte-estimate-v1`, a cheap read-before-read
 heuristic that does not scan full file contents. These xattrs are not control
 files; `setxattr` and `removexattr` must fail.
+
+`user.cortexfs.mime_type` is supplied even for extensionless ABI files such as
+`model/route` and session `raw`. It is an observation attribute, not a request
+to change the file's content type. Clients that cannot use xattrs should still
+fall back to the path shape and regular-file semantics.
 
 ## Directory Removal
 

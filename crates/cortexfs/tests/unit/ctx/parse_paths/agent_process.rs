@@ -432,6 +432,7 @@ fn agent_env_reports_derived_sandbox_environment() {
             "PATH=/usr/bin:/bin".to_owned(),
             "CTX_PATH=/ctx/tool:/ctx/home/1000/tool".to_owned(),
             "CTX_AGENT_LOOP=chat".to_owned(),
+            "CTX_AGENT_COMPACT_SETTING=auto".to_owned(),
         ])
     );
 }

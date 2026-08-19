@@ -35,8 +35,12 @@ pub struct AgentRuntimeView {
     pub(crate) mount_table: MountTable,
     pub(crate) model: String,
     pub(crate) model_limit: ModelContextLimit,
+    pub(crate) model_recommended: ModelContextLimit,
+    pub(crate) model_compact: ModelContextLimit,
     pub(crate) window_setting: AgentWindowSetting,
     pub(crate) effective_window: AgentEffectiveWindow,
+    pub(crate) compact_setting: AgentWindowSetting,
+    pub(crate) effective_compact: AgentEffectiveWindow,
     pub(crate) loop_kind: AgentLoop,
     pub(crate) policy: PolicyV0,
     pub(crate) declared_tools: BTreeSet<String>,
@@ -223,6 +227,18 @@ impl AgentRuntimeView {
         self.model_limit
     }
 
+    /// Returns the model metadata recommendation before Agent overrides.
+    #[must_use]
+    pub const fn model_recommended(&self) -> ModelContextLimit {
+        self.model_recommended
+    }
+
+    /// Returns the model metadata compaction threshold before Agent overrides.
+    #[must_use]
+    pub const fn model_compact(&self) -> ModelContextLimit {
+        self.model_compact
+    }
+
     /// Returns the durable Agent window setting.
     #[must_use]
     pub const fn window_setting(&self) -> AgentWindowSetting {
@@ -233,6 +249,18 @@ impl AgentRuntimeView {
     #[must_use]
     pub const fn effective_window(&self) -> AgentEffectiveWindow {
         self.effective_window
+    }
+
+    /// Returns the durable Agent compaction setting.
+    #[must_use]
+    pub const fn compact_setting(&self) -> AgentWindowSetting {
+        self.compact_setting
+    }
+
+    /// Returns the effective compaction threshold.
+    #[must_use]
+    pub const fn effective_compact(&self) -> AgentEffectiveWindow {
+        self.effective_compact
     }
 
     /// Returns the configured provider-neutral behavior loop.

@@ -623,6 +623,7 @@ fn fuse_projection_allows_durable_session_layout_creation() {
         "home/1000/agent/coder/session/index/by-cwd",
         "home/1000/agent/coder/session/index/by-hash",
         "home/1000/agent/coder/session/index/by-uuid",
+        "home/1000/agent/coder/session/index/channel",
     ] {
         assert_eq!(projection.create_layout_dir(dir, 1000, 1000, 0o700), Ok(()));
     }
@@ -656,6 +657,48 @@ fn fuse_projection_allows_durable_session_layout_creation() {
             Ok(())
         );
     }
+
+    let channel = "home/1000/agent/coder/session/index/channel/terminal_coder_fuse";
+    let channel_temp = "home/1000/agent/coder/session/index/channel/.terminal_coder_fuse.tmp-1-1-0";
+    let channel_content = r#"{"version":1,"name":"terminal_coder_fuse","agent":"coder","session":"fuse","scope":"private","transport":"terminal"}
+"#;
+    assert_eq!(
+        projection.create_layout_file(channel_temp, 1000, 1000, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(
+            channel_temp,
+            0,
+            channel_content.as_bytes(),
+            1000,
+            1000,
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        projection.rename_atomic_temp(channel_temp, channel, 1000),
+        Ok(())
+    );
+    assert_eq!(
+        projection.read_to_string(channel).as_deref(),
+        Ok(channel_content)
+    );
+    assert_eq!(
+        projection.write_control_file(channel, "{}\n"),
+        Err(FuseError::InvalidContent)
+    );
+    assert_eq!(
+        projection.read_to_string(channel).as_deref(),
+        Ok(channel_content)
+    );
+    assert!(
+        projection
+            .readdir("home/1000/agent/coder/session/index/channel")
+            .is_ok_and(|entries| entries
+                .iter()
+                .any(|entry| entry.name() == "terminal_coder_fuse"))
+    );
 
     assert!(root.join(session).join("messages.jsonl").is_file());
     assert!(root.join(session).join("context/swap/chunk").is_dir());

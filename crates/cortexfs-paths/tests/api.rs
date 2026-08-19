@@ -48,6 +48,21 @@ mod tests {
             ),
             PathBuf::from("/ctx/home/1000/agent/coder/session/default/index/current")
         );
+        assert_eq!(
+            cortexfs_paths::session_channel_index_path(Path::new(
+                "/ctx/home/1000/agent/coder/session"
+            )),
+            PathBuf::from("/ctx/home/1000/agent/coder/session/index/channel")
+        );
+        assert_eq!(
+            cortexfs_paths::session_channel_path(
+                Path::new("/ctx/home/1000/agent/coder/session"),
+                "terminal_coder_default",
+            ),
+            PathBuf::from(
+                "/ctx/home/1000/agent/coder/session/index/channel/terminal_coder_default"
+            )
+        );
     }
 
     #[test]

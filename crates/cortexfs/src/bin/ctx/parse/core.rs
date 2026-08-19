@@ -37,11 +37,15 @@ pub(crate) struct Cli {
 #[derive(Debug)]
 /// Top-level parsed command for `ctx`.
 pub(crate) enum Command {
+    NewSession,
     Help,
     HelpTopic(String),
     Abi,
     Env,
     Root,
+    Attach {
+        selector: Option<String>,
+    },
     Man {
         topic: Option<String>,
     },
@@ -67,7 +71,7 @@ pub(crate) enum Command {
         session: Option<String>,
     },
     Resume {
-        agent: String,
+        agent: Option<String>,
         session: Option<String>,
     },
     Send {
@@ -203,11 +207,13 @@ pub(crate) enum ScheduleArgs {
 pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
     let cli = parse(args)?;
     match cli.command {
+        Command::NewSession => start_default_session(&cli.root),
         Command::Help => success(print_help()),
         Command::HelpTopic(topic) => success(print_help_topic(&topic)),
         Command::Abi => success(print_abi()),
         Command::Env => success(print_env(&cli.root)),
         Command::Root => success(print_line(&cli.root.display().to_string())),
+        Command::Attach { ref selector } => channel_attach(&cli.root, selector.as_deref()),
         Command::Man { topic } => success(print_man(&cli.root, topic.as_deref())),
         Command::Status => success(print_status(&cli.root)),
         Command::Bootstrap {
@@ -230,7 +236,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             success(history(&cli.root, &agent, session.as_deref()))
         }
         Command::Resume { agent, session } => {
-            agent_resume(&cli.root, &agent, session.as_deref(), false)
+            resume_current_session(&cli.root, agent.as_deref(), session.as_deref())
         }
         Command::Send {
             agent,
@@ -435,7 +441,7 @@ pub(crate) fn parse_storage_command(
 pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let Some(command) = values.next() else {
-        return Ok(Command::Status);
+        return Ok(Command::NewSession);
     };
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) && is_top_level_help_topic(command.as_str()) {
@@ -447,7 +453,15 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = rest.into_iter();
 
     match command.as_str() {
-        "help" | "--help" | "-h" => Ok(Command::Help),
+        "help" => {
+            let topic = values.next();
+            no_extra_args(values)?;
+            topic.map_or(Ok(Command::Help), |topic| Ok(Command::HelpTopic(topic)))
+        }
+        "--help" | "-h" => {
+            no_extra_args(values)?;
+            Ok(Command::Help)
+        }
         "abi" => {
             no_extra_args(values)?;
             Ok(Command::Abi)
@@ -459,6 +473,11 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "root" => {
             no_extra_args(values)?;
             Ok(Command::Root)
+        }
+        "attach" => {
+            let selector = values.next();
+            no_extra_args(values)?;
+            Ok(Command::Attach { selector })
         }
         "man" => {
             let topic = values.next();
@@ -502,7 +521,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             Ok(Command::History { agent, session })
         }
         "resume" => {
-            let (agent, session) = parse_agent_session(values, "resume")?;
+            let (agent, session) = parse_resume(values)?;
             Ok(Command::Resume { agent, session })
         }
         "send" => {
@@ -606,6 +625,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "abi"
             | "env"
             | "root"
+            | "attach"
             | "man"
             | "bootstrap"
             | "storage"

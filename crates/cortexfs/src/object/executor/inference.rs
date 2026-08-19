@@ -185,6 +185,8 @@ pub(crate) fn agent_model_command(
     input: &str,
     model_executable: &fs::File,
 ) -> Command {
+    let compaction_tokens = env::var("CTX_CONTEXT_COMPACTION_TOKENS").ok();
+    let compact_setting = env::var("CTX_AGENT_COMPACT_SETTING").ok();
     let mut command = Command::new(proc_fd_path(model_executable));
     command
         .arg(input)
@@ -205,7 +207,13 @@ pub(crate) fn agent_model_command(
         command.env("CTX_CONTEXT_WINDOW_TOKENS", budget.tokens().to_string());
         command.env("CTX_CONTEXT_WINDOW_CHARS", budget.total_chars().to_string());
     }
+    if let Some(tokens) = compaction_tokens {
+        command.env("CTX_CONTEXT_COMPACTION_TOKENS", tokens);
+    }
     command.env("CTX_AGENT_WINDOW_SETTING", config.window_setting.value());
+    if let Some(setting) = compact_setting {
+        command.env("CTX_AGENT_COMPACT_SETTING", setting);
+    }
     command.process_group(0);
     pass_runtime_provider_secret_env(&mut command);
     pass_provider_egress_env(&mut command);

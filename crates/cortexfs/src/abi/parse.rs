@@ -293,6 +293,12 @@ pub(crate) fn parse_session_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
             AbiPathKind::SessionIndex {
                 kind: SessionIndexKind::Current,
             }
+        } else if *first == "channel" {
+            match *tail {
+                [] => AbiPathKind::SessionChannelRoot,
+                [channel] if is_object_name(channel) => AbiPathKind::SessionChannel { channel },
+                _ => AbiPathKind::Unknown,
+            }
         } else if tail.len() == 1 && tail.first().is_some_and(|key| is_object_name(key)) {
             match *first {
                 "by-cwd" => AbiPathKind::SessionIndex {

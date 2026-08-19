@@ -74,8 +74,9 @@ Example:
       cap
       effort
       default
-      fallback
       limit
+      recommended
+      compact
       session
       status
       log
@@ -83,11 +84,14 @@ Example:
     gpt-5.6
     gpt-5.6.d/
       id
+      metadata.json
       driver
       cap
       effort
       default
-      fallback
+      limit
+      recommended
+      compact
       session
       status
       log
@@ -103,16 +107,26 @@ Control files:
 
 ```text
 id       provider-native model id or runtime-internal model id
+metadata.json complete normalized metadata plus the exact models.dev model object
 driver   driver route table; see below
 cap      capability list, one per line
 effort   provider-neutral reasoning effort: auto, none, low, medium, high, xhigh, or max
 default  default parameters, KEY=VALUE, one per line
-fallback ordered fallback model chain, one provider/model name per line
 limit    maximum hard context size in tokens, or unknown
+recommended recommended working context size selected by metadata, or unknown
+compact  context-compaction trigger selected by metadata, or unknown
 session  none or socket
 status   dynamic status
 log      short call log or pointer to log location
 ```
+
+The remaining control files describe the selected adapter rather than repeat
+model metadata: `default` exposes the non-secret base endpoint used by the
+executor, `session` declares whether a CortexFS model socket exists, `status`
+reports the projection lifecycle, and `effort` is the provider-neutral default
+reasoning effort. They are inspection and routing inputs; model facts such as
+context limits and capabilities come from `limit`/`metadata.json`, while an
+Agent's effective context choices live under `agent/<name>.d/`.
 
 ## Hard Context Limit
 
@@ -145,6 +159,45 @@ opens and writes that request mutation must fail with `EROFS`, including for
 uid 0. Updating a limit happens only when host configuration changes or during
 the existing synchronous mount-start catalog refresh; there is no watcher,
 poller, or hot-reload path.
+
+`recommended` and `compact` are read-only model policy projections. `limit` is
+the trusted hard ceiling; `recommended` is the conservative working window
+chosen by `cortexfs-metadatas`; `compact` is the token threshold at which a
+context compiler should compact before the working window is exhausted. The
+default metadata policy uses the smaller of the hard limit and 131072 tokens,
+then compacts at 80 percent. A metadata record may provide more precise
+recommendations, but both values are always bounded by `limit`.
+
+`metadata.json` is a read-only JSON document owned by `cortexfs-metadatas`. Its
+`metadata` object contains the normalized CortexFS fields (identity, aliases,
+limits, modalities, capabilities, reasoning, lifecycle and provenance). When
+the record came from the official models.dev catalog, `metadata.models_dev`
+contains the complete upstream model object without dropping fields that this
+crate does not yet normalize. This includes description, family, knowledge
+cutoff, dates, attachment, reasoning options, interleaved reasoning,
+structured output, temperature, modalities, open weights, limits and pricing.
+The document's `effective` object reports the host projection after any
+explicit provider override; it is distinct from the upstream hard limit.
+
+`cap` is intentionally a stable positive capability index, not a dump of every
+upstream field. `supported` facts become capability words; `unsupported` and
+`unknown` facts remain visible in `metadata.json` and are not advertised as
+usable. Transport capabilities that are not model facts, such as streaming on
+the OpenAI Chat/Responses adapter, may also be added to `cap` after the model
+facts are resolved. This keeps the Agent-facing file useful without losing the
+complete upstream record.
+
+The catalog refresh validates the current raw `models.dev` document directly.
+A missing required field, identity mismatch, unsafe model id, oversized
+response, or malformed cache is rejected atomically; the previous valid cache
+remains in place. Optional upstream facts are retained exactly when present
+and become `unknown` in the normalized Rust view when omitted.
+
+Agents keep their effective choices in `agent/<name>.d/window` and
+`agent/<name>.d/compact`. `auto` follows the selected model's `recommended`
+and `compact` files; a positive explicit value is an intentional per-Agent
+attenuation and may not exceed the applicable model/Agent ceiling. Thus model
+metadata remains read-only while an Agent can safely choose a smaller budget.
 
 The resolver uses this precedence:
 
@@ -194,11 +247,13 @@ or duplicate words make the provider configuration invalid. An explicit empty
 list is valid and projects an empty `cap` file. Models without an override use
 the adapter-derived capability projection.
 
-CortexFS obtains catalog limits through the external `models-dev` library.
+CortexFS obtains the catalog from the raw `models.dev/api.json` endpoint.
+The refresh path retains each model object verbatim in `metadata.models_dev`
+and publishes it through the read-only `metadata.json` file interface.
 Catalog provider and model map keys are matched exactly to the projected
 `<provider>/<model>` identity; transport hosts and aggregator names are not
 guessed as original providers. Only stable CortexFS provider/model names and
-positive limits enter the cache.
+positive limits enter the normalized cache.
 
 The host cache is bounded, versioned data with this shape:
 
@@ -218,19 +273,19 @@ the last valid cache unchanged. A missing, malformed, oversized, wrong-schema,
 or unsafe cache supplies no limit. Catalog cache content contains no provider
 credentials and is backend state, not a new `/ctx` namespace.
 
-`fallback` is a model fallback chain, not a transport route. It lives next to
-the selected model in `model/<provider>/<model>.d/fallback`; each non-comment
-line is another stable provider/model reference, for example:
+Model fallback is part of the single global `model/route` file, not a hidden
+per-model control file. This keeps transport routing and model failover
+observable in one route ABI. A model fallback rule uses the following form:
 
 ```text
-openai/gpt-5.6
-models.example.test/compatible-model
+model-fallback(openai/gpt-5.6) -> openai/gpt-5.6-sol, local/backup
 ```
 
 When the selected model is unavailable or fails before producing a successful
 answer, the runtime tries fallback models in order. Each candidate still uses
 the normal provider registry, secret lookup, and `/ctx/model/route` egress
-rules.
+rules. The separate `fallback: direct` line remains the transport default and
+must not be confused with `model-fallback(...)`.
 
 `driver` may be a legacy single driver name:
 
@@ -548,8 +603,17 @@ chat
 stream
 session
 vision
+image_input
+image_output
 audio_input
 audio_output
+video_input
+video_output
+pdf_input
+pdf_output
+attachment
+temperature
+interleaved
 json_schema
 tool_call_syntax
 reasoning
@@ -569,6 +633,9 @@ native_stateful
 native_stateless
 ```
 
+`attachment` means the model accepts file attachments; it does not grant file
+access. `temperature` means the adapter can expose temperature control, and
+`interleaved` means reasoning content can be interleaved with normal output.
 `tool_call_syntax` only means the model event stream may contain
 tool-call-shaped events. It does not mean the model can execute tools. It
 grants no tool permission.

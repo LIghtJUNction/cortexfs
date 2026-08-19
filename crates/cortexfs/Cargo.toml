@@ -16,6 +16,7 @@ arrow-schema = "59.1.0"
 base64 = "0.22.1"
 cortexfs-channels = { version = "0.1.16", path = "../cortexfs-channels" }
 cortexfs-context = { version = "0.1.7", path = "../cortexfs-context" }
+cortexfs-metadatas = { version = "0.1.16", path = "../cortexfs-metadatas" }
 cortexfs-module = { version = "0.1.7", path = "../cortexfs-module" }
 cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
 cortexfs-protocol = { version = "0.1.7", path = "../cortexfs-protocol" }
@@ -28,7 +29,6 @@ jsonschema = { version = "0.47.0", default-features = false }
 keyring = "4.1.4"
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "rustls-tls"] }
 listenfd = "1.0.2"
-models-dev = { version = "0.1.1", default-features = false, features = ["rustls-tls"] }
 nix = { version = "0.31.3", features = ["fs", "signal", "socket", "term", "user"] }
 parquet = { version = "59.1.0", default-features = false, features = ["arrow"] }
 portable-pty = "0.9.0"

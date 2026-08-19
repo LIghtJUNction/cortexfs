@@ -254,19 +254,14 @@ pub(crate) fn push_model_candidate_name(
 }
 
 pub(crate) fn model_fallback_chain(ctx_root: &Path, model: &str) -> Vec<String> {
-    let Some((provider, name)) = model.split_once('/') else {
-        return Vec::new();
-    };
-    let path = cortexfs_paths::model_control_file_path(ctx_root, provider, name, "fallback");
+    let path = cortexfs_paths::model_route_path(ctx_root);
     let Ok(content) = read_small_plain_text_file(&path, MAX_RUNNER_CONTROL_BYTES, "runner") else {
         return Vec::new();
     };
-    let (fallback, report) = parse_model_fallback(&content);
-    if report.is_ok() {
-        fallback.models().to_vec()
-    } else {
-        Vec::new()
-    }
+    parse_model_transport_route_table(&content)
+        .ok()
+        .and_then(|table| table.model_fallback_chain(model).map(<[String]>::to_vec))
+        .unwrap_or_default()
 }
 
 pub(crate) fn model_default_base_url(content: &str) -> Option<String> {

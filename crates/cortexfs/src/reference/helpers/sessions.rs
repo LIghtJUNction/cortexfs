@@ -35,6 +35,9 @@ pub(crate) fn ensure_reference_home_agent(
     create_reference_dir(&agent_root.join("session").join("index").join("by-cwd"))?;
     create_reference_dir(&agent_root.join("session").join("index").join("by-hash"))?;
     create_reference_dir(&agent_root.join("session").join("index").join("by-uuid"))?;
+    create_reference_dir(&cortexfs_paths::session_channel_index_path(
+        &agent_root.join("session"),
+    ))?;
     create_reference_dir(&agent_root.join("data"))?;
     create_reference_dir(&agent_root.join("cache"))?;
     create_reference_dir(&agent_root.join("log"))
@@ -63,6 +66,7 @@ pub(crate) fn ensure_reference_home_scaffold_ownership(
             agent_root.join("session").join("index").join("by-cwd"),
             agent_root.join("session").join("index").join("by-hash"),
             agent_root.join("session").join("index").join("by-uuid"),
+            cortexfs_paths::session_channel_index_path(&agent_root.join("session")),
             agent_root.join("data"),
             agent_root.join("cache"),
             agent_root.join("log"),

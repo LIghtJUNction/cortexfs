@@ -88,6 +88,7 @@ mod helpers;
 
 mod atomic;
 mod authority;
+mod channel;
 mod child;
 mod context;
 mod defaults;

@@ -350,7 +350,12 @@ pub(crate) fn create_agent_files_with_hook(
             .map_err(|_error| AgentCreateError::CannotCreate)?;
         paths.own_dir(paths.home.join("session/index"), &index_fd)?;
         chown_home_entry(&index_fd, uid_number, gid_number)?;
-        for name in ["by-cwd", "by-hash", "by-uuid"] {
+        for name in [
+            "by-cwd",
+            "by-hash",
+            "by-uuid",
+            cortexfs_paths::SESSION_CHANNEL_INDEX,
+        ] {
             let file = crate::support::plain::create_plain_dir_at(&index_fd, name, 0o755)
                 .map_err(|_error| AgentCreateError::CannotCreate)?;
             paths.own_dir(paths.home.join("session/index").join(name), &file)?;

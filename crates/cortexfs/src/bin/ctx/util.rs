@@ -266,7 +266,7 @@ pub(crate) fn help_line(color: bool, line: &str) -> String {
     if line.is_empty() {
         return String::new();
     }
-    if line == "ctx - CortexFS filesystem management CLI" {
+    if line.starts_with("ctx - CortexFS") {
         return styled(color, ANSI_BOLD_CYAN, line);
     }
     if line.ends_with(':') && !line.starts_with(' ') {

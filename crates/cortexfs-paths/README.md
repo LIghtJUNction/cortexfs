@@ -6,7 +6,7 @@ configuration paths in one small dependency so applications do not copy
 path literals from the CortexFS implementation.
 
 ```toml
-cortexfs-paths = "0.1.7"
+cortexfs-paths = "0.1.16"
 ```
 
 The crate is intentionally dependency-free. It composes paths and exposes the
@@ -35,3 +35,15 @@ The public client endpoint for a system agent is
 `system_agent_runtime_socket("coder")` returns the private systemd listener
 path `/run/cortexfs/agent/coder.sock`; it is lifecycle data, not a user or
 channel configuration value.
+
+Attachable terminal, web, and IM frontends are ordinary files below the
+existing durable session index. Use the public compositors instead of
+copying `index/channel` literals:
+
+```rust
+use cortexfs_paths::{session_channel_index_path, session_channel_path};
+
+let sessions = Path::new("/ctx/home/1000/agent/coder/session");
+let channels = session_channel_index_path(sessions);
+let terminal = session_channel_path(sessions, "terminal_coder_default");
+```

@@ -126,6 +126,24 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
         derive_agent_runtime_view(&root, "coder"),
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "window"
     ));
+    write_text_file(&root.join("model/local/chat.d/limit"), "1000000\n");
+    write_text_file(&root.join("model/local/chat.d/recommended"), "131072\n");
+    write_text_file(&root.join("model/local/chat.d/compact"), "104857\n");
+    write_text_file(&control.join("window"), "auto\n");
+    let recommended = ok!(derive_agent_runtime_view(&root, "coder"));
+    assert_eq!(recommended.model_limit().tokens(), Some(1_000_000));
+    assert_eq!(recommended.model_recommended().tokens(), Some(131_072));
+    assert_eq!(recommended.model_compact().tokens(), Some(104_857));
+    assert_eq!(recommended.effective_window().tokens(), Some(131_072));
+    assert_eq!(recommended.effective_compact().tokens(), Some(104_857));
+    assert_eq!(
+        env_value(recommended.env(), "CTX_CONTEXT_WINDOW_TOKENS"),
+        Some("131072")
+    );
+    assert_eq!(
+        env_value(recommended.env(), "CTX_CONTEXT_COMPACTION_TOKENS"),
+        Some("104857")
+    );
     write_text_file(&root.join("model/local/chat.d/limit"), "unknown\n");
     write_text_file(&control.join("window"), "32\n");
     assert!(matches!(

@@ -17,11 +17,8 @@ pub(crate) fn validate_model_control_write(abi_path: &str, content: &str) -> Res
         Some("cap") if inspect_model_capabilities(content).is_ok() => Ok(()),
         Some("driver") if parse_model_driver_routes(content).is_ok() => Ok(()),
         Some("effort") if ModelEffort::parse(content).is_some() => Ok(()),
-        Some("fallback") if parse_model_fallback(content).1.is_ok() => Ok(()),
         Some("session") if matches!(content.trim(), "none" | "socket") => Ok(()),
-        Some("cap" | "driver" | "effort" | "fallback" | "session") => {
-            Err(FuseError::InvalidContent)
-        }
+        Some("cap" | "driver" | "effort" | "session") => Err(FuseError::InvalidContent),
         _ if !content.contains('\0') => Ok(()),
         _ => Err(FuseError::InvalidContent),
     }

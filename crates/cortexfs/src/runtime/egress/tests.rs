@@ -96,8 +96,8 @@ fn plan_deduplicates_equivalent_effective_provider_bases() -> Result<(), Box<dyn
             &format!("http://127.0.0.1:8001{fallback}"),
         )?;
         fs::write(
-            root.path().join("model/fixture/primary.d/fallback"),
-            "fixture/fallback\n",
+            root.path().join("model/route"),
+            "model-fallback(fixture/primary) -> fixture/fallback\n",
         )?;
         assert_eq!(plan_targets(root.path(), "fixture/primary")?.len(), 1);
     }
@@ -111,8 +111,8 @@ fn plan_rejects_provider_base_conflicts_before_resources() -> Result<(), Box<dyn
     write_model(root.path(), "fixture/primary", "http://127.0.0.1:8001/v1")?;
     write_model(root.path(), "fixture/fallback", "http://127.0.0.1:8001/v2")?;
     fs::write(
-        root.path().join("model/fixture/primary.d/fallback"),
-        "fixture/fallback\n",
+        root.path().join("model/route"),
+        "model-fallback(fixture/primary) -> fixture/fallback\n",
     )?;
     let result = create_egress(
         &control,
@@ -157,8 +157,8 @@ fn plan_resolves_alias_fallback_and_deduplicates_provider() -> Result<(), Box<dy
     write_model(root.path(), "fixture/primary", base)?;
     write_model(root.path(), "fixture/fallback", base)?;
     fs::write(
-        root.path().join("model/fixture/primary.d/fallback"),
-        "fixture/fallback\n",
+        root.path().join("model/route"),
+        "model-fallback(fixture/primary) -> fixture/fallback\n",
     )?;
     std::os::unix::fs::symlink("/ctx/model/fixture/primary", root.path().join("model/main"))?;
     let targets = plan_targets(root.path(), "main")?;
@@ -173,8 +173,8 @@ fn plan_skips_orphan_fallback_but_requires_primary_control()
     let (root, control) = fixture()?;
     write_model(root.path(), "fixture/primary", "http://127.0.0.1:8001/v1")?;
     fs::write(
-        root.path().join("model/fixture/primary.d/fallback"),
-        "orphan/missing\n",
+        root.path().join("model/route"),
+        "model-fallback(fixture/primary) -> orphan/missing\n",
     )?;
     assert_eq!(plan_targets(root.path(), "fixture/primary")?.len(), 1);
     let result = create_egress(

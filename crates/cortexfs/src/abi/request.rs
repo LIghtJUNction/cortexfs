@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::{MAX_SOCKET_FRAME_BYTES, is_stable_chroot_absolute_path, validate_socket_object_field};
 use cortexfs_runtime_client::interaction::{
-    INTERACTION_ABI, InteractionFrame, InteractionPayload, InteractionRequest,
+    INTERACTION_ABI, InteractionFrame, InteractionOrigin, InteractionPayload, InteractionRequest,
 };
 
 /// Stable socket session scope.
@@ -43,6 +43,10 @@ impl SocketSessionScope {
 }
 
 /// Canonical JSONL socket request.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the public socket request keeps the stable send envelope inline"
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SocketRequest {
     /// Start or continue a run by sending user input into a session.
@@ -61,6 +65,8 @@ pub enum SocketRequest {
         input: String,
         /// Optional provider-neutral external event that caused this input.
         event: Option<Value>,
+        /// Optional frontend origin used for durable channel discovery.
+        origin: Option<InteractionOrigin>,
     },
     /// Execute one tsh command through the authoritative agent runtime.
     Tsh {
@@ -175,14 +181,23 @@ fn parse_interaction_request(frame: &str) -> Result<SocketRequest, SocketRequest
             event,
             cwd,
             workspace,
-            ..
+            origin,
         } => {
             let scope =
                 SocketSessionScope::parse(&scope).ok_or(SocketRequestError::InvalidField {
                     field: "scope",
                     value: scope,
                 })?;
-            parse_socket_send_request(request_id, session, scope, cwd, workspace, input, event)
+            parse_socket_send_request(
+                request_id,
+                session,
+                scope,
+                cwd,
+                workspace,
+                input,
+                event,
+                Some(origin),
+            )
         }
         InteractionRequest::Resume { session, after, .. } => {
             parse_socket_resume_request(session, after)
@@ -207,6 +222,10 @@ pub(crate) fn trim_jsonl_frame(frame: &str) -> Result<&str, SocketRequestError> 
     Ok(trimmed)
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the wire parser mirrors the stable send envelope without an extra allocation"
+)]
 #[derive(Deserialize)]
 #[serde(tag = "op")]
 enum SocketRequestFrame {
@@ -222,6 +241,8 @@ enum SocketRequestFrame {
         input: String,
         #[serde(default)]
         event: Option<Value>,
+        #[serde(default)]
+        origin: Option<InteractionOrigin>,
     },
     #[serde(rename = "tsh")]
     Tsh {
@@ -281,7 +302,17 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
                 workspace,
                 input,
                 event,
-            } => parse_socket_send_request(id, session, scope.into(), cwd, workspace, input, event),
+                origin,
+            } => parse_socket_send_request(
+                id,
+                session,
+                scope.into(),
+                cwd,
+                workspace,
+                input,
+                event,
+                origin,
+            ),
             SocketRequestFrame::Tsh { id, session, args } => {
                 validate_socket_object_field("id", &id)?;
                 validate_socket_object_field("session", &session)?;
@@ -330,6 +361,7 @@ pub(crate) fn parse_socket_send_request(
     workspace: Option<String>,
     input: String,
     event: Option<Value>,
+    origin: Option<InteractionOrigin>,
 ) -> Result<SocketRequest, SocketRequestError> {
     validate_socket_object_field("id", &id)?;
     validate_socket_object_field("session", &session)?;
@@ -350,6 +382,7 @@ pub(crate) fn parse_socket_send_request(
         workspace,
         input,
         event,
+        origin,
     })
 }
 

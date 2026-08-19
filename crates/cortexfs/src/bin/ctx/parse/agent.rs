@@ -21,6 +21,36 @@ pub(crate) fn parse_agent_session(
     Ok((agent, session))
 }
 
+pub(crate) fn parse_resume(
+    mut values: impl Iterator<Item = String>,
+) -> Result<(Option<String>, Option<String>), CliError> {
+    let first = values.next();
+    let mut agent = None;
+    let mut session = None;
+    match first.as_deref() {
+        None => {}
+        Some("--session" | "-s") => {
+            session = Some(required_arg(
+                &mut values,
+                "resume --session requires a session name",
+            )?);
+        }
+        Some(value) => agent = Some(value.to_owned()),
+    }
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" if session.is_none() => {
+                session = Some(required_arg(
+                    &mut values,
+                    "resume --session requires a session name",
+                )?);
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok((agent, session))
+}
+
 /// Parse common `agent` subcommand arguments that require optional `--session`.
 pub(crate) fn parse_send(
     mut values: impl Iterator<Item = String>,

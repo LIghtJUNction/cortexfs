@@ -9,3 +9,6 @@ pub mod core;
 pub mod files;
 pub mod provider;
 pub mod terminal;
+
+#[cfg(test)]
+mod tests;

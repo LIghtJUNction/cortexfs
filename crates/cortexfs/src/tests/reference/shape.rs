@@ -110,6 +110,14 @@ fn abi_paths_classify_by_stable_shape() {
             "shared/project-a/model/debug/echo.d/session/default/messages.jsonl",
             "ctx.session.messages",
         ),
+        (
+            "home/1000/agent/coder/session/index/channel/terminal_coder_default",
+            "ctx.session.channel",
+        ),
+        (
+            "home/1000/agent/coder/session/index/channel",
+            "ctx.session.channel.dir",
+        ),
         ("shared/project-a", "ctx.shared.dir"),
         ("shared/project-a/tool/project.test", "ctx.shared.tool.exec"),
         (
@@ -242,7 +250,7 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     assert!(inspect_tool_schema_json(&schema).is_ok());
 
     let private_session_root = agent_session_root(&root, "coder");
-    for index in ["by-cwd", "by-hash", "by-uuid"] {
+    for index in ["by-cwd", "by-hash", "by-uuid", "channel"] {
         assert!(private_session_root.join("index").join(index).is_dir());
     }
     assert!(!private_session_root.join("default").exists());
@@ -316,7 +324,7 @@ fn assert_reference_agents(root: &Path) {
     assert!(coder_policy.contains("allow coder_t tool:shell.exec execute"));
     assert!(coder_policy.contains("allow coder_t tool:bash execute"));
 
-    for index in ["by-cwd", "by-hash", "by-uuid"] {
+    for index in ["by-cwd", "by-hash", "by-uuid", "channel"] {
         assert!(
             agent_session_root(root, "coder")
                 .join("index")

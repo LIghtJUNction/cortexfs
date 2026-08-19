@@ -1,6 +1,6 @@
 use std::{path::PathBuf, thread, time::Duration};
 
-use cortexfs_channels::{ChannelError, ChannelId};
+use cortexfs_channels::{ChannelError, ChannelId, ChannelProgressPolicy};
 
 use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
@@ -16,6 +16,7 @@ pub struct DiscordConfig {
     pub api_base: String,
     pub gateway_url: String,
     pub intents: u64,
+    pub progress: ChannelProgressPolicy,
 }
 
 impl std::fmt::Debug for DiscordConfig {
@@ -31,6 +32,7 @@ impl std::fmt::Debug for DiscordConfig {
             .field("api_base", &self.api_base)
             .field("gateway_url", &self.gateway_url)
             .field("intents", &self.intents)
+            .field("progress", &self.progress)
             .finish()
     }
 }

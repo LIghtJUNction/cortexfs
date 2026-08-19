@@ -60,6 +60,7 @@ pub(crate) struct ModelTransportRouteTable {
     pub(crate) groups: BTreeMap<String, RouteGroupAction>,
     pub(crate) rules: Vec<RouteRule>,
     pub(crate) fallback: Option<String>,
+    pub(crate) model_fallbacks: BTreeMap<String, Vec<String>>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RouteGroupAction {
@@ -191,6 +192,7 @@ pub(crate) fn parse_model_transport_route_table(
         ]),
         rules: Vec::new(),
         fallback: None,
+        model_fallbacks: BTreeMap::new(),
     };
     for (index, raw_line) in content.lines().enumerate() {
         let line_number = index + 1;
@@ -210,6 +212,14 @@ pub(crate) fn parse_model_transport_route_table(
         };
         let left = left.trim();
         let right = right.trim();
+        if let Some(primary) = call_arg(left, "model-fallback") {
+            let primary = valid_model_route_reference(primary, line_number)?;
+            let fallbacks = parse_model_route_fallbacks(right, line_number)?;
+            if table.model_fallbacks.insert(primary, fallbacks).is_some() {
+                return Err(format!("duplicate model fallback on line {line_number}"));
+            }
+            continue;
+        }
         if let Some(name) = call_arg(left, "group") {
             table.groups.insert(
                 valid_route_name(name.trim(), line_number)?,
@@ -223,6 +233,30 @@ pub(crate) fn parse_model_transport_route_table(
         });
     }
     Ok(table)
+}
+
+fn valid_model_route_reference(value: &str, line: usize) -> Result<String, String> {
+    is_model_name(value.trim())
+        .then(|| value.trim().to_owned())
+        .ok_or_else(|| format!("invalid model fallback reference on line {line}"))
+}
+
+fn parse_model_route_fallbacks(value: &str, line: usize) -> Result<Vec<String>, String> {
+    let values = parse_route_list(value, line)?
+        .into_iter()
+        .map(|value| valid_model_route_reference(&value, line))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut seen = std::collections::HashSet::new();
+    if values.iter().any(|value| !seen.insert(value)) {
+        return Err(format!("duplicate model fallback reference on line {line}"));
+    }
+    Ok(values)
+}
+
+impl ModelTransportRouteTable {
+    pub(crate) fn model_fallback_chain(&self, model: &str) -> Option<&[String]> {
+        self.model_fallbacks.get(model).map(Vec::as_slice)
+    }
 }
 pub(crate) fn parse_route_matcher(value: &str, line: usize) -> Result<RouteMatcher, String> {
     if let Some(args) = call_arg(value, "domain") {
@@ -381,4 +415,33 @@ pub(crate) fn is_url(value: &str) -> bool {
 }
 pub(crate) fn is_safe_absolute_unix_socket_path(value: &str) -> bool {
     value.starts_with('/') && !value.bytes().any(|byte| byte.is_ascii_control())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_fallback_is_kept_separate_from_transport_fallback() -> Result<(), String> {
+        let table = parse_model_transport_route_table(
+            "model-fallback(primary/one) -> primary/two, primary/three\nfallback: direct\n",
+        )?;
+        assert_eq!(table.fallback.as_deref(), Some("direct"));
+        assert_eq!(
+            table.model_fallback_chain("primary/one"),
+            Some(["primary/two".to_owned(), "primary/three".to_owned()].as_slice())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn model_fallback_rejects_duplicate_candidates() -> Result<(), String> {
+        let error = parse_model_transport_route_table(
+            "model-fallback(primary/one) -> primary/two, primary/two\n",
+        )
+        .err()
+        .ok_or_else(|| "duplicate fallback must fail".to_owned())?;
+        assert!(error.contains("duplicate model fallback"));
+        Ok(())
+    }
 }

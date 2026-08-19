@@ -1,3 +1,5 @@
+use cortexfs_runtime_client::interaction::InteractionOrigin;
+
 #[test]
 fn socket_peer_credentials_come_from_kernel() {
     let pair = UnixStream::pair();
@@ -39,7 +41,8 @@ fn socket_request_parser_accepts_stable_request_frames() {
             cwd: Some("/work".to_owned()),
             workspace: Some("/repo".to_owned()),
             input: "hello".to_owned(),
-            event: None
+            event: None,
+            origin: None,
         })
     );
     assert_eq!(
@@ -84,7 +87,8 @@ fn socket_request_parser_defaults_session_and_scope() {
             cwd: None,
             workspace: None,
             input: "hello".to_owned(),
-            event: None
+            event: None,
+            origin: None,
         })
     );
     assert_eq!(
@@ -116,7 +120,11 @@ fn socket_request_parser_accepts_interaction_input_frames() {
             cwd: None,
             workspace: None,
             input: "hello".to_owned(),
-            event: None
+            event: None,
+            origin: Some(InteractionOrigin {
+                transport: "web".to_owned(),
+                ..InteractionOrigin::default()
+            })
         })
     );
 }

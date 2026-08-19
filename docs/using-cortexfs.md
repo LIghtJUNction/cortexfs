@@ -9,6 +9,12 @@ sidebar_label: Daily Usage
 The everyday CortexFS experience should feel like Unix: discover objects, read
 state, then execute files or connect to sockets when you need work done.
 
+For the short interactive path, run `ctx` in a project directory. It creates a
+fresh session with that directory mounted at `/workspace` and opens chat. Run
+`ctx resume` in the same directory to reopen its session, or pass
+`ctx resume coder --session SESSION` for an explicit session. `ctx status` is
+the explicit status command; `ctx help` and `ctx --help` show the CLI help.
+
 ## Find Available Objects
 
 ```bash

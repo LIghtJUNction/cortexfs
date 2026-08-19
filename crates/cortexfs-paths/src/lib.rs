@@ -40,10 +40,11 @@ pub use runtime::{
     user_systemd_transient_path,
 };
 pub use session::{
-    agent_home_path, agent_session_path, agent_sessions_from_home_path, agent_sessions_path,
-    ctx_home_path, home_agent_root_from_home_path, home_agent_root_path, home_model_from_home_path,
-    home_model_path, home_tool_from_home_path, home_tool_path, session_file_path,
-    session_index_file_path, session_terminal_from_home_path, session_terminal_path,
+    SESSION_CHANNEL_INDEX, agent_home_path, agent_session_path, agent_sessions_from_home_path,
+    agent_sessions_path, ctx_home_path, home_agent_root_from_home_path, home_agent_root_path,
+    home_model_from_home_path, home_model_path, home_tool_from_home_path, home_tool_path,
+    session_channel_index_path, session_channel_path, session_file_path, session_index_file_path,
+    session_terminal_from_home_path, session_terminal_path,
 };
 pub use shared::{
     shared_agent_from_space_path, shared_agent_path, shared_agent_root_from_space_path,

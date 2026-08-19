@@ -62,6 +62,12 @@ pub(crate) fn agent_inspect_lines(
         format!("session.cwd={}", inspect_value(&session_dir.join("cwd"))?),
         format!("model.name={}", view.model()),
         format!("model.limit={}", view.model_limit()),
+        format!("model.recommended={}", view.model_recommended()),
+        format!("model.compact={}", view.model_compact()),
+        format!("agent.window={}", view.window_setting().value()),
+        format!("agent.window.effective={}", view.effective_window()),
+        format!("agent.compact={}", view.compact_setting().value()),
+        format!("agent.compact.effective={}", view.effective_compact()),
         format!("model.cap={capabilities}"),
         format!(
             "policy={}",

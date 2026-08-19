@@ -422,9 +422,9 @@ pub(super) fn create_complete_object_layout(
             "chat"
         } else if class == ObjectClass::Model && *file == "effort" {
             "auto"
-        } else if class == ObjectClass::Model && *file == "fallback" {
-            ""
-        } else if class == ObjectClass::Model && *file == "limit" {
+        } else if class == ObjectClass::Model
+            && matches!(*file, "limit" | "recommended" | "compact")
+        {
             "unknown"
         } else if class == ObjectClass::Model && *file == "driver" {
             "default=openai-chat"
@@ -478,7 +478,7 @@ pub(super) fn agent_control_fixture_value(file: &str) -> &'static str {
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev",
         "model" => "debug/echo",
         "abi" => "sdk-envelope-v1",
-        "window" => "auto",
+        "window" | "compact" => "auto",
         "policy" => "allow coder_t model:debug/echo use",
         "status" => "idle",
         "log" => "agent/coder/log",

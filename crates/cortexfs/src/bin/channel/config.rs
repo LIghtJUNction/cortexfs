@@ -1,5 +1,5 @@
 use cortexfs::channel::email::EmailConfig;
-use cortexfs_channels::ChannelId;
+use cortexfs_channels::{ChannelId, ChannelProgressPolicy};
 use std::{env, net::SocketAddr, path::PathBuf};
 mod disk;
 pub use cortexfs::channel::discord::DiscordConfig;
@@ -25,6 +25,7 @@ pub struct CommonConfig {
     pub prefix: String,
     pub cwd: Option<String>,
     pub channel: Option<ChannelId>,
+    pub progress: ChannelProgressPolicy,
 }
 #[derive(Debug)]
 pub enum CommandConfig {
@@ -471,24 +472,70 @@ fn common() -> Result<CommonConfig, ConfigError> {
                     .map_err(|error| ConfigError::Invalid("CORTEXFS_CHANNEL_ID", error.to_string()))
             })
             .transpose()?,
+        progress: progress()?,
+    })
+}
+
+fn progress() -> Result<ChannelProgressPolicy, ConfigError> {
+    let edit_chunk_bytes = optional_usize("CORTEXFS_CHANNEL_PROGRESS_EDIT_CHUNK_BYTES")?;
+    Ok(ChannelProgressPolicy {
+        reaction: configured("CORTEXFS_CHANNEL_PROGRESS_REACTION"),
+        error_reaction: configured("CORTEXFS_CHANNEL_PROGRESS_ERROR_REACTION"),
+        placeholder: configured("CORTEXFS_CHANNEL_PROGRESS_PLACEHOLDER"),
+        error_prefix: configured("CORTEXFS_CHANNEL_PROGRESS_ERROR_PREFIX"),
+        typing: optional_bool("CORTEXFS_CHANNEL_PROGRESS_TYPING")?,
+        edit_interval_ms: optional_number("CORTEXFS_CHANNEL_PROGRESS_EDIT_INTERVAL_MS")?,
+        edit_chunk_bytes,
     })
 }
 
 fn required(name: &'static str) -> Result<String, ConfigError> {
-    env::var(name)
-        .ok()
-        .filter(|value| !value.is_empty())
-        .ok_or(ConfigError::Missing(name))
+    configured(name).ok_or(ConfigError::Missing(name))
 }
 
 fn optional(name: &'static str, default: &str) -> String {
-    env::var(name).unwrap_or_else(|_| default.to_owned())
+    configured(name).unwrap_or_else(|| default.to_owned())
 }
 
 fn number(name: &'static str, default: u64) -> Result<u64, ConfigError> {
     optional(name, &default.to_string())
         .parse::<u64>()
         .map_err(|error| ConfigError::Invalid(name, error.to_string()))
+}
+
+fn configured(name: &'static str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+fn optional_number(name: &'static str) -> Result<Option<u64>, ConfigError> {
+    configured(name)
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|error| ConfigError::Invalid(name, error.to_string()))
+        })
+        .transpose()
+}
+
+fn optional_usize(name: &'static str) -> Result<Option<usize>, ConfigError> {
+    configured(name)
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .map_err(|error| ConfigError::Invalid(name, error.to_string()))
+        })
+        .transpose()
+}
+
+fn optional_bool(name: &'static str) -> Result<bool, ConfigError> {
+    configured(name)
+        .map(|value| {
+            value
+                .parse::<bool>()
+                .map_err(|error| ConfigError::Invalid(name, error.to_string()))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(false))
 }
 
 fn boolean(name: &'static str, default: bool) -> Result<bool, ConfigError> {

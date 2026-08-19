@@ -15,6 +15,8 @@ pub(crate) fn debug_model_metadata(id: &str, description: &str, cap: &str) -> St
         "# cortexfs.created_at=".to_owned(),
         "# cortexfs.owned_by=cortexfs".to_owned(),
         "# cortexfs.context_length=unknown".to_owned(),
+        "# cortexfs.context_recommended=unknown".to_owned(),
+        "# cortexfs.context_compact=unknown".to_owned(),
         "# cortexfs.driver=debug".to_owned(),
         "# cortexfs.driver.default=debug".to_owned(),
         "# cortexfs.driver.exec=debug".to_owned(),
@@ -31,11 +33,19 @@ pub(crate) fn debug_model_metadata(id: &str, description: &str, cap: &str) -> St
 pub(crate) fn debug_model_control_content(model: &str, file: &str) -> Option<String> {
     match file {
         "id" => Some(format!("{model}\n")),
+        "metadata.json" => Some(
+            serde_json::json!({
+                "schema": cortexfs_metadatas::MODEL_METADATA_SCHEMA,
+                "metadata": {"provider": "debug", "id": model, "name": model},
+            })
+            .to_string()
+                + "\n",
+        ),
         "driver" => Some("default=debug\nexec=debug\nagent=debug\n".to_owned()),
         "cap" => Some("chat\nstream\n".to_owned()),
         "effort" => Some("auto\n".to_owned()),
-        "limit" => Some("unknown\n".to_owned()),
-        "default" | "fallback" | "log" => Some("\n".to_owned()),
+        "limit" | "recommended" | "compact" => Some("unknown\n".to_owned()),
+        "default" | "log" => Some("\n".to_owned()),
         "session" => Some("none\n".to_owned()),
         "status" => Some("idle\n".to_owned()),
         _ => None,
@@ -121,6 +131,8 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
          # cortexfs.created_at=\n\
          # cortexfs.owned_by={}\n\
          # cortexfs.context_length={}\n\
+         # cortexfs.context_recommended={}\n\
+         # cortexfs.context_compact={}\n\
          # cortexfs.driver={driver}\n\
          # cortexfs.driver.default={}\n\
          # cortexfs.driver.exec={}\n\
@@ -131,6 +143,8 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
          # cortexfs.cap={}\n",
         model.provider,
         model.limit,
+        model.recommended,
+        model.compact,
         routes.route_value(ModelDriverUseCase::Default),
         routes.route_value(ModelDriverUseCase::Exec),
         routes.route_value(ModelDriverUseCase::Socket),

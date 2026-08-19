@@ -1119,6 +1119,7 @@ mod permission_tests {
             workspace: None,
             input: "input".to_owned(),
             event: None,
+            origin: None,
         };
         let response = handle_socket_request(&session_root, "/workspace", None, &request);
         assert!(response.is_ok());

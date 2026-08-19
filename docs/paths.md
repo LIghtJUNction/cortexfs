@@ -10,7 +10,7 @@ and administration tools can derive paths without copying literals from the
 main implementation:
 
 ~~~toml
-cortexfs-paths = "0.1.7"
+cortexfs-paths = "0.1.16"
 ~~~
 
 Its version follows the workspace version of CortexFS. A CortexFS release
@@ -28,6 +28,8 @@ The same agent can have several paths. They are intentionally different:
 | Private systemd listener | system_agent_runtime_socket | /run/cortexfs/agent/coder.sock |
 | Durable backing tree | agent_backing_socket | /var/lib/cortexfs/storage/current/agent/coder.sock |
 | User terminal ABI | session_terminal_path | /ctx/home/1000/agent/coder/session/default/terminal/main.sock |
+| Attach channel index | session_channel_index_path | /ctx/home/1000/agent/coder/session/index/channel |
+| Attach channel file | session_channel_path | /ctx/home/1000/agent/coder/session/index/channel/terminal_coder_default |
 | User terminal runtime | terminal_runtime_socket | /run/user/1000/cortexfs/terminal/coder/default/main.sock |
 
 An IM adapter normally reads its configured agent_socket from
@@ -97,7 +99,7 @@ cortexfs-paths is the ABI boundary for path names. New integrations should
 depend on it directly:
 
 ~~~toml
-cortexfs-paths = "0.1.7"
+cortexfs-paths = "0.1.16"
 ~~~
 
 Do not duplicate /ctx, /run/cortexfs, /var/lib/cortexfs, or /etc/cortexfs

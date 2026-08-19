@@ -1,4 +1,5 @@
 use super::*;
+use cortexfs_metadatas::{compaction_threshold_tokens, recommended_context_tokens};
 
 use crate::authority::helpers::{AtomicCommit, atomic_write_owned};
 use crate::support::plain::{
@@ -389,6 +390,12 @@ impl FuseProjection {
                 std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
             return atomic_replace_text(&path, content).map_err(|_error| FuseError::Io);
         }
+        if matches!(
+            parse_abi_path(normalized).model_control_file(),
+            Some("limit" | "recommended" | "compact" | "metadata.json")
+        ) {
+            return Err(FuseError::ReadOnly);
+        }
         if snapshot
             .and_then(|snapshot| projected_provider_model_control_file(snapshot, normalized))
             .is_some()
@@ -453,7 +460,7 @@ impl FuseProjection {
             Self::validate_agent_layout_content(&target, content, uid)?;
             let _lock = self.lock_agent_window_target(&target)?;
             if let Some((agent, control)) = Self::agent_control_target(&target)
-                && matches!(control, "model" | "window")
+                && matches!(control, "model" | "window" | "compact")
             {
                 self.validate_agent_window_pair(
                     agent,
@@ -471,7 +478,7 @@ impl FuseProjection {
             Self::validate_agent_layout_content(&normalized, content, uid)?;
             let _lock = self.lock_agent_window_target(&normalized)?;
             if let Some((agent, control)) = Self::agent_control_target(&normalized)
-                && matches!(control, "model" | "window")
+                && matches!(control, "model" | "window" | "compact")
             {
                 self.validate_agent_window_pair(
                     agent,
@@ -571,6 +578,9 @@ impl FuseProjection {
         content: &[u8],
     ) -> Result<(), FuseError> {
         let content = std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
+        if Self::is_private_session_channel_path(normalized) {
+            Self::validate_session_channel_content(normalized, content)?;
+        }
         let path = self.resolve(normalized)?;
         if Self::is_session_append_path(normalized) {
             return atomic_create_text_with_mode(&path, content, 0o600)
@@ -702,7 +712,7 @@ impl FuseProjection {
             return Err(FuseError::InvalidPath);
         }
         if let Some((agent, control)) = Self::agent_control_target(&to)
-            && matches!(control, "model" | "window")
+            && matches!(control, "model" | "window" | "compact")
         {
             let content = support::plain::read_small_text_file(
                 &from_path,
@@ -716,6 +726,14 @@ impl FuseProjection {
                 content.as_bytes(),
                 snapshot.as_ref().ok_or(FuseError::Io)?,
             )?;
+        }
+        if Self::is_private_session_channel_path(&to) {
+            let content = support::plain::read_small_text_file(
+                &from_path,
+                u64::try_from(MAX_FUSE_SMALL_WRITE_BYTES).unwrap_or(u64::MAX),
+            )
+            .map_err(|_error| FuseError::Io)?;
+            Self::validate_session_channel_content(&to, &content)?;
         }
         let renamed = if no_replace {
             nix::fcntl::renameat2(
@@ -897,14 +915,21 @@ impl FuseProjection {
         } else {
             read_peer("window")?.unwrap_or_else(|| "auto\n".to_owned())
         };
+        let compact_content = if candidate_control == "compact" {
+            candidate.to_owned()
+        } else {
+            read_peer("compact")?.unwrap_or_else(|| "auto\n".to_owned())
+        };
         let setting =
             AgentWindowSetting::parse_control(&window_content).ok_or(FuseError::InvalidContent)?;
+        let compact_setting =
+            AgentWindowSetting::parse_control(&compact_content).ok_or(FuseError::InvalidContent)?;
         let Some(model_content) = model_content else {
             // No model recorded yet: `auto` stays valid for any later model,
             // while an explicit window cannot be validated against a limit.
-            return match setting {
-                AgentWindowSetting::Auto => Ok(()),
-                AgentWindowSetting::Explicit(_) => Err(FuseError::InvalidContent),
+            return match (setting, compact_setting) {
+                (AgentWindowSetting::Auto, AgentWindowSetting::Auto) => Ok(()),
+                _ => Err(FuseError::InvalidContent),
             };
         };
         let model = support::control::parse_canonical_control_value(&model_content)
@@ -912,10 +937,7 @@ impl FuseProjection {
             .ok_or(FuseError::InvalidContent)?;
         let model_name = if is_model_alias(model) {
             let target = self.default_model_alias_target(model, snapshot)?;
-            let model_root = format!(
-                "{}/",
-                cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
-            );
+            let model_root = format!("{}/", cortexfs_paths::model_root_path(&self.root).display());
             target
                 .to_str()
                 .and_then(|target| target.strip_prefix(&model_root))
@@ -934,8 +956,33 @@ impl FuseProjection {
             .ok_or(FuseError::InvalidContent)?;
         let limit =
             ModelContextLimit::parse_control(&limit_content).ok_or(FuseError::InvalidContent)?;
-        setting
-            .resolve(limit)
+        let recommended_path = format!("model/{provider}/{model}.d/recommended");
+        let recommended_content = self
+            .virtual_model_content(&recommended_path, snapshot)?
+            .unwrap_or_else(|| {
+                limit.tokens().map_or_else(
+                    || "unknown\n".to_owned(),
+                    |value| format!("{}\n", recommended_context_tokens(value)),
+                )
+            });
+        let recommended = ModelContextLimit::parse_control(&recommended_content)
+            .ok_or(FuseError::InvalidContent)?;
+        let compact_path = format!("model/{provider}/{model}.d/compact");
+        let compact_content = self
+            .virtual_model_content(&compact_path, snapshot)?
+            .unwrap_or_else(|| {
+                recommended.tokens().map_or_else(
+                    || "unknown\n".to_owned(),
+                    |value| format!("{}\n", compaction_threshold_tokens(value)),
+                )
+            });
+        let compact =
+            ModelContextLimit::parse_control(&compact_content).ok_or(FuseError::InvalidContent)?;
+        let effective = setting
+            .resolve_with_recommendation(limit, recommended)
+            .map_err(|_error| FuseError::InvalidContent)?;
+        compact_setting
+            .resolve_with_recommendation(effective, compact)
             .map(|_effective| ())
             .map_err(|_error| FuseError::InvalidContent)
     }
@@ -947,7 +994,7 @@ impl FuseProjection {
         let Some((agent, control)) = Self::agent_control_target(normalized_target) else {
             return Ok(None);
         };
-        if !matches!(control, "model" | "window") {
+        if !matches!(control, "model" | "window" | "compact") {
             return Ok(None);
         }
         let control_dir =
@@ -1094,6 +1141,55 @@ impl FuseProjection {
         )
     }
 
+    /// Returns whether a session `raw` file is the read-only history view.
+    #[must_use]
+    pub fn is_session_raw_path(normalized: &str) -> bool {
+        matches!(
+            parse_abi_path(normalized),
+            AbiPathKind::SessionFile { file: "raw", .. }
+        )
+    }
+
+    fn is_private_session_channel_path(normalized: &str) -> bool {
+        normalized.starts_with("home/")
+            && matches!(
+                parse_abi_path(normalized),
+                AbiPathKind::SessionChannel { .. }
+            )
+    }
+
+    fn validate_session_channel_content(path: &str, content: &str) -> Result<(), FuseError> {
+        let value =
+            serde_json::from_str::<Value>(content).map_err(|_error| FuseError::InvalidContent)?;
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(FuseError::InvalidPath)?;
+        let object = value.as_object().ok_or(FuseError::InvalidContent)?;
+        let valid_name = object.get("name").and_then(Value::as_str) == Some(name);
+        let valid_agent = object
+            .get("agent")
+            .and_then(Value::as_str)
+            .is_some_and(is_object_name);
+        let valid_session = object
+            .get("session")
+            .and_then(Value::as_str)
+            .is_some_and(is_object_name);
+        let valid_scope = matches!(
+            object.get("scope").and_then(Value::as_str),
+            Some("private" | "shared")
+        );
+        if object.get("version").and_then(Value::as_u64) != Some(1)
+            || !valid_name
+            || !valid_agent
+            || !valid_session
+            || !valid_scope
+        {
+            return Err(FuseError::InvalidContent);
+        }
+        Ok(())
+    }
+
     fn is_session_store_path(normalized: &str) -> bool {
         let Some((session, suffix)) = normalized.split_once("/.store") else {
             return false;
@@ -1130,6 +1226,7 @@ impl FuseProjection {
             {
                 true
             }
+            _ if Self::is_private_session_channel_path(normalized) => true,
             ["home", uid, "agent", agent, "session", session, file]
                 if uid.parse::<u32>().is_ok()
                     && is_object_name(agent)
@@ -1211,7 +1308,7 @@ impl FuseProjection {
                 "index",
                 ref tail @ ..,
             ] if uid.parse::<u32>().is_ok() && is_object_name(agent) => {
-                matches!(tail, [] | ["by-cwd" | "by-hash" | "by-uuid"])
+                matches!(tail, [] | ["by-cwd" | "by-hash" | "by-uuid" | "channel"])
             }
             [
                 "home",
@@ -1258,7 +1355,7 @@ impl FuseProjection {
                 agent,
                 "session",
                 "index",
-                "by-cwd" | "by-hash" | "by-uuid",
+                "by-cwd" | "by-hash" | "by-uuid" | "channel",
             ] if uid.parse::<u32>().is_ok() && is_object_name(agent) => true,
             ["home", uid, "agent", agent, "session", session, "terminal"]
                 if uid.parse::<u32>().is_ok()
@@ -1284,7 +1381,16 @@ impl FuseProjection {
         if Self::is_session_store_path(abi_path) || self.hides_model_residue(abi_path, snapshot)? {
             return Err(FuseError::NotFound);
         }
-        resolve_fuse_abi_path(&self.root, abi_path)
+        let resolved = if Self::is_session_raw_path(abi_path) {
+            let parent = abi_path
+                .rsplit_once('/')
+                .map(|(parent, _)| parent)
+                .ok_or(FuseError::InvalidPath)?;
+            format!("{parent}/messages.jsonl")
+        } else {
+            abi_path.to_owned()
+        };
+        resolve_fuse_abi_path(&self.root, &resolved)
     }
 
     fn provider_snapshot_for_operation(
@@ -1296,7 +1402,7 @@ impl FuseProjection {
         let provider_dependent = target == "model"
             || target.starts_with("model/")
             || Self::agent_control_target(&target)
-                .is_some_and(|(_agent, control)| matches!(control, "model" | "window"));
+                .is_some_and(|(_agent, control)| matches!(control, "model" | "window" | "compact"));
         if !provider_dependent {
             return Ok(None);
         }

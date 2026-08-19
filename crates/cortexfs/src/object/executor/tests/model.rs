@@ -238,12 +238,12 @@ fn agent_model_config_prefers_current_user_agent_control() -> Result<(), Box<dyn
 }
 
 #[test]
-fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::error::Error>> {
+fn model_candidates_follow_route_fallback_rule() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-model-fallback")?;
     fs::create_dir_all(root.join("model/primary/alpha.d"))?;
     fs::write(
-        root.join("model/primary/alpha.d/fallback"),
-        "primary/beta\nprimary/gamma\n",
+        root.join("model/route"),
+        "model-fallback(primary/alpha) -> primary/beta, primary/gamma\n",
     )?;
 
     let candidates = model_candidates(&root, "primary/alpha")?;
@@ -282,13 +282,12 @@ fn model_candidates_do_not_append_existing_local_counterpart()
 }
 
 #[test]
-fn model_candidates_ignore_symlinked_fallback_control_file()
--> Result<(), Box<dyn std::error::Error>> {
+fn model_candidates_ignore_symlinked_route_file() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-model-fallback-symlink")?;
     fs::create_dir_all(root.join("model/primary/alpha.d"))?;
-    let outside = root.join("outside-fallback");
-    fs::write(&outside, "primary/beta\n")?;
-    symlink(&outside, root.join("model/primary/alpha.d/fallback"))?;
+    let outside = root.join("outside-route");
+    fs::write(&outside, "model-fallback(primary/alpha) -> primary/beta\n")?;
+    symlink(&outside, root.join("model/route"))?;
 
     let candidates = model_candidates(&root, "primary/alpha")?;
 
@@ -327,7 +326,7 @@ fn agent_model_config_allows_primary_selected_through_alias_policy()
 }
 
 #[test]
-fn agent_model_config_denies_fallback_without_selected_model_policy()
+fn agent_model_config_denies_route_fallback_without_selected_model_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-agent-model-policy-fallback")?;
     let agent_dir = root.join("agent/coder.d");
@@ -335,8 +334,8 @@ fn agent_model_config_denies_fallback_without_selected_model_policy()
     fs::create_dir_all(root.join("model/primary/approved.d"))?;
     fs::create_dir_all(root.join("model/evil"))?;
     fs::write(
-        root.join("model/primary/approved.d/fallback"),
-        "evil/leak\n",
+        root.join("model/route"),
+        "model-fallback(primary/approved) -> evil/leak\n",
     )?;
     write_executable_script(&root.join("model/evil/leak"), "#!/bin/sh\nexit 0\n")?;
     fs::write(agent_dir.join("model"), "primary/approved\n")?;

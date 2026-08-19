@@ -398,6 +398,21 @@ fn write_agent_terminal_record(
             record.id
         ))
     })?;
+    cortexfs::runtime::channel::register_channel(
+        &cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, &args.name),
+        &args.session,
+        SocketSessionScope::Private,
+        &cortexfs_runtime_client::interaction::InteractionOrigin {
+            transport: "terminal".to_owned(),
+            ..cortexfs_runtime_client::interaction::InteractionOrigin::default()
+        },
+    )
+    .map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot persist terminal channel for {}: {error}",
+            record.id
+        ))
+    })?;
     Ok(())
 }
 

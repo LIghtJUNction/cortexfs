@@ -124,11 +124,13 @@ impl FuseProjection {
                 "" | "echo"
                     | "echo.d"
                     | "echo.d/id"
+                    | "echo.d/metadata.json"
                     | "echo.d/driver"
                     | "echo.d/cap"
                     | "echo.d/effort"
-                    | "echo.d/fallback"
                     | "echo.d/limit"
+                    | "echo.d/recommended"
+                    | "echo.d/compact"
                     | "echo.d/default"
                     | "echo.d/session"
                     | "echo.d/status"
@@ -330,13 +332,19 @@ impl FuseProjection {
                 class: ObjectClass::Model,
                 ..
             } if abi_path.starts_with("model/debug/echo.d/") => {
-                let Some(content) = abi_path
-                    .strip_prefix("model/debug/echo.d/")
-                    .and_then(|file| debug_model_control_content(DEBUG_ECHO_MODEL, file))
-                else {
+                let Some(file) = abi_path.strip_prefix("model/debug/echo.d/") else {
                     return Ok(None);
                 };
-                projected_regular_file(abi_path, content, 0o644).map(Some)
+                let Some(content) = debug_model_control_content(DEBUG_ECHO_MODEL, file) else {
+                    return Ok(None);
+                };
+                let mode = if matches!(file, "limit" | "recommended" | "compact" | "metadata.json")
+                {
+                    0o444
+                } else {
+                    0o644
+                };
+                projected_regular_file(abi_path, content, mode).map(Some)
             }
             AbiPathKind::ObjectControl {
                 class: ObjectClass::Model,

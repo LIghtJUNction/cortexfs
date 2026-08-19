@@ -66,7 +66,6 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
     inspect_model_capability_control(class, name, &control_dir, &mut issues);
     inspect_model_driver_control(class, name, &control_dir, &mut issues);
     inspect_model_effort_control(class, name, &control_dir, &mut issues);
-    inspect_model_fallback_control(class, name, &control_dir, &mut issues);
     inspect_tool_schema_control(class, name, &control_dir, &mut issues);
     inspect_agent_control_files(class, name, &control_dir, &mut issues);
     ObjectLayoutReport::new(issues)
@@ -241,37 +240,6 @@ pub(crate) fn inspect_model_effort_control(
             }
         },
     );
-}
-
-pub(crate) fn inspect_model_fallback_control(
-    class: ObjectClass,
-    name: &str,
-    control_dir: &Path,
-    issues: &mut Vec<PathLayoutIssue>,
-) {
-    with_object_control_file(
-        class,
-        ObjectClass::Model,
-        control_dir,
-        "fallback",
-        issues,
-        |content, issues| {
-            let path = format!("model/{name}.d/fallback");
-            let report = parse_model_fallback(content).1;
-            let values = report
-                .issues()
-                .iter()
-                .map(|issue| model_fallback_issue_value(issue).to_owned());
-            push_control_invalid_values(&path, values, issues);
-        },
-    );
-}
-
-pub(crate) fn model_fallback_issue_value(issue: &ModelFallbackIssue) -> &str {
-    match issue {
-        &ModelFallbackIssue::InvalidLine { ref value, .. }
-        | &ModelFallbackIssue::DuplicateModel { ref value, .. } => value.as_str(),
-    }
 }
 
 pub(crate) fn inspect_tool_schema_control(

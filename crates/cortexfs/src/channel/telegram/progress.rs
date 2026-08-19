@@ -10,11 +10,8 @@ use crate::channel::{
 
 use super::{TelegramConfig, message, request};
 
-const EYES: &str = "👀";
-const CROSS: &str = "❌";
 const MAX_BYTES: usize = 64 * 1024;
 const MAX_CHARS: usize = 4_000;
-const EDIT_INTERVAL: Duration = Duration::from_millis(700);
 
 pub(super) struct Progress<'a> {
     client: &'a Client,
@@ -25,6 +22,7 @@ pub(super) struct Progress<'a> {
     placeholder: Option<String>,
     text: String,
     last_edit: Instant,
+    last_edit_len: usize,
     delivered: bool,
 }
 
@@ -43,6 +41,7 @@ impl<'a> Progress<'a> {
             placeholder: None,
             text: String::new(),
             last_edit: Instant::now(),
+            last_edit_len: 0,
             delivered: false,
         }
     }
@@ -52,6 +51,7 @@ impl<'a> Progress<'a> {
         };
         if message::edit(self.client, self.config, &self.chat, message, text).is_ok() {
             self.last_edit = Instant::now();
+            self.last_edit_len = self.text.len();
             self.delivered = true;
             true
         } else {
@@ -65,29 +65,71 @@ impl<'a> Progress<'a> {
     }
 
     fn react(&self, emoji: Option<&str>) {
-        let _ignored = message::react(self.client, self.config, &self.chat, &self.source, emoji);
+        if let Some(emoji) = emoji.filter(|value| !value.is_empty()) {
+            let _ignored = message::react(
+                self.client,
+                self.config,
+                &self.chat,
+                &self.source,
+                Some(emoji),
+            );
+        }
+    }
+
+    fn clear_reaction(&self) {
+        if self
+            .config
+            .progress
+            .reaction
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        {
+            let _ignored = message::react(self.client, self.config, &self.chat, &self.source, None);
+        }
+    }
+
+    fn should_edit(&self) -> bool {
+        let interval_ready = self
+            .config
+            .progress
+            .edit_interval_ms
+            .is_some_and(|value| self.last_edit.elapsed() >= Duration::from_millis(value));
+        let chunk_ready = self
+            .config
+            .progress
+            .edit_chunk_bytes
+            .is_some_and(|value| self.text.len().saturating_sub(self.last_edit_len) >= value);
+        interval_ready || chunk_ready
     }
 }
 
 impl ChannelProgressSink for Progress<'_> {
     fn begin(&mut self, _inbound: &InboundMessage) {
-        self.react(Some(EYES));
-        let _ignored = message::typing(self.client, self.config, &self.chat);
-        self.placeholder = message::create(
-            self.client,
-            self.config,
-            &self.chat,
-            &self.source,
-            self.thread.as_deref(),
-        )
-        .ok();
+        self.react(self.config.progress.reaction.as_deref());
+        if self.config.progress.typing {
+            let _ignored = message::typing(self.client, self.config, &self.chat);
+        }
+        self.placeholder = self
+            .config
+            .progress
+            .placeholder
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .and_then(|text| {
+                message::create(
+                    self.client,
+                    self.config,
+                    &self.chat,
+                    &self.source,
+                    text,
+                    self.thread.as_deref(),
+                )
+                .ok()
+            });
     }
     fn delta(&mut self, text: &str) {
         append_bounded(&mut self.text, text, MAX_BYTES);
-        if self.placeholder.is_some()
-            && fits(&self.text, MAX_CHARS)
-            && (self.last_edit.elapsed() >= EDIT_INTERVAL)
-        {
+        if self.placeholder.is_some() && fits(&self.text, MAX_CHARS) && self.should_edit() {
             let text = self.text.clone();
             self.edit(&text);
         }
@@ -102,17 +144,22 @@ impl ChannelProgressSink for Progress<'_> {
             self.remove_placeholder();
             self.delivered = message::send_text(self.client, self.config, &self.chat, text).is_ok();
         }
-        self.react(None);
+        self.clear_reaction();
     }
     fn error(&mut self, error: &str) {
-        let text = format!("⚠️ {error}");
+        let text = self
+            .config
+            .progress
+            .error_prefix
+            .as_deref()
+            .map_or_else(|| error.to_owned(), |prefix| format!("{prefix}{error}"));
         self.delivered = self.edit(&text);
         if !self.delivered {
             self.remove_placeholder();
             let _ignored = message::send_text(self.client, self.config, &self.chat, &text);
         }
-        self.react(None);
-        self.react(Some(CROSS));
+        self.clear_reaction();
+        self.react(self.config.progress.error_reaction.as_deref());
     }
     fn completed(&self) -> bool {
         self.delivered

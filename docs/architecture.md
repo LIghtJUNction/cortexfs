@@ -113,6 +113,14 @@ home/<uid>/agent/<agent>/session/<session>/terminal/<terminal-id>/
 The root remains frozen: this session-local path does not add /ctx/terminal.
 A top-level terminal class requires a separately versioned root ABI decision.
 
+Interactive frontends use the same session-local discovery rule. Each durable
+terminal, web, or external channel is represented by a filename below
+`home/<uid>/agent/<agent>/session/index/channel/` (or the corresponding
+shared-space session index). The filename is the user-facing channel selector;
+its JSON content only maps a generic transport to an existing agent/session.
+This keeps `ctx attach` discoverable with `ls` while preserving the frozen root
+ABI and the existing interaction socket.
+
 The compact rule is:
 
 ```text
@@ -140,9 +148,10 @@ message, tool-result, or credential contents.
 ## Model and context boundary
 
 A model object is the stable provider/model identity. Its `driver` control
-selects replaceable adapters for each use case; `cap` and `limit` project only
-provider-neutral facts. Agents and context code consume those projections and
-must not branch on provider names, API formats, or model branding.
+selects replaceable adapters for each use case; `cap`, `limit`, `recommended`,
+and `compact` project only provider-neutral facts. Agents and context code
+consume those projections and must not branch on provider names, API formats,
+or model branding.
 
 Capability data is conservative. Hard limits use the precedence defined by the
 Model ABI: explicit per-model host configuration, then the validated catalog,
@@ -153,8 +162,10 @@ model-call side effect, a background watcher, or a second configuration store;
 accepted evidence would enter the same validated `cap`/`limit` projection or
 remain diagnostic-only.
 
-Context construction uses the selected model's hard `limit` and the Agent's
-attenuating `window` control. Raw session history remains intact while the
+Context construction uses the selected model's hard `limit`, metadata
+`recommended`/`compact` policy, and the Agent's attenuating `window`/`compact`
+controls. `window=auto` follows the model recommendation, not necessarily the
+maximum advertised window. Raw session history remains intact while the
 rendered prompt may use a recent tail, summaries, rules, skills, and loaded tool
 metadata. Changing models therefore rebuilds prompt context from durable facts;
 it does not rewrite history or teach each Agent a table of model-specific cases.

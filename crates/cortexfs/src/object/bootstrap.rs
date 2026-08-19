@@ -50,8 +50,12 @@ pub(crate) fn install_object_control_files(
     validate_control_overrides(class, control_overrides)?;
     for file in control_files_for(class) {
         let content = object_control_content(class, name, file, control_overrides)?;
-        atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
-            .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
+        atomic_replace_text_with_mode(
+            &control_dir.join(file),
+            &content,
+            object_control_mode(class, file),
+        )
+        .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     }
     if class == ObjectClass::Agent {
         for file in AGENT_OPTIONAL_CONTROL_FILES {
@@ -69,6 +73,16 @@ pub(crate) fn install_object_control_files(
         }
     }
     Ok(())
+}
+
+fn object_control_mode(class: ObjectClass, file: &str) -> u32 {
+    if class == ObjectClass::Model
+        && matches!(file, "limit" | "recommended" | "compact" | "metadata.json")
+    {
+        0o444
+    } else {
+        0o644
+    }
 }
 
 pub(crate) fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
@@ -133,14 +147,16 @@ pub(crate) fn validate_model_control_content(
     content: &str,
 ) -> Result<(), ObjectBootstrapError> {
     match file {
+        "metadata.json"
+            if serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()) =>
+        {
+            Ok(())
+        }
         "cap" if inspect_model_capabilities(content).is_ok() => Ok(()),
         "driver" if parse_model_driver_routes(content).is_ok() => Ok(()),
         "effort" if ModelEffort::parse(content).is_some() => Ok(()),
-        "fallback" if parse_model_fallback(content).1.is_ok() => Ok(()),
         "session" if matches!(content.trim(), "none" | "socket") => Ok(()),
-        "cap" | "driver" | "effort" | "fallback" | "session" => {
-            Err(ObjectBootstrapError::InvalidControlValue)
-        }
+        "cap" | "driver" | "effort" | "session" => Err(ObjectBootstrapError::InvalidControlValue),
         _ if !content.contains('\0') => Ok(()),
         _ => Err(ObjectBootstrapError::InvalidControlValue),
     }
@@ -197,10 +213,11 @@ pub(crate) fn default_object_control_value(
 pub(crate) fn default_model_control_value(object_name: &str, file: &str) -> String {
     match file {
         "id" => object_name.to_owned(),
+        "metadata.json" => "{}".to_owned(),
         "driver" => "default=openai-chat".to_owned(),
         "cap" => "chat\nstream".to_owned(),
         "effort" => ModelEffort::Auto.as_control_value().to_owned(),
-        "fallback" => "\n".to_owned(),
+        "recommended" | "compact" => "unknown".to_owned(),
         "session" => "none".to_owned(),
         "status" => "idle".to_owned(),
         _ => String::new(),
@@ -228,7 +245,7 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
                 root.display()
             )
         }
-        "window" => "auto".to_owned(),
+        "window" | "compact" => "auto".to_owned(),
         "status" => "idle".to_owned(),
         "system.md" => format!("You are CortexFS agent `{object_name}`."),
         "prompt.template.md" => DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),
@@ -286,8 +303,13 @@ pub(crate) fn stage_generated_model_pair(
         .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for file in MODEL_CONTROL_FILES {
         let content = object_control_content(ObjectClass::Model, id, file, control_overrides)?;
-        support::plain::write_text_file_at(&control, file, &content, 0o644)
-            .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
+        support::plain::write_text_file_at(
+            &control,
+            file,
+            &content,
+            object_control_mode(ObjectClass::Model, file),
+        )
+        .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     }
     let wrapper = executable_wrapper_script(ObjectClass::Model, id, wrapper_target);
     support::plain::write_text_file_at(provider_dir, model, &wrapper, 0o755)

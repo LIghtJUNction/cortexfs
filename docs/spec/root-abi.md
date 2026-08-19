@@ -92,7 +92,9 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
         cap
         effort
         default
-        fallback
+        limit
+        recommended
+        compact
         session
         status
         log
@@ -105,7 +107,9 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
         cap
         effort
         default
-        fallback
+        limit
+        recommended
+        compact
         session
         status
         log

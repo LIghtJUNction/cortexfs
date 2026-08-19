@@ -1,7 +1,8 @@
 use std::{fmt, time::Duration};
 
 use cortexfs_channels::{
-    ChannelCodec, ChannelError, ChannelIncoming, platform::telegram::TelegramCodec,
+    ChannelCodec, ChannelError, ChannelIncoming, ChannelProgressPolicy,
+    platform::telegram::TelegramCodec,
 };
 use serde_json::Value;
 
@@ -17,6 +18,7 @@ pub struct TelegramConfig {
     token: String,
     api_base: String,
     poll_seconds: u64,
+    progress: ChannelProgressPolicy,
 }
 
 impl fmt::Debug for TelegramConfig {
@@ -25,6 +27,7 @@ impl fmt::Debug for TelegramConfig {
             .field("token", &"[redacted]")
             .field("api_base", &self.api_base)
             .field("poll_seconds", &self.poll_seconds)
+            .field("progress", &self.progress)
             .finish()
     }
 }
@@ -45,12 +48,19 @@ impl TelegramConfig {
             token,
             api_base,
             poll_seconds: 20,
+            progress: ChannelProgressPolicy::default(),
         })
     }
 
     #[must_use]
     pub fn with_poll_seconds(mut self, seconds: u64) -> Self {
         self.poll_seconds = if seconds > 50 { 50 } else { seconds };
+        self
+    }
+
+    #[must_use]
+    pub fn with_progress(mut self, progress: ChannelProgressPolicy) -> Self {
+        self.progress = progress;
         self
     }
 }

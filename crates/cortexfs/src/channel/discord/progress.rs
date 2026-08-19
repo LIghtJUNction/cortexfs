@@ -10,11 +10,8 @@ use crate::channel::{
 
 use super::{DiscordConfig, api, effect, message};
 
-const EYES: &str = "%F0%9F%91%80";
-const CROSS: &str = "%E2%9D%8C";
 const MAX_PROGRESS_BYTES: usize = 64 * 1024;
 const MAX_MESSAGE_CHARS: usize = 1_900;
-const EDIT_INTERVAL: Duration = Duration::from_millis(700);
 
 pub(super) struct Progress<'a> {
     client: &'a Client,
@@ -67,25 +64,51 @@ impl<'a> Progress<'a> {
         }
     }
 
-    fn cleanup_reaction(&self, emoji: &str) {
-        let _ignored = effect::remove(self.client, self.config, &self.channel, &self.source, emoji);
+    fn reaction(&self, emoji: Option<&str>, remove: bool) {
+        let Some(emoji) = emoji.filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let _ignored = if remove {
+            effect::remove(self.client, self.config, &self.channel, &self.source, emoji)
+        } else {
+            effect::react(self.client, self.config, &self.channel, &self.source, emoji)
+        };
+    }
+
+    fn should_edit(&self) -> bool {
+        let interval_ready = self
+            .config
+            .progress
+            .edit_interval_ms
+            .is_some_and(|value| self.last_edit.elapsed() >= Duration::from_millis(value));
+        let chunk_ready = self
+            .config
+            .progress
+            .edit_chunk_bytes
+            .is_some_and(|value| self.text.len().saturating_sub(self.last_edit_len) >= value);
+        interval_ready || chunk_ready
     }
 }
 impl ChannelProgressSink for Progress<'_> {
     fn begin(&mut self, _inbound: &InboundMessage) {
-        let _ignored = effect::react(self.client, self.config, &self.channel, &self.source, EYES);
-        let _ignored = effect::typing(self.client, self.config, &self.channel);
-        self.placeholder =
-            message::create(self.client, self.config, &self.channel, &self.source).ok();
+        self.reaction(self.config.progress.reaction.as_deref(), false);
+        if self.config.progress.typing {
+            let _ignored = effect::typing(self.client, self.config, &self.channel);
+        }
+        self.placeholder = self
+            .config
+            .progress
+            .placeholder
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .and_then(|text| {
+                message::create(self.client, self.config, &self.channel, &self.source, text).ok()
+            });
     }
 
     fn delta(&mut self, text: &str) {
         append_bounded(&mut self.text, text, MAX_PROGRESS_BYTES);
-        if self.placeholder.is_some()
-            && fits(&self.text, MAX_MESSAGE_CHARS)
-            && (self.last_edit.elapsed() >= EDIT_INTERVAL
-                || self.text.len().saturating_sub(self.last_edit_len) >= 512)
-        {
+        if self.placeholder.is_some() && fits(&self.text, MAX_MESSAGE_CHARS) && self.should_edit() {
             let text = self.text.clone();
             self.edit(&text);
         }
@@ -100,18 +123,23 @@ impl ChannelProgressSink for Progress<'_> {
         } else {
             self.remove_placeholder();
         }
-        self.cleanup_reaction(EYES);
+        self.reaction(self.config.progress.reaction.as_deref(), true);
     }
 
     fn error(&mut self, message: &str) {
-        let text = format!("⚠️ {message}");
+        let text = self
+            .config
+            .progress
+            .error_prefix
+            .as_deref()
+            .map_or_else(|| message.to_owned(), |prefix| format!("{prefix}{message}"));
         self.delivered = self.edit(&text);
         if !self.delivered {
             self.remove_placeholder();
             let _ignored = api::send_reply(self.client, self.config, &self.channel, &text);
         }
-        self.cleanup_reaction(EYES);
-        let _ignored = effect::react(self.client, self.config, &self.channel, &self.source, CROSS);
+        self.reaction(self.config.progress.reaction.as_deref(), true);
+        self.reaction(self.config.progress.error_reaction.as_deref(), false);
     }
 
     fn completed(&self) -> bool {

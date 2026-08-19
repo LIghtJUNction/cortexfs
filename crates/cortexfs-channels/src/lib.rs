@@ -19,6 +19,7 @@ mod framewire;
 mod incoming;
 mod message;
 pub mod platform;
+mod progress;
 mod registry;
 mod route;
 mod wire;
@@ -43,6 +44,7 @@ pub use message::{
 };
 pub use platform::catalog::{CHANNEL_CATALOG, ChannelSpec, ChannelTransport};
 pub use platform::{ChannelCodec, OutboundRequest};
+pub use progress::ChannelProgressPolicy;
 pub use registry::ChannelRegistry;
 pub use route::ChannelSessionRoute;
 pub use wire::{CHANNEL_ABI, ChannelEnvelope, ChannelEvent};

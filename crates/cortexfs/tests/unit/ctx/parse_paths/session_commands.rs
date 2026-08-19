@@ -57,7 +57,7 @@ fn parses_session_file_commands() {
     assert!(matches!(
         resume_flagged,
         Ok(Command::Resume {
-            ref agent,
+            agent: Some(ref agent),
             session: Some(ref session)
         }) if agent == "coder" && session == "focus"
     ));

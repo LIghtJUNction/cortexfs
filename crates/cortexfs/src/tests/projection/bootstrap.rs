@@ -257,6 +257,11 @@ fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
     assert_eq!(tool.control_dir(), root.join("tool").join("fs.read.d"));
     assert!(inspect_object_layout(&root, ObjectClass::Model, "debug/echo").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Tool, "fs.read").is_ok());
+    for file in ["limit", "recommended", "compact", "metadata.json"] {
+        let permissions = fs::metadata(root.join("model/debug/echo.d").join(file))
+            .map(|metadata| metadata.permissions().mode());
+        assert_eq!(ok!(permissions) & 0o777, 0o444, "{file}");
+    }
 
     let wrapper = fs::read_to_string(root.join("tool").join("fs.read"));
     let wrapper = ok!(wrapper);

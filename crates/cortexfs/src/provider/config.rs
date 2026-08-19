@@ -45,9 +45,12 @@ pub struct ProjectedProviderModel {
     pub(crate) base_url: String,
     pub(crate) driver: String,
     pub(crate) cap: String,
+    pub(crate) log: String,
     pub(crate) effort: String,
-    pub(crate) fallback: String,
     pub(crate) limit: ModelContextLimit,
+    pub(crate) recommended: ModelContextLimit,
+    pub(crate) compact: ModelContextLimit,
+    pub(crate) metadata: String,
 }
 
 const fn default_enabled() -> bool {

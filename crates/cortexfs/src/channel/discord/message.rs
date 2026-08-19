@@ -8,13 +8,14 @@ pub(super) fn create(
     config: &DiscordConfig,
     channel: &str,
     source: &str,
+    text: &str,
 ) -> Result<String, DiscordError> {
     let value = effect::auth(
         client.post(effect::channel_url(config, channel, "messages")),
         config,
     )
     .json(&json!({
-        "content": "⏳ 思考中…",
+        "content": text,
         "message_reference": {"message_id": source},
         "allowed_mentions": {"parse": []}
     }))

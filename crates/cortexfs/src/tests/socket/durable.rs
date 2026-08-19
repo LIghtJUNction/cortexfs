@@ -55,6 +55,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     assert!(session_root.join("index").join("by-cwd").is_dir());
     assert!(session_root.join("index").join("by-hash").is_dir());
     assert!(session_root.join("index").join("by-uuid").is_dir());
+    assert!(session_root.join("index").join("channel").is_dir());
     assert!(meta.contains("\"model\":\"main\""));
     assert!(meta.contains("\"scope\":\"private\""));
     assert!(inspect_context_pack_json(&pack).is_ok());

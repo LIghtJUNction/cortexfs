@@ -2450,7 +2450,8 @@ impl Stream {
     #[must_use]
     pub fn from_abi_path(abi_path: &str) -> Option<Self> {
         match parse_abi_path(abi_path) {
-            AbiPathKind::SessionFile {
+            AbiPathKind::SessionFile { file: "raw", .. }
+            | AbiPathKind::SessionFile {
                 file: "messages.jsonl",
                 ..
             } => Some(Self::Messages),

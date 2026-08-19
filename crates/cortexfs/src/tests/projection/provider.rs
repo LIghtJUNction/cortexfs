@@ -232,8 +232,12 @@ fn fuse_projection_projects_configured_provider_models() -> std::io::Result<()> 
         Ok("auto\n".to_owned())
     );
     assert_eq!(
-        projection.read_to_string("model/api.test/gpt-5.6-terra.d/fallback"),
-        Ok("api.test/gpt-5.6-terra\n".to_owned())
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/recommended"),
+        Ok("unknown\n".to_owned())
+    );
+    assert_eq!(
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/compact"),
+        Ok("unknown\n".to_owned())
     );
     assert_eq!(
         projection.write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n"),
@@ -245,6 +249,115 @@ fn fuse_projection_projects_configured_provider_models() -> std::io::Result<()> 
     );
     let attr = projection.getattr("model/api.test/gpt-5.6-terra");
     assert!(matches!(attr, Ok(ref attr) if attr.mode() & 0o777 == 0o555));
+    Ok(())
+}
+
+#[test]
+fn fuse_projection_exposes_complete_models_dev_record() -> std::io::Result<()> {
+    let root = reference_tree("fuse-provider-model-metadata");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"https://api.test/v1","models":["known"]}"#,
+    );
+    let raw = serde_json::json!({
+        "id": "known",
+        "name": "Known",
+        "attachment": false,
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {"input": ["text"], "output": ["text"]},
+        "open_weights": false,
+        "limit": {"context": 1_000_000, "output": 32_768},
+        "future_field": "retained-through-file-abi"
+    });
+    let metadata = cortexfs_metadatas::ModelMetadata::new("local", "known", "Known")
+        .with_context(1_000_000)
+        .with_models_dev(raw.clone());
+    let cache_document = serde_json::json!({
+        "schema": cortexfs_metadatas::MODEL_METADATA_SCHEMA,
+        "models": {"local/known": metadata}
+    });
+    write_text_file(
+        &cache.join("model-metadata.json"),
+        &serde_json::to_string(&cache_document)?,
+    );
+    let projection = FuseProjection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    let content = projection
+        .read_to_string("model/local/known.d/metadata.json")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let document: serde_json::Value = serde_json::from_str(&content)?;
+    assert_eq!(document.pointer("/metadata/models_dev"), Some(&raw));
+    assert_eq!(
+        document.pointer("/metadata/models_dev/future_field"),
+        Some(&serde_json::Value::from("retained-through-file-abi")),
+    );
+    assert_eq!(
+        document.pointer("/effective/limit_tokens"),
+        Some(&serde_json::Value::from(1_000_000)),
+    );
+    assert!(matches!(
+        projection.getattr("model/local/known.d/metadata.json"),
+        Ok(ref attr) if attr.mode() & 0o777 == 0o444
+    ));
+    assert_eq!(
+        projection
+            .read_at("model/local/known.d/metadata.json", 0, content.len())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?,
+        content.as_bytes(),
+    );
+    Ok(())
+}
+
+#[test]
+fn fuse_projection_maps_lmm_deepseek_alias_to_verified_metadata() -> std::io::Result<()> {
+    let root = reference_tree("fuse-provider-model-deepseek-alias");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("lmm.json"),
+        r#"{"name":"lmm","base_url":"https://api.lmm.best/v1","models":["deepseek-v4-flash-0731"]}"#,
+    );
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
+
+    let content = projection
+        .read_to_string("model/lmm/deepseek-v4-flash-0731.d/metadata.json")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let document: serde_json::Value = serde_json::from_str(&content)?;
+    assert_eq!(
+        document.pointer("/metadata/provider"),
+        Some(&serde_json::Value::from("lmm"))
+    );
+    assert_eq!(
+        document.pointer("/metadata/id"),
+        Some(&serde_json::Value::from("deepseek-v4-flash-0731"))
+    );
+    assert_eq!(
+        document.pointer("/resolution"),
+        Some(&serde_json::Value::from("mapped"))
+    );
+    assert_eq!(
+        document.pointer("/canonical_id"),
+        Some(&serde_json::Value::from("deepseek/deepseek-v4-flash"))
+    );
+    assert_eq!(
+        document.pointer("/metadata/models_dev/limit/context"),
+        Some(&serde_json::Value::from(1_000_000))
+    );
+    assert_eq!(
+        projection.read_to_string("model/lmm/deepseek-v4-flash-0731.d/limit"),
+        Ok("1000000\n".to_owned())
+    );
+    assert_eq!(
+        projection.read_to_string("model/lmm/deepseek-v4-flash-0731.d/cap"),
+        Ok(
+            "chat\ntool_call_syntax\nstream\njson_schema\nreasoning\ntemperature\ninterleaved\n"
+                .to_owned()
+        )
+    );
     Ok(())
 }
 

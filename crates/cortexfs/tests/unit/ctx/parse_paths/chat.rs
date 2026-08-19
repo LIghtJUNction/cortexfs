@@ -162,6 +162,20 @@ fn top_level_send_ignores_root_session_workspace() {
 fn top_level_resume_uses_agent_resume_request_shape() {
     let root = clean_test_dir("ctx-top-level-resume-agent-shape");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
+    let session = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    let current = std::env::current_dir();
+    assert!(current.is_ok());
+    let Ok(current) = current else {
+        return;
+    };
+    assert!(fs::write(session.join("workspace"), format!("{}\n", current.display())).is_ok());
     let server = spawn_agent_socket_request_capture(&root, "coder");
 
     let result = run(vec![

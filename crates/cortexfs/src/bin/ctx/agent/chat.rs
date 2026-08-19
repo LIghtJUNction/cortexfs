@@ -39,7 +39,7 @@ pub(crate) fn agent_send_request_json(
 ) -> String {
     if debug {
         return format!(
-            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{},\"debug\":true}}\n",
+            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{},\"origin\":{{\"transport\":\"terminal\"}},\"debug\":true}}\n",
             json_string(run_id),
             json_string(session),
             json_string(cwd),
@@ -47,7 +47,7 @@ pub(crate) fn agent_send_request_json(
         );
     }
     format!(
-        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
+        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{},\"origin\":{{\"transport\":\"terminal\"}}}}\n",
         json_string(run_id),
         json_string(session),
         json_string(cwd),

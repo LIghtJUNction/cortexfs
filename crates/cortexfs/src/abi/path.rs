@@ -165,6 +165,10 @@ pub enum AbiPathKind<'a> {
     SessionFile { session: &'a str, file: &'a str },
     /// Reserved durable session index file.
     SessionIndex { kind: SessionIndexKind },
+    /// Directory containing attachable channel selector files.
+    SessionChannelRoot,
+    /// A provider-neutral attachable channel selector file.
+    SessionChannel { channel: &'a str },
     /// Durable file below `context/` in a session.
     SessionContextFile {
         session: &'a str,
@@ -208,10 +212,13 @@ impl AbiPathKind<'_> {
                 file: "messages.jsonl",
                 ..
             } => "ctx.session.messages",
+            Self::SessionFile { file: "raw", .. } => "ctx.session.raw",
             Self::SessionFile {
                 file: "events.jsonl",
                 ..
             } => "ctx.session.events",
+            Self::SessionChannelRoot => "ctx.session.channel.dir",
+            Self::SessionChannel { .. } => "ctx.session.channel",
             Self::SessionFile { .. }
             | Self::SessionIndex { .. }
             | Self::SessionContextFile { .. }
@@ -323,7 +330,7 @@ impl<'a> AbiPathKind<'a> {
                 class: ObjectClass::Model,
                 file,
                 ..
-            } if file != "limit"
+            } if !matches!(file, "limit" | "recommended" | "compact" | "metadata.json")
         ) || matches!(
             self,
             Self::ObjectControl {
@@ -388,6 +395,9 @@ mod tests {
     fn writable_control_path_classification() {
         assert!(parse_abi_path("model/debug/echo.d/cap").is_writable_control_path());
         assert!(!parse_abi_path("model/debug/echo.d/limit").is_writable_control_path());
+        assert!(!parse_abi_path("model/debug/echo.d/recommended").is_writable_control_path());
+        assert!(!parse_abi_path("model/debug/echo.d/compact").is_writable_control_path());
+        assert!(!parse_abi_path("model/debug/echo.d/metadata.json").is_writable_control_path());
         assert!(parse_abi_path("agent/coder.d/cwd").is_writable_control_path());
         assert!(parse_abi_path("tool/fs.read.d/schema").is_writable_control_path());
         assert!(parse_abi_path("shared/team/tool/repo.d/schema").is_writable_control_path());

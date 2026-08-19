@@ -9,8 +9,11 @@ pub(super) fn run(
     api_base: String,
     poll: u64,
 ) -> Result<(), Box<dyn Error>> {
+    let progress = common.progress.clone();
     let bridge = common::bridge(common)?;
-    let config = TelegramConfig::new(token, api_base)?.with_poll_seconds(poll);
+    let config = TelegramConfig::new(token, api_base)?
+        .with_poll_seconds(poll)
+        .with_progress(progress);
     telegram::run(&config, &bridge)?;
     Ok(())
 }

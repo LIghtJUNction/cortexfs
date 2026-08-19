@@ -1,4 +1,5 @@
 use crate::*;
+use cortexfs_metadatas::{compaction_threshold_tokens, recommended_context_tokens};
 use std::collections::BTreeSet;
 
 use cortexfs_runtime_client::agent::is_agent_launch_abi;
@@ -70,10 +71,21 @@ pub fn derive_agent_runtime_view(
     let window_content = read_required_agent_control(&control_dir, "window")?;
     let window_setting = AgentWindowSetting::parse_control(&window_content)
         .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("window".to_owned()))?;
-    let model_limit = read_agent_model_limit(ctx_root, &model)?;
+    let (model_limit, model_recommended, model_compact) =
+        read_agent_model_context(ctx_root, &model)?;
     let effective_window = window_setting
-        .resolve(model_limit)
+        .resolve_with_recommendation(model_limit, model_recommended)
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("window".to_owned()))?;
+    let compact_content = match read_required_agent_control(&control_dir, "compact") {
+        Ok(content) => content,
+        Err(AgentRuntimeViewError::MissingControlFile(_)) => "auto\n".to_owned(),
+        Err(error) => return Err(error),
+    };
+    let compact_setting = AgentWindowSetting::parse_control(&compact_content)
+        .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("compact".to_owned()))?;
+    let effective_compact = compact_setting
+        .resolve_with_recommendation(effective_window, model_compact)
+        .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("compact".to_owned()))?;
     let loop_kind = read_agent_loop_control(&control_dir)?;
 
     let policy_content = read_required_agent_control(&control_dir, "policy")?;
@@ -95,6 +107,8 @@ pub fn derive_agent_runtime_view(
         ctx_path: &raw_path,
         control_dir: &control_dir,
         effective_window,
+        effective_compact,
+        compact_setting,
         loop_kind: &loop_kind,
     })?;
 
@@ -119,8 +133,12 @@ pub fn derive_agent_runtime_view(
         mount_table,
         model,
         model_limit,
+        model_recommended,
+        model_compact,
         window_setting,
         effective_window,
+        compact_setting,
+        effective_compact,
         loop_kind,
         policy,
         declared_tools,
@@ -128,11 +146,37 @@ pub fn derive_agent_runtime_view(
     })
 }
 
-fn read_agent_model_limit(
+fn read_agent_model_context(
     ctx_root: &Path,
     model: &str,
-) -> Result<ModelContextLimit, AgentRuntimeViewError> {
-    let model_name = if is_model_alias(model) {
+) -> Result<(ModelContextLimit, ModelContextLimit, ModelContextLimit), AgentRuntimeViewError> {
+    let model_name = resolve_agent_model_name(ctx_root, model)?;
+    let (provider, model) = model_name
+        .split_once('/')
+        .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
+    let limit = read_model_context_control(ctx_root, provider, model, "limit", true)?
+        .ok_or_else(|| AgentRuntimeViewError::MissingControlFile("limit".to_owned()))?;
+    let recommended = read_model_context_control(ctx_root, provider, model, "recommended", false)?
+        .or_else(|| {
+            limit
+                .tokens()
+                .map(recommended_context_tokens)
+                .and_then(ModelContextLimit::known)
+        })
+        .unwrap_or(ModelContextLimit::Unknown);
+    let compact = read_model_context_control(ctx_root, provider, model, "compact", false)?
+        .or_else(|| {
+            recommended
+                .tokens()
+                .map(compaction_threshold_tokens)
+                .and_then(ModelContextLimit::known)
+        })
+        .unwrap_or(ModelContextLimit::Unknown);
+    Ok((limit, recommended, compact))
+}
+
+fn resolve_agent_model_name(ctx_root: &Path, model: &str) -> Result<String, AgentRuntimeViewError> {
+    if is_model_alias(model) {
         let alias = cortexfs_paths::model_root_path(ctx_root).join(model);
         let metadata = fs::symlink_metadata(&alias)
             .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
@@ -143,37 +187,51 @@ fn read_agent_model_limit(
         }
         let target = fs::read_link(alias)
             .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
-        let model_root = format!(
-            "{}/",
-            cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()).display()
-        );
         let target = target
             .to_str()
-            .and_then(|target| target.strip_prefix(&model_root))
+            .and_then(|target| {
+                [
+                    cortexfs_paths::model_root_path(ctx_root),
+                    cortexfs_paths::model_root_path(&cortexfs_paths::ctx_root()),
+                ]
+                .into_iter()
+                .find_map(|root| target.strip_prefix(&format!("{}/", root.display())))
+            })
             .filter(|target| is_model_name(target))
             .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
-        target.to_owned()
+        Ok(target.to_owned())
     } else if is_model_name(model) {
-        model.to_owned()
+        Ok(model.to_owned())
     } else {
-        return Err(AgentRuntimeViewError::InvalidControlFile(
+        Err(AgentRuntimeViewError::InvalidControlFile(
             "model".to_owned(),
-        ));
+        ))
+    }
+}
+
+fn read_model_context_control(
+    ctx_root: &Path,
+    provider: &str,
+    model: &str,
+    file: &str,
+    required: bool,
+) -> Result<Option<ModelContextLimit>, AgentRuntimeViewError> {
+    let path = cortexfs_paths::model_control_path(ctx_root, provider, model).join(file);
+    let content = match read_small_text_file(&path, MAX_AGENT_RUNTIME_CONTROL_BYTES) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => {
+            return Ok(None);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AgentRuntimeViewError::MissingControlFile(file.to_owned()));
+        }
+        Err(_error) => {
+            return Err(AgentRuntimeViewError::CannotReadControl(file.to_owned()));
+        }
     };
-    let (provider, model) = model_name
-        .split_once('/')
-        .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;
-    let path = cortexfs_paths::model_control_path(ctx_root, provider, model).join("limit");
-    let content =
-        read_small_text_file(&path, MAX_AGENT_RUNTIME_CONTROL_BYTES).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                AgentRuntimeViewError::MissingControlFile("limit".to_owned())
-            } else {
-                AgentRuntimeViewError::CannotReadControl("limit".to_owned())
-            }
-        })?;
     ModelContextLimit::parse_control(&content)
-        .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("limit".to_owned()))
+        .map(Some)
+        .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile(file.to_owned()))
 }
 
 pub(crate) fn parse_agent_approval_control(
@@ -334,6 +392,8 @@ pub(crate) struct AgentRuntimeEnv<'a> {
     ctx_path: &'a str,
     control_dir: &'a Path,
     effective_window: AgentEffectiveWindow,
+    effective_compact: AgentEffectiveWindow,
+    compact_setting: AgentWindowSetting,
     loop_kind: &'a AgentLoop,
 }
 
@@ -357,6 +417,10 @@ pub(crate) fn derive_agent_runtime_env(
             "CTX_AGENT_LOOP".to_owned(),
             config.loop_kind.as_str().to_owned(),
         ),
+        (
+            "CTX_AGENT_COMPACT_SETTING".to_owned(),
+            config.compact_setting.value(),
+        ),
     ];
     if let Some(budget) = budget_from_effective(config.effective_window) {
         env.push((
@@ -366,6 +430,12 @@ pub(crate) fn derive_agent_runtime_env(
         env.push((
             "CTX_CONTEXT_WINDOW_CHARS".to_owned(),
             budget.total_chars().to_string(),
+        ));
+    }
+    if let Some(budget) = budget_from_effective(config.effective_compact) {
+        env.push((
+            "CTX_CONTEXT_COMPACTION_TOKENS".to_owned(),
+            budget.tokens().to_string(),
         ));
     }
     let _validated_env = parse_agent_env_control(&env_content)?;

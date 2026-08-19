@@ -40,9 +40,24 @@ Arch users may alternatively install `cortexfs-git` from the AUR, enable
 
 `ctx doctor` should report whether the mount, base directories, default model
 alias, and agent runtime state are available. `ctx --help` lists the
-subcommands supported by the current build, including `ctx agent`, `ctx file`,
-`ctx send`, `ctx exec`, and socket conveniences. The default live test does not
+subcommands supported by the current build. The default live test does not
 depend on an external cloud API.
+
+## Start A Session
+
+The short interactive commands use the current folder as the workspace:
+
+```bash
+ctx                 # create a fresh session here and open chat
+ctx resume          # resume this folder's session
+ctx status          # show CortexFS status
+ctx help            # show concise CLI help
+```
+
+`ctx resume coder --session SESSION` restores an explicit session. The default
+interactive agent is `coder`; set `CTX_DEFAULT_AGENT` to choose another agent.
+The longer `ctx agent ...` commands remain available for lifecycle, raw socket,
+PTY, history, and diagnostic operations.
 
 ## Meet `/ctx`
 

@@ -447,6 +447,10 @@ impl CortexFuse {
             CortexXattr::new("user.cortexfs.origin", origin),
             CortexXattr::new("user.cortexfs.storage", storage),
             CortexXattr::new("user.cortexfs.virtual", virtual_value),
+            CortexXattr::new(
+                "user.cortexfs.mime_type",
+                crate::fuse::mime::mime_type(path, attr.file_type()),
+            ),
             CortexXattr::new("user.cortexfs.bytes", byte_len.to_string()),
             CortexXattr::new("user.cortexfs.token_estimate", token_estimate.to_string()),
             CortexXattr::new(
@@ -463,6 +467,30 @@ impl CortexFuse {
                 if backing_exists { "true" } else { "false" },
             ),
         ];
+        if let Some(policy) = self.projection.context_policy_for_session_path(path) {
+            attrs.extend([
+                CortexXattr::new("user.cortexfs.context_length", token_estimate.to_string()),
+                CortexXattr::new(
+                    "user.cortexfs.context_recommended",
+                    policy
+                        .recommended_tokens
+                        .map_or_else(|| "unknown".to_owned(), |tokens| tokens.to_string()),
+                ),
+                CortexXattr::new(
+                    "user.cortexfs.context_compact_threshold",
+                    policy
+                        .compaction_threshold_tokens
+                        .map_or_else(|| "unknown".to_owned(), |tokens| tokens.to_string()),
+                ),
+                CortexXattr::new(
+                    "user.cortexfs.context_max",
+                    policy
+                        .max_tokens
+                        .map_or_else(|| "unknown".to_owned(), |tokens| tokens.to_string()),
+                ),
+                CortexXattr::new("user.cortexfs.context_policy", "model-metadata"),
+            ]);
+        }
         if backing_exists {
             attrs.push(CortexXattr::new(
                 "user.cortexfs.backing_path",

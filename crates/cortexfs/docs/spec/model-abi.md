@@ -74,8 +74,9 @@ Example:
       cap
       effort
       default
-      fallback
       limit
+      recommended
+      compact
       session
       status
       log
@@ -83,11 +84,14 @@ Example:
     gpt-5.6
     gpt-5.6.d/
       id
+      metadata.json
       driver
       cap
       effort
       default
-      fallback
+      limit
+      recommended
+      compact
       session
       status
       log
@@ -103,12 +107,14 @@ Control files:
 
 ```text
 id       provider-native model id or runtime-internal model id
+metadata.json complete normalized metadata plus the exact models.dev model object
 driver   driver route table; see below
 cap      capability list, one per line
-effort   provider-neutral reasoning effort: auto, low, medium, high, or xhigh
+effort   provider-neutral reasoning effort: auto, none, low, medium, high, xhigh, or max
 default  default parameters, KEY=VALUE, one per line
-fallback ordered fallback model chain, one provider/model name per line
 limit    maximum hard context size in tokens, or unknown
+recommended recommended working context size selected by metadata, or unknown
+compact  context-compaction trigger selected by metadata, or unknown
 session  none or socket
 status   dynamic status
 log      short call log or pointer to log location
@@ -145,6 +151,23 @@ opens and writes that request mutation must fail with `EROFS`, including for
 uid 0. Updating a limit happens only when host configuration changes or during
 the existing synchronous mount-start catalog refresh; there is no watcher,
 poller, or hot-reload path.
+
+`recommended` and `compact` are read-only model policy projections. `limit` is
+the trusted hard ceiling; `recommended` is the conservative working window
+chosen by `cortexfs-metadatas`; `compact` is the token threshold at which a
+context compiler should compact before the working window is exhausted. The
+default policy uses the smaller of the hard limit and 131072 tokens, then
+compacts at 80 percent. Both values are bounded by `limit`.
+
+`metadata.json` is a read-only JSON document owned by `cortexfs-metadatas`. Its
+`metadata.models_dev` member retains the complete official models.dev model
+object, including fields not yet normalized by the Rust API. The `effective`
+member reports the host projection after provider overrides.
+
+Agents keep their effective choices in `agent/<name>.d/window` and
+`agent/<name>.d/compact`. `auto` follows the selected model's `recommended`
+and `compact` files; a positive value is an intentional smaller per-Agent
+setting.
 
 The resolver uses this precedence:
 
@@ -197,19 +220,19 @@ the last valid cache unchanged. A missing, malformed, oversized, wrong-schema,
 or unsafe cache supplies no limit. Catalog cache content contains no provider
 credentials and is backend state, not a new `/ctx` namespace.
 
-`fallback` is a model fallback chain, not a transport route. It lives next to
-the selected model in `model/<provider>/<model>.d/fallback`; each non-comment
-line is another stable provider/model reference, for example:
+Model fallback is declared in the single global `model/route` file, not in a
+model `.d/` directory. Each rule names the primary model and an ordered list of
+provider/model candidates:
 
 ```text
-openai/gpt-5.6
-models.example.test/compatible-model
+model(deepseek-v4-flash-0731) -> lmm/deepseek-v4-flash-0731, openai/gpt-5.6
 ```
 
-When the selected model is unavailable or fails before producing a successful
-answer, the runtime tries fallback models in order. Each candidate still uses
-the normal provider registry, secret lookup, and `/ctx/model/route` egress
-rules.
+The runtime tries candidates in order when the primary model is unavailable or
+fails before producing a successful answer. Each candidate still uses the
+normal provider registry, secret lookup, and the same `/ctx/model/route`
+egress rules. The separate `fallback: direct` line remains the transport
+default; it is not a model fallback chain.
 
 `driver` may be a legacy single driver name:
 
