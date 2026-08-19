@@ -17,6 +17,7 @@ members = [
     "crates/cortexfs-agent-sdk", "crates/cortexfs-mcp",
     "crates/cortexfs-runtime-client",
     "crates/cortexfs-tool-sdk",
+    "crates/cortexfs-channel-tools",
     "tests/sdk-extension-fixture",
 ]
 resolver = "3"

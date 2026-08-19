@@ -462,8 +462,8 @@ mod tests {
 
         assert_eq!(model.model, "mystery-model");
         assert_eq!(model.limit.tokens(), Some(2048));
-        assert_eq!(model.recommended.tokens(), Some(2048));
-        assert_eq!(model.compact.tokens(), Some(1638));
+        assert_eq!(model.recommended.tokens(), Some(1024));
+        assert_eq!(model.compact.tokens(), Some(921));
         assert_eq!(model.cap, "session\nvision\n");
         assert!(
             model
@@ -581,8 +581,8 @@ mod tests {
         let model = &projected[0];
 
         assert_eq!(model.limit.tokens(), Some(1_000_000));
-        assert_eq!(model.recommended.tokens(), Some(131_072));
-        assert_eq!(model.compact.tokens(), Some(104_857));
+        assert_eq!(model.recommended.tokens(), Some(500_000));
+        assert_eq!(model.compact.tokens(), Some(450_000));
         for capability in [
             "chat",
             "tool_call_syntax",

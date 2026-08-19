@@ -292,6 +292,7 @@ pub(crate) fn create_child_context(
     life: &str,
 ) -> ChildCreateResult<(String, u32)> {
     if !crate::is_object_name(name)
+        || crate::is_agent_alias(name)
         || !crate::is_object_name(parent)
         || !crate::is_object_name(session)
         || !crate::is_object_name(run)
@@ -1405,7 +1406,7 @@ allow coder_t agent:window-child start\n",
     fn production_child_without_request_materializes_known_parent_window() {
         let (error, window) = capture_production_child_window("auto\n", "64\n", None);
         assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
-        assert_eq!(window.as_deref(), Some("64\n"));
+        assert_eq!(window.as_deref(), Some("32\n"));
     }
 
     #[test]
@@ -1418,8 +1419,8 @@ allow coder_t agent:window-child start\n",
     #[test]
     fn production_child_materializes_equal_explicit_window_canonically() {
         let (error, window) = capture_production_child_window("auto\n", "64\n", Some(64));
-        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
-        assert_eq!(window.as_deref(), Some("64\n"));
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EACCES"));
+        assert_eq!(window, None);
     }
 
     #[test]

@@ -60,6 +60,7 @@ pub(crate) fn agent_executable_socket_command(
                     runtime,
                     mount_table,
                     cwd: request.cwd.unwrap_or(runtime.default_cwd),
+                    channel: request.channel,
                     debug: request.debug,
                     input: AGENT_ENVELOPE_ARG,
                     agent_executable_fd: agent_executable_fd.raw(),
@@ -96,6 +97,7 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub runtime: AgentExecutableSocketRuntime<'a>,
     pub mount_table: &'a MountTable,
     pub cwd: &'a str,
+    pub channel: Option<&'a runtime::channelenv::ChannelRuntimeContext>,
     pub debug: Option<SocketDebugTiming>,
     pub input: &'a str,
     pub agent_executable_fd: RawFd,
@@ -129,7 +131,7 @@ impl Drop for InheritedFd {
     }
 }
 
-fn agent_executable_socket_env(
+pub(crate) fn agent_executable_socket_env(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
     provider_egress_token: Option<&str>,
@@ -159,6 +161,21 @@ fn agent_executable_socket_env(
         ("CTX_AGENT_LAUNCH".to_owned(), AGENT_LAUNCH_ABI.to_owned()),
         ("CTX_AGENT_STEP".to_owned(), step.to_string()),
     ]);
+    if let Some(channel) = request.channel {
+        environment.retain(|entry| entry.0 != "CTX_PATH");
+        environment.extend([
+            ("CTX_PATH".to_owned(), channel.tool_path().to_env()),
+            ("CTX_CHANNEL_ID".to_owned(), channel.channel().to_owned()),
+            ("CTX_CHANNEL_SESSION".to_owned(), request.session.to_owned()),
+            ("CTX_CHANNEL_CAPS".to_owned(), channel.caps()),
+            (
+                "CTX_CHANNEL_SOCKET".to_owned(),
+                cortexfs_paths::channel_driver_socket(channel.channel())
+                    .display()
+                    .to_string(),
+            ),
+        ]);
+    }
     if let Some(token) = provider_egress_token {
         environment.push((
             runtime::egress::PROVIDER_EGRESS_TOKEN_ENV.to_owned(),
@@ -201,6 +218,12 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
     ]);
     bwrap.extend(support::process::bwrap_system_layout_args());
+    if let Some(channel) = request.channel {
+        let socket = cortexfs_paths::channel_driver_socket(channel.channel());
+        if socket.exists() {
+            bwrap.extend(support::bwrap::readonly_bind_args(&socket));
+        }
+    }
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }

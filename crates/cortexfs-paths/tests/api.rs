@@ -38,6 +38,14 @@ mod tests {
             Some(PathBuf::from("/ctx/shared"))
         );
         assert_eq!(
+            cortexfs_paths::channel_tool_path(root, "discord"),
+            PathBuf::from("/ctx/channel/discord/tool")
+        );
+        assert_eq!(
+            cortexfs_paths::home_channel_control_file_path(root, "1000", "discord", "cap"),
+            PathBuf::from("/ctx/home/1000/channel/discord.d/cap")
+        );
+        assert_eq!(
             cortexfs_paths::model_control_file_path(root, "openai", "gpt-5.6", "limit"),
             PathBuf::from("/ctx/model/openai/gpt-5.6.d/limit")
         );

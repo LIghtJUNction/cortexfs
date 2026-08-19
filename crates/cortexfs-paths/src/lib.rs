@@ -5,6 +5,7 @@
 //! The crate only composes paths. Callers must validate dynamic components
 //! with [`validate_component`] before inserting untrusted values.
 
+mod channel;
 mod host;
 mod object;
 mod root;
@@ -12,6 +13,11 @@ mod runtime;
 mod session;
 mod shared;
 
+pub use channel::{
+    channel_control_file_path, channel_control_path, channel_path, channel_tool_path,
+    home_channel_control_file_path, home_channel_control_path, home_channel_path,
+    home_channel_root_path, home_channel_tool_path,
+};
 pub use host::{
     SYSTEM_AGENT_PROMPT_PATH, SYSTEM_CHANNEL_CONFIG_DIR, SYSTEM_PROVIDER_CONFIG_DIR,
     SYSTEM_PROVIDER_MODEL_CACHE_DIR, SYSTEM_PROVIDER_SECRET_DIR, SYSTEM_STORAGE_CURRENT,
@@ -28,8 +34,8 @@ pub use object::{
     tool_config_path, tool_control_file_path, tool_control_path, tool_path,
 };
 pub use root::{
-    agent_root_path, bin_root_path, ctx_root, home_root_path, model_root_path, root_entry_path,
-    shared_root_path, status_path, tool_root_path,
+    agent_root_path, bin_root_path, channel_root_path, ctx_root, home_root_path, model_root_path,
+    root_entry_path, shared_root_path, status_path, tool_root_path,
 };
 pub use runtime::{
     AGENT_EXECUTABLE_SOCKET, PROVIDER_EGRESS_SANDBOX_PATH, RUN_CONTROL_SOCKET,
@@ -54,7 +60,9 @@ pub use shared::{
 /// Canonical `/ctx` root for the system mount.
 pub const CTX_ROOT: &str = "/ctx";
 /// Stable root entries exposed by the FUSE ABI.
-pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
+pub const ROOT_ENTRIES: &[&str] = &[
+    "status", "bin", "model", "agent", "tool", "channel", "home", "shared",
+];
 /// Maximum length of a single dynamic path component.
 pub const MAX_COMPONENT_LEN: usize = 64;
 /// Canonical executable used by projected object files.

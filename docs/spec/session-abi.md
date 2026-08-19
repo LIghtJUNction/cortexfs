@@ -98,7 +98,7 @@ effective per-Agent choices. Missing model metadata is represented by
 ## Attach channel index
 
 Attachable frontends are indexed as filenames below the existing session
-index; this does not create a `/ctx/channel` root namespace:
+index; this selector index is separate from the channel driver/tool root:
 
 ```text
 private  /ctx/home/<uid>/agent/<agent>/session/index/channel/<channel_name>

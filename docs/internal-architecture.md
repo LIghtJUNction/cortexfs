@@ -4,7 +4,8 @@ This document is the **engineering structure** companion to
 [architecture.md](architecture.md). Product/ABI rules stay there. This file
 governs **how Rust code is layered**, which boundaries may depend on which,
 how errors and binaries should look, and how to migrate the current monolith
-without breaking the frozen root ABI.
+without breaking the stable root ABI. The explicit `channel` root is the
+communication subsystem exception; no other orchestration roots are allowed.
 
 Normative ABI: [spec/](spec/). Naming: [naming-guide.md](naming-guide.md).
 Contributor rules live in the repository-root `AGENTS.md`.
@@ -417,7 +418,8 @@ in new code; CodeGraph or manual review on PRs.
 
 Reviewers ask:
 
-1. **ABI:** Any new root path or orchestration entry? (Must be no.)
+1. **ABI:** Any new root path or orchestration entry? Only the explicitly
+   versioned `channel` root and its generic state/tool children are allowed.
 2. **Layer:** Does this module only call same/lower layers?
 3. **Error:** New `Result<_, String>`? Missing `Display`/`Error` on public errors?
 4. **Size:** New expects for `too_many_lines` / `too_many_arguments` without split?

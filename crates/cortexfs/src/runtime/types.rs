@@ -28,9 +28,26 @@ pub enum SocketSessionRecordError {
     CannotRecord,
 }
 
+/// Channel-specific run context resolution error.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ChannelRuntimeError {
+    #[error("channel origin is invalid")]
+    InvalidOrigin,
+    #[error("channel directory is not a plain directory")]
+    InvalidDirectory,
+    #[error("channel capability file cannot be read")]
+    CannotReadCapability,
+    #[error("channel capability is invalid")]
+    InvalidCapability,
+    #[error("channel tool collides with an Agent tool: {0}")]
+    ToolCollision(String),
+}
+
 /// Socket runtime request handling error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SocketRuntimeError {
+    /// Channel-specific run context could not be resolved safely.
+    ChannelContext(ChannelRuntimeError),
     /// Request frame is not valid `CortexFS` socket JSONL.
     Request(SocketRequestError),
     /// Durable session layout could not be ensured.
@@ -164,7 +181,7 @@ impl SocketRuntimeError {
             Self::IndexedRecord(error) => error.errno(),
             Self::Record(error) => error.errno(),
             Self::InvalidSessionName => "EINVAL",
-            Self::PeerDenied => "EACCES",
+            Self::ChannelContext(_) | Self::PeerDenied => "EACCES",
             Self::CannotReadEvents
             | Self::PeerCredential(_)
             | Self::CannotReadFrame

@@ -1,5 +1,7 @@
 //! Shared bubblewrap argument builders used by agent, runtime, and tool sandboxes.
 
+use std::path::Path;
+
 /// Create `--dir` args for every absolute path prefix of `cwd`.
 #[must_use]
 pub fn dir_args_for_chdir(cwd: &str) -> Vec<String> {
@@ -28,6 +30,15 @@ pub fn dir_args_for_parent(path: &str) -> Vec<String> {
     } else {
         dir_args_for_chdir(parent)
     }
+}
+
+/// Creates a read-only bind for one existing host path and its parent dirs.
+#[must_use]
+pub fn readonly_bind_args(path: &Path) -> Vec<String> {
+    let value = path.display().to_string();
+    let mut args = dir_args_for_parent(&value);
+    args.extend(["--ro-bind".to_owned(), value.clone(), value]);
+    args
 }
 
 #[cfg(test)]

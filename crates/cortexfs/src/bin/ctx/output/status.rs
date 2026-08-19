@@ -2,7 +2,7 @@ use crate::*;
 
 pub(crate) fn print_abi() -> Result<(), CliError> {
     print_line(&format!("root={CTX_ROOT}"))?;
-    print_line("entries=status bin model agent tool home shared")?;
+    print_line("entries=status bin model agent tool channel home shared")?;
     print_line("exec=model agent tool")?;
     print_line("socket=name.sock")?;
     print_line("control=name.d")?;

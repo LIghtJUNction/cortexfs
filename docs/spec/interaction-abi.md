@@ -97,7 +97,9 @@ channel runtime -- interaction ABI --> agent session
 Platform codecs remain below this boundary. They translate native payloads into
 the existing `InboundMessage`/`OutboundMessage` ABI and never enter Agent code.
 
-Neither protocol creates a `/ctx/interaction` or `/ctx/channel` namespace.
+The interaction protocol creates no `/ctx/interaction` namespace. Channel
+state/tools use the separate explicit `/ctx/channel` ABI and never become
+interaction objects.
 Durable history remains under the existing session path; sockets are live
 transports and files remain the observable state surface.
 

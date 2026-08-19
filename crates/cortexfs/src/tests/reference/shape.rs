@@ -8,6 +8,7 @@ fn root_keeps_only_short_agent_os_entries() {
     assert!(is_root_entry("model"));
     assert!(is_root_entry("agent"));
     assert!(is_root_entry("tool"));
+    assert!(is_root_entry("channel"));
     assert!(!is_root_entry("provider"));
     assert!(!is_root_entry("format"));
     assert!(!is_root_entry("db"));
@@ -186,6 +187,17 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     assert!(root.join("bin").join("ctxterm").is_file());
     assert!(!root.join("bin").join("te").exists());
     assert!(root.join("bin").join("tsh").is_file());
+    assert!(root.join("bin").join("cortexfs-channel-tool").is_file());
+    assert!(root.join("channel").join("discord").join("tool").is_dir());
+    assert!(root.join("channel").join("discord.d").join("cap").is_file());
+    assert!(
+        root.join("channel")
+            .join("discord")
+            .join("tool")
+            .join("channel.reply")
+            .is_file()
+    );
+    assert!(!root.join("channel").join("tool").exists());
     assert_reference_bin_placeholders(&root);
     assert_file_text(
         &root.join("agent").join("coder"),

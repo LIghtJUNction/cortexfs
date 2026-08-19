@@ -99,6 +99,18 @@ impl ChannelFrame {
                 valid(session)?;
                 valid(command_id)
             }
+            ChannelFrameBody::ControlRequest { request_id, action } => {
+                valid(request_id)?;
+                action.validate().map_err(|error| {
+                    ChannelError::InvalidMessage(format!("invalid control action: {error}"))
+                })
+            }
+            ChannelFrameBody::ControlResponse {
+                request_id, error, ..
+            } => {
+                valid(request_id)?;
+                error.as_deref().map(valid).transpose().map(|_| ())
+            }
             ChannelFrameBody::Error {
                 request_id,
                 code,
@@ -109,8 +121,19 @@ impl ChannelFrame {
                 valid(code)?;
                 valid(message)
             }
-            ChannelFrameBody::Hello { request_id, .. }
-            | ChannelFrameBody::Start { request_id }
+            ChannelFrameBody::Hello {
+                request_id,
+                channel,
+                ..
+            }
+            | ChannelFrameBody::ControlHello {
+                request_id,
+                channel,
+            } => {
+                valid(request_id)?;
+                valid(channel.as_str())
+            }
+            ChannelFrameBody::Start { request_id }
             | ChannelFrameBody::Stop { request_id }
             | ChannelFrameBody::Receipt { request_id, .. }
             | ChannelFrameBody::HealthRequest { request_id }

@@ -32,6 +32,12 @@ mod tests {
 
     #[test]
     fn context_policy_separates_hard_recommended_and_compaction_limits() {
+        let default_model = ModelMetadata::new("local", "default", "Default")
+            .with_context(1_000_000)
+            .context_policy();
+        assert_eq!(default_model.recommended_tokens, Some(500_000));
+        assert_eq!(default_model.compaction_threshold_tokens, Some(450_000));
+
         let model = ModelMetadata::new("local", "long", "Long")
             .with_context(1_000_000)
             .with_context_policy(262_144, 209_715);
@@ -275,7 +281,7 @@ mod tests {
         assert_eq!(model.input_modalities, vec![Modality::Text]);
         assert_eq!(model.tools, Support::Unsupported);
         assert_eq!(model.reasoning.support, Support::Unsupported);
-        assert_eq!(model.structured_output, Support::Unknown);
+        assert_eq!(model.structured_output, Support::Supported);
         fs::remove_dir_all(directory)?;
         Ok(())
     }

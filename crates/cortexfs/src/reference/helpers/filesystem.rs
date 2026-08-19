@@ -190,6 +190,44 @@ pub(crate) fn ensure_reference_socket(
     Ok(())
 }
 
+/// Materializes reserved Agent aliases as links to canonical executable and socket paths.
+pub(crate) fn ensure_reference_agent_aliases(root: &Path) -> Result<(), ReferenceTreeError> {
+    let parent = cortexfs_paths::agent_root_path(root);
+    let parent_dir = open_reference_dir(&parent)?;
+    for &(alias, target) in AGENT_ALIASES {
+        let executable_target = cortexfs_paths::agent_path(&cortexfs_paths::ctx_root(), target);
+        ensure_reference_alias_entry(&parent_dir, alias, &executable_target)?;
+        let socket_target = cortexfs_paths::agent_socket_path(&cortexfs_paths::ctx_root(), target);
+        ensure_reference_alias_entry(&parent_dir, &format!("{alias}.sock"), &socket_target)?;
+    }
+    parent_dir
+        .sync_all()
+        .map_err(|_error| ReferenceTreeError::CannotLink)
+}
+
+fn ensure_reference_alias_entry(
+    parent: &fs::File,
+    name: &str,
+    target: &Path,
+) -> Result<(), ReferenceTreeError> {
+    match support::receipt::receipt_at(parent, name, support::receipt::EntryKind::Symlink) {
+        Ok(Some(_)) => {
+            let current = nix::fcntl::readlinkat(parent, name)
+                .map(PathBuf::from)
+                .map_err(|_error| ReferenceTreeError::CannotLink)?;
+            (current == target)
+                .then_some(())
+                .ok_or(ReferenceTreeError::CannotLink)
+        }
+        Ok(None) => match nix::unistd::symlinkat(target, parent, name) {
+            Ok(()) => Ok(()),
+            Err(nix::errno::Errno::EEXIST) => Err(ReferenceTreeError::CannotLink),
+            Err(_error) => Err(ReferenceTreeError::CannotLink),
+        },
+        Err(_error) => Err(ReferenceTreeError::CannotLink),
+    }
+}
+
 pub(crate) const fn should_repair_reference_owner(effective_uid: u32) -> bool {
     effective_uid == 0
 }

@@ -27,6 +27,8 @@ pub const MODEL_CONTROL_FILES: &[&str] = &[
     "status",
     "log",
 ];
+/// Required control files for one global or per-user channel instance.
+pub const CHANNEL_CONTROL_FILES: &[&str] = &["id", "driver", "cap", "status", "health"];
 /// Required hook directory inside every executable object's `.d/` control tree.
 pub const OBJECT_HOOK_DIR: &str = "hooks";
 /// Required hook phase directories inside `hooks/`.
@@ -51,7 +53,23 @@ pub(crate) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
 /// Canonical model aliases exposed directly below `/ctx/model`.
 pub const MODEL_ALIASES: &[&str] = &["main", "helper", "fast", "reason", "code", "vision"];
+/// Stable Agent aliases backed by canonical executable and socket symlinks.
+pub const AGENT_ALIASES: &[(&str, &str)] = &[("main", "coder")];
 pub const DEFAULT_WORKER_MODEL: &str = "openai/gpt-5.6";
+
+/// Returns the canonical Agent target for a reserved alias.
+#[must_use]
+pub fn agent_alias_target(alias: &str) -> Option<&'static str> {
+    AGENT_ALIASES
+        .iter()
+        .find_map(|&(name, target)| (name == alias).then_some(target))
+}
+
+/// Returns whether a name is reserved for an Agent alias.
+#[must_use]
+pub fn is_agent_alias(name: &str) -> bool {
+    agent_alias_target(name).is_some()
+}
 
 /// Returns whether a name is a canonical model alias.
 #[must_use]

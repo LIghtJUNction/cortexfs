@@ -74,10 +74,9 @@ names, duplicate canonical models, unknown targets, and alias conflicts. A
 failed model registration is transactional: it cannot leave half of its
 aliases in the catalog.
 
-For models whose official maximum is much larger than the useful default,
-`with_context` derives a conservative policy (131072 recommended tokens and an
-80% compaction trigger by default). A verified record can override those
-values:
+`with_context` derives a conservative policy: the default working window is
+50% of the hard maximum and compaction starts at 90% of that working window.
+A verified record can override those values:
 
 ```rust
 let model = ModelMetadata::new("gateway", "long", "Long Context")

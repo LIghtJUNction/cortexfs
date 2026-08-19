@@ -23,7 +23,9 @@ pub fn ensure_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, Refe
         }
         ensure_reference_agent(root, agent.name, agent.parent, &agent_groups)?;
     }
+    ensure_reference_agent_aliases(root)?;
     ensure_reference_global_tools(root)?;
+    ensure_reference_channels(root)?;
     ensure_reference_docs(root)?;
     ensure_reference_home(root)?;
     migrate_reference_legacy_session_meta_models(root)?;
@@ -161,7 +163,12 @@ pub(crate) fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError
         "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec /usr/bin/ctx \"$@\"\n",
     )?;
     set_reference_executable(&ctx)?;
-    for name in ["ctxterm", "tsh", "cortexfs-object-runner"] {
+    for name in [
+        "ctxterm",
+        "tsh",
+        "cortexfs-object-runner",
+        "cortexfs-channel-tool",
+    ] {
         let path = cortexfs_paths::bin_root_path(root).join(name);
         write_reference_text(
             &path,
@@ -379,6 +386,14 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
             ),
         );
     }
+    for channel in cortexfs_channels::CHANNEL_CATALOG {
+        for tool in channel.tool_names() {
+            let _ignored = std::fmt::Write::write_fmt(
+                &mut policy,
+                format_args!("allow {policy_subject} tool:{tool} execute\n"),
+            );
+        }
+    }
     for child in reference_agent_children(name) {
         let _ignored = std::fmt::Write::write_fmt(
             &mut policy,
@@ -537,6 +552,23 @@ mod reference_model_tests {
             format_reference_agent_groups([1002, 1000, 1001, 1002]),
             "1000\n1001\n1002\n"
         );
+    }
+
+    #[test]
+    fn main_agent_alias_points_to_canonical_agent() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        ensure_reference_tree(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+
+        assert_eq!(
+            fs::read_link(root.path().join("agent/main"))?,
+            PathBuf::from("/ctx/agent/coder")
+        );
+        assert_eq!(
+            fs::read_link(root.path().join("agent/main.sock"))?,
+            PathBuf::from("/ctx/agent/coder.sock")
+        );
+        Ok(())
     }
 
     #[test]

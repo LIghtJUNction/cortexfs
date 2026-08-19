@@ -3,7 +3,7 @@
 Normative ABI detail lives under [spec/](spec/). Visual identity lives in
 [DESIGN.md](DESIGN.md) (Google Labs DESIGN.md format). This file is the
 engineering design entry: what CortexFS is, where state lives, and what must
-not become root ABI.
+not become an additional root ABI.
 
 ## One-page model
 
@@ -12,6 +12,7 @@ not become root ABI.
 model is a pure inference file.
 agent is the policy-bound orchestrator.
 tool is a capability endpoint.
+channel is a filesystem-backed communication capability namespace.
 session is ordinary file history.
 policy is a minimal SELinux-like allowlist.
 CortexFS protocol adapters remove provider and API-format differences.
@@ -23,7 +24,7 @@ CortexFS controls agent visibility, execution, and sharing, not framework config
 ## Frozen root rule
 
 ```text
-root only contains stable object classes
+root only contains stable object classes; channel is the explicit communication root
 root never mirrors provider, database, workflow, memory, or orchestration internals
 MCP must not become a root namespace
 MCP configs, skills, project rules, and prompt packages are ordinary visible files
@@ -90,9 +91,9 @@ runtime boundary. `cortexfs-runtime-client` names that logical contract
 `cortexfs.interaction/v1`; terminal, web, and IM clients share request/event
 semantics and correlation ids. `cortexfs-channels` has a separate
 `cortexfs.channel.socket/v1` driver boundary for platform lifecycle, delivery,
-receipts, and live effects. Neither contract adds a `/ctx/interaction` or
-`/ctx/channel` root namespace, and platform-specific message types do not cross
-the Agent boundary.
+receipts, live effects, and tool control. The `/ctx/channel/<name>` tree
+exposes only generic channel state and tools; platform-specific message types
+do not cross the Agent boundary.
 
 Heavy or OS-specific transports remain external processes on that boundary.
 For example, `cortexfs-channel-nostr` owns relay WebSockets and NIP-04/NIP-17
@@ -245,7 +246,7 @@ short names over long phrases
 one clear job per module
 reuse before inventing helpers
 no parallel enums for Empty/Missing/Invalid
-no second root ABI for orchestration
+no second root ABI for orchestration; channel state/tools use the explicit root
 no background watchers, polling, or hot-reload subcommands
 Git commit (or process restart) is the development refresh boundary
 atomic rename for control-plane writes

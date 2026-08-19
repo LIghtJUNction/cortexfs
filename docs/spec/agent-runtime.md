@@ -179,6 +179,12 @@ one newline, with no other bytes, and is at most 1 MiB including that newline:
   "run": "run-1",
   "step": 1,
   "input": "original user input",
+  "origin": {
+    "transport": "channel",
+    "endpoint": "discord",
+    "conversation": "room-1",
+    "thread": "thread-1"
+  },
   "history_messages": "[]",
   "tool_context": "",
   "observation": {
@@ -210,6 +216,23 @@ next bounded step with that result in the typed envelope. The host alone emits
 the logical run's final `done`.
 Agent-originated results, malformed or multiple calls, and frames after a
 yielded call are invalid output.
+
+For a channel-backed run, Runtime additionally injects these child-only
+values:
+
+```text
+CTX_CHANNEL_ID
+CTX_CHANNEL_SESSION
+CTX_CHANNEL_CAPS
+CTX_CHANNEL_SOCKET
+```
+
+`CTX_PATH` is rebuilt for the request in this order: the user's channel tool
+directory, the global channel tool directory, the Agent's original path, then
+the normal `/ctx/tool` tiers. User tools override global channel tools; a
+collision with an existing Agent tool is rejected. The channel token and other
+credentials never enter these values. Identity, attachments, and thread data
+stay in the bounded structured `origin`/`event` envelope.
 
 The optional `agent/<name>.d/approval` control is `auto` when absent and accepts
 `auto` or `ask`. In `ask` mode, after the host has completed direct-native
@@ -340,6 +363,19 @@ agent/<name>.d/label
 
 Prompt text, `AGENTS.md`, skill metadata, `.mcp.json`, and tool descriptions
 may influence model behavior, but they do not grant authority.
+
+The reference tree reserves the Agent alias `main`:
+
+```text
+agent/main      -> agent/coder
+agent/main.sock -> agent/coder.sock
+```
+
+An Agent alias is an entry-point link, not a second Agent or a second control
+directory. The canonical control tree, Linux identity, permissions, runtime
+receipt, and durable sessions remain owned by the target Agent. Alias targets
+are fixed and validated by bootstrap; arbitrary Agent directory links are not
+accepted as an authority boundary.
 
 Actual authority is the intersection of:
 

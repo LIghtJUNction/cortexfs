@@ -28,8 +28,8 @@ name. The token is read only from this file and is redacted from diagnostics:
 ```toml
 application_id = "DISCORD_APPLICATION_ID"
 bot_token = "DISCORD_BOT_TOKEN"
-agent_socket = "/ctx/agent/coder.sock"
-agent = "coder"
+agent_socket = "/ctx/agent/main.sock"
+agent = "main"
 session_prefix = "discord"
 # Optional complete instance id; omit for the base `discord` id.
 # channel = "discord.primary"
@@ -58,10 +58,15 @@ sudo systemctl enable --now cortexfs-channel@discord.service
 sudo journalctl -u cortexfs-channel@discord.service -f
 ```
 
-The adapter keeps one bounded WebSocket connection and uses the canonical
-public `/ctx/agent/<agent>.sock` endpoint for the existing durable session ABI.
-It validates that the endpoint is a live Unix socket before connecting. It does not add a
-`/ctx/channel` namespace, watcher, or polling worker.
+The adapter keeps one bounded WebSocket connection and uses the public
+`/ctx/agent/main.sock` alias for the existing durable session ABI. The default
+reference tree materializes `agent/main -> agent/coder` and
+`agent/main.sock -> agent/coder.sock`; the canonical control and session owner
+remains `coder`.
+It validates that the endpoint is a live Unix socket before connecting. Channel
+state and tools are visible under `/ctx/channel/discord/` and
+`/ctx/channel/discord.d/`; credentials remain outside `/ctx`. There is no
+background watcher or hot-reload path.
 
 To run more than one account of the same platform, give each foreground host
 an instance id, for example `CORTEXFS_CHANNEL_ID=telegram.primary` and

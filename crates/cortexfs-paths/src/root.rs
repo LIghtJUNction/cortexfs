@@ -33,6 +33,11 @@ pub fn tool_root_path(root: &Path) -> PathBuf {
 }
 
 #[must_use]
+pub fn channel_root_path(root: &Path) -> PathBuf {
+    root.join("channel")
+}
+
+#[must_use]
 pub fn home_root_path(root: &Path) -> PathBuf {
     root.join("home")
 }
@@ -50,6 +55,7 @@ pub fn root_entry_path(root: &Path, entry: &str) -> Option<PathBuf> {
         "model" => Some(model_root_path(root)),
         "agent" => Some(agent_root_path(root)),
         "tool" => Some(tool_root_path(root)),
+        "channel" => Some(channel_root_path(root)),
         "home" => Some(home_root_path(root)),
         "shared" => Some(shared_root_path(root)),
         _ => None,

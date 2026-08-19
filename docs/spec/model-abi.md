@@ -164,9 +164,11 @@ poller, or hot-reload path.
 the trusted hard ceiling; `recommended` is the conservative working window
 chosen by `cortexfs-metadatas`; `compact` is the token threshold at which a
 context compiler should compact before the working window is exhausted. The
-default metadata policy uses the smaller of the hard limit and 131072 tokens,
-then compacts at 80 percent. A metadata record may provide more precise
-recommendations, but both values are always bounded by `limit`.
+default metadata policy uses 50% of the hard limit as the working window, then
+compacts at 90% of that working window. For a 1,000,000-token model this is
+500,000 recommended tokens and a 450,000-token compaction trigger. A metadata
+record may provide more precise recommendations, but both values are always
+bounded by `limit`.
 
 `metadata.json` is a read-only JSON document owned by `cortexfs-metadatas`. Its
 `metadata` object contains the normalized CortexFS fields (identity, aliases,

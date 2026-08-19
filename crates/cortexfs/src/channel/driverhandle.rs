@@ -25,6 +25,31 @@ pub(crate) fn handle(
                 (Some(error(Some(request_id))), false)
             }
         }
+        ChannelFrameBody::ControlHello {
+            request_id,
+            channel,
+        } => {
+            if channel == config.channel {
+                (Some(event(ChannelRuntimeEvent::Connected)), false)
+            } else {
+                (Some(error(Some(request_id))), true)
+            }
+        }
+        ChannelFrameBody::ControlRequest { request_id, action } => {
+            let response = match config.hub.dispatch(&config.channel, &request_id, action) {
+                Ok(()) => ChannelFrame::new(ChannelFrameBody::ControlResponse {
+                    request_id,
+                    accepted: true,
+                    error: None,
+                }),
+                Err(error) => ChannelFrame::new(ChannelFrameBody::ControlResponse {
+                    request_id,
+                    accepted: false,
+                    error: Some(error.to_string()),
+                }),
+            };
+            (Some(response), false)
+        }
         ChannelFrameBody::Start { .. } => (Some(event(ChannelRuntimeEvent::Connected)), false),
         ChannelFrameBody::Inbound { event_id, message } => {
             if message.target.channel != config.channel {

@@ -3,7 +3,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{ObjectClass, is_object_name};
+use crate::{ObjectClass, is_agent_alias, is_object_name};
 
 /// Files created for one ordinary agent object.
 #[derive(Debug)]
@@ -272,7 +272,7 @@ pub(crate) fn create_agent_files_with_hook(
         .unwrap_or(uid)
         .parse::<u32>()
         .map_err(|_error| AgentCreateError::InvalidInput)?;
-    if !is_object_name(name) || executable.contains('\0') {
+    if !is_object_name(name) || is_agent_alias(name) || executable.contains('\0') {
         return Err(AgentCreateError::InvalidInput);
     }
     let mut paths = AgentCreatePaths::new(root, uid, name);

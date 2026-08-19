@@ -10,12 +10,13 @@ implementation literals.
 The public FUSE root is `/ctx`. Its only stable top-level entries are:
 
 ```text
-status  bin  model  agent  tool  home  shared
+ status  bin  model  agent  tool  channel  home  shared
 ```
 
 The crate exports `CTX_ROOT`, `ROOT_ENTRIES`, and compositors for each root,
 object, control, model, agent, tool, home, shared, durable-session, and
-attach-channel path.
+attach-channel path. It also composes global and per-user channel instance,
+control, and tool paths.
 Unknown root entries are not accepted by `root_entry_path`.
 
 ## Agent socket roles

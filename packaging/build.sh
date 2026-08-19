@@ -10,7 +10,7 @@ WORK_DIR=
 
 readonly BINARIES=(
     ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner
-    cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr
+    cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 )
@@ -85,6 +85,7 @@ build_release() {
         cd "$ROOT"
         CARGO_TARGET_DIR="$(dirname "$target")" \
         cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+            -p cortexfs-channel-tools \
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
             -p cortexfs-channel-voice -p cortexfs-channel-slack \

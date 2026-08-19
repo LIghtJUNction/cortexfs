@@ -1374,7 +1374,9 @@ fn fuse_projection_exposes_reference_tree_ops() {
         .collect::<Vec<_>>();
     assert_eq!(
         names,
-        ["agent", "bin", "home", "model", "shared", "status", "tool"]
+        [
+            "agent", "bin", "channel", "home", "model", "shared", "status", "tool",
+        ]
     );
 
     let model_node = projection.lookup(&root_node, "model");

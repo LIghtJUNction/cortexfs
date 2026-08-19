@@ -43,8 +43,8 @@ pub mod xai;
 
 pub use catalog::MetadataCatalog;
 pub use context::{
-    ContextWindowPolicy, DEFAULT_COMPACTION_THRESHOLD_PERCENT, DEFAULT_RECOMMENDED_CONTEXT_TOKENS,
-    compaction_threshold_tokens, recommended_context_tokens,
+    ContextWindowPolicy, DEFAULT_COMPACTION_THRESHOLD_PERCENT, DEFAULT_RECOMMENDED_CONTEXT_PERCENT,
+    DEFAULT_RECOMMENDED_CONTEXT_TOKENS, compaction_threshold_tokens, recommended_context_tokens,
 };
 pub use error::{MetadataError, MetadataSourceError};
 pub use metadata::ModelMetadata;

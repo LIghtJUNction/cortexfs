@@ -3,8 +3,9 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 
 use cortexfs_channels::{
-    Attachment, ChannelCommandResult, ChannelEventContext, ChannelFrame, ChannelFrameBody,
-    ChannelId, ChannelIncomingEvent, ChannelRuntimeEvent, ChannelSessionRoute, ConversationId,
+    Attachment, ChannelActions, ChannelCapabilities, ChannelCommandResult, ChannelControlAction,
+    ChannelEffect, ChannelEventContext, ChannelFrame, ChannelFrameBody, ChannelId,
+    ChannelIncomingEvent, ChannelRuntimeEvent, ChannelSessionRoute, ConversationId,
     DeliveryReceipt, InboundMessage, MessageBody, MessageTarget, Participant,
 };
 
@@ -489,5 +490,107 @@ fn driver_accepts_unsolicited_status_and_receipt_frames() -> Result<(), Box<dyn 
             ));
         }
     }
+    Ok(())
+}
+
+#[test]
+fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = tempfile::tempdir()?;
+    let channel = ChannelId::new("discord")?;
+    let hub = DriverHub::default();
+    let bridge = AgentChannelBridge::new(
+        root.path().join("agent.sock"),
+        ChannelSessionRoute::new("coder", "im")?,
+        None,
+    );
+    let adapter_config = DriverConfig {
+        socket: root.path().join("channel.sock"),
+        channel: channel.clone(),
+        bridge: bridge.clone(),
+        hub: hub.clone(),
+    };
+    let control_config = DriverConfig {
+        socket: root.path().join("control.sock"),
+        channel: channel.clone(),
+        bridge,
+        hub,
+    };
+    let (mut adapter, adapter_runtime) = UnixStream::pair()?;
+    let adapter_thread =
+        thread::spawn(move || super::driver::serve_once(adapter_runtime, &adapter_config));
+    adapter.write_all(
+        &ChannelFrame::new(ChannelFrameBody::Hello {
+            request_id: "adapter-hello".to_owned(),
+            channel: channel.clone(),
+            capabilities: ChannelCapabilities::text(),
+            actions: ChannelActions {
+                typing: true,
+                ..ChannelActions::empty()
+            },
+        })
+        .encode()?,
+    )?;
+    adapter.write_all(
+        &ChannelFrame::new(ChannelFrameBody::Start {
+            request_id: "adapter-start".to_owned(),
+        })
+        .encode()?,
+    )?;
+    let mut adapter_reader = BufReader::new(adapter.try_clone()?);
+    let mut line = String::new();
+    adapter_reader.read_line(&mut line)?;
+    assert!(line.contains("connected"));
+    line.clear();
+    adapter_reader.read_line(&mut line)?;
+    assert!(line.contains("connected"));
+
+    let (mut control, control_runtime) = UnixStream::pair()?;
+    let control_thread =
+        thread::spawn(move || super::driver::serve_once(control_runtime, &control_config));
+    control.write_all(
+        &ChannelFrame::new(ChannelFrameBody::ControlHello {
+            request_id: "control-hello".to_owned(),
+            channel: channel.clone(),
+        })
+        .encode()?,
+    )?;
+    let mut control_reader = BufReader::new(control.try_clone()?);
+    line.clear();
+    control_reader.read_line(&mut line)?;
+    assert!(line.contains("connected"));
+    let target = MessageTarget {
+        channel,
+        conversation: ConversationId::new("room-1")?,
+        thread: None,
+        reply_to: None,
+    };
+    control.write_all(
+        &ChannelFrame::new(ChannelFrameBody::ControlRequest {
+            request_id: "control-1".to_owned(),
+            action: ChannelControlAction::Effect {
+                target,
+                effect: ChannelEffect::Typing { active: true },
+            },
+        })
+        .encode()?,
+    )?;
+    line.clear();
+    control_reader.read_line(&mut line)?;
+    assert!(line.contains("control_response"));
+    assert!(line.contains("\"accepted\":true"));
+    line.clear();
+    adapter_reader.read_line(&mut line)?;
+    assert!(line.contains("\"effect\""), "adapter frame: {line}");
+    drop(control_reader);
+    drop(control);
+    control_thread
+        .join()
+        .map_err(|error| std::io::Error::other(format!("control driver panicked: {error:?}")))??;
+    drop(adapter_reader);
+    drop(adapter);
+    adapter_thread
+        .join()
+        .map_err(|error| std::io::Error::other(format!("adapter driver panicked: {error:?}")))??;
     Ok(())
 }

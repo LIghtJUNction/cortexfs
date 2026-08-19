@@ -4,7 +4,10 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-use cortexfs_channels::{ChannelId, DeliveryReceipt};
+use cortexfs_channels::{
+    ChannelActions, ChannelCapabilities, ChannelControlAction, ChannelFrame, ChannelFrameBody,
+    ChannelId, DeliveryReceipt,
+};
 
 mod send;
 
@@ -12,7 +15,13 @@ mod send;
 mod tests;
 
 type DriverWriter = Arc<Mutex<UnixStream>>;
-type DriverWriters = Arc<Mutex<BTreeMap<String, DriverWriter>>>;
+#[derive(Clone, Debug)]
+struct DriverPeer {
+    writer: DriverWriter,
+    capabilities: ChannelCapabilities,
+    actions: ChannelActions,
+}
+type DriverWriters = Arc<Mutex<BTreeMap<String, DriverPeer>>>;
 type PendingReceipts = Arc<Mutex<BTreeMap<String, mpsc::SyncSender<DeliveryReceipt>>>>;
 
 /// Handle used by runtime code to send a message without an inbound trigger.
@@ -23,9 +32,72 @@ pub struct DriverHub {
 }
 
 impl DriverHub {
-    pub(super) fn attach(&self, channel: &ChannelId, writer: DriverWriter) -> DriverRegistration {
+    pub(crate) fn dispatch(
+        &self,
+        channel: &ChannelId,
+        request_id: &str,
+        action: ChannelControlAction,
+    ) -> Result<(), super::DriverError> {
+        let peer = self
+            .writers
+            .lock()
+            .map_err(|_error| super::DriverError::Lock)?
+            .get(channel.as_str())
+            .cloned()
+            .ok_or(super::DriverError::Unavailable)?;
+        let frame = match action {
+            ChannelControlAction::Send { message } if peer.capabilities.send => {
+                ChannelFrame::new(ChannelFrameBody::Outbound {
+                    request_id: request_id.to_owned(),
+                    message,
+                })
+            }
+            ChannelControlAction::Effect { target, effect }
+                if peer.actions.supports(effect.action()) =>
+            {
+                ChannelFrame::new(ChannelFrameBody::Effect {
+                    request_id: request_id.to_owned(),
+                    target,
+                    effect,
+                })
+            }
+            ChannelControlAction::Command {
+                session,
+                command_id,
+                command,
+                target,
+            } if peer.capabilities.commands => ChannelFrame::new(ChannelFrameBody::Command {
+                request_id: request_id.to_owned(),
+                session,
+                command_id,
+                command,
+                target,
+            }),
+            _ => return Err(super::DriverError::Rejected),
+        };
+        let mut stream = peer
+            .writer
+            .lock()
+            .map_err(|_error| super::DriverError::Lock)?;
+        super::write(&mut stream, &frame)
+    }
+
+    pub(super) fn attach(
+        &self,
+        channel: &ChannelId,
+        writer: DriverWriter,
+        capabilities: ChannelCapabilities,
+        actions: ChannelActions,
+    ) -> DriverRegistration {
         if let Ok(mut writers) = self.writers.lock() {
-            writers.insert(channel.to_string(), Arc::clone(&writer));
+            writers.insert(
+                channel.to_string(),
+                DriverPeer {
+                    writer: Arc::clone(&writer),
+                    capabilities,
+                    actions,
+                },
+            );
         }
         DriverRegistration {
             hub: self.clone(),
@@ -38,7 +110,7 @@ impl DriverHub {
         if let Ok(mut writers) = self.writers.lock()
             && writers
                 .get(channel.as_str())
-                .is_some_and(|current| Arc::ptr_eq(current, writer))
+                .is_some_and(|current| Arc::ptr_eq(&current.writer, writer))
         {
             writers.remove(channel.as_str());
         }

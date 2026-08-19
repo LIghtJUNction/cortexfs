@@ -102,7 +102,8 @@ durable state -> existing agent/session files
 live control/events -> existing agent/session sockets
 ```
 
-No `/ctx/module`, `/ctx/plugin`, or `/ctx/channel` namespace is introduced.
+No `/ctx/module` or `/ctx/plugin` namespace is introduced. The explicit
+`/ctx/channel` root is owned by the channel subsystem, not by the Module ABI.
 An adapter may expose ordinary object-local or session-local status where an
 existing ABI already permits it.
 

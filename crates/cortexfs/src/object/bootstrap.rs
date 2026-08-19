@@ -14,7 +14,8 @@ pub fn install_executable_object_wrapper(
     wrapper_target: &str,
     control_overrides: &[(&str, &str)],
 ) -> Result<ObjectBootstrap, ObjectBootstrapError> {
-    if !is_object_name_for_class(class, name) {
+    if !is_object_name_for_class(class, name) || class == ObjectClass::Agent && is_agent_alias(name)
+    {
         return Err(ObjectBootstrapError::InvalidObjectName);
     }
     if !is_valid_wrapper_target(wrapper_target) {

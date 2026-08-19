@@ -49,14 +49,17 @@ impl DriverHub {
         request_id: String,
         message: OutboundMessage,
     ) -> Result<(), DriverError> {
-        let writer = self
+        let peer = self
             .writers
             .lock()
             .map_err(|_error| DriverError::Lock)?
             .get(channel.as_str())
             .cloned()
             .ok_or(DriverError::Unavailable)?;
-        let mut stream = writer.lock().map_err(|_error| DriverError::Lock)?;
+        if !peer.capabilities.send {
+            return Err(DriverError::Rejected);
+        }
+        let mut stream = peer.writer.lock().map_err(|_error| DriverError::Lock)?;
         write(
             &mut stream,
             &ChannelFrame::new(ChannelFrameBody::Outbound {

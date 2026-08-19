@@ -6,6 +6,7 @@ use super::{
     AGENT_INVOCATION_SCHEMA, AgentInvocationEnvelope, AgentToolObservation,
     MAX_AGENT_CONTEXT_BYTES, MAX_AGENT_INVOCATION_BYTES, MAX_AGENT_STEPS,
 };
+use crate::interaction::InteractionOrigin;
 
 /// Maximum bytes read for a single invocation frame (payload + trailing newline).
 ///
@@ -74,6 +75,7 @@ pub fn read_agent_invocation(
             .event
             .as_ref()
             .is_some_and(|event| !event.is_object() || event_bytes_too_large(event))
+        || envelope.origin.as_ref().is_some_and(invalid_origin)
         || (envelope.step == 0) != envelope.observation.0.is_none()
         || envelope.observation().is_some_and(invalid_observation)
     {
@@ -85,6 +87,25 @@ pub fn read_agent_invocation(
 
 fn event_bytes_too_large(event: &serde_json::Value) -> bool {
     serde_json::to_vec(event).is_ok_and(|bytes| bytes.len() > MAX_EVENT_BYTES)
+}
+
+fn invalid_origin(origin: &InteractionOrigin) -> bool {
+    serde_json::to_vec(origin).is_ok_and(|bytes| bytes.len() > MAX_EVENT_BYTES)
+        || [
+            Some(origin.transport.as_str()),
+            origin.endpoint.as_deref(),
+            origin.identity.as_deref(),
+            origin.conversation.as_deref(),
+            origin.thread.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value.is_empty() || value.bytes().any(|byte| byte.is_ascii_control()))
+        || origin.metadata.iter().any(|(key, value)| {
+            key.is_empty()
+                || key.bytes().any(|byte| byte.is_ascii_control())
+                || value.bytes().any(|byte| byte.is_ascii_control())
+        })
 }
 
 /// Returns whether a tool observation violates the wire contract.

@@ -30,6 +30,7 @@ pub struct ToolSpec {
 pub struct ToolInvocation {
     run_id: String,
     input: String,
+    tool_name: Option<String>,
 }
 
 impl ToolInvocation {
@@ -39,6 +40,21 @@ impl ToolInvocation {
         Self {
             run_id: run_id.into(),
             input: input.into(),
+            tool_name: None,
+        }
+    }
+
+    /// Creates an invocation with the executable tool name supplied by a host.
+    #[must_use]
+    pub fn named(
+        run_id: impl Into<String>,
+        name: impl Into<String>,
+        input: impl Into<String>,
+    ) -> Self {
+        Self {
+            run_id: run_id.into(),
+            input: input.into(),
+            tool_name: Some(name.into()),
         }
     }
 
@@ -52,6 +68,12 @@ impl ToolInvocation {
     #[must_use]
     pub fn input(&self) -> &str {
         &self.input
+    }
+
+    /// Returns the host-selected executable name, when supplied.
+    #[must_use]
+    pub fn tool_name(&self) -> Option<&str> {
+        self.tool_name.as_deref()
     }
 
     /// Parses input as JSON.
@@ -285,8 +307,18 @@ pub fn run_tool(
     invocation: &ToolInvocation,
     writer: &mut dyn Write,
 ) -> io::Result<ExitCode> {
+    run_tool_named(tool, tool.spec().name, invocation, writer)
+}
+
+/// Runs a tool while emitting a host-selected object name.
+pub fn run_tool_named(
+    tool: &dyn Tool,
+    name: &str,
+    invocation: &ToolInvocation,
+    writer: &mut dyn Write,
+) -> io::Result<ExitCode> {
     let mut output = ToolEmitter::new(invocation.run_id().to_owned(), writer);
-    output.start(tool.spec().name)?;
+    output.start(name)?;
     match tool.call(invocation, &mut output) {
         Ok(()) => {
             output.done("ok")?;
@@ -320,6 +352,17 @@ where
     }
 }
 
+/// Runs a tool CLI while emitting a host-selected object name.
+pub fn run_cli_named<I>(tool: &dyn Tool, name: &str, args: I) -> ExitCode
+where
+    I: IntoIterator<Item = OsString>,
+{
+    match run_cli_named_inner(tool, name, args) {
+        Ok(code) => code,
+        Err(_error) => ExitCode::from(1),
+    }
+}
+
 fn run_cli_inner<I>(tool: &dyn Tool, args: I) -> io::Result<ExitCode>
 where
     I: IntoIterator<Item = OsString>,
@@ -331,6 +374,19 @@ where
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     run_tool(tool, &invocation, &mut stdout)
+}
+
+fn run_cli_named_inner<I>(tool: &dyn Tool, name: &str, args: I) -> io::Result<ExitCode>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let stdin = io::stdin();
+    let input = collect_input_from_reader(args, stdin.lock())?;
+    let run_id = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    let invocation = ToolInvocation::named(run_id, name, input);
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    run_tool_named(tool, name, &invocation, &mut stdout)
 }
 
 fn collect_input_from_reader<I>(args: I, reader: impl Read) -> io::Result<String>
@@ -374,7 +430,7 @@ mod tests {
     use super::{
         MAX_CLI_STDIN_INPUT_BYTES, Registry, RegistryError, Tool, ToolEmitter, ToolError,
         ToolInvocation, ToolResult, ToolSpec, Value, collect_input_from_reader, parse_jsonl_frames,
-        run_tool,
+        run_tool, run_tool_named,
     };
     use std::ffi::OsString;
     use std::io::{self, Cursor, Write};
@@ -471,6 +527,27 @@ mod tests {
                 "content": content
             })]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn named_tool_run_emits_host_selected_name() -> TestResult {
+        let tool = EchoTool;
+        let invocation = ToolInvocation::named("r-named", "channel.reply", r#"{"text":"ok"}"#);
+        let mut output = Vec::new();
+        assert_eq!(
+            run_tool_named(&tool, "channel.reply", &invocation, &mut output)?,
+            ExitCode::SUCCESS
+        );
+        let frames = parse_jsonl_frames(&String::from_utf8(output)?)?;
+        assert_eq!(
+            frames
+                .first()
+                .and_then(|frame| frame.get("tool"))
+                .and_then(Value::as_str),
+            Some("channel.reply")
+        );
+        assert_eq!(invocation.tool_name(), Some("channel.reply"));
         Ok(())
     }
 

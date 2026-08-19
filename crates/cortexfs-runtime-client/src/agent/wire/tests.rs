@@ -65,6 +65,31 @@ fn accepts_exact_initial_and_continuation_frames() {
     ));
 }
 
+#[test]
+fn accepts_bounded_channel_origin_in_envelope() {
+    let mut value = frame(0, &serde_json::Value::Null);
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "origin".to_owned(),
+            serde_json::json!({
+                "transport": "channel",
+                "endpoint": "discord",
+                "identity": "user-1",
+                "conversation": "room-1",
+                "thread": "thread-1",
+                "metadata": {"source": "mock"}
+            }),
+        );
+    }
+    let parsed = parse(&value);
+    assert_eq!(
+        parsed
+            .ok()
+            .and_then(|envelope| envelope.origin().map(|origin| origin.endpoint.clone())),
+        Some(Some("discord".to_owned()))
+    );
+}
+
 /// Rejects a frame missing the trailing newline and reject concatenated multi-frame blobs.
 ///
 /// This guards against framing ambiguities and read-side desync.

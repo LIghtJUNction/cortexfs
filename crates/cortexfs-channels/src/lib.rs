@@ -10,6 +10,7 @@ mod adapter;
 mod address;
 mod capability;
 mod command;
+mod control;
 mod driver;
 mod effect;
 mod error;
@@ -32,6 +33,7 @@ pub use adapter::{
 pub use address::{ChannelId, ConversationId};
 pub use capability::{ChannelCapabilities, ChannelHealth, HealthState};
 pub use command::{ChannelChoice, ChannelCommand, ChannelCommandResult};
+pub use control::ChannelControlAction;
 pub use driver::{ChannelDriverClient, ChannelDriverError, ChannelDriverSession};
 pub use effect::ChannelEffect;
 pub use error::{ChannelError, RetryHint};
@@ -42,7 +44,7 @@ pub use incoming::ChannelIncoming;
 pub use message::{
     Attachment, InboundMessage, MessageBody, MessageTarget, OutboundMessage, Participant,
 };
-pub use platform::catalog::{CHANNEL_CATALOG, ChannelSpec, ChannelTransport};
+pub use platform::catalog::{CHANNEL_CATALOG, COMMON_CHANNEL_TOOLS, ChannelSpec, ChannelTransport};
 pub use platform::{ChannelCodec, OutboundRequest};
 pub use progress::ChannelProgressPolicy;
 pub use registry::ChannelRegistry;

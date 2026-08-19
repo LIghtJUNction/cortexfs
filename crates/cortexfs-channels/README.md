@@ -54,7 +54,9 @@ unchanged.
 Process-isolated adapters may reuse `ChannelDriverClient` for the common
 `Hello`/`Start`/`Inbound`/`InboundEvent`/`Deliver` exchange. It is a small blocking Unix
 socket helper for external drivers; it does not start an Agent, allocate a
-port, or persist channel state. A persistent driver can use
+port, or persist channel state. Tool SDK executables use a separate
+`ControlHello`/`ControlRequest` connection for generic sends, effects, and
+commands; it never replaces the adapter connection. A persistent driver can use
 `ChannelDriverSession` to receive runtime-initiated `Outbound` deliveries even
 while idle and return the provider-neutral acknowledgement. The optional Nostr,
 AMQP, MQTT, Slack Socket Mode, WeChat iLink, WeCom WebSocket, and voice/ClawdTalk drivers use this
@@ -103,7 +105,7 @@ and `telegram.secondary` are two independent channel instances in the same
 `telegram` family. Use `ChannelId::family()` for catalog/capability lookup and
 retain the complete id for registry, driver, delivery, and session routing.
 This lets multiple accounts share one runtime without assigning one TCP port
-per account or adding a channel tree to `/ctx`; each instance may instead use
+per account; each instance may instead use
 its own configured driver socket.
 Native hosts may set `CORTEXFS_CHANNEL_ID=telegram.primary` (or the equivalent
 family/instance value) to preserve that complete id when a stateless codec

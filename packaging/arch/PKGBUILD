@@ -56,6 +56,7 @@ build() {
     [[ -n ${CORTEXFS_PREBUILT_DIR:-} ]] && return
     cd "$srcdir/cortexfs-$pkgver"
     cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+        -p cortexfs-channel-tools \
         -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
         -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
         -p cortexfs-channel-voice -p cortexfs-channel-slack \
@@ -75,7 +76,7 @@ install_payload() {
     install -d -m 0700 "$root/var/lib/cortexfs/secrets"
     install -d -m 0700 "$root/etc/cortexfs/channels"
     for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-        cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr \
+        cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp; do
         install -m 0755 "$release/$binary" "$root/usr/bin/$binary"

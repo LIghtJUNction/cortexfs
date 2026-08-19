@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::ModelMetadata;
 
-/// Default maximum working window used when a provider advertises a larger limit.
+/// Default fraction of a model hard limit used as the Agent working window.
+pub const DEFAULT_RECOMMENDED_CONTEXT_PERCENT: u32 = 50;
+/// Legacy fixed-window constant retained for source compatibility. It is not
+/// used by the dynamic default policy.
 pub const DEFAULT_RECOMMENDED_CONTEXT_TOKENS: u32 = 131_072;
 /// Fraction of the recommended window at which a context compiler should compact.
-pub const DEFAULT_COMPACTION_THRESHOLD_PERCENT: u32 = 80;
+pub const DEFAULT_COMPACTION_THRESHOLD_PERCENT: u32 = 90;
 
 /// Three distinct context limits exposed to runtimes and filesystem clients.
 #[expect(
@@ -36,11 +39,8 @@ impl ContextWindowPolicy {
 /// Derives a bounded working window from a provider/model hard maximum.
 #[must_use]
 pub const fn recommended_context_tokens(max_tokens: u32) -> u32 {
-    if max_tokens < DEFAULT_RECOMMENDED_CONTEXT_TOKENS {
-        max_tokens
-    } else {
-        DEFAULT_RECOMMENDED_CONTEXT_TOKENS
-    }
+    let recommended = max_tokens.saturating_mul(DEFAULT_RECOMMENDED_CONTEXT_PERCENT) / 100;
+    if recommended == 0 { 1 } else { recommended }
 }
 
 /// Derives the compaction trigger from a recommended working window.

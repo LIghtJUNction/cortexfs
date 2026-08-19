@@ -1,4 +1,5 @@
 use super::*;
+use crate::ToolPath;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
 pub(crate) struct AgentToolExecutionConfig<'a> {
@@ -9,6 +10,8 @@ pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) session: &'a str,
     pub(crate) control: Option<AgentToolControl>,
     pub(crate) cancel: Option<(&'a Path, &'a str)>,
+    pub(crate) tool_path: Option<&'a ToolPath>,
+    pub(crate) channel: Option<&'a crate::runtime::channelenv::ChannelRuntimeContext>,
 }
 
 #[derive(Clone, Debug)]
@@ -67,16 +70,9 @@ pub(crate) fn prepare_agent_tool_call(
         NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
     )
     .is_ok();
-    if tool_call.name == "tsh" {
-        validate_agent_tsh_args(&tool_call.args)?;
-    } else if !view.declared_tools().contains(&tool_call.name) {
-        return Err(ExecError::new(format!(
-            "unsupported native tool {}; declare it in the agent tools control",
-            tool_call.name
-        )));
-    }
-    let Some(hit) = view
-        .tool_path()
+    let tool_path = config.tool_path.unwrap_or_else(|| view.tool_path());
+    validate_tool_admission(&view, config, tool_call)?;
+    let Some(hit) = tool_path
         .find(&tool_call.name)
         .map_err(|error| ExecError::new(format!("cannot inspect CTX_PATH: {error:?}")))?
     else {
@@ -93,7 +89,7 @@ pub(crate) fn prepare_agent_tool_call(
     let tool_policy = PolicyV0::parse(&policy_text)
         .map_err(|_error| ExecError::new(format!("invalid policy for tool:{}", tool_call.name)))?;
     let grant = authorize_tool_execution(
-        view.tool_path(),
+        tool_path,
         &tool_call.name,
         ToolExecutionAuthority::new(
             view.identity(),
@@ -159,11 +155,44 @@ pub(crate) fn prepare_agent_tool_call(
                     pinned: false,
                     last_used: 0,
                 },
-                tsh_working_set_limit(&view),
+                tsh_working_set_limit(tool_path),
             )
         }),
         control_gate,
     })
+}
+
+fn validate_tool_admission(
+    view: &cortexfs::AgentRuntimeView,
+    config: &AgentToolExecutionConfig<'_>,
+    call: &AgentToolCall,
+) -> Result<(), ExecError> {
+    if call.name == "tsh" {
+        return validate_agent_tsh_args(&call.args);
+    }
+    if config
+        .channel
+        .is_some_and(|channel| channel.is_channel_tool(&call.name))
+    {
+        if config
+            .channel
+            .is_none_or(|channel| !channel.allows_tool(&call.name))
+        {
+            return Err(ExecError::new(format!(
+                "channel capability denied for tool {}",
+                call.name
+            )));
+        }
+        return Ok(());
+    }
+    if view.declared_tools().contains(&call.name) {
+        Ok(())
+    } else {
+        Err(ExecError::new(format!(
+            "unsupported native tool {}; declare it in the agent tools control",
+            call.name
+        )))
+    }
 }
 
 fn open_agent_home_fds(home_source: &Path) -> Result<(fs::File, fs::File), ExecError> {
@@ -184,8 +213,8 @@ fn open_agent_home_fds(home_source: &Path) -> Result<(fs::File, fs::File), ExecE
     Ok((home_dir, home_alias_dir))
 }
 
-fn tsh_working_set_limit(view: &cortexfs::AgentRuntimeView) -> usize {
-    let Some(hit) = view.tool_path().find("tsh").ok().flatten() else {
+fn tsh_working_set_limit(tool_path: &ToolPath) -> usize {
+    let Some(hit) = tool_path.find("tsh").ok().flatten() else {
         return cortexfs::tool::core::tools::TshRuntimeConfig::default().max_loaded_tools;
     };
     let path = hit.control_dir().join("config");
@@ -487,6 +516,16 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
     ];
     args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
     args.extend(bwrap_system_layout_args().into_iter().map(OsString::from));
+    if let Some(channel) = request.config.channel {
+        let socket = cortexfs_paths::channel_driver_socket(channel.channel());
+        if socket.exists() {
+            args.extend(
+                crate::support::bwrap::readonly_bind_args(&socket)
+                    .into_iter()
+                    .map(OsString::from),
+            );
+        }
+    }
     if !request.network_allowed {
         args.push(OsString::from("--unshare-net"));
     }
@@ -547,6 +586,23 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
     args
 }
 
+fn sandbox_tool_path(path: &ToolPath, source: &Path) -> String {
+    path.dirs()
+        .iter()
+        .map(|entry| {
+            entry
+                .strip_prefix(source)
+                .map_or_else(
+                    |_| entry.clone(),
+                    |relative| cortexfs_paths::ctx_root().join(relative),
+                )
+                .display()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> {
     let mut args = Vec::new();
     for env in request.env {
@@ -564,6 +620,14 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
             OsString::from(&env.1),
         ]);
     }
+    let default_path = format!(
+        "{}:{}",
+        cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root()).display(),
+        cortexfs_paths::home_tool_from_home_path(request.ctx_home_target).display()
+    );
+    let tool_path = request.config.tool_path.map_or(default_path, |path| {
+        sandbox_tool_path(path, request.config.source)
+    });
     args.extend([
         OsString::from("--setenv"),
         OsString::from("CTX_AGENT"),
@@ -591,11 +655,7 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("/home/agent"),
         OsString::from("--setenv"),
         OsString::from("CTX_PATH"),
-        OsString::from(format!(
-            "{}:{}",
-            cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root()).display(),
-            cortexfs_paths::home_tool_from_home_path(request.ctx_home_target).display()
-        )),
+        OsString::from(tool_path),
         OsString::from("--setenv"),
         OsString::from("CTX_SOURCE"),
         request.config.source.as_os_str().to_owned(),
@@ -609,6 +669,26 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("PATH"),
         OsString::from(crate::support::command::TRUSTED_PATH),
     ]);
+    if let Some(channel) = request.config.channel {
+        args.extend([
+            OsString::from("--setenv"),
+            OsString::from("CTX_CHANNEL_ID"),
+            OsString::from(channel.channel()),
+            OsString::from("--setenv"),
+            OsString::from("CTX_CHANNEL_SESSION"),
+            OsString::from(&request.config.session),
+            OsString::from("--setenv"),
+            OsString::from("CTX_CHANNEL_CAPS"),
+            OsString::from(channel.caps()),
+            OsString::from("--setenv"),
+            OsString::from("CTX_CHANNEL_SOCKET"),
+            OsString::from(
+                cortexfs_paths::channel_driver_socket(channel.channel())
+                    .display()
+                    .to_string(),
+            ),
+        ]);
+    }
     if let Some(control) = request.control {
         let socket = &control.target;
         args.extend([

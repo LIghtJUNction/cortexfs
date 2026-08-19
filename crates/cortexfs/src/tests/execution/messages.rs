@@ -304,6 +304,8 @@ fn executable_agent_rejects_non_authoritative_tool_frames() {
                 cwd: None,
                 input: "",
                 event: None,
+                origin: None,
+                channel: None,
                 history_messages: "",
                 tool_context: "",
                 debug: None,

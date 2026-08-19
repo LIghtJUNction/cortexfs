@@ -105,14 +105,14 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
 
     let auto = ok!(derive_agent_runtime_view(&root, "coder"));
     assert_eq!(auto.window_setting(), AgentWindowSetting::Auto);
-    assert_eq!(auto.effective_window().tokens(), Some(64));
+    assert_eq!(auto.effective_window().tokens(), Some(32));
     assert_eq!(
         env_value(auto.env(), "CTX_CONTEXT_WINDOW_TOKENS"),
-        Some("64")
+        Some("32")
     );
     assert_eq!(
         env_value(auto.env(), "CTX_CONTEXT_WINDOW_CHARS"),
-        Some("256")
+        Some("128")
     );
     for value in ["1\n", "64\n"] {
         write_text_file(&control.join("window"), value);
@@ -127,22 +127,22 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "window"
     ));
     write_text_file(&root.join("model/local/chat.d/limit"), "1000000\n");
-    write_text_file(&root.join("model/local/chat.d/recommended"), "131072\n");
-    write_text_file(&root.join("model/local/chat.d/compact"), "104857\n");
+    write_text_file(&root.join("model/local/chat.d/recommended"), "500000\n");
+    write_text_file(&root.join("model/local/chat.d/compact"), "450000\n");
     write_text_file(&control.join("window"), "auto\n");
     let recommended = ok!(derive_agent_runtime_view(&root, "coder"));
     assert_eq!(recommended.model_limit().tokens(), Some(1_000_000));
-    assert_eq!(recommended.model_recommended().tokens(), Some(131_072));
-    assert_eq!(recommended.model_compact().tokens(), Some(104_857));
-    assert_eq!(recommended.effective_window().tokens(), Some(131_072));
-    assert_eq!(recommended.effective_compact().tokens(), Some(104_857));
+    assert_eq!(recommended.model_recommended().tokens(), Some(500_000));
+    assert_eq!(recommended.model_compact().tokens(), Some(450_000));
+    assert_eq!(recommended.effective_window().tokens(), Some(500_000));
+    assert_eq!(recommended.effective_compact().tokens(), Some(450_000));
     assert_eq!(
         env_value(recommended.env(), "CTX_CONTEXT_WINDOW_TOKENS"),
-        Some("131072")
+        Some("500000")
     );
     assert_eq!(
         env_value(recommended.env(), "CTX_CONTEXT_COMPACTION_TOKENS"),
-        Some("104857")
+        Some("450000")
     );
     write_text_file(&root.join("model/local/chat.d/limit"), "unknown\n");
     write_text_file(&control.join("window"), "32\n");

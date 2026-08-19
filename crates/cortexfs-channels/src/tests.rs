@@ -1373,6 +1373,30 @@ fn channel_socket_frame_round_trips_runtime_command_result() -> Result<(), Chann
 }
 
 #[test]
+fn channel_control_frame_round_trips_effect_request() -> Result<(), ChannelError> {
+    let frame = ChannelFrame::new(ChannelFrameBody::ControlRequest {
+        request_id: "tool-1".to_owned(),
+        action: ChannelControlAction::Effect {
+            target: MessageTarget {
+                channel: ChannelId::from_static("discord"),
+                conversation: ConversationId::new("room-1")?,
+                thread: None,
+                reply_to: None,
+            },
+            effect: ChannelEffect::Typing { active: true },
+        },
+    });
+    let decoded = ChannelFrame::decode(
+        &frame
+            .encode()
+            .map_err(|error| ChannelError::Protocol(error.to_string()))?,
+    )
+    .map_err(|error| ChannelError::Protocol(error.to_string()))?;
+    assert_eq!(decoded, frame);
+    Ok(())
+}
+
+#[test]
 fn channel_socket_frame_rejects_wrong_abi() {
     let frame = ChannelFrame {
         abi: "other".to_owned(),
@@ -1381,4 +1405,17 @@ fn channel_socket_frame_rejects_wrong_abi() {
         },
     };
     assert!(frame.encode().is_err());
+}
+
+#[test]
+fn every_catalog_channel_exposes_common_tool_names() {
+    for spec in CHANNEL_CATALOG {
+        let names = spec.tool_names();
+        assert!(names.iter().any(|name| name == "channel.send"));
+        assert!(
+            names
+                .iter()
+                .any(|name| name == &format!("{}.invoke", spec.id))
+        );
+    }
 }

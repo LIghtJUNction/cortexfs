@@ -117,7 +117,10 @@ impl<'a> AgentProcessTreeRenderer<'a> {
 }
 
 pub(crate) fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
-    let names = list_kind_names(root, ObjectClass::Agent)?;
+    let names = list_kind_names(root, ObjectClass::Agent)?
+        .into_iter()
+        .filter(|name| !cortexfs::is_agent_alias(name))
+        .collect::<Vec<_>>();
     let mut processes = Vec::new();
     for name in names {
         let control = agent_control_dir(root, &name);

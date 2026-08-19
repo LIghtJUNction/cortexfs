@@ -134,6 +134,37 @@ pub enum AbiPathKind<'a> {
     Unknown,
     /// `model/<provider>`.
     ModelDir { provider: &'a str },
+    /// Global or per-user channel root.
+    ChannelRoot { uid: Option<&'a str> },
+    /// One global or per-user channel instance directory.
+    ChannelDir {
+        uid: Option<&'a str>,
+        channel: &'a str,
+    },
+    /// One channel's tool directory.
+    ChannelToolRoot {
+        uid: Option<&'a str>,
+        channel: &'a str,
+    },
+    /// One channel executable tool.
+    ChannelToolExec {
+        uid: Option<&'a str>,
+        channel: &'a str,
+        name: &'a str,
+    },
+    /// One channel tool control file.
+    ChannelToolControl {
+        uid: Option<&'a str>,
+        channel: &'a str,
+        name: &'a str,
+        file: &'a str,
+    },
+    /// One channel control file under `<channel>.d/`.
+    ChannelControl {
+        uid: Option<&'a str>,
+        channel: &'a str,
+        file: &'a str,
+    },
     /// Global model route file, `model/route`.
     ModelRoute,
     /// `model/<provider>/<model>`, `agent/<name>`, or `tool/<name>`.
@@ -202,6 +233,20 @@ impl AbiPathKind<'_> {
         match self {
             Self::Unknown => "ctx.unknown",
             Self::ModelDir { .. } => "ctx.model.dir",
+            Self::ChannelRoot { uid: None } | Self::ChannelDir { uid: None, .. } => {
+                "ctx.channel.dir"
+            }
+            Self::ChannelRoot { uid: Some(_) } | Self::ChannelDir { uid: Some(_), .. } => {
+                "ctx.home.channel.dir"
+            }
+            Self::ChannelToolRoot { uid: None, .. } => "ctx.channel.tool.dir",
+            Self::ChannelToolRoot { uid: Some(_), .. } => "ctx.home.channel.tool.dir",
+            Self::ChannelToolExec { uid: None, .. } => "ctx.channel.tool.exec",
+            Self::ChannelToolExec { uid: Some(_), .. } => "ctx.home.channel.tool.exec",
+            Self::ChannelToolControl { uid: None, .. } => "ctx.channel.tool.control",
+            Self::ChannelToolControl { uid: Some(_), .. } => "ctx.home.channel.tool.control",
+            Self::ChannelControl { uid: None, .. } => "ctx.channel.control",
+            Self::ChannelControl { uid: Some(_), .. } => "ctx.home.channel.control",
             Self::ModelRoute => "ctx.model.route",
             Self::ObjectExec { class, .. } => class.exec_type(),
             Self::ObjectSocket { class, .. } => class.socket_type(),
@@ -270,6 +315,7 @@ impl<'a> AbiPathKind<'a> {
                 file: "schema",
                 ..
             } | Self::SharedToolControl { file: "schema", .. }
+                | Self::ChannelToolControl { file: "schema", .. }
         )
     }
 
@@ -277,7 +323,10 @@ impl<'a> AbiPathKind<'a> {
     #[must_use]
     pub const fn control_file(self) -> Option<&'a str> {
         match self {
-            Self::ObjectControl { file, .. } | Self::SharedToolControl { file, .. } => Some(file),
+            Self::ObjectControl { file, .. }
+            | Self::SharedToolControl { file, .. }
+            | Self::ChannelToolControl { file, .. }
+            | Self::ChannelControl { file, .. } => Some(file),
             _ => None,
         }
     }
@@ -337,6 +386,8 @@ impl<'a> AbiPathKind<'a> {
                 class: ObjectClass::Agent | ObjectClass::Tool,
                 ..
             } | Self::SharedToolControl { .. }
+                | Self::ChannelToolControl { uid: Some(_), .. }
+                | Self::ChannelControl { uid: Some(_), .. }
         )
     }
 
@@ -401,6 +452,11 @@ mod tests {
         assert!(parse_abi_path("agent/coder.d/cwd").is_writable_control_path());
         assert!(parse_abi_path("tool/fs.read.d/schema").is_writable_control_path());
         assert!(parse_abi_path("shared/team/tool/repo.d/schema").is_writable_control_path());
+        assert!(parse_abi_path("home/1000/channel/discord.d/cap").is_writable_control_path());
+        assert!(
+            parse_abi_path("home/1000/channel/discord/tool/channel.reply.d/schema")
+                .is_writable_control_path()
+        );
     }
 
     #[test]
@@ -409,5 +465,10 @@ mod tests {
         assert!(!parse_abi_path("model/debug/echo").is_writable_control_path());
         assert!(!parse_abi_path("shared/team/queue").is_writable_control_path());
         assert!(!parse_abi_path("tool").is_writable_control_path());
+        assert!(!parse_abi_path("channel/discord.d/cap").is_writable_control_path());
+        assert_eq!(
+            classify_abi_path("channel/discord/tool/channel.reply"),
+            "ctx.channel.tool.exec"
+        );
     }
 }

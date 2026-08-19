@@ -1006,6 +1006,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexfs-channel-tools"
+version = "0.1.16"
+dependencies = [
+ "cortexfs-channels",
+ "cortexfs-paths",
+ "cortexfs-tool-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "cortexfs-channel-voice"
 version = "0.1.16"
 dependencies = [

@@ -7,6 +7,7 @@
 //! - [rust-fs-mcp runtime architecture](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md)
 //! - [modelcontextprotocol/servers#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 
+use crate::interaction::InteractionOrigin;
 use serde::Deserialize;
 
 mod wire;
@@ -91,6 +92,9 @@ pub struct AgentInvocationEnvelope {
     /// Optional provider-neutral external event that caused the invocation.
     #[serde(default)]
     event: Option<serde_json::Value>,
+    /// Provider-neutral external transport origin for channel runs.
+    #[serde(default)]
+    origin: Option<InteractionOrigin>,
     /// History context snapshot for this invocation.
     history_messages: String,
     /// Tool context snapshot for this invocation.
@@ -158,6 +162,12 @@ impl AgentInvocationEnvelope {
     #[must_use]
     pub fn event(&self) -> Option<&serde_json::Value> {
         self.event.as_ref()
+    }
+
+    /// External transport origin, when this invocation came from a channel.
+    #[must_use]
+    pub fn origin(&self) -> Option<&InteractionOrigin> {
+        self.origin.as_ref()
     }
 
     /// Historical message payload carried in this invocation.

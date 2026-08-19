@@ -47,3 +47,14 @@ let sessions = Path::new("/ctx/home/1000/agent/coder/session");
 let channels = session_channel_index_path(sessions);
 let terminal = session_channel_path(sessions, "terminal_coder_default");
 ```
+
+Channel paths use the same ABI crate:
+
+```rust
+use cortexfs_paths::{channel_tool_path, home_channel_control_file_path};
+let global_tools = channel_tool_path(Path::new("/ctx"), "discord");
+let user_cap = home_channel_control_file_path(Path::new("/ctx"), "1000", "discord", "cap");
+```
+
+There is no `channel/tool` compositor. Common tools live below each named
+channel, and the runtime resolves user paths before global paths.

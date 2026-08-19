@@ -90,6 +90,16 @@ impl ToolPath {
         &self.dirs
     }
 
+    /// Returns the path in the environment format used by executable tools.
+    #[must_use]
+    pub fn to_env(&self) -> String {
+        self.dirs
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
     /// Returns whether this path only removes parent search tiers while
     /// preserving their first-hit order.
     #[must_use]

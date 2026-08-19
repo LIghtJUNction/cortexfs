@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ChannelIncomingEvent;
 use crate::{
-    ChannelActions, ChannelCapabilities, ChannelCommand, ChannelCommandResult, ChannelEffect,
-    ChannelHealth, ChannelId, DeliveryReceipt, InboundMessage, MessageTarget, OutboundMessage,
+    ChannelActions, ChannelCapabilities, ChannelCommand, ChannelCommandResult,
+    ChannelControlAction, ChannelEffect, ChannelHealth, ChannelId, DeliveryReceipt, InboundMessage,
+    MessageTarget, OutboundMessage,
 };
 
 /// Versioned JSONL protocol for a bidirectional channel driver socket.
@@ -24,6 +25,10 @@ pub enum ChannelFrameBody {
         capabilities: ChannelCapabilities,
         #[serde(default)]
         actions: ChannelActions,
+    },
+    ControlHello {
+        request_id: String,
+        channel: ChannelId,
     },
     Start {
         request_id: String,
@@ -67,6 +72,16 @@ pub enum ChannelFrameBody {
         session: String,
         command_id: String,
         result: ChannelCommandResult,
+    },
+    ControlRequest {
+        request_id: String,
+        action: ChannelControlAction,
+    },
+    ControlResponse {
+        request_id: String,
+        accepted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     Receipt {
         request_id: String,

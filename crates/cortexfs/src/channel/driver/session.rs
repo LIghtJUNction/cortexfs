@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-use cortexfs_channels::ChannelFrame;
+use cortexfs_channels::{ChannelFrame, ChannelFrameBody};
 
 use super::{
     DriverConfig, DriverError, reader,
@@ -26,7 +26,8 @@ pub(super) enum SessionEvent {
 pub(super) fn serve(stream: UnixStream, config: &DriverConfig) -> Result<(), DriverError> {
     let reader_stream = stream.try_clone()?;
     let writer = Arc::new(Mutex::new(stream));
-    let _registration = config.hub.attach(&config.channel, Arc::clone(&writer));
+    let mut registration = None;
+    let mut handshake = false;
     let (events, incoming) = mpsc::sync_channel(64);
     let reader = reader::spawn(reader_stream, events.clone());
     let commands = super::new_broker();
@@ -35,6 +36,22 @@ pub(super) fn serve(stream: UnixStream, config: &DriverConfig) -> Result<(), Dri
     while let Ok(event) = incoming.recv() {
         match event {
             SessionEvent::Frame(frame) => {
+                if !handshake {
+                    handshake = true;
+                    if let &ChannelFrameBody::Hello {
+                        capabilities,
+                        actions,
+                        ..
+                    } = &frame.frame
+                    {
+                        registration = Some(config.hub.attach(
+                            &config.channel,
+                            Arc::clone(&writer),
+                            capabilities,
+                            actions,
+                        ));
+                    }
+                }
                 if input::handle(
                     frame,
                     config,
@@ -57,5 +74,6 @@ pub(super) fn serve(stream: UnixStream, config: &DriverConfig) -> Result<(), Dri
         let _ignored = worker.join();
     }
     let _ignored = reader.join();
+    drop(registration);
     Ok(())
 }

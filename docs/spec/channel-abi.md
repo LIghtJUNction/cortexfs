@@ -1,8 +1,8 @@
 # Channel ABI
 
 This specification defines the public `cortexfs-channels` crate boundary and
-the optional CortexFS channel host. It does not add a `/ctx/channel` tree or a
-second durable submission mechanism. Channel delivery enters the existing
+the optional CortexFS channel host. Channel state and tools use the explicit
+`/ctx/channel` root; delivery enters the existing
 `agent/<name>.sock` JSONL session ABI.
 
 ## Public crate
@@ -29,6 +29,8 @@ exports:
 - `ChannelFrame`: bidirectional JSONL socket boundary with ABI value
   `cortexfs.channel.socket/v1`, correlation ids, lifecycle, health, delivery,
   receipts, live effects, and provider-neutral runtime commands/results;
+- `ChannelControlAction`: provider-neutral Tool SDK requests for sending,
+  effects, and commands without platform-specific message types;
 - `platform::{telegram, bluesky, discord, slack, feishu, lark, dingtalk, line, teams, nextcloud, matrix, whatsapp, gmail, email, signal, irc, twitch, reddit, mattermost, qq, linq, notion}`: stateless payload codecs; each codec exposes the catalog-derived `capabilities()` declaration.
 - `cortexfs-channel-nostr`: an optional process-isolated driver for NIP-04/NIP-17 and relay WebSockets; it speaks only `cortexfs.channel.socket/v1` and keeps Nostr key/encryption types outside this ABI crate.
 - `cortexfs-channel-amqp`: an optional process-isolated AMQP driver; it speaks only `cortexfs.channel.socket/v1` and keeps `lapin`, broker credentials, and acknowledgement semantics outside this ABI crate.
@@ -92,6 +94,35 @@ Stateless webhook codecs must call `decode_incoming()` rather than only
 delete bypass message parsing and enter the same bridge as an inbound message;
 the bridge derives a stable event request id and applies identity-isolated
 session routing when the route enables it.
+
+## Channel filesystem and Tool SDK
+
+Each channel instance owns its generic tools and read-only global state:
+
+```text
+/ctx/channel/<name>/tool/<tool>
+/ctx/channel/<name>.d/{id,driver,cap,status,health}
+/ctx/home/<uid>/channel/<name>/tool/<tool>
+/ctx/home/<uid>/channel/<name>.d/*
+```
+
+There is intentionally no `/ctx/channel/tool`. Common operations keep generic
+names (`channel.send`, `channel.reply`, `channel.react`, and so on) but are
+installed inside every channel namespace. A platform extension uses the
+`<channel>.invoke` name and carries only a provider-neutral `Invoke` payload.
+User channel tools precede global channel tools for that user. A collision with
+the Agent's existing tool path fails closed instead of silently shadowing it.
+
+For a channel-backed run, Runtime constructs the effective `CTX_PATH` and
+injects `CTX_CHANNEL_ID`, `CTX_CHANNEL_SESSION`, `CTX_CHANNEL_CAPS`, and
+`CTX_CHANNEL_SOCKET` into the Agent child. Identity, thread, attachments, and
+other structured origin data remain in the stdin JSONL envelope. Secrets never
+enter these values.
+
+`ControlHello` creates a controller connection without replacing the registered
+adapter. `ControlRequest` carries a `ChannelControlAction`; the driver checks
+the adapter's negotiated capabilities/actions, forwards `Outbound`, `Effect`,
+or `Command` to the adapter, and returns a correlated `ControlResponse`.
 
 ## Message and session semantics
 

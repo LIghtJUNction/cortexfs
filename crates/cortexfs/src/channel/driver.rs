@@ -48,6 +48,8 @@ pub enum DriverError {
     ReceiptTimeout,
     #[error("channel driver lock is poisoned")]
     Lock,
+    #[error("channel driver capability rejected the request")]
+    Rejected,
 }
 
 pub(super) fn write(stream: &mut UnixStream, frame: &ChannelFrame) -> Result<(), DriverError> {

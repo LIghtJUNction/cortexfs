@@ -36,6 +36,7 @@ pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     }
 
     ok &= doctor_objects(root)?;
+    ok &= doctor_channels(root)?;
     ok &= doctor_sessions(root)?;
     ok &= doctor_shared_queues(root)?;
     ok &= doctor_retired_reference_agents(root)?;
@@ -46,6 +47,57 @@ pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     } else {
         Err(CliError::unavailable("doctor found ABI problems"))
     }
+}
+
+/// Validate global channel state and Tool SDK object pairs.
+pub(crate) fn doctor_channels(root: &Path) -> Result<bool, CliError> {
+    let channel_root = cortexfs_paths::channel_root_path(root);
+    if !doctor_is_dir(&channel_root) {
+        return Ok(false);
+    }
+    let mut ok = true;
+    if doctor_exists(&channel_root.join("tool")) {
+        ok = false;
+        print_line("invalid channel/tool (global channel tool root is forbidden)")?;
+    }
+    #[expect(
+        clippy::case_sensitive_file_extension_comparisons,
+        reason = "the channel ABI reserves the exact lowercase .d suffix"
+    )]
+    for name in read_dir_names(&channel_root)? {
+        if name.ends_with(".d") || !is_object_name(&name) {
+            continue;
+        }
+        let path = cortexfs_paths::channel_path(root, &name);
+        let control = cortexfs_paths::channel_control_path(root, &name);
+        let tools = cortexfs_paths::channel_tool_path(root, &name);
+        let shape = doctor_is_dir(&path) && doctor_is_dir(&control) && doctor_is_dir(&tools);
+        if !shape {
+            ok = false;
+            print_line(&format!("invalid channel/{name}"))?;
+            continue;
+        }
+        for file in CHANNEL_CONTROL_FILES {
+            if !doctor_is_file(&control.join(file)) {
+                ok = false;
+                print_line(&format!("missing channel/{name}.d/{file}"))?;
+            }
+        }
+        for tool in read_dir_names(&tools)? {
+            if !is_object_name(&tool) || !is_executable_file(&tools.join(&tool)) {
+                continue;
+            }
+            if !doctor_is_file(&tools.join(format!("{tool}.d/policy"))) {
+                ok = false;
+                print_line(&format!("missing channel/{name}/tool/{tool}.d/policy"))?;
+            }
+        }
+        print_line(&format!(
+            "{} channel/{name}",
+            if shape { "ok" } else { "invalid" }
+        ))?;
+    }
+    Ok(ok)
 }
 
 /// Report retired reference agents and mark them as expected stale entries.
@@ -127,7 +179,7 @@ pub(crate) fn object_names_for_doctor(
     if class != ObjectClass::Model {
         return Ok(read_dir_names(dir)?
             .into_iter()
-            .filter(|name| is_object_name(name))
+            .filter(|name| is_object_name(name) && !cortexfs::is_agent_alias(name))
             .collect());
     }
 

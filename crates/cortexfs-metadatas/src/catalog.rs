@@ -56,18 +56,7 @@ impl MetadataCatalog {
         };
         let mut catalog = Self::builtins();
         for metadata in cached.models.into_values() {
-            let key = qualified(&metadata.provider, &metadata.id);
-            let target = catalog
-                .canonical_reference(&key)
-                .map(str::to_owned)
-                .unwrap_or(key);
-            if let Some(base) = catalog.models.get(&target).cloned() {
-                catalog
-                    .models
-                    .insert(target, merge_metadata(base, metadata));
-            } else {
-                let _ignored = catalog.register(metadata);
-            }
+            merge_cached_model(&mut catalog, metadata);
         }
         catalog
     }
@@ -225,6 +214,43 @@ pub(crate) fn catalog_cache_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join(MODEL_METADATA_CACHE_FILE)
 }
 
+fn merge_cached_model(catalog: &mut MetadataCatalog, metadata: ModelMetadata) {
+    let key = qualified(&metadata.provider, &metadata.id);
+    let target = catalog
+        .canonical_reference(&key)
+        .map_or_else(|| key.clone(), str::to_owned);
+    if let Some(base) = catalog.models.get(&target).cloned() {
+        let merged = merge_metadata(base, metadata);
+        let aliases = merged.aliases.clone();
+        catalog.models.insert(target.clone(), merged);
+        for alias in aliases {
+            let _ignored = catalog.add_provider_alias(&target, &alias);
+        }
+        return;
+    }
+    if catalog.models.contains_key(&key)
+        || catalog.aliases.contains_key(&key)
+        || metadata.aliases.iter().any(|alias| {
+            let scoped = qualified_from_key(&key, alias);
+            catalog
+                .models
+                .get(&scoped)
+                .is_some_and(|existing| qualified(&existing.provider, &existing.id) != key)
+                || catalog
+                    .aliases
+                    .get(&scoped)
+                    .is_some_and(|existing| existing != &key)
+        })
+    {
+        return;
+    }
+    let aliases = metadata.aliases.clone();
+    catalog.models.insert(key.clone(), metadata);
+    for alias in aliases {
+        let _ignored = catalog.add_provider_alias(&key, &alias);
+    }
+}
+
 fn merge_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> ModelMetadata {
     let authoritative = is_models_dev_record(&overlay);
     if !overlay.name.trim().is_empty() {
@@ -239,14 +265,14 @@ fn merge_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> ModelMetad
         .compaction_threshold_tokens
         .or(base.compaction_threshold_tokens);
     base.max_output_tokens = overlay.max_output_tokens.or(base.max_output_tokens);
+    base.tools = overlay_support(base.tools, overlay.tools);
+    base.structured_output = overlay_support(base.structured_output, overlay.structured_output);
+    base.streaming = overlay_support(base.streaming, overlay.streaming);
+    base.attachment = overlay_support(base.attachment, overlay.attachment);
+    base.temperature = overlay_support(base.temperature, overlay.temperature);
+    base.open_weights = overlay_support(base.open_weights, overlay.open_weights);
+    base.interleaved = overlay_support(base.interleaved, overlay.interleaved);
     if authoritative {
-        base.tools = overlay.tools;
-        base.structured_output = overlay.structured_output;
-        base.streaming = overlay.streaming;
-        base.attachment = overlay.attachment;
-        base.temperature = overlay.temperature;
-        base.open_weights = overlay.open_weights;
-        base.interleaved = overlay.interleaved;
         base.description = overlay.description;
         base.family = overlay.family;
         base.knowledge = overlay.knowledge;
@@ -256,13 +282,6 @@ fn merge_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> ModelMetad
         base.output_modalities = overlay.output_modalities;
         base.reasoning = overlay.reasoning;
     } else {
-        base.tools = overlay_support(base.tools, overlay.tools);
-        base.structured_output = overlay_support(base.structured_output, overlay.structured_output);
-        base.streaming = overlay_support(base.streaming, overlay.streaming);
-        base.attachment = overlay_support(base.attachment, overlay.attachment);
-        base.temperature = overlay_support(base.temperature, overlay.temperature);
-        base.open_weights = overlay_support(base.open_weights, overlay.open_weights);
-        base.interleaved = overlay_support(base.interleaved, overlay.interleaved);
         base.description = overlay.description.or(base.description);
         base.family = overlay.family.or(base.family);
         base.knowledge = overlay.knowledge.or(base.knowledge);

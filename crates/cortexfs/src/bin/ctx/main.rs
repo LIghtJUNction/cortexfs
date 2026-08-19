@@ -47,8 +47,8 @@ pub(crate) use cortexfs::authority::helpers::{
 pub(crate) use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentLaunchCommand, AgentPromptContext, AgentRuntimeView,
     AgentScheduleIssue, AgentScheduleNode, AgentScheduleRecordError, AgentUnixIdentity,
-    BootstrapAction, CTX_ROOT, ChildContextLease, ChildContextRecordError, ChildContextStatus,
-    ChildHandoffReceipt, ContextJsonlIssue, ContextPackIssue, ControlLineIssue,
+    BootstrapAction, CHANNEL_CONTROL_FILES, CTX_ROOT, ChildContextLease, ChildContextRecordError,
+    ChildContextStatus, ChildHandoffReceipt, ContextJsonlIssue, ContextPackIssue, ControlLineIssue,
     DEFAULT_AGENT_PROMPT_TEMPLATE, EventStreamIssue, MANUAL_INDEX, MANUAL_INDEX_FILE,
     MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES, MessageStreamIssue,
     ModelCapabilityIssue, ModelDriverRouteError, ModelEffort, MountTable, ObjectClass,

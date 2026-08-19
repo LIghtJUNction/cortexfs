@@ -103,6 +103,8 @@ pub(super) fn test_agent_tool_config(
         session: "default",
         control: None,
         cancel: None,
+        tool_path: None,
+        channel: None,
     }
 }
 

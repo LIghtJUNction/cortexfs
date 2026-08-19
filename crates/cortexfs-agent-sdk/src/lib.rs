@@ -16,6 +16,7 @@ use std::process::ExitCode;
 
 pub use cortexfs_runtime_client::agent::AgentToolObservation;
 use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI, read_agent_invocation};
+pub use cortexfs_runtime_client::interaction::InteractionOrigin;
 
 /// Maximum number of arguments supported by a single tool call.
 ///
@@ -43,6 +44,12 @@ pub struct AgentInvocation {
     input: String,
     /// Optional provider-neutral external event for this run.
     event: Option<Value>,
+    /// External transport origin for a channel-backed invocation.
+    origin: Option<InteractionOrigin>,
+    /// Channel identity values injected for this run, when channel-backed.
+    channel_id: Option<String>,
+    channel_session: Option<String>,
+    channel_caps: Option<String>,
     /// Agent name from environment binding.
     agent: Option<String>,
     /// Session name from environment binding.
@@ -71,6 +78,10 @@ impl AgentInvocation {
             run_id: run_id.into(),
             input: input.into(),
             event: None,
+            origin: None,
+            channel_id: None,
+            channel_session: None,
+            channel_caps: None,
             agent: None,
             session: None,
             ctx_root: None,
@@ -98,6 +109,26 @@ impl AgentInvocation {
     #[must_use]
     pub fn event(&self) -> Option<&Value> {
         self.event.as_ref()
+    }
+    /// Returns the external transport origin for this run, if present.
+    #[must_use]
+    pub fn origin(&self) -> Option<&InteractionOrigin> {
+        self.origin.as_ref()
+    }
+    /// Returns the active channel identifier, when present.
+    #[must_use]
+    pub fn channel_id(&self) -> Option<&str> {
+        self.channel_id.as_deref()
+    }
+    /// Returns the channel-scoped session name, when present.
+    #[must_use]
+    pub fn channel_session(&self) -> Option<&str> {
+        self.channel_session.as_deref()
+    }
+    /// Returns the bounded channel capability list, when present.
+    #[must_use]
+    pub fn channel_caps(&self) -> Option<&str> {
+        self.channel_caps.as_deref()
     }
     /// Returns the selected agent name, when supplied.
     #[must_use]
@@ -393,6 +424,10 @@ where
     invocation.history_messages = Some(envelope.history_messages().to_owned());
     invocation.tool_context = Some(envelope.tool_context().to_owned());
     invocation.event = envelope.event().cloned();
+    invocation.origin = envelope.origin().cloned();
+    invocation.channel_id = env_text("CTX_CHANNEL_ID");
+    invocation.channel_session = env_text("CTX_CHANNEL_SESSION");
+    invocation.channel_caps = env_text("CTX_CHANNEL_CAPS");
     invocation.step = envelope.step();
     invocation.observation = envelope.observation().cloned();
     let Some(agent_name) = invocation.agent() else {

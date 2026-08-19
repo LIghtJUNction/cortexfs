@@ -7,8 +7,8 @@ use std::{
 };
 
 use cortexfs_channels::{
-    ChannelFrame, ChannelFrameBody, ChannelId, ConversationId, DeliveryReceipt, MessageBody,
-    MessageTarget, OutboundMessage,
+    ChannelActions, ChannelCapabilities, ChannelFrame, ChannelFrameBody, ChannelId, ConversationId,
+    DeliveryReceipt, MessageBody, MessageTarget, OutboundMessage,
 };
 
 use super::DriverHub;
@@ -19,7 +19,12 @@ fn hub_waits_for_driver_receipt() -> Result<(), Box<dyn std::error::Error + Send
     let hub = DriverHub::default();
     let (runtime, adapter) = UnixStream::pair()?;
     let writer = Arc::new(Mutex::new(runtime));
-    let _registration = hub.attach(&channel, Arc::clone(&writer));
+    let _registration = hub.attach(
+        &channel,
+        Arc::clone(&writer),
+        ChannelCapabilities::text(),
+        ChannelActions::empty(),
+    );
     let receipt_channel = channel.clone();
     let receipt_hub = hub.clone();
     let worker = thread::spawn(

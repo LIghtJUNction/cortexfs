@@ -1,4 +1,5 @@
 use super::*;
+use cortexfs_runtime_client::interaction::InteractionOrigin;
 use std::ffi::OsString;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -247,6 +248,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         ref cwd,
         ref input,
         ref event,
+        ref origin,
         ..
     } = request
     else {
@@ -303,6 +305,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         .ok_or(SocketRuntimeError::CannotRunAgent)?
         .to_owned();
     let tool_context = agent_tool_context_for_request(cwd.as_deref())?;
+    let channel = channel_context_for_request(&runtime, origin.as_ref())?;
     let mut client_connected = true;
     write_while_connected(&mut client_connected, || {
         write_optional_socket_debug_timing_frame(stream, debug, "socket_send_received")
@@ -326,6 +329,8 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         cwd: cwd.as_deref(),
         input,
         event: event.as_ref(),
+        origin: origin.as_ref(),
+        channel: channel.as_ref(),
         history_messages: &history_messages,
         tool_context: &tool_context,
         debug,
@@ -352,6 +357,21 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     let mut frames = recorder_response.frames().to_vec();
     frames.extend(agent_frames);
     Ok(SocketRuntimeResponse::new(frames))
+}
+
+fn channel_context_for_request(
+    runtime: &AgentExecutableSocketRuntime<'_>,
+    origin: Option<&InteractionOrigin>,
+) -> Result<Option<runtime::channelenv::ChannelRuntimeContext>, SocketRuntimeError> {
+    let base = runtime::channelenv::base_tool_path(
+        runtime.env,
+        runtime.source_root,
+        runtime.identity.uid(),
+    );
+    let context =
+        runtime::channelenv::resolve(runtime.source_root, runtime.identity.uid(), &base, origin)
+            .map_err(SocketRuntimeError::ChannelContext)?;
+    Ok(context)
 }
 
 fn handle_agent_immediate_request(
@@ -436,6 +456,8 @@ fn handle_agent_tsh_request(
         session,
         control: Some(control.tool.clone()),
         cancel: None,
+        tool_path: None,
+        channel: None,
     };
     let mut bytes = Vec::new();
     object::executor::output::write_tool_call_event(&mut bytes, &run, &call)
@@ -871,6 +893,15 @@ fn run_agent_envelope_loop_with_control(
         {
             object.insert("event".to_owned(), event.clone());
         }
+        if let Some(origin) = request.origin
+            && let Some(object) = envelope.as_object_mut()
+        {
+            object.insert(
+                "origin".to_owned(),
+                serde_json::to_value(origin)
+                    .map_err(|_error| SocketRuntimeError::CannotRunAgent)?,
+            );
+        }
         let envelope = envelope.to_string() + "\n";
         if envelope.len() > 1024 * 1024 {
             return Ok(agent_error_outcome(
@@ -988,6 +1019,10 @@ fn run_agent_envelope_loop_with_control(
             session: request.session,
             control: control.as_ref().map(|entry| entry.tool.clone()),
             cancel: Some((&cancel_dir, request.cancellation_id)),
+            tool_path: request
+                .channel
+                .map(runtime::channelenv::ChannelRuntimeContext::tool_path),
+            channel: request.channel,
         };
         let (content, status) =
             match object::executor::exec::prepare_agent_tool_call(&config, &call) {
@@ -1612,6 +1647,8 @@ pub(crate) struct AgentExecutableRunRequest<'a> {
     pub(crate) cwd: Option<&'a str>,
     pub(crate) input: &'a str,
     pub(crate) event: Option<&'a Value>,
+    pub(crate) origin: Option<&'a InteractionOrigin>,
+    pub(crate) channel: Option<&'a runtime::channelenv::ChannelRuntimeContext>,
     pub(crate) history_messages: &'a str,
     pub(crate) tool_context: &'a str,
     pub(crate) debug: Option<SocketDebugTiming>,
@@ -1923,6 +1960,8 @@ mod completion_tests {
             cwd: None,
             input: "overflow",
             event: None,
+            origin: None,
+            channel: None,
             history_messages: "",
             tool_context: "",
             debug: None,
@@ -2009,6 +2048,8 @@ mod completion_tests {
             cwd: None,
             input: "say hello",
             event: None,
+            origin: None,
+            channel: None,
             history_messages: "",
             tool_context: "",
             debug: None,

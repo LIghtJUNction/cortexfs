@@ -392,8 +392,8 @@ build_cortexfs() {
     local source=$1
     card "$( [[ $LANGUAGE == zh ]] && printf '04 · Release 构建' || printf '04 · Release build' )"
     say "Source: $source" "源码：$source"
-    say "Command: cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp -p cortexfs-channel-nostr -p cortexfs-channel-amqp -p cortexfs-channel-wecom-ws -p cortexfs-channel-voice -p cortexfs-channel-slack -p cortexfs-channel-mqtt" \
-        "命令：cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp -p cortexfs-channel-nostr -p cortexfs-channel-amqp -p cortexfs-channel-wecom-ws -p cortexfs-channel-voice -p cortexfs-channel-slack -p cortexfs-channel-mqtt"
+    say "Command: cargo build --release --locked -p cortexfs --bins -p cortexfs-channel-tools -p cortexfs-mcp --bin ctxmcp ..." \
+        "命令：cargo build --release --locked -p cortexfs --bins -p cortexfs-channel-tools -p cortexfs-mcp --bin ctxmcp …"
     confirm "BUILD CORTEXFS" \
         "Type BUILD CORTEXFS to start the release build as your current user." \
         "输入 BUILD CORTEXFS，以当前用户开始 release 构建。"
@@ -401,6 +401,7 @@ build_cortexfs() {
         cd "$source"
         CARGO_TARGET_DIR="$source/target" \
             cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+                -p cortexfs-channel-tools \
                 -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
                 -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
                 -p cortexfs-channel-voice -p cortexfs-channel-slack \
@@ -410,7 +411,7 @@ build_cortexfs() {
 
 expected_binaries() {
     printf '%s\n' ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-        cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr \
+        cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 }
@@ -452,8 +453,8 @@ ensure_mountpoint() {
 deploy() {
     local source=$1 binary unit
     card "$( [[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment' )"
-    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
-        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
+    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
+        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
     say "Units: /usr/lib/systemd/system/cortexfs*.{service,socket}" \
         "单元：/usr/lib/systemd/system/cortexfs*.{service,socket}"
     say "Preserved: /var/lib/cortexfs/{storage,secrets}, /etc/cortexfs/providers.d, existing *.env, and /ctx user state." \

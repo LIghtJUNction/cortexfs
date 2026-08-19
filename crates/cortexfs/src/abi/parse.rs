@@ -25,6 +25,7 @@ pub fn parse_abi_path(path: &str) -> AbiPathKind<'_> {
         "model" => parse_model_object_path(rest),
         "agent" => parse_simple_object_path(ObjectClass::Agent, rest),
         "tool" => parse_simple_object_path(ObjectClass::Tool, rest),
+        "channel" => parse_channel_path(None, rest),
         "home" => parse_home_path(rest),
         "shared" => parse_shared_path(rest),
         _ => AbiPathKind::Unknown,
@@ -131,9 +132,12 @@ pub(crate) fn parse_model_object_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> 
 }
 
 pub(crate) fn parse_home_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((_uid, rest)) = parts.split_first() else {
+    let Some((uid, rest)) = parts.split_first() else {
         return AbiPathKind::Unknown;
     };
+    if uid.parse::<u32>().is_err() {
+        return AbiPathKind::Unknown;
+    }
 
     let Some((first, rest)) = rest.split_first() else {
         return AbiPathKind::HomeDir;
@@ -141,7 +145,70 @@ pub(crate) fn parse_home_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
     match *first {
         "agent" => parse_home_agent_path(rest),
         "model" => parse_home_model_path(rest),
+        "channel" => parse_channel_path(Some(uid), rest),
         _ => AbiPathKind::HomeDir,
+    }
+}
+
+fn parse_channel_path<'a>(uid: Option<&'a str>, parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((channel, rest)) = parts.split_first() else {
+        return AbiPathKind::ChannelRoot { uid };
+    };
+    if let Some(control_channel) = channel.strip_suffix(".d") {
+        if !is_object_name(control_channel) {
+            return AbiPathKind::Unknown;
+        }
+        return match *rest {
+            [] => AbiPathKind::ChannelDir {
+                uid,
+                channel: control_channel,
+            },
+            [file] => AbiPathKind::ChannelControl {
+                uid,
+                channel: control_channel,
+                file,
+            },
+            _ => AbiPathKind::Ordinary,
+        };
+    }
+    if !is_object_name(channel) {
+        return AbiPathKind::Unknown;
+    }
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::ChannelDir { uid, channel };
+    };
+    if *first != "tool" {
+        return AbiPathKind::Ordinary;
+    }
+    parse_channel_tool_path(uid, channel, rest)
+}
+
+fn parse_channel_tool_path<'a>(
+    uid: Option<&'a str>,
+    channel: &'a str,
+    parts: &[&'a str],
+) -> AbiPathKind<'a> {
+    let Some((name, rest)) = parts.split_first() else {
+        return AbiPathKind::ChannelToolRoot { uid, channel };
+    };
+    if let Some(tool) = name.strip_suffix(".d") {
+        if !is_object_name(tool) {
+            return AbiPathKind::Unknown;
+        }
+        return match *rest {
+            [file] => AbiPathKind::ChannelToolControl {
+                uid,
+                channel,
+                name: tool,
+                file,
+            },
+            _ => AbiPathKind::Ordinary,
+        };
+    }
+    if rest.is_empty() && is_object_name(name) {
+        AbiPathKind::ChannelToolExec { uid, channel, name }
+    } else {
+        AbiPathKind::Ordinary
     }
 }
 

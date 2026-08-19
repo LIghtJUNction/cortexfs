@@ -20,6 +20,41 @@ pub struct ChannelSpec {
     pub capabilities: ChannelCapabilities,
 }
 
+/// Common capability tools made available inside every channel tool namespace.
+pub const COMMON_CHANNEL_TOOLS: &[&str] = &[
+    "channel.send",
+    "channel.reply",
+    "channel.typing",
+    "channel.preview",
+    "channel.react",
+    "channel.edit",
+    "channel.delete",
+    "channel.mark_read",
+    "channel.pin",
+    "channel.unpin",
+    "channel.redact",
+    "channel.choice",
+    "channel.approval",
+    "channel.notify",
+    "channel.room_create",
+    "channel.room_invite",
+    "channel.draft",
+    "channel.gate",
+    "channel.forge",
+];
+
+impl ChannelSpec {
+    /// Returns common tools plus one namespaced escape hatch for platform APIs.
+    #[must_use]
+    pub fn tool_names(self) -> Vec<String> {
+        COMMON_CHANNEL_TOOLS
+            .iter()
+            .map(|name| (*name).to_owned())
+            .chain(std::iter::once(format!("{}.invoke", self.id)))
+            .collect()
+    }
+}
+
 impl ChannelSpec {
     /// Effects supported by the reusable codec or native host.
     #[must_use]
