@@ -158,6 +158,64 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
 }
 
 #[test]
+#[ignore = "requires an explicit models.dev live-network check"]
+fn live_models_dev_metadata_reaches_agent_context_environment() -> std::io::Result<()> {
+    let root = clean_test_dir("agent-runtime-live-model-metadata");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let cache = tempfile::tempdir()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let catalog = runtime
+        .block_on(cortexfs_metadatas::MetadataCatalog::from_models_dev(
+            cache.path(),
+        ))
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let metadata = catalog
+        .models()
+        .find(|model| model.context_window_tokens.is_some() && !model.id.contains('/'))
+        .ok_or_else(|| std::io::Error::other("models.dev has no bounded simple model"))?;
+    let model = format!("{}/{}", metadata.provider, metadata.id);
+    let policy = metadata.context_policy();
+    let model_dir = root
+        .join("model")
+        .join(&metadata.provider)
+        .join(format!("{}.d", metadata.id));
+    std::fs::create_dir_all(&model_dir)?;
+    write_text_file(
+        &model_dir.join("limit"),
+        &format!("{}\n", policy.max_tokens.unwrap_or_default()),
+    );
+    write_text_file(
+        &model_dir.join("recommended"),
+        &format!("{}\n", policy.recommended_tokens.unwrap_or_default()),
+    );
+    write_text_file(
+        &model_dir.join("compact"),
+        &format!(
+            "{}\n",
+            policy.compaction_threshold_tokens.unwrap_or_default()
+        ),
+    );
+    let control = root.join("agent/coder.d");
+    write_text_file(&control.join("model"), &format!("{model}\n"));
+    write_text_file(
+        &control.join("policy"),
+        &format!("allow coder_t model:{model} use\n"),
+    );
+    let view = derive_agent_runtime_view(&root, "coder")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    assert_eq!(view.model_limit().tokens(), policy.max_tokens);
+    assert_eq!(view.model_recommended().tokens(), policy.recommended_tokens);
+    assert_eq!(
+        view.model_compact().tokens(),
+        policy.compaction_threshold_tokens
+    );
+    Ok(())
+}
+
+#[test]
 fn agent_runtime_view_rejects_malformed_alias_and_limit() {
     let root = clean_test_dir("agent-runtime-window-invalid-model-state");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
