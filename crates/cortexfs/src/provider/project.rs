@@ -587,4 +587,51 @@ mod tests {
         assert_eq!(document["metadata"]["models_dev"], serde_json::Value::Null);
         Ok(())
     }
+
+    #[test]
+    #[ignore = "requires an explicit models.dev live-network check"]
+    fn live_models_dev_record_drives_agent_runtime_budget() -> io::Result<()> {
+        let dir = tempdir()?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        let catalog = runtime
+            .block_on(MetadataCatalog::from_models_dev(dir.path()))
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        let metadata = catalog
+            .models()
+            .find(|model| model.context_window_tokens.is_some() && !model.id.contains('/'))
+            .ok_or_else(|| io::Error::other("models.dev has no simple bounded model"))?;
+        let provider = metadata.provider.clone();
+        let model_name = metadata.id.clone();
+        let config = ProviderConfig {
+            name: Some(provider.clone()),
+            base_url: "http://127.0.0.1/v1".to_owned(),
+            default_model: Some(model_name),
+            models: Vec::new(),
+            model_limits: HashMap::new(),
+            model_capabilities: HashMap::new(),
+            enabled: true,
+            formats: vec!["openai.chat".to_owned()],
+            auth: Vec::new(),
+            oauth: None,
+        };
+        let mut projected = Vec::new();
+        project_models(&provider, &config, dir.path(), &mut projected);
+        let model = projected
+            .first()
+            .ok_or_else(|| io::Error::other("live model was not projected"))?;
+        assert_eq!(model.limit.tokens(), metadata.context_window_tokens);
+        assert_eq!(
+            model.recommended.tokens(),
+            metadata.context_policy().recommended_tokens
+        );
+        assert_eq!(
+            model.compact.tokens(),
+            metadata.context_policy().compaction_threshold_tokens
+        );
+        assert!(model.metadata.contains("models_dev"));
+        Ok(())
+    }
 }
