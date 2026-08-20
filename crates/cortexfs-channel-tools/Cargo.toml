@@ -11,9 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-cortexfs-channels = { version = "0.1.17", path = "../cortexfs-channels" }
-cortexfs-paths = { version = "0.1.17", path = "../cortexfs-paths" }
-cortexfs-tool-sdk = { version = "0.1.17", path = "../cortexfs-tool-sdk" }
+cortexfs-channels = { version = "0.1.18", path = "../cortexfs-channels" }
+cortexfs-paths = { version = "0.1.18", path = "../cortexfs-paths" }
+cortexfs-tool-sdk = { version = "0.1.18", path = "../cortexfs-tool-sdk" }
 serde_json = "1.0.151"
 
 [lints]

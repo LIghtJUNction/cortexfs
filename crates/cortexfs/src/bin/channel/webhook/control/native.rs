@@ -86,8 +86,7 @@ pub(super) fn request(
             | "wecom.send_news"
             | "wecom.send_template_card"
             | "wecom.send_image"
-            | "wecom.send_file"
-            | "wecom.draft_update",
+            | "wecom.send_file",
         ) => ("send".to_owned(), payload.clone()),
         _ => return Err(fail("unsupported operation")),
     };

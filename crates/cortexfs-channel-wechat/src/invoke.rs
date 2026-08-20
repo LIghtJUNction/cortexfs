@@ -26,10 +26,7 @@ pub(crate) async fn run(
         .and_then(Value::as_str)
         .unwrap_or("");
     match name {
-        "wechat.send_markdown"
-        | "wechat.send_media"
-        | "wechat.send_file"
-        | "wechat.draft_update" => {
+        "wechat.send_markdown" => {
             let text = payload
                 .get("text")
                 .and_then(Value::as_str)
@@ -37,10 +34,6 @@ pub(crate) async fn run(
             api::send_message(client, config, user, context, text).await?;
             Ok(json!({"accepted":true}))
         }
-        "wechat.start_typing" => Ok(json!({
-            "accepted": false,
-            "detail": "WeChat iLink has no typing endpoint"
-        })),
         _ => Err(error("unsupported operation")),
     }
 }

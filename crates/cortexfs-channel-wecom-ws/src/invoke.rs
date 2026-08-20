@@ -17,10 +17,6 @@ pub(crate) async fn run(
         name,
         "wecom_ws.send_markdown"
             | "wecom-ws.send_markdown"
-            | "wecom_ws.send_media"
-            | "wecom-ws.send_media"
-            | "wecom_ws.send_file"
-            | "wecom-ws.send_file"
             | "wecom_ws.draft_update"
             | "wecom-ws.draft_update"
     ) {

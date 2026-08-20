@@ -1,5 +1,5 @@
 Name:           cortexfs
-Version:        0.1.17
+Version:        0.1.18
 Release:        1%{?dist}
 Summary:        FUSE filesystem interface for agent runtimes
 License:        MIT
@@ -156,7 +156,7 @@ fi
 %attr(0700,root,root) %dir %{_sharedstatedir}/cortexfs/secrets
 
 %changelog
-* Thu Aug 21 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.17-1
+* Thu Aug 21 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.18-1
 - Preserve completed host tool calls in continuation context to prevent duplicate execution.
 
 * Tue Aug 18 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.15-1

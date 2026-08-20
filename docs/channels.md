@@ -258,8 +258,9 @@ cortexfs-channel gmail
 ```
 
 Email uses IMAP IDLE for inbound mail and SMTP STARTTLS for replies. The
-current host handles plain text and simple RFC 5322 messages; MIME attachment
-download/upload is not advertised until the attachment policy is implemented:
+current host handles plain text and simple RFC 5322 messages. Outbound MIME
+attachments are available through `email.send_attachment`, bounded to 8 MiB;
+inbound attachment download remains adapter-specific:
 
 ```bash
 export CORTEXFS_EMAIL_IMAP_HOST='imap.example.org'
