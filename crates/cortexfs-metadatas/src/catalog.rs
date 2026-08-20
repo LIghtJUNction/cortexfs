@@ -210,7 +210,10 @@ impl MetadataCatalog {
     /// Exact provider-independent model metadata by path-style model id.
     #[must_use]
     pub fn base_model(&self, id: &str) -> Option<&Value> {
-        self.base_models.get(id)
+        self.base_models.get(id).or_else(|| {
+            id.split_once('/')
+                .and_then(|(_, model)| self.base_models.get(model))
+        })
     }
 }
 
