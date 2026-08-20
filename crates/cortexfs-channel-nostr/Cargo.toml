@@ -11,7 +11,7 @@ keywords = ["agent", "channel", "nostr", "im"]
 categories = ["network-programming"]
 
 [dependencies]
-cortexfs-channels = { version = "0.1.18", path = "../cortexfs-channels" }
+cortexfs-channels = { version = "0.1.19", path = "../cortexfs-channels" }
 cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
 nostr-sdk = { version = "0.44", default-features = false, features = ["nip04", "nip59"] }
 thiserror = "2.0.20"
