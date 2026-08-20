@@ -192,8 +192,9 @@ fn reference_tree_bootstrap_materializes_current_layout() {
     );
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(matches!(agent_policy, Ok(ref content) if content.contains("model:main use")));
-    assert!(
-        matches!(agent_policy, Ok(ref content) if !content.contains("network:default connect"))
-    );
+    assert!(matches!(
+        agent_policy,
+        Ok(ref content) if content.contains("network:default connect")
+    ));
 }
 use super::*;

@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=175426
-prod=122075
+all=175586
+prod=122234
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 981 crates/cortexfs-agent-sdk/src/lib.rs
@@ -75,7 +75,7 @@ prod=122075
 55 crates/cortexfs-channel-wechat/src/api/request.rs
 96 crates/cortexfs-channel-wechat/src/config.rs
 28 crates/cortexfs-channel-wechat/src/error.rs
-50 crates/cortexfs-channel-wechat/src/invoke.rs
+43 crates/cortexfs-channel-wechat/src/invoke.rs
 24 crates/cortexfs-channel-wechat/src/main.rs
 97 crates/cortexfs-channel-wechat/src/message.rs
 96 crates/cortexfs-channel-wechat/src/relay.rs
@@ -83,7 +83,7 @@ prod=122075
 61 crates/cortexfs-channel-wechat/src/socket.rs
 77 crates/cortexfs-channel-wecom-ws/src/config.rs
 26 crates/cortexfs-channel-wecom-ws/src/error.rs
-41 crates/cortexfs-channel-wecom-ws/src/invoke.rs
+37 crates/cortexfs-channel-wecom-ws/src/invoke.rs
 24 crates/cortexfs-channel-wecom-ws/src/main.rs
 96 crates/cortexfs-channel-wecom-ws/src/message.rs
 76 crates/cortexfs-channel-wecom-ws/src/output.rs
@@ -348,13 +348,13 @@ prod=122075
 139 crates/cortexfs/src/bin/channel/webhook.rs
 31 crates/cortexfs/src/bin/channel/webhook/challenge.rs
 75 crates/cortexfs/src/bin/channel/webhook/control.rs
-105 crates/cortexfs/src/bin/channel/webhook/control/native.rs
+104 crates/cortexfs/src/bin/channel/webhook/control/native.rs
 59 crates/cortexfs/src/bin/channel/webhook/control/ops.rs
 55 crates/cortexfs/src/bin/channel/webhook/outbound.rs
 66 crates/cortexfs/src/bin/channel/webhook/progress.rs
 67 crates/cortexfs/src/bin/channel/webhook/server.rs
 186 crates/cortexfs/src/bin/channel/webhook/signature.rs
-35 crates/cortexfs/src/bin/ctx/agent.rs
+37 crates/cortexfs/src/bin/ctx/agent.rs
 178 crates/cortexfs/src/bin/ctx/agent/chat.rs
 237 crates/cortexfs/src/bin/ctx/agent/child.rs
 204 crates/cortexfs/src/bin/ctx/agent/context.rs
@@ -372,10 +372,11 @@ prod=122075
 704 crates/cortexfs/src/bin/ctx/agent/start.rs
 156 crates/cortexfs/src/bin/ctx/agent/terminal.rs
 128 crates/cortexfs/src/bin/ctx/agent/tools.rs
+120 crates/cortexfs/src/bin/ctx/agent/workspace.rs
 80 crates/cortexfs/src/bin/ctx/attach.rs
 69 crates/cortexfs/src/bin/ctx/attach/records.rs
 85 crates/cortexfs/src/bin/ctx/attach/scan.rs
-108 crates/cortexfs/src/bin/ctx/default.rs
+109 crates/cortexfs/src/bin/ctx/default.rs
 466 crates/cortexfs/src/bin/ctx/doctor.rs
 2 crates/cortexfs/src/bin/ctx/file.rs
 355 crates/cortexfs/src/bin/ctx/file/basic.rs
@@ -391,7 +392,7 @@ prod=122075
 199 crates/cortexfs/src/bin/ctx/objects/paths.rs
 86 crates/cortexfs/src/bin/ctx/objects/stream.rs
 7 crates/cortexfs/src/bin/ctx/output.rs
-644 crates/cortexfs/src/bin/ctx/output/help.rs
+654 crates/cortexfs/src/bin/ctx/output/help.rs
 391 crates/cortexfs/src/bin/ctx/output/mount.rs
 181 crates/cortexfs/src/bin/ctx/output/status.rs
 11 crates/cortexfs/src/bin/ctx/package.rs
@@ -726,7 +727,7 @@ prod=122075
 15 crates/cortexfs/src/reference.rs
 11 crates/cortexfs/src/reference/bootstrap.rs
 84 crates/cortexfs/src/reference/bootstrap/channels.rs
-708 crates/cortexfs/src/reference/bootstrap/core.rs
+709 crates/cortexfs/src/reference/bootstrap/core.rs
 170 crates/cortexfs/src/reference/bootstrap/tools.rs
 340 crates/cortexfs/src/reference/bootstrap/upgrade.rs
 52 crates/cortexfs/src/reference/build.rs
@@ -773,7 +774,7 @@ prod=122075
 380 crates/cortexfs/src/runtime/socket.rs
 364 crates/cortexfs/src/runtime/socket/bwrap.rs
 332 crates/cortexfs/src/runtime/socket/events.rs
-2353 crates/cortexfs/src/runtime/socket/exec.rs
+2390 crates/cortexfs/src/runtime/socket/exec.rs
 120 crates/cortexfs/src/runtime/socket/exec/approval.rs
 53 crates/cortexfs/src/runtime/socket/exec/delivery.rs
 166 crates/cortexfs/src/runtime/socket/session.rs

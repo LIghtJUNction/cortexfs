@@ -818,6 +818,12 @@ fn run_agent_envelope_loop(
     request: AgentExecutableRunRequest<'_>,
     record_dir: Option<&Path>,
 ) -> Result<AgentRunOutcome, SocketRuntimeError> {
+    if provider_network_denied(runtime) {
+        return Ok(agent_error_outcome(
+            Vec::new(),
+            agent_provider_network_denied_frames(request.run_id),
+        ));
+    }
     open_agent_executable_no_follow(runtime.agent_executable)?;
     let provider_egress = create_run_provider_egress(runtime, request)?;
     let mut control = start_run_control(runtime, request.session, request.run_id)?;
@@ -833,6 +839,18 @@ fn run_agent_envelope_loop(
         control.finish()?;
     }
     result
+}
+
+fn provider_network_denied(runtime: AgentExecutableSocketRuntime<'_>) -> bool {
+    !runtime.network_allowed
+        && matches!(
+            runtime.execution,
+            AgentExecutableSocketExecution::Bwrap { .. }
+        )
+        && runtime.model.is_some_and(|model| {
+            runtime::egress::is_provider_model(runtime.ctx_root, model)
+                .is_ok_and(|provider| provider)
+        })
 }
 
 #[expect(
@@ -1594,6 +1612,14 @@ pub(crate) fn agent_process_failed_frames(run_id: &str, stderr: &str) -> Vec<Str
     agent_terminal_error_frames(run_id, "EIO", &message)
 }
 
+fn agent_provider_network_denied_frames(run_id: &str) -> Vec<String> {
+    agent_terminal_error_frames(
+        run_id,
+        "EACCES",
+        "provider network access denied by agent policy; grant network:default connect",
+    )
+}
+
 fn agent_invalid_output_frames(run_id: &str) -> Vec<String> {
     agent_terminal_error_frames(run_id, "EPROTO", "agent emitted an invalid event sequence")
 }
@@ -1692,6 +1718,17 @@ mod completion_tests {
             name: "example.echo".to_owned(),
             args: vec![OsString::from("one")],
         }
+    }
+
+    #[test]
+    fn provider_network_denial_names_the_required_policy_permission() {
+        let frames = agent_provider_network_denied_frames("run-1");
+        assert!(frames.first().is_some_and(|frame| frame.contains("EACCES")));
+        assert!(
+            frames
+                .first()
+                .is_some_and(|frame| frame.contains("network:default connect"))
+        );
     }
 
     #[test]

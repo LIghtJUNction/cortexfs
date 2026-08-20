@@ -15,6 +15,7 @@ pub(crate) use sandbox::*;
 pub(crate) use start::*;
 pub(crate) use terminal::*;
 pub(crate) use tools::*;
+pub(crate) use workspace::*;
 
 pub mod chat;
 pub mod child;
@@ -33,3 +34,4 @@ pub mod sandbox;
 pub mod start;
 pub mod terminal;
 pub mod tools;
+pub mod workspace;

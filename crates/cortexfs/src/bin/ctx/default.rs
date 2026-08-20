@@ -4,10 +4,11 @@ const DEFAULT_AGENT: &str = "coder";
 
 pub(crate) fn start_default_session(root: &Path) -> Result<ExitCode, CliError> {
     let agent = configured_default_agent()?;
-    absolute_existing_path(&env::current_dir().map_err(|error| {
+    let workspace = absolute_existing_path(&env::current_dir().map_err(|error| {
         CliError::unavailable(format!("cannot read current directory: {error}"))
     })?)
     .map_err(|error| CliError::unavailable(format!("cannot resolve current directory: {error}")))?;
+    ensure_default_workspace_mount(root, &agent, &workspace)?;
     let request = request_id()?;
     let suffix = request.strip_prefix("ctx-").unwrap_or(&request);
     let session = format!("ctx_{suffix}");

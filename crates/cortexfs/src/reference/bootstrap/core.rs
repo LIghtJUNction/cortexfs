@@ -361,6 +361,7 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
     let model = reference_agent_model(name);
     let mut policy = format!(
         "allow {policy_subject} model:{model} use\n\
+         allow {policy_subject} network:default connect\n\
          allow {policy_subject} tool:tsh execute\n\
          allow {policy_subject} tool:fs.read execute\n\
          allow {policy_subject} tool:fs.list execute\n\

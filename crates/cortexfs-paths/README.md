@@ -6,7 +6,7 @@ configuration paths in one small dependency so applications do not copy
 path literals from the CortexFS implementation.
 
 ```toml
-cortexfs-paths = "0.1.19"
+cortexfs-paths = "0.1.20"
 ```
 
 The crate is intentionally dependency-free. It composes paths and exposes the

@@ -10,7 +10,7 @@ and administration tools can derive paths without copying literals from the
 main implementation:
 
 ~~~toml
-cortexfs-paths = "0.1.19"
+cortexfs-paths = "0.1.20"
 ~~~
 
 Its version follows the workspace version of CortexFS. A CortexFS release
@@ -99,7 +99,7 @@ cortexfs-paths is the ABI boundary for path names. New integrations should
 depend on it directly:
 
 ~~~toml
-cortexfs-paths = "0.1.19"
+cortexfs-paths = "0.1.20"
 ~~~
 
 Do not duplicate /ctx, /run/cortexfs, /var/lib/cortexfs, or /etc/cortexfs
