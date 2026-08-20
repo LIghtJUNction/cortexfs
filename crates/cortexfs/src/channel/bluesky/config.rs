@@ -5,6 +5,7 @@ use cortexfs_channels::ChannelError;
 use super::super::bridge::ChannelBridgeError;
 
 /// Bluesky handle, app-password, and polling configuration.
+#[derive(Clone)]
 pub struct BlueskyConfig {
     pub(super) handle: String,
     pub(super) app_password: String,

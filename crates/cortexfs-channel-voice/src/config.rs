@@ -17,6 +17,7 @@ use parse::{list, optional, provider, required, seconds};
 pub(crate) enum ChannelKind {
     VoiceCall,
     ClawdTalk,
+    VoiceWake,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,12 +40,14 @@ pub(crate) struct Config {
     pub(crate) webhook_token: Option<String>,
     pub(crate) webhook_base: Option<String>,
     pub(crate) hangup_after: Option<Duration>,
+    pub(crate) wake_executable: Option<String>,
 }
 
 impl Config {
     pub(crate) fn load() -> Result<Self> {
         let channel = match env::var("CORTEXFS_VOICE_CHANNEL").as_deref() {
             Ok("clawdtalk") => ChannelKind::ClawdTalk,
+            Ok("voice_wake") => ChannelKind::VoiceWake,
             Ok("voice_call") | Err(_) => ChannelKind::VoiceCall,
             Ok(value) => return Err(Error::Config(format!("unknown channel: {value}"))),
         };
@@ -69,19 +72,37 @@ impl Config {
             .unwrap_or_else(|_| "127.0.0.1:8789".to_owned())
             .parse()
             .map_err(|error| Error::Config(format!("invalid webhook bind address: {error}")))?;
+        let wake = channel == ChannelKind::VoiceWake;
         Ok(Self {
             channel,
             provider,
             api_base: base.trim_end_matches('/').to_owned(),
-            auth_token: required("CORTEXFS_VOICE_AUTH_TOKEN")?,
-            account_id: required("CORTEXFS_VOICE_ACCOUNT_ID")?,
-            from_number: required("CORTEXFS_VOICE_FROM_NUMBER")?,
-            allowed_destinations: list("CORTEXFS_VOICE_ALLOWED_DESTINATIONS"),
+            auth_token: if wake {
+                String::new()
+            } else {
+                required("CORTEXFS_VOICE_AUTH_TOKEN")?
+            },
+            account_id: if wake {
+                String::new()
+            } else {
+                required("CORTEXFS_VOICE_ACCOUNT_ID")?
+            },
+            from_number: if wake {
+                String::new()
+            } else {
+                required("CORTEXFS_VOICE_FROM_NUMBER")?
+            },
+            allowed_destinations: if wake {
+                BTreeSet::new()
+            } else {
+                list("CORTEXFS_VOICE_ALLOWED_DESTINATIONS")
+            },
             socket,
             webhook_bind,
             webhook_token: optional("CORTEXFS_VOICE_WEBHOOK_TOKEN"),
             webhook_base: optional("CORTEXFS_VOICE_WEBHOOK_BASE_URL"),
             hangup_after: seconds("CORTEXFS_VOICE_HANGUP_AFTER_SECONDS")?,
+            wake_executable: optional("CORTEXFS_VOICE_WAKE_EXECUTABLE"),
         })
     }
 
@@ -91,11 +112,19 @@ impl Config {
             .any(|value| value == "*" || value == destination)
     }
 
-    pub(crate) const fn capabilities() -> ChannelCapabilities {
-        ChannelCapabilities {
-            audio: true,
-            webhook: true,
-            ..ChannelCapabilities::text()
+    pub(crate) const fn capabilities(channel: ChannelKind) -> ChannelCapabilities {
+        match channel {
+            ChannelKind::VoiceWake => ChannelCapabilities {
+                audio: true,
+                tool_control: true,
+                ..ChannelCapabilities::empty()
+            },
+            ChannelKind::VoiceCall | ChannelKind::ClawdTalk => ChannelCapabilities {
+                audio: true,
+                webhook: true,
+                tool_control: true,
+                ..ChannelCapabilities::text()
+            },
         }
     }
 }
@@ -105,6 +134,7 @@ impl ChannelKind {
         match self {
             Self::VoiceCall => "voice_call",
             Self::ClawdTalk => "clawdtalk",
+            Self::VoiceWake => "voice_wake",
         }
     }
 }

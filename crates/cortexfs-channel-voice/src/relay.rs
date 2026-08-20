@@ -9,7 +9,7 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 
 use crate::{
-    config::Config,
+    config::{ChannelKind, Config},
     error::{Error, Result},
     http, socket,
 };
@@ -33,6 +33,9 @@ pub(crate) async fn run(config: Config) -> Result<()> {
 }
 
 async fn run_once(config: &Config) -> Result<()> {
+    if config.channel == ChannelKind::VoiceWake {
+        return run_wake_once(config).await;
+    }
     let session = socket::Session::connect(config).await?;
     let client = Client::new();
     let (sender, mut receiver) = mpsc::channel(64);
@@ -58,6 +61,17 @@ async fn run_once(config: &Config) -> Result<()> {
                 return Err(Error::Protocol("webhook server stopped".to_owned()));
             }
         }
+    }
+}
+
+async fn run_wake_once(config: &Config) -> Result<()> {
+    let session = socket::Session::connect(config).await?;
+    let client = Client::new();
+    let mut calls = BTreeMap::new();
+    let mut frame = Box::pin(next_frame(session.clone()));
+    loop {
+        frames::handle(config, &client, &session, &mut calls, frame.await?).await?;
+        frame = Box::pin(next_frame(session.clone()));
     }
 }
 

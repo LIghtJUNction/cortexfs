@@ -78,6 +78,6 @@ pub(super) fn send(
     Ok(())
 }
 
-fn endpoint(config: &MatrixConfig, path: &str) -> String {
+pub(super) fn endpoint(config: &MatrixConfig, path: &str) -> String {
     format!("{}/_matrix/client/v3/{path}", config.homeserver)
 }

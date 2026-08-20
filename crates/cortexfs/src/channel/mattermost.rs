@@ -7,6 +7,7 @@ use super::bridge::AgentChannelBridge;
 
 mod api;
 mod config;
+mod control;
 mod host;
 mod transport;
 
@@ -19,8 +20,9 @@ pub fn run(config: &MattermostConfig, bridge: &AgentChannelBridge) -> Result<(),
         .build()
         .map_err(MattermostError::Http)?;
     let user_id = api::current_user(&client, config)?;
+    let control = control::start(config, bridge, &client)?;
     loop {
-        if let Err(_error) = run_connection(&client, config, bridge, &user_id) {
+        if let Err(_error) = run_connection(&client, config, bridge, &user_id, &control) {
             thread::sleep(config.reconnect_delay());
         }
     }
@@ -31,10 +33,14 @@ fn run_connection(
     config: &MattermostConfig,
     bridge: &AgentChannelBridge,
     user_id: &str,
+    control: &crate::channel::control::ChannelControl,
 ) -> Result<(), MattermostError> {
     let (mut socket, _) = connect(config.websocket_url()).map_err(MattermostError::WebSocket)?;
     transport::authenticate(&mut socket, &config.token)?;
     loop {
+        control
+            .check()
+            .map_err(|error| MattermostError::Protocol(error.to_string()))?;
         let message = socket.read().map_err(MattermostError::WebSocket)?;
         match message {
             Message::Text(text) => {

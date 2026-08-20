@@ -68,6 +68,47 @@ state and tools are visible under `/ctx/channel/discord/` and
 `/ctx/channel/discord.d/`; credentials remain outside `/ctx`. There is no
 background watcher or hot-reload path.
 
+### How an Agent controls Discord
+
+An inbound Discord message follows this path:
+
+```text
+Discord Gateway
+    -> cortexfs-channel (Discord host)
+    -> AgentChannelBridge
+    -> existing agent session socket
+    -> Agent model/tool call
+```
+
+When the Agent calls `discord.send_embed`, `discord.send_file`, or another
+Discord-local tool, the tool executable does not receive the bot token and does
+not call Discord directly. It writes a provider-neutral
+`ChannelCommand::Invoke { name, payload }` request to the Discord channel
+driver socket. The driver checks the negotiated `tool_control` capability and
+forwards the command to the running Discord host. The host validates the
+payload, calls the Discord REST API with its private bot token, and returns a
+correlated `CommandResult`.
+
+For example, an Agent can target the conversation from the inbound message with
+the following operation payload:
+
+```json
+{
+  "name": "discord.send_embed",
+  "payload": {
+    "title": "Build complete",
+    "description": "The release checks passed.",
+    "color": 5763719
+  }
+}
+```
+
+`channel.send` uses the same driver path for ordinary text; `channel.react`,
+`channel.edit`, `channel.pin`, and typing/preview effects use the
+provider-neutral `Outbound`/`Effect` frames. Thus the Agent controls the
+Discord account through the already-running host and its capability-gated
+Unix socket, not by being given Discord credentials.
+
 To run more than one account of the same platform, give each foreground host
 an instance id, for example `CORTEXFS_CHANNEL_ID=telegram.primary` and
 `CORTEXFS_CHANNEL_ID=telegram.secondary`. The complete id is used for channel

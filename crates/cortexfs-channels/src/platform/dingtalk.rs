@@ -94,7 +94,10 @@ impl ChannelCodec for DingTalkCodec {
             path: "sessionWebhook".to_owned(),
             content_type: "application/json".to_owned(),
             body: json!({"msgtype":"markdown","markdown":{"title":"CortexFS","text":message.body.text}}).to_string(),
-            headers: std::collections::BTreeMap::new(),
+            headers: std::collections::BTreeMap::from([(
+                "DingTalk-Conversation".to_owned(),
+                message.target.conversation.to_string(),
+            )]),
         })
     }
 }

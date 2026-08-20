@@ -24,7 +24,7 @@ impl Session {
     pub(crate) async fn connect(config: &Config) -> Result<Self> {
         let path = config.socket.clone();
         let channel = ChannelId::new(config.channel.id())?;
-        let capabilities = Config::capabilities();
+        let capabilities = Config::capabilities(config.channel);
         tokio::task::spawn_blocking(move || {
             Ok(Self {
                 client: ChannelDriverSession::connect_retry(
@@ -48,6 +48,11 @@ impl Session {
 
     pub(crate) fn next(&self) -> Result<ChannelFrameBody> {
         Ok(self.client.recv()?)
+    }
+
+    pub(crate) fn send_frame(&self, frame: ChannelFrameBody) -> Result<()> {
+        self.client.send_frame(frame)?;
+        Ok(())
     }
 
     pub(crate) fn receipt(&self, request_id: String, receipt: DeliveryReceipt) -> Result<()> {

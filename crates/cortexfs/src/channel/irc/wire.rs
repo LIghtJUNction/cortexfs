@@ -13,7 +13,7 @@ pub(super) fn send(
     line(writer, &request.body)
 }
 
-pub(super) fn line(writer: &mut impl Write, value: &str) -> Result<(), IrcError> {
+pub(in crate::channel) fn line(writer: &mut impl Write, value: &str) -> Result<(), IrcError> {
     writer.write_all(value.as_bytes())?;
     writer.flush().map_err(IrcError::Io)
 }

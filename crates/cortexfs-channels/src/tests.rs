@@ -126,14 +126,22 @@ fn catalog_exposes_native_and_external_channel_families() -> Result<(), ChannelE
     assert!(!SlackCodec.capabilities().typing);
     assert!(SlackCodec.capabilities().choices);
     assert!(MatrixCodec.actions().mark_read);
+    assert!(MatrixCodec.capabilities().tool_control);
+    assert!(BlueskyCodec.capabilities().tool_control);
+    assert!(DingTalkCodec.capabilities().send);
+    assert!(QqCodec.capabilities().tool_control);
+    assert!(GmailCodec.capabilities().tool_control);
     assert!(MatrixCodec.actions().supports(ChannelAction::Reaction));
     assert!(TelegramCodec.capabilities().send_attachments);
+    assert!(TelegramCodec.capabilities().tool_control);
     assert!(DiscordCodec.capabilities().receive_attachments);
     assert!(DiscordCodec.capabilities().send_attachments);
     assert!(SlackCodec.capabilities().send_attachments);
     assert!(SlackCodec.capabilities().commands);
+    assert!(SlackCodec.capabilities().tool_control);
     assert!(LinqCodec.capabilities().send_attachments);
     assert!(MattermostCodec.capabilities().send_attachments);
+    assert!(MattermostCodec.capabilities().tool_control);
     assert!(TeamsCodec.capabilities().receive_attachments);
     assert!(platform::catalog::find("twitch").is_some_and(|spec| spec.native));
     assert!(platform::catalog::find("reddit").is_some_and(|spec| spec.native));
@@ -151,8 +159,15 @@ fn catalog_exposes_native_and_external_channel_families() -> Result<(), ChannelE
             .is_some_and(|spec| { spec.native && spec.capabilities.polling })
     );
     assert!(platform::catalog::find("voice_wake").is_some_and(|spec| {
-        !spec.native && spec.capabilities.audio && !spec.capabilities.send
+        !spec.native
+            && spec.capabilities.audio
+            && spec.capabilities.tool_control
+            && !spec.capabilities.send
     }));
+    assert!(
+        platform::catalog::find("wecom-ws")
+            .is_some_and(|spec| { spec.capabilities.websocket && spec.capabilities.tool_control })
+    );
     Ok(())
 }
 

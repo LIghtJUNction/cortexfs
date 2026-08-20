@@ -7,9 +7,11 @@ use super::{
     irc::{self, IrcConfig, IrcError},
 };
 
+mod control;
 mod tls;
 
 /// Twitch chat configuration using the platform's TLS IRC endpoint.
+#[derive(Clone)]
 pub struct TwitchConfig {
     pub server: String,
     pub port: u16,
@@ -41,7 +43,11 @@ pub enum TwitchError {
 }
 
 pub fn run(config: &TwitchConfig, bridge: &AgentChannelBridge) -> Result<(), TwitchError> {
+    let control = control::start(config, bridge)?;
     loop {
+        control
+            .check()
+            .map_err(|error| TwitchError::Tls(error.to_string()))?;
         if let Err(_error) = run_once(config, bridge) {
             thread::sleep(Duration::from_secs(5));
         }

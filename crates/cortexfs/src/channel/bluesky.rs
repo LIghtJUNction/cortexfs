@@ -8,6 +8,7 @@ use super::bridge::AgentChannelBridge;
 mod api;
 mod clock;
 mod config;
+mod control;
 
 #[cfg(test)]
 mod tests;
@@ -21,7 +22,11 @@ pub fn run(config: &BlueskyConfig, bridge: &AgentChannelBridge) -> Result<(), Bl
         .build()
         .map_err(BlueskyError::Http)?;
     let mut session = api::login(&client, config)?;
+    let control = control::start(config, bridge, &client)?;
     loop {
+        control
+            .check()
+            .map_err(|error| BlueskyError::Protocol(error.to_string()))?;
         match poll(&client, config, bridge, &mut session) {
             Ok(()) => thread::sleep(config.poll_delay()),
             Err(_error) => {

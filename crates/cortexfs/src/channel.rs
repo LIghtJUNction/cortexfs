@@ -2,6 +2,8 @@
 
 pub mod bluesky;
 pub mod bridge;
+#[doc(hidden)]
+pub mod control;
 pub mod dingtalk;
 pub mod discord;
 pub mod driver;

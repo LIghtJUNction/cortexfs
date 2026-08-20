@@ -1,6 +1,7 @@
 use std::{fmt, net::SocketAddr, path::PathBuf};
 
 /// Gmail Pub/Sub push host configuration.
+#[derive(Clone)]
 pub struct GmailConfig {
     pub socket: PathBuf,
     pub bind: SocketAddr,

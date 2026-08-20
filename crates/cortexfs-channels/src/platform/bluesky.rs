@@ -66,12 +66,25 @@ impl ChannelCodec for BlueskyCodec {
             .ok_or_else(|| {
                 ChannelError::InvalidMessage("bluesky created_at is missing".to_owned())
             })?;
-        let record = json!({
+        let mut record = json!({
             "$type": "app.bsky.feed.post",
             "text": message.body.text,
             "createdAt": created_at,
             "reply": reply,
         });
+        if let (Some(uri), Some(cid)) = (
+            message.metadata.get("bluesky.quote_uri"),
+            message.metadata.get("bluesky.quote_cid"),
+        ) && let Some(fields) = record.as_object_mut()
+        {
+            fields.insert(
+                "embed".to_owned(),
+                json!({
+                    "$type": "app.bsky.embed.record",
+                    "record": {"uri": uri, "cid": cid},
+                }),
+            );
+        }
         Ok(OutboundRequest {
             method: "POST".to_owned(),
             path: "com.atproto.repo.createRecord".to_owned(),

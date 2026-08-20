@@ -18,12 +18,14 @@ use crate::{
 
 mod command;
 mod effect;
+mod invoke;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) use command::{Outcome as CommandOutcome, pending_kind, send as send_command};
 pub(crate) use effect::apply as effect;
+pub(crate) use invoke::run as invoke;
 
 pub(crate) async fn open_url(client: &Client, config: &Config) -> Result<String> {
     let body = json!({}).to_string();

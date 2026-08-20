@@ -1,6 +1,7 @@
 use std::{fmt, time::Duration};
 
 /// Matrix homeserver and access-token configuration.
+#[derive(Clone)]
 pub struct MatrixConfig {
     pub(super) homeserver: String,
     pub(super) access_token: String,

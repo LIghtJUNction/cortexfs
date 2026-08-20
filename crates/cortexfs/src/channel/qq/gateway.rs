@@ -13,6 +13,7 @@ pub(super) fn run(
     client: &Client,
     config: &QqConfig,
     bridge: &AgentChannelBridge,
+    control: &crate::channel::control::ChannelControl,
 ) -> Result<(), QqError> {
     let url = api::gateway(client, config)?;
     let (mut socket, _) = connect(url).map_err(QqError::WebSocket)?;
@@ -21,6 +22,9 @@ pub(super) fn run(
     identify(&mut socket, config)?;
     let mut sequence = Value::Null;
     loop {
+        control
+            .check()
+            .map_err(|error| QqError::Protocol(error.to_string()))?;
         match socket.read() {
             Ok(Message::Text(text)) => {
                 let root: Value = serde_json::from_str(text.as_str())?;

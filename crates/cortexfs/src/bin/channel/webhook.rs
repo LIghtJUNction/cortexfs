@@ -14,6 +14,7 @@ use serde_json::json;
 use std::{fmt, net::SocketAddr};
 
 mod challenge;
+mod control;
 mod outbound;
 mod progress;
 mod server;
@@ -66,6 +67,8 @@ pub enum WebhookError {
     Http(#[source] reqwest::Error),
     #[error("webhook worker queue closed")]
     QueueClosed,
+    #[error("webhook control failed: {0}")]
+    Control(String),
 }
 
 fn codec(platform: Platform) -> Box<dyn ChannelCodec> {

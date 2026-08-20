@@ -7,9 +7,11 @@
 use std::collections::BTreeMap;
 
 use cortexfs_channels::{
-    ChannelId, ConversationId, InboundMessage, MessageBody, MessageTarget, Participant,
+    ChannelId, ConversationId, InboundMessage, MessageBody, MessageTarget, OutboundMessage,
+    Participant,
 };
-use nostr_sdk::prelude::{Client, Event, Kind, NostrSigner, PublicKey};
+use nostr_sdk::prelude::{Client, Event, EventBuilder, EventId, Kind, NostrSigner, PublicKey, Tag};
+use nostr_sdk::serde_json::{Value, json};
 
 use crate::{
     config::Config,
@@ -77,4 +79,72 @@ pub(crate) async fn decode(
         },
         nip17,
     }))
+}
+
+pub(crate) async fn invoke(
+    client: &Client,
+    target: &MessageTarget,
+    name: &str,
+    payload: &Value,
+) -> Result<Value> {
+    match name {
+        "nostr.publish" => {
+            let text = string(payload, "text")?;
+            client
+                .send_event_builder(EventBuilder::text_note(text))
+                .await
+                .map_err(nostr)?;
+            Ok(json!({"accepted":true}))
+        }
+        "nostr.send_dm" => {
+            let text = string(payload, "text")?;
+            let mut metadata = BTreeMap::new();
+            metadata.insert(
+                "nostr_protocol".to_owned(),
+                payload
+                    .get("protocol")
+                    .and_then(Value::as_str)
+                    .unwrap_or("nip17")
+                    .to_owned(),
+            );
+            let message = OutboundMessage {
+                target: target.clone(),
+                body: MessageBody::text(text.to_owned())
+                    .map_err(|error| Error::Protocol(error.to_string()))?,
+                metadata,
+            };
+            proactive(client, message).await?;
+            Ok(json!({"accepted":true}))
+        }
+        "nostr.query_relays" => {
+            let relays = client
+                .relays()
+                .await
+                .keys()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            Ok(json!({"relays": relays}))
+        }
+        "nostr.reaction" => {
+            let event = EventId::parse(string(payload, "event_id")?)
+                .map_err(|error| Error::Protocol(error.to_string()))?;
+            let reaction = string(payload, "reaction").unwrap_or("+");
+            client
+                .send_event_builder(
+                    EventBuilder::new(Kind::Reaction, reaction).tag(Tag::event(event)),
+                )
+                .await
+                .map_err(nostr)?;
+            Ok(json!({"accepted":true}))
+        }
+        _ => Err(Error::Protocol("unsupported operation".to_owned())),
+    }
+}
+
+fn string<'a>(value: &'a Value, name: &'static str) -> Result<&'a str> {
+    value
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && !value.contains('\0'))
+        .ok_or_else(|| Error::Protocol(format!("{name} is missing")))
 }

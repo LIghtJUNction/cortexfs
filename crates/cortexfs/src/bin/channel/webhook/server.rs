@@ -20,6 +20,7 @@ pub(super) fn run(config: &WebhookConfig, bridge: &AgentChannelBridge) -> Result
         .build()
         .map_err(WebhookError::Http)?;
     let codec: Arc<dyn ChannelCodec> = Arc::from(codec(config.platform));
+    let _control = super::control::start(config, bridge, &client, Arc::clone(&codec))?;
     let (sender, receiver) = mpsc::sync_channel(QUEUE);
     let receiver = Arc::new(Mutex::new(receiver));
     let config = Arc::new(config.clone());

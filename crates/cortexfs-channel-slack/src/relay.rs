@@ -18,6 +18,7 @@ use crate::{
 
 mod frames;
 mod input;
+mod invoke;
 
 pub(crate) async fn run(config: Config) -> Result<()> {
     let config = Arc::new(config);

@@ -83,6 +83,45 @@ impl<'a> GmailApi<'a> {
             .map_err(GmailError::Http)
     }
 
+    pub(super) fn search(&self, query: &str) -> Result<Value, GmailError> {
+        self.client
+            .get(self.url("users/me/messages"))
+            .bearer_auth(self.token)
+            .query(&[("q", query)])
+            .send()
+            .map_err(GmailError::Http)?
+            .error_for_status()
+            .map_err(GmailError::Http)?
+            .json::<Value>()
+            .map_err(GmailError::Http)
+    }
+
+    pub(super) fn modify(&self, id: &str, body: &Value) -> Result<Value, GmailError> {
+        self.client
+            .post(self.url(&format!("users/me/messages/{id}/modify")))
+            .bearer_auth(self.token)
+            .json(&body)
+            .send()
+            .map_err(GmailError::Http)?
+            .error_for_status()
+            .map_err(GmailError::Http)?
+            .json::<Value>()
+            .map_err(GmailError::Http)
+    }
+
+    pub(super) fn watch(&self, body: &Value) -> Result<Value, GmailError> {
+        self.client
+            .post(self.url("users/me/watch"))
+            .bearer_auth(self.token)
+            .json(&body)
+            .send()
+            .map_err(GmailError::Http)?
+            .error_for_status()
+            .map_err(GmailError::Http)?
+            .json::<Value>()
+            .map_err(GmailError::Http)
+    }
+
     pub(super) fn send(&self, request: OutboundRequest) -> Result<(), GmailError> {
         self.client
             .post(self.url(&request.path))

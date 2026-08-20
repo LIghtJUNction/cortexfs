@@ -11,6 +11,7 @@ use cortexfs_channels::{ChannelId, ChannelProgressPolicy, ConversationId, Messag
 
 use super::DiscordConfig;
 
+mod commands;
 mod message;
 mod other;
 mod security;

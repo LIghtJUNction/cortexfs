@@ -1,4 +1,6 @@
-use cortexfs_channels::{ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent};
+use cortexfs_channels::{
+    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent,
+};
 use reqwest::Client;
 
 use crate::{
@@ -28,6 +30,18 @@ pub(super) async fn handle(
         }
         ChannelFrameBody::Effect { target, effect, .. } => {
             api::effect(client, config, &target, effect).await?;
+        }
+        ChannelFrameBody::Command {
+            request_id,
+            session: session_id,
+            command_id,
+            command: ChannelCommand::Invoke { name, payload },
+            target: Some(target),
+        } => {
+            super::invoke::handle(
+                client, config, session, request_id, session_id, command_id, target, name, payload,
+            )
+            .await?;
         }
         ChannelFrameBody::Command {
             request_id,

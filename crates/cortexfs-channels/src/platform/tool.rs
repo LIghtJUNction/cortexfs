@@ -40,6 +40,7 @@ const TOOLSETS: &[(&str, &str)] = &[
     ("whatsapp_web", "send_media send_location send_interactive request_approval"),
     ("wecom", "send_markdown send_news send_template_card send_image send_file draft_update"),
     ("wecom_ws", "send_markdown send_media send_file draft_update"),
+    ("wecom-ws", "send_markdown send_media send_file draft_update"),
     ("bluesky", "create_post reply like unlike repost follow quote"),
     ("twitter", "post reply send_dm search_mentions like"),
     ("mochat", "send_media update cursor"),

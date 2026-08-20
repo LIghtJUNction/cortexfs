@@ -1,4 +1,5 @@
 use cortexfs_channels::OutboundMessage;
+use cortexfs_channels::OutboundRequest;
 use lettre::{
     Message, SmtpTransport, Transport, message::header::ContentType,
     transport::smtp::authentication::Credentials,
@@ -32,6 +33,53 @@ pub(super) fn send(config: &EmailConfig, message: &OutboundMessage) -> Result<()
     }
     let email = builder
         .body(message.body.text.clone())
+        .map_err(|error| EmailError::Smtp(error.to_string()))?;
+    let mailer = SmtpTransport::starttls_relay(&config.smtp_host)
+        .map_err(|error| EmailError::Smtp(error.to_string()))?
+        .port(config.smtp_port)
+        .credentials(Credentials::new(
+            config.username.clone(),
+            config.password.clone(),
+        ))
+        .build();
+    mailer
+        .send(&email)
+        .map_err(|error| EmailError::Smtp(error.to_string()))?;
+    Ok(())
+}
+
+pub(super) fn send_request(
+    config: &EmailConfig,
+    request: &OutboundRequest,
+) -> Result<(), EmailError> {
+    if request.content_type != "message/rfc822" {
+        return Err(EmailError::Smtp("email request is not RFC 822".to_owned()));
+    }
+    let (headers, body) = request
+        .body
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| EmailError::Smtp("email body is malformed".to_owned()))?;
+    let header = |name: &str| {
+        headers
+            .lines()
+            .find_map(|line| line.strip_prefix(name).map(str::trim))
+            .ok_or_else(|| EmailError::Smtp(format!("email header {name} is missing")))
+    };
+    let recipient = header("To:")?;
+    let subject = header("Subject:")?;
+    let email = Message::builder()
+        .from(
+            config
+                .from
+                .parse()
+                .map_err(|error| EmailError::Smtp(format!("invalid sender: {error}")))?,
+        )
+        .to(recipient
+            .parse()
+            .map_err(|error| EmailError::Smtp(format!("invalid recipient: {error}")))?)
+        .subject(subject)
+        .header(ContentType::TEXT_PLAIN)
+        .body(body.to_owned())
         .map_err(|error| EmailError::Smtp(error.to_string()))?;
     let mailer = SmtpTransport::starttls_relay(&config.smtp_host)
         .map_err(|error| EmailError::Smtp(error.to_string()))?

@@ -27,6 +27,7 @@ impl Session {
                     ChannelCapabilities {
                         polling: true,
                         long_polling: true,
+                        tool_control: true,
                         ..ChannelCapabilities::text()
                     },
                     ChannelActions::empty(),
@@ -46,6 +47,11 @@ impl Session {
 
     pub(crate) fn next(&self) -> Result<ChannelFrameBody> {
         Ok(self.client.recv()?)
+    }
+
+    pub(crate) fn send_frame(&self, frame: ChannelFrameBody) -> Result<()> {
+        self.client.send_frame(frame)?;
+        Ok(())
     }
 
     pub(crate) fn receipt(&self, request_id: String, receipt: DeliveryReceipt) -> Result<()> {

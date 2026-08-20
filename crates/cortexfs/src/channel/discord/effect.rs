@@ -72,3 +72,37 @@ pub(super) fn remove(
     .map_err(DiscordError::Http)?;
     Ok(())
 }
+
+pub(super) fn pin(
+    client: &Client,
+    config: &DiscordConfig,
+    channel: &str,
+    message: &str,
+) -> Result<(), DiscordError> {
+    auth(
+        client.put(channel_url(config, channel, &format!("pins/{message}"))),
+        config,
+    )
+    .send()
+    .map_err(DiscordError::Http)?
+    .error_for_status()
+    .map_err(DiscordError::Http)?;
+    Ok(())
+}
+
+pub(super) fn unpin(
+    client: &Client,
+    config: &DiscordConfig,
+    channel: &str,
+    message: &str,
+) -> Result<(), DiscordError> {
+    auth(
+        client.delete(channel_url(config, channel, &format!("pins/{message}"))),
+        config,
+    )
+    .send()
+    .map_err(DiscordError::Http)?
+    .error_for_status()
+    .map_err(DiscordError::Http)?;
+    Ok(())
+}

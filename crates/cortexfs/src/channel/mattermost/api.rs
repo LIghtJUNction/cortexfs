@@ -50,6 +50,6 @@ pub(super) fn send(
     Ok(())
 }
 
-fn endpoint(config: &MattermostConfig, path: &str) -> String {
+pub(super) fn endpoint(config: &MattermostConfig, path: &str) -> String {
     format!("{}/{}", config.base_url, path.trim_start_matches('/'))
 }

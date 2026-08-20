@@ -8,6 +8,7 @@ use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod api;
 mod config;
+mod control;
 
 #[cfg(test)]
 mod tests;
@@ -20,8 +21,12 @@ pub fn run(config: &MochatConfig, bridge: &AgentChannelBridge) -> Result<(), Moc
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(MochatError::Http)?;
+    let control = control::start(config, bridge, &client)?;
     let mut since_id = None;
     loop {
+        control
+            .check()
+            .map_err(|error| MochatError::Protocol(error.to_string()))?;
         match poll(&client, config, bridge, &mut since_id) {
             Ok(()) => thread::sleep(config.poll_delay()),
             Err(_error) => thread::sleep(Duration::from_secs(5)),

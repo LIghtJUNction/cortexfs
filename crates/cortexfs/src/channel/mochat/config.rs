@@ -1,6 +1,7 @@
 use std::{fmt, time::Duration};
 
 /// Mochat HTTP API and sender allowlist configuration.
+#[derive(Clone)]
 pub struct MochatConfig {
     pub api_base: String,
     pub api_token: String,

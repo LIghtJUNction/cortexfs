@@ -2,6 +2,7 @@
 
 mod config;
 mod error;
+mod invoke;
 mod message;
 mod output;
 mod relay;

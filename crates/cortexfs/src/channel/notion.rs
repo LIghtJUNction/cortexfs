@@ -8,6 +8,7 @@ use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod api;
 mod config;
+mod control;
 
 #[cfg(test)]
 mod tests;
@@ -34,8 +35,12 @@ pub fn run(config: &NotionConfig, bridge: &AgentChannelBridge) -> Result<(), Not
         &config.result_property,
     )
     .with_status_type(&status_type);
+    let control = control::start(config, bridge, &client, codec.clone())?;
     let mut active = HashSet::new();
     loop {
+        control
+            .check()
+            .map_err(|error| NotionError::Protocol(error.to_string()))?;
         if let Err(_error) = poll(&client, config, &codec, bridge, &mut active) {
             thread::sleep(Duration::from_secs(5));
         } else {

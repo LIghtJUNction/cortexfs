@@ -1,6 +1,7 @@
 use std::{fmt, time::Duration};
 
 /// QQ Bot application and gateway configuration.
+#[derive(Clone)]
 pub struct QqConfig {
     pub(super) app_id: String,
     pub(super) token: String,

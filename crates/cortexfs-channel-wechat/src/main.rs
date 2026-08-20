@@ -3,6 +3,7 @@
 mod api;
 mod config;
 mod error;
+mod invoke;
 mod message;
 mod relay;
 mod socket;

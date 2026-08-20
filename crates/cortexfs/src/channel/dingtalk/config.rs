@@ -1,4 +1,5 @@
 /// `DingTalk` Stream Mode configuration.
+#[derive(Clone)]
 pub struct DingTalkConfig {
     pub(super) client_id: String,
     pub(super) client_secret: String,

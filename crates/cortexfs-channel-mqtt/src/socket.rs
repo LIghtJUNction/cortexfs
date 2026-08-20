@@ -28,7 +28,10 @@ impl Session {
                 client: ChannelDriverSession::connect_retry(
                     &path,
                     &ChannelId::from_static("mqtt"),
-                    ChannelCapabilities::text(),
+                    ChannelCapabilities {
+                        tool_control: true,
+                        ..ChannelCapabilities::text()
+                    },
                     ChannelActions::empty(),
                     "mqtt",
                     Duration::from_secs(10),

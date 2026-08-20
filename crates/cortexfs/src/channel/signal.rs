@@ -11,8 +11,10 @@ use cortexfs_channels::{
 
 use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
+mod control;
+
 /// signal-cli JSON-lines adapter. signal-cli owns Signal Protocol state.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SignalConfig {
     pub account: String,
     pub executable: String,
@@ -48,7 +50,11 @@ pub enum SignalError {
 
 /// Runs signal-cli receive JSON output and reconnects when it exits.
 pub fn run(config: &SignalConfig, bridge: &AgentChannelBridge) -> Result<(), SignalError> {
+    let control = control::start(config, bridge)?;
     loop {
+        control
+            .check()
+            .map_err(|error| SignalError::Config(error.to_string()))?;
         if let Err(_error) = run_once(config, bridge) {
             thread::sleep(Duration::from_secs(5));
         }

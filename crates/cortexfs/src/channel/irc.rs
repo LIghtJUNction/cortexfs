@@ -5,11 +5,14 @@ use cortexfs_channels::{ChannelError, platform::irc::IrcCodec};
 use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod runner;
-mod wire;
+pub(in crate::channel) mod wire;
+
+mod control;
 
 pub(in crate::channel) use runner::{run_stream, run_stream_with};
 
 /// Plain IRC foreground adapter. TLS can be supplied by an external local relay.
+#[derive(Clone)]
 pub struct IrcConfig {
     pub server: String,
     pub port: u16,
@@ -69,7 +72,11 @@ pub enum IrcError {
 
 /// Runs an IRC connection and reconnects after a disconnect.
 pub fn run(config: &IrcConfig, bridge: &AgentChannelBridge) -> Result<(), IrcError> {
+    let control = control::start(config, bridge)?;
     loop {
+        control
+            .check()
+            .map_err(|error| IrcError::Config(error.to_string()))?;
         if let Err(_error) = run_once(config, bridge) {
             thread::sleep(Duration::from_secs(5));
         }

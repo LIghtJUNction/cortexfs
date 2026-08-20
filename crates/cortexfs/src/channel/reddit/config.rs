@@ -1,6 +1,7 @@
 use std::{fmt, time::Duration};
 
 /// Reddit OAuth inbox configuration; secrets stay outside filesystem state.
+#[derive(Clone)]
 pub struct RedditConfig {
     pub client_id: String,
     pub client_secret: String,

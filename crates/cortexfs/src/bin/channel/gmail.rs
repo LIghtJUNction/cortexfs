@@ -10,6 +10,7 @@ use serde_json::json;
 
 mod api;
 mod config;
+mod control;
 
 pub use config::GmailConfig;
 
@@ -35,9 +36,13 @@ pub fn run(config: &GmailConfig, bridge: &AgentChannelBridge) -> Result<(), Gmai
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(GmailError::Http)?;
+    let control = control::start(config, bridge, &client)?;
     let mut history = None;
     let mut seen = BTreeSet::new();
     loop {
+        control
+            .check()
+            .map_err(|error| GmailError::Api(error.to_string()))?;
         match http::serve_once(&listener, |request| {
             handle(config, &client, bridge, &mut history, &mut seen, &request)
         }) {

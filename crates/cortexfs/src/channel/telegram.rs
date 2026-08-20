@@ -1,26 +1,25 @@
-use std::{fmt, time::Duration};
-
+use super::bridge::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink};
 use cortexfs_channels::{
     ChannelCodec, ChannelError, ChannelIncoming, ChannelProgressPolicy,
     platform::telegram::TelegramCodec,
 };
 use serde_json::Value;
-
-use super::bridge::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink};
+use std::{fmt, time::Duration};
 
 mod api;
+mod control;
 mod message;
 mod progress;
 mod request;
 
 /// Foreground Telegram long-poll configuration.
+#[derive(Clone)]
 pub struct TelegramConfig {
     token: String,
     api_base: String,
     poll_seconds: u64,
     progress: ChannelProgressPolicy,
 }
-
 impl fmt::Debug for TelegramConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TelegramConfig")
@@ -31,7 +30,6 @@ impl fmt::Debug for TelegramConfig {
             .finish()
     }
 }
-
 impl TelegramConfig {
     pub fn new(
         token: impl Into<String>,
@@ -64,7 +62,6 @@ impl TelegramConfig {
         self
     }
 }
-
 /// Errors returned by the built-in Telegram foreground adapter.
 #[derive(Debug, thiserror::Error)]
 pub enum TelegramError {
@@ -81,16 +78,19 @@ pub enum TelegramError {
     #[error("Telegram API rejected request: {0}")]
     Api(String),
 }
-
 /// Runs one explicit foreground long-poll loop until the process is stopped.
 pub fn run(config: &TelegramConfig, bridge: &AgentChannelBridge) -> Result<(), TelegramError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(config.poll_seconds.saturating_add(20)))
         .build()
         .map_err(TelegramError::Http)?;
+    let control = control::start(config, bridge, &client)?;
     let codec = TelegramCodec;
     let mut offset = 0_i64;
     loop {
+        control
+            .check()
+            .map_err(|error| TelegramError::Api(error.to_string()))?;
         let updates = api::get_updates(&client, config, offset)?;
         for update in updates {
             let payload = serde_json::to_string(&update)?;

@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use cortexfs_channels::{ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt, OutboundMessage};
+use cortexfs_channels::{
+    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+    OutboundMessage,
+};
 
 use crate::{
     api,
@@ -31,6 +34,31 @@ pub(super) async fn handle(
             message,
         } => {
             proactive(client, config, session, request_id, message).await?;
+        }
+        ChannelFrameBody::Command {
+            request_id,
+            session: session_id,
+            command_id,
+            command,
+            target,
+        } => {
+            let result = match command {
+                ChannelCommand::Invoke { name, payload } => {
+                    crate::invoke::run(client, config, target.as_ref(), &name, &payload).await
+                }
+                _ => Err(Error::Protocol("WeChat command is unsupported".to_owned())),
+            };
+            session.send_frame(ChannelFrameBody::CommandResult {
+                request_id,
+                session: session_id,
+                command_id,
+                result: result.map_or_else(
+                    |error| ChannelCommandResult::Rejected {
+                        reason: error.to_string(),
+                    },
+                    |payload| ChannelCommandResult::Value { payload },
+                ),
+            })?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,

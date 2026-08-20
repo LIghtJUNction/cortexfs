@@ -1,5 +1,5 @@
 use cortexfs_channels::{
-    ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
 };
 use rumqttc::AsyncClient;
 
@@ -40,15 +40,25 @@ pub(super) async fn handle(
             request_id,
             session: session_id,
             command_id,
-            ..
+            command,
+            target,
         } => {
+            let result = match command {
+                ChannelCommand::Invoke { name, payload } => {
+                    crate::invoke::run(config, client, target.as_ref(), &name, &payload).await
+                }
+                _ => Err(Error::Config("MQTT command is unsupported".to_owned())),
+            };
             session.send_frame(ChannelFrameBody::CommandResult {
                 request_id,
                 session: session_id,
                 command_id,
-                result: ChannelCommandResult::Rejected {
-                    reason: "MQTT has no interactive command reply path".to_owned(),
-                },
+                result: result.map_or_else(
+                    |error| ChannelCommandResult::Rejected {
+                        reason: error.to_string(),
+                    },
+                    |payload| ChannelCommandResult::Value { payload },
+                ),
             })?;
         }
         ChannelFrameBody::Event {

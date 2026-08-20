@@ -75,3 +75,30 @@ pub(super) fn delete(
     .map_err(DiscordError::Http)?;
     Ok(())
 }
+
+pub(super) fn edit_components(
+    client: &Client,
+    config: &DiscordConfig,
+    channel: &str,
+    message: &str,
+    text: &str,
+) -> Result<Value, DiscordError> {
+    effect::auth(
+        client.patch(effect::channel_url(
+            config,
+            channel,
+            &format!("messages/{message}"),
+        )),
+        config,
+    )
+    .json(&json!({
+        "content": text,
+        "components": [],
+        "allowed_mentions": {"parse": []}
+    }))
+    .send()
+    .map_err(DiscordError::Http)
+    .and_then(|response| response.error_for_status().map_err(DiscordError::Http))?
+    .json::<Value>()
+    .map_err(DiscordError::Http)
+}

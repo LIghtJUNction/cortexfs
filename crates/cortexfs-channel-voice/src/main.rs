@@ -3,9 +3,11 @@
 mod config;
 mod error;
 mod http;
+mod invoke;
 mod provider;
 mod relay;
 mod socket;
+mod wake;
 
 use error::Result;
 use std::io::Write as _;

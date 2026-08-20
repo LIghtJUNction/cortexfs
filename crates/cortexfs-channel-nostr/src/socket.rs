@@ -25,6 +25,7 @@ impl Session {
                     &path,
                     &ChannelId::from_static("nostr"),
                     ChannelCapabilities {
+                        tool_control: true,
                         websocket: true,
                         ..ChannelCapabilities::text()
                     },
@@ -45,6 +46,11 @@ impl Session {
 
     pub(crate) fn next(&self) -> Result<ChannelFrameBody> {
         Ok(self.client.recv()?)
+    }
+
+    pub(crate) fn send_frame(&self, frame: ChannelFrameBody) -> Result<()> {
+        self.client.send_frame(frame)?;
+        Ok(())
     }
 
     pub(crate) fn receipt(&self, request_id: String, receipt: DeliveryReceipt) -> Result<()> {

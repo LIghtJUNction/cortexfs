@@ -3,10 +3,13 @@ use std::{fmt, thread, time::Duration};
 use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 use cortexfs_channels::ChannelError;
 
+mod attachment;
+mod control;
 mod imap;
 mod smtp;
 
 /// IMAP IDLE plus SMTP channel configuration.
+#[derive(Clone)]
 pub struct EmailConfig {
     pub imap_host: String,
     pub imap_port: u16,
@@ -74,7 +77,11 @@ pub enum EmailError {
 /// Runs IMAP IDLE and reconnects after a transport failure.
 pub fn run(config: &EmailConfig, bridge: &AgentChannelBridge) -> Result<(), EmailError> {
     config.validate()?;
+    let control = control::start(config, bridge)?;
     loop {
+        control
+            .check()
+            .map_err(|error| EmailError::Config(error.to_string()))?;
         if let Err(_error) = imap::run_once(config, bridge) {
             thread::sleep(Duration::from_secs(5));
         }

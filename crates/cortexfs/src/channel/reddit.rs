@@ -7,6 +7,7 @@ use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod api;
 mod config;
+mod control;
 
 #[cfg(test)]
 mod tests;
@@ -20,7 +21,11 @@ pub fn run(config: &RedditConfig, bridge: &AgentChannelBridge) -> Result<(), Red
         .build()
         .map_err(RedditError::Http)?;
     let mut session = api::login(&client, config)?;
+    let control = control::start(config, bridge, &client)?;
     loop {
+        control
+            .check()
+            .map_err(|error| RedditError::Protocol(error.to_string()))?;
         match poll(&client, config, bridge, &mut session) {
             Ok(()) => thread::sleep(config.poll_delay()),
             Err(_error) => {

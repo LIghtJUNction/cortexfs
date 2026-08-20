@@ -38,6 +38,7 @@ impl Session {
                         send_attachments: true,
                         commands: true,
                         choices: true,
+                        tool_control: true,
                         websocket: true,
                         ..ChannelCapabilities::text()
                     },

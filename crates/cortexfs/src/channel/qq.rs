@@ -9,6 +9,7 @@ use super::bridge::AgentChannelBridge;
 
 mod api;
 mod config;
+mod control;
 mod gateway;
 
 pub use config::{QqConfig, QqError};
@@ -19,8 +20,9 @@ pub fn run(config: &QqConfig, bridge: &AgentChannelBridge) -> Result<(), QqError
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(QqError::Http)?;
+    let control = control::start(config, bridge, &client)?;
     loop {
-        if let Err(_error) = gateway::run(&client, config, bridge) {
+        if let Err(_error) = gateway::run(&client, config, bridge, &control) {
             thread::sleep(config.reconnect_delay());
         }
     }

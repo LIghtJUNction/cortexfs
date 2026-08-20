@@ -1,6 +1,7 @@
 use std::{fmt, time::Duration};
 
 /// Mattermost server and bot-token configuration.
+#[derive(Clone)]
 pub struct MattermostConfig {
     pub(super) base_url: String,
     pub(super) token: String,

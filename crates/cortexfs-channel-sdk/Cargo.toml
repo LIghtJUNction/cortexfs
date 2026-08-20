@@ -11,7 +11,7 @@ keywords = ["agent", "chat", "channel", "sdk"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
-cortexfs-channels = { version = "0.1.16", path = "../cortexfs-channels" }
+cortexfs-channels = { version = "0.1.17", path = "../cortexfs-channels" }
 thiserror = "2.0.20"
 
 [lints]

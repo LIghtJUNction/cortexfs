@@ -8,6 +8,7 @@ use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod api;
 mod config;
+mod control;
 mod text;
 
 #[cfg(test)]
@@ -22,8 +23,12 @@ pub fn run(config: &TwitterConfig, bridge: &AgentChannelBridge) -> Result<(), Tw
         .build()
         .map_err(TwitterError::Http)?;
     let bot_id = api::me(&client, config)?;
+    let control = control::start(config, bridge, &client, &bot_id)?;
     let mut since_id = None;
     loop {
+        control
+            .check()
+            .map_err(|error| TwitterError::Protocol(error.to_string()))?;
         match poll(&client, config, bridge, &bot_id, &mut since_id) {
             Ok(()) => thread::sleep(config.poll_delay()),
             Err(TwitterError::RateLimited) => thread::sleep(Duration::from_mins(1)),

@@ -1,6 +1,7 @@
 use std::{fmt, time::Duration};
 
 /// Twitter API v2 bearer token and mention routing configuration.
+#[derive(Clone)]
 pub struct TwitterConfig {
     pub bearer_token: String,
     pub api_base: String,

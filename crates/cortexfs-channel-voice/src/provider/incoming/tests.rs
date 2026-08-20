@@ -22,6 +22,7 @@ fn config() -> Config {
         webhook_token: None,
         webhook_base: None,
         hangup_after: None,
+        wake_executable: None,
     }
 }
 

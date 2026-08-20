@@ -38,6 +38,7 @@ impl std::fmt::Debug for DiscordConfig {
 }
 
 mod api;
+mod command;
 mod component;
 mod control;
 mod effect;

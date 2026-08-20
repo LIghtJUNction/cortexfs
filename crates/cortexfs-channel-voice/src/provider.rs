@@ -11,9 +11,10 @@ use reqwest::Client;
 
 use crate::{config::Config, error::Result};
 
-mod call;
+pub(crate) mod call;
+pub(crate) mod control;
 mod incoming;
-mod speech;
+pub(crate) mod speech;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveCall {

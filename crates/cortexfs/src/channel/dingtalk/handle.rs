@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::TcpStream};
+use std::net::TcpStream;
 
 use cortexfs_channels::{ChannelCodec, platform::dingtalk::DingTalkCodec};
 use reqwest::blocking::Client;
@@ -11,18 +11,18 @@ pub(super) fn run_once(
     config: &DingTalkConfig,
     bridge: &AgentChannelBridge,
     client: &Client,
+    webhooks: &super::Webhooks,
 ) -> Result<(), DingTalkError> {
     let gateway = api::register(client, config)?;
     let url = transport::websocket_url(&gateway.endpoint, &gateway.ticket)?;
     let (mut socket, _) = connect(url).map_err(DingTalkError::WebSocket)?;
     let codec = DingTalkCodec;
-    let mut webhooks = HashMap::new();
     loop {
         match socket.read()? {
             Message::Text(payload) => handle_frame(
                 &mut socket,
                 codec,
-                &mut webhooks,
+                webhooks,
                 bridge,
                 client,
                 payload.as_str(),
@@ -37,7 +37,7 @@ pub(super) fn run_once(
 fn handle_frame(
     socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
     codec: DingTalkCodec,
-    webhooks: &mut HashMap<String, String>,
+    webhooks: &super::Webhooks,
     bridge: &AgentChannelBridge,
     client: &Client,
     payload: &str,
@@ -51,7 +51,9 @@ fn handle_frame(
         return Ok(());
     };
     socket.send(Message::text(transport::ack(&root)))?;
-    if let Some(webhook) = DingTalkCodec::session_webhook(payload) {
+    if let Some(webhook) = DingTalkCodec::session_webhook(payload)
+        && let Ok(mut webhooks) = webhooks.lock()
+    {
         webhooks.insert(inbound.target.conversation.to_string(), webhook);
         if webhooks.len() > 4096
             && let Some(key) = webhooks.keys().next().cloned()
@@ -62,8 +64,12 @@ fn handle_frame(
     let Ok(outbound) = bridge.handle(inbound) else {
         return Ok(());
     };
-    let Some(webhook) = webhooks.get(outbound.target.conversation.as_str()) else {
+    let webhook = webhooks
+        .lock()
+        .ok()
+        .and_then(|webhooks| webhooks.get(outbound.target.conversation.as_str()).cloned());
+    let Some(webhook) = webhook else {
         return Ok(());
     };
-    api::reply(client, webhook, codec.encode(&outbound)?)
+    api::reply(client, &webhook, codec.encode(&outbound)?)
 }

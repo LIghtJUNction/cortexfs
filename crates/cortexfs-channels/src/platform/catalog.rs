@@ -116,9 +116,15 @@ const WEBHOOK: ChannelCapabilities = ChannelCapabilities {
     webhook: true,
     ..TEXT
 };
+const TOOL_WEBHOOK: ChannelCapabilities = ChannelCapabilities {
+    webhook: true,
+    tool_control: true,
+    ..TEXT
+};
 const SEND_WEBHOOK: ChannelCapabilities = ChannelCapabilities {
     send: true,
     webhook: true,
+    tool_control: true,
     ..ChannelCapabilities::empty()
 };
 const LONG_POLL: ChannelCapabilities = ChannelCapabilities {
@@ -133,10 +139,12 @@ const POLL: ChannelCapabilities = ChannelCapabilities {
 const VOICE: ChannelCapabilities = ChannelCapabilities {
     audio: true,
     webhook: true,
+    tool_control: true,
     ..TEXT
 };
 const VOICE_WAKE: ChannelCapabilities = ChannelCapabilities {
     audio: true,
+    tool_control: true,
     ..ChannelCapabilities::empty()
 };
 const SOCKET: ChannelCapabilities = ChannelCapabilities {
@@ -153,7 +161,14 @@ const TELEGRAM: ChannelCapabilities = ChannelCapabilities {
     reactions: true,
     streaming: true,
     draft_updates: true,
+    tool_control: true,
     ..LONG_POLL
+};
+const DINGTALK: ChannelCapabilities = ChannelCapabilities {
+    group: true,
+    threads: true,
+    tool_control: true,
+    ..SOCKET
 };
 const DISCORD: ChannelCapabilities = ChannelCapabilities {
     group: true,
@@ -176,28 +191,37 @@ const SLACK: ChannelCapabilities = ChannelCapabilities {
     reactions: true,
     commands: true,
     choices: true,
+    tool_control: true,
     ..GROUP_WEBHOOK
 };
 const LINE: ChannelCapabilities = ChannelCapabilities {
     attachments: true,
     send_attachments: true,
+    tool_control: true,
     ..GROUP_WEBHOOK
 };
 const WHATSAPP: ChannelCapabilities = ChannelCapabilities {
     attachments: true,
     send_attachments: true,
+    tool_control: true,
     ..WEBHOOK
+};
+const WHATSAPP_WEB: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..TEXT
 };
 const LINQ: ChannelCapabilities = ChannelCapabilities {
     attachments: true,
     receive_attachments: true,
     send_attachments: true,
+    tool_control: true,
     ..WEBHOOK
 };
 const MATTERMOST: ChannelCapabilities = ChannelCapabilities {
     attachments: true,
     receive_attachments: true,
     send_attachments: true,
+    tool_control: true,
     ..GROUP_SOCKET
 };
 const TEAMS: ChannelCapabilities = ChannelCapabilities {
@@ -212,19 +236,91 @@ const GROUP_SOCKET: ChannelCapabilities = ChannelCapabilities {
     threads: true,
     ..SOCKET
 };
+const QQ: ChannelCapabilities = ChannelCapabilities {
+    group: true,
+    threads: true,
+    tool_control: true,
+    ..SOCKET
+};
 const GROUP_POLL: ChannelCapabilities = ChannelCapabilities {
     group: true,
     threads: true,
+    tool_control: true,
     ..LONG_POLL
 };
 const GROUP_WEBHOOK: ChannelCapabilities = ChannelCapabilities {
     group: true,
     threads: true,
+    tool_control: true,
     ..WEBHOOK
 };
 const BLUESKY: ChannelCapabilities = ChannelCapabilities {
     threads: true,
+    tool_control: true,
     ..POLL
+};
+const REDDIT: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..POLL
+};
+const SIGNAL: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..TEXT
+};
+const IRC: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..LONG_POLL
+};
+const TWITCH: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..LONG_POLL
+};
+const EMAIL: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..LONG_POLL
+};
+const GMAIL: ChannelCapabilities = ChannelCapabilities {
+    webhook: true,
+    tool_control: true,
+    ..TEXT
+};
+const TWITTER: ChannelCapabilities = ChannelCapabilities {
+    polling: true,
+    tool_control: true,
+    ..TEXT
+};
+const NOTION: ChannelCapabilities = ChannelCapabilities {
+    polling: true,
+    tool_control: true,
+    ..TEXT
+};
+const MOCHAT: ChannelCapabilities = ChannelCapabilities {
+    polling: true,
+    tool_control: true,
+    ..TEXT
+};
+const NOSTR: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..SOCKET
+};
+const WECHAT: ChannelCapabilities = ChannelCapabilities {
+    polling: true,
+    long_polling: true,
+    tool_control: true,
+    ..TEXT
+};
+const WECOM_WS: ChannelCapabilities = ChannelCapabilities {
+    websocket: true,
+    tool_control: true,
+    ..TEXT
+};
+const AMQP: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..TEXT
+};
+const MQTT: ChannelCapabilities = ChannelCapabilities {
+    tool_control: true,
+    ..TEXT
 };
 
 /// The upstream `ZeroClaw` channel families known to `CortexFS`.
@@ -234,7 +330,7 @@ pub const CHANNEL_CATALOG: &[ChannelSpec] = &[
     spec("bluesky", ChannelTransport::Polling, true, BLUESKY),
     spec("slack", ChannelTransport::Webhook, true, SLACK),
     spec("feishu", ChannelTransport::Webhook, true, GROUP_WEBHOOK),
-    spec("dingtalk", ChannelTransport::WebSocket, true, GROUP_SOCKET),
+    spec("dingtalk", ChannelTransport::WebSocket, true, DINGTALK),
     spec("line", ChannelTransport::Webhook, true, LINE),
     spec("lark", ChannelTransport::Webhook, true, GROUP_WEBHOOK),
     spec("teams", ChannelTransport::Webhook, true, TEAMS),
@@ -246,34 +342,40 @@ pub const CHANNEL_CATALOG: &[ChannelSpec] = &[
     ),
     spec("matrix", ChannelTransport::Polling, true, GROUP_POLL),
     spec("mattermost", ChannelTransport::WebSocket, true, MATTERMOST),
-    spec("qq", ChannelTransport::WebSocket, true, GROUP_SOCKET),
-    spec("reddit", ChannelTransport::Polling, true, POLL),
-    spec("signal", ChannelTransport::LocalApi, true, TEXT),
-    spec("irc", ChannelTransport::Polling, true, LONG_POLL),
-    spec("twitch", ChannelTransport::Polling, true, LONG_POLL),
-    spec("email", ChannelTransport::Polling, true, LONG_POLL),
-    spec("gmail", ChannelTransport::Webhook, true, WEBHOOK),
+    spec("qq", ChannelTransport::WebSocket, true, QQ),
+    spec("reddit", ChannelTransport::Polling, true, REDDIT),
+    spec("signal", ChannelTransport::LocalApi, true, SIGNAL),
+    spec("irc", ChannelTransport::Polling, true, IRC),
+    spec("twitch", ChannelTransport::Polling, true, TWITCH),
+    spec("email", ChannelTransport::Polling, true, EMAIL),
+    spec("gmail", ChannelTransport::Webhook, true, GMAIL),
     spec("whatsapp", ChannelTransport::Webhook, true, WHATSAPP),
     spec("wecom", ChannelTransport::Webhook, true, SEND_WEBHOOK),
-    spec("whatsapp_web", ChannelTransport::External, false, TEXT),
+    spec(
+        "whatsapp_web",
+        ChannelTransport::Webhook,
+        false,
+        WHATSAPP_WEB,
+    ),
     spec("imessage", ChannelTransport::External, false, TEXT),
-    spec("nostr", ChannelTransport::External, false, SOCKET),
-    spec("twitter", ChannelTransport::Polling, true, POLL),
-    spec("mochat", ChannelTransport::Polling, true, POLL),
+    spec("nostr", ChannelTransport::External, false, NOSTR),
+    spec("twitter", ChannelTransport::Polling, true, TWITTER),
+    spec("mochat", ChannelTransport::Polling, true, MOCHAT),
     spec("linq", ChannelTransport::Webhook, true, LINQ),
-    spec("notion", ChannelTransport::Polling, true, POLL),
-    spec("wechat", ChannelTransport::Polling, false, LONG_POLL),
-    spec("wecom_ws", ChannelTransport::External, false, SOCKET),
+    spec("notion", ChannelTransport::Polling, true, NOTION),
+    spec("wechat", ChannelTransport::Polling, false, WECHAT),
+    spec("wecom-ws", ChannelTransport::External, false, WECOM_WS),
+    spec("wecom_ws", ChannelTransport::External, false, WECOM_WS),
     spec("clawdtalk", ChannelTransport::External, false, VOICE),
     spec("voice_call", ChannelTransport::External, false, VOICE),
     spec("voice_wake", ChannelTransport::External, false, VOICE_WAKE),
-    spec("webhook", ChannelTransport::Webhook, true, WEBHOOK),
+    spec("webhook", ChannelTransport::Webhook, true, TOOL_WEBHOOK),
     spec("cli", ChannelTransport::Stdio, true, TEXT),
     spec("acp", ChannelTransport::Stdio, false, TEXT),
     spec("filesystem", ChannelTransport::LocalApi, false, TEXT),
     spec("git", ChannelTransport::LocalApi, false, TEXT),
-    spec("amqp", ChannelTransport::External, false, TEXT),
-    spec("mqtt", ChannelTransport::External, false, TEXT),
+    spec("amqp", ChannelTransport::External, false, AMQP),
+    spec("mqtt", ChannelTransport::External, false, MQTT),
 ];
 
 #[must_use]

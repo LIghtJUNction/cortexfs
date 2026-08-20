@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use cortexfs_channels::{ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt};
+use cortexfs_channels::{
+    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+};
 use lapin::{
     message::Delivery,
     options::{BasicAckOptions, BasicNackOptions},
@@ -60,6 +62,32 @@ pub(super) async fn handle(
                     timestamp_ms: None,
                 },
             )?;
+        }
+        ChannelFrameBody::Command {
+            request_id,
+            session: session_id,
+            command_id,
+            command,
+            target,
+        } => {
+            let result = match command {
+                ChannelCommand::Invoke { name, payload } => {
+                    crate::invoke::run(config, channel, pending, target.as_ref(), &name, &payload)
+                        .await
+                }
+                _ => Err(Error::Config("AMQP command is unsupported".to_owned())),
+            };
+            session.send_frame(ChannelFrameBody::CommandResult {
+                request_id,
+                session: session_id,
+                command_id,
+                result: result.map_or_else(
+                    |error| ChannelCommandResult::Rejected {
+                        reason: error.to_string(),
+                    },
+                    |payload| ChannelCommandResult::Value { payload },
+                ),
+            })?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,

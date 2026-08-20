@@ -24,7 +24,10 @@ impl Session {
                 client: ChannelDriverSession::connect_retry(
                     &path,
                     &ChannelId::from_static("amqp"),
-                    ChannelCapabilities::text(),
+                    ChannelCapabilities {
+                        tool_control: true,
+                        ..ChannelCapabilities::text()
+                    },
                     ChannelActions::empty(),
                     "amqp",
                     Duration::from_secs(10),
@@ -42,6 +45,11 @@ impl Session {
 
     pub(crate) fn next(&self) -> Result<ChannelFrameBody> {
         Ok(self.client.recv()?)
+    }
+
+    pub(crate) fn send_frame(&self, frame: ChannelFrameBody) -> Result<()> {
+        self.client.send_frame(frame)?;
+        Ok(())
     }
 
     pub(crate) fn receipt(&self, request_id: String, receipt: DeliveryReceipt) -> Result<()> {
