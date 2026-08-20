@@ -65,6 +65,7 @@ for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
     cortexfs-channel-email.service cortexfs-channel-gmail.service \
     cortexfs-channel-irc.service cortexfs-channel-matrix.service \
     cortexfs-channel-mattermost.service cortexfs-channel-mochat.service \
+    cortexfs-channel-notion.service \
     cortexfs-channel-qq.service \
     cortexfs-channel-reddit.service cortexfs-channel-twitch.service \
     cortexfs-channel-twitter.service; do
@@ -156,7 +157,7 @@ fi
 %attr(0700,root,root) %dir %{_sharedstatedir}/cortexfs/secrets
 
 %changelog
-* Thu Aug 21 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.20-1
+* Fri Aug 21 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.20-1
 - Preserve completed host tool calls in continuation context to prevent duplicate execution.
 - Auto-mount the current workspace for bare ctx sessions when the agent policy permits it.
 - Report the required provider network permission when an agent policy denies egress.
