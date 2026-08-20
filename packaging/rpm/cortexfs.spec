@@ -158,6 +158,9 @@ fi
 %changelog
 * Thu Aug 21 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.20-1
 - Preserve completed host tool calls in continuation context to prevent duplicate execution.
+- Auto-mount the current workspace for bare ctx sessions when the agent policy permits it.
+- Report the required provider network permission when an agent policy denies egress.
+- Refresh the base64, fuser, getrandom, jsonschema, and reqwest dependency lines.
 
 * Tue Aug 18 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.15-1
 - Accept raw stdout from passthrough agent tools and preserve failure diagnostics.

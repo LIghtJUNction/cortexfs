@@ -33,7 +33,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     ];
     let session = mount_before_refresh(
         || {
-            fuser::spawn_mount2(fs, config.mountpoint, &options)
+            fuser::spawn_mount(fs, config.mountpoint, &options)
                 .map_err(|error| format!("mount failed: {error}"))
         },
         || {

@@ -17,7 +17,7 @@ workspace = true
 cortexfs-channels = { version = "0.1.20", path = "../cortexfs-channels" }
 cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
 futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "query", "rustls"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "sync"] }
