@@ -5,8 +5,8 @@ use std::{
 };
 
 use cortexfs_channels::{
-    ChannelActions, ChannelCapabilities, ChannelControlAction, ChannelFrame, ChannelFrameBody,
-    ChannelId, DeliveryReceipt,
+    ChannelActions, ChannelCapabilities, ChannelCommand, ChannelControlAction, ChannelFrame,
+    ChannelFrameBody, ChannelId, DeliveryReceipt,
 };
 
 mod send;
@@ -66,13 +66,18 @@ impl DriverHub {
                 command_id,
                 command,
                 target,
-            } if peer.capabilities.commands => ChannelFrame::new(ChannelFrameBody::Command {
-                request_id: request_id.to_owned(),
-                session,
-                command_id,
-                command,
-                target,
-            }),
+            } if peer.capabilities.commands
+                || (peer.capabilities.tool_control
+                    && matches!(&command, ChannelCommand::Invoke { .. })) =>
+            {
+                ChannelFrame::new(ChannelFrameBody::Command {
+                    request_id: request_id.to_owned(),
+                    session,
+                    command_id,
+                    command,
+                    target,
+                })
+            }
             _ => return Err(super::DriverError::Rejected),
         };
         let mut stream = peer

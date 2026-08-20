@@ -688,6 +688,7 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
                     .to_string(),
             ),
         ]);
+        append_channel_conversation(&mut args, channel);
     }
     if let Some(control) = request.control {
         let socket = &control.target;
@@ -719,6 +720,19 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         ]);
     }
     args
+}
+
+fn append_channel_conversation(
+    args: &mut Vec<OsString>,
+    channel: &crate::runtime::channelenv::ChannelRuntimeContext,
+) {
+    if let Some(conversation) = channel.conversation() {
+        args.extend([
+            OsString::from("--setenv"),
+            OsString::from("CTX_CHANNEL_CONVERSATION"),
+            OsString::from(conversation),
+        ]);
+    }
 }
 
 pub(crate) fn overlay_workspace_bwrap_args(sandbox: &AgentToolSandbox) -> Vec<OsString> {

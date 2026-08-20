@@ -1,9 +1,9 @@
-use cortexfs_channels::ChannelEffect;
+use cortexfs_channels::{ChannelCommand, ChannelEffect};
 use cortexfs_tool_sdk::{ToolError, ToolInvocation, ToolResult};
 use serde_json::{Value, json};
 use std::env;
 
-use crate::input::{approval, body, bool_field, choice, notify, string, target};
+use crate::input::{approval, body, bool_field, choice, multi_choice, notify, string, target};
 use crate::wire::{command, effect, invoke, request, send};
 
 pub(crate) fn run(name: &str, invocation: &ToolInvocation) -> ToolResult<Value> {
@@ -76,6 +76,14 @@ pub(crate) fn run(name: &str, invocation: &ToolInvocation) -> ToolResult<Value> 
             },
         ),
         "channel.choice" => command(invocation, target, choice(&input)?),
+        "channel.multi_choice" => command(invocation, target, multi_choice(&input)?),
+        "channel.input" | "channel.ask" => command(
+            invocation,
+            target,
+            ChannelCommand::RequestInput {
+                prompt: string(&input, "prompt")?,
+            },
+        ),
         "channel.approval" => command(invocation, target, approval(&input)?),
         "channel.notify" => command(invocation, target, notify(&input)?),
         _ => invoke(invocation, target, name, input),

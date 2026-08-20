@@ -748,6 +748,18 @@ voice, and ClawdTalk use the same `cortexfs.channel.socket/v1` boundary, while
 macOS-only or local event-source integrations remain explicit external-host
 work.
 
+### Channel-local tools
+
+Every catalog entry exposes common tools plus named platform operations below
+its own tool directory. Examples are `telegram.send_photo`,
+`discord.send_component`, `slack.send_blocks`, `email.search`,
+`gmail.fetch_message`, `matrix.invite_user`, `git.pull_request`, and
+`voice_call.start_call`. The full inventory is generated from
+`ChannelSpec::platform_tool_names()` so filesystem discovery, policy, and the
+ZeroClaw comparison cannot drift apart. These executables send a generic
+`ChannelCommand::Invoke`; the adapter is responsible for native API behavior,
+authentication, rate limits, and unsupported-operation errors.
+
 ## Extending from another agent application
 
 Add the public crate and implement `ChannelAdapter` for a platform transport:

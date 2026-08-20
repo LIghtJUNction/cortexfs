@@ -30,6 +30,8 @@ pub struct ChannelCapabilities {
     pub choices: bool,
     /// The adapter can collect more than one choice from one prompt.
     pub multi_choice: bool,
+    /// The adapter accepts runtime-to-platform channel tool operations.
+    pub tool_control: bool,
     pub polling: bool,
     pub long_polling: bool,
     pub websocket: bool,
@@ -67,6 +69,7 @@ impl ChannelCapabilities {
             commands: false,
             choices: false,
             multi_choice: false,
+            tool_control: false,
             polling: false,
             long_polling: false,
             websocket: false,

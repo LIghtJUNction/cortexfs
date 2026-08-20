@@ -225,6 +225,7 @@ fn capabilities_keep_old_wire_frames_compatible() -> Result<(), ChannelError> {
     assert!(capabilities.receive);
     assert!(!capabilities.attachments);
     assert!(!capabilities.receive_attachments);
+    assert!(!capabilities.tool_control);
     let frame = ChannelFrame::decode(
         br#"{"abi":"cortexfs.channel.socket/v1","frame":{"type":"hello","request_id":"r","channel":"telegram","capabilities":{"receive":true,"send":true}}}
 "#,
@@ -1417,5 +1418,34 @@ fn every_catalog_channel_exposes_common_tool_names() {
                 .iter()
                 .any(|name| name == &format!("{}.invoke", spec.id))
         );
+    }
+}
+
+#[test]
+fn every_catalog_channel_exposes_named_platform_tools() {
+    for spec in CHANNEL_CATALOG {
+        let names = spec.platform_tool_names();
+        assert!(!names.is_empty(), "{} has no platform tools", spec.id);
+        assert!(names.iter().all(|name| name.starts_with(spec.id)));
+        assert!(
+            names
+                .iter()
+                .all(|name| name != &format!("{}.invoke", spec.id))
+        );
+    }
+    for (id, expected) in [
+        ("telegram", "telegram.send_photo"),
+        ("discord", "discord.send_embed"),
+        ("slack", "slack.send_blocks"),
+        ("email", "email.search"),
+        ("gmail", "gmail.register_watch"),
+        ("matrix", "matrix.create_room"),
+        ("git", "git.forge_request"),
+    ] {
+        let spec = platform::catalog::find(id);
+        assert!(spec.is_some(), "missing catalog entry: {id}");
+        if let Some(spec) = spec {
+            assert!(spec.tool_names().iter().any(|name| name == expected));
+        }
     }
 }

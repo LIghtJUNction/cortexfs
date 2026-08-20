@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=167984
-prod=115626
+all=168294
+prod=115780
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 981 crates/cortexfs-agent-sdk/src/lib.rs
@@ -38,8 +38,8 @@ prod=115626
 72 crates/cortexfs-channel-slack/src/relay/input.rs
 116 crates/cortexfs-channel-slack/src/socket.rs
 95 crates/cortexfs-channel-slack/src/socket/command.rs
-85 crates/cortexfs-channel-tools/src/action.rs
-83 crates/cortexfs-channel-tools/src/input.rs
+93 crates/cortexfs-channel-tools/src/action.rs
+102 crates/cortexfs-channel-tools/src/input.rs
 25 crates/cortexfs-channel-tools/src/main.rs
 31 crates/cortexfs-channel-tools/src/tool.rs
 80 crates/cortexfs-channel-tools/src/wire.rs
@@ -81,7 +81,7 @@ prod=115626
 67 crates/cortexfs-channels/src/action.rs
 102 crates/cortexfs-channels/src/adapter.rs
 92 crates/cortexfs-channels/src/address.rs
-101 crates/cortexfs-channels/src/capability.rs
+104 crates/cortexfs-channels/src/capability.rs
 45 crates/cortexfs-channels/src/command.rs
 65 crates/cortexfs-channels/src/control.rs
 451 crates/cortexfs-channels/src/driver.rs
@@ -97,10 +97,10 @@ prod=115626
 49 crates/cortexfs-channels/src/incoming.rs
 55 crates/cortexfs-channels/src/lib.rs
 100 crates/cortexfs-channels/src/message.rs
-170 crates/cortexfs-channels/src/platform.rs
+172 crates/cortexfs-channels/src/platform.rs
 88 crates/cortexfs-channels/src/platform/bluesky.rs
 77 crates/cortexfs-channels/src/platform/bluesky/parse.rs
-277 crates/cortexfs-channels/src/platform/catalog.rs
+296 crates/cortexfs-channels/src/platform/catalog.rs
 119 crates/cortexfs-channels/src/platform/dingtalk.rs
 102 crates/cortexfs-channels/src/platform/discord.rs
 98 crates/cortexfs-channels/src/platform/discord/effect.rs
@@ -145,6 +145,7 @@ prod=115626
 119 crates/cortexfs-channels/src/platform/telegram.rs
 70 crates/cortexfs-channels/src/platform/telegram/effect.rs
 113 crates/cortexfs-channels/src/platform/telegram/event.rs
+61 crates/cortexfs-channels/src/platform/tool.rs
 36 crates/cortexfs-channels/src/platform/twitch.rs
 78 crates/cortexfs-channels/src/platform/twitter.rs
 98 crates/cortexfs-channels/src/platform/twitter/parse.rs
@@ -166,7 +167,7 @@ prod=115626
 561 crates/cortexfs-mcp/src/project.rs
 217 crates/cortexfs-mcp/src/tool.rs
 27 crates/cortexfs-metadatas/src/anthropic.rs
-822 crates/cortexfs-metadatas/src/catalog.rs
+815 crates/cortexfs-metadatas/src/catalog.rs
 5 crates/cortexfs-metadatas/src/common.rs
 91 crates/cortexfs-metadatas/src/context.rs
 119 crates/cortexfs-metadatas/src/deepseek.rs
@@ -455,7 +456,7 @@ prod=115626
 148 crates/cortexfs/src/channel/discord/progress.rs
 65 crates/cortexfs/src/channel/discord/transport.rs
 62 crates/cortexfs/src/channel/driver.rs
-146 crates/cortexfs/src/channel/driver/hub.rs
+151 crates/cortexfs/src/channel/driver/hub.rs
 71 crates/cortexfs/src/channel/driver/hub/send.rs
 39 crates/cortexfs/src/channel/driver/reader.rs
 79 crates/cortexfs/src/channel/driver/session.rs
@@ -571,7 +572,7 @@ prod=115626
 93 crates/cortexfs/src/object/executor/args.rs
 113 crates/cortexfs/src/object/executor/call.rs
 31 crates/cortexfs/src/object/executor/error.rs
-960 crates/cortexfs/src/object/executor/exec.rs
+974 crates/cortexfs/src/object/executor/exec.rs
 45 crates/cortexfs/src/object/executor/frames.rs
 338 crates/cortexfs/src/object/executor/inference.rs
 276 crates/cortexfs/src/object/executor/model.rs
@@ -652,8 +653,8 @@ prod=115626
 148 crates/cortexfs/src/provider/snapshot.rs
 15 crates/cortexfs/src/reference.rs
 11 crates/cortexfs/src/reference/bootstrap.rs
-75 crates/cortexfs/src/reference/bootstrap/channels.rs
-698 crates/cortexfs/src/reference/bootstrap/core.rs
+84 crates/cortexfs/src/reference/bootstrap/channels.rs
+708 crates/cortexfs/src/reference/bootstrap/core.rs
 170 crates/cortexfs/src/reference/bootstrap/tools.rs
 340 crates/cortexfs/src/reference/bootstrap/upgrade.rs
 52 crates/cortexfs/src/reference/build.rs
@@ -670,7 +671,7 @@ prod=115626
 14 crates/cortexfs/src/runtime.rs
 116 crates/cortexfs/src/runtime/channel.rs
 51 crates/cortexfs/src/runtime/channelcaps.rs
-117 crates/cortexfs/src/runtime/channelenv.rs
+122 crates/cortexfs/src/runtime/channelenv.rs
 1478 crates/cortexfs/src/runtime/control.rs
 200 crates/cortexfs/src/runtime/egress.rs
 58 crates/cortexfs/src/runtime/egress/http.rs
@@ -698,7 +699,7 @@ prod=115626
 1223 crates/cortexfs/src/runtime/record/session.rs
 324 crates/cortexfs/src/runtime/record/socket.rs
 380 crates/cortexfs/src/runtime/socket.rs
-358 crates/cortexfs/src/runtime/socket/bwrap.rs
+364 crates/cortexfs/src/runtime/socket/bwrap.rs
 332 crates/cortexfs/src/runtime/socket/events.rs
 2353 crates/cortexfs/src/runtime/socket/exec.rs
 120 crates/cortexfs/src/runtime/socket/exec/approval.rs

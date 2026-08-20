@@ -386,13 +386,23 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
             ),
         );
     }
+    let mut channel_tools = HashSet::new();
+    channel_tools.extend(
+        cortexfs_channels::COMMON_CHANNEL_TOOLS
+            .iter()
+            .map(|tool| (*tool).to_owned()),
+    );
     for channel in cortexfs_channels::CHANNEL_CATALOG {
-        for tool in channel.tool_names() {
-            let _ignored = std::fmt::Write::write_fmt(
-                &mut policy,
-                format_args!("allow {policy_subject} tool:{tool} execute\n"),
-            );
-        }
+        channel_tools.extend(channel.platform_tool_names());
+        channel_tools.insert(format!("{}.invoke", channel.id));
+    }
+    let mut channel_tools = channel_tools.into_iter().collect::<Vec<_>>();
+    channel_tools.sort();
+    for tool in channel_tools {
+        let _ignored = std::fmt::Write::write_fmt(
+            &mut policy,
+            format_args!("allow {policy_subject} tool:{tool} execute\n"),
+        );
     }
     for child in reference_agent_children(name) {
         let _ignored = std::fmt::Write::write_fmt(

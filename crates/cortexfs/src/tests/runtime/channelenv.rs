@@ -74,7 +74,10 @@ fn channel_environment_is_scoped_to_one_run() -> Result<(), Box<dyn std::error::
         "tool.*\n",
     )?;
     let base = ToolPath::new([cortexfs_paths::tool_root_path(root.path())]);
-    let origin = origin("discord");
+    let origin = InteractionOrigin {
+        conversation: Some("room-1".to_owned()),
+        ..origin("discord")
+    };
     let channel = crate::runtime::channelenv::resolve(root.path(), uid, &base, Some(&origin))?
         .ok_or("missing channel context")?;
     let env = [("CTX_PATH".to_owned(), base.to_env())];
@@ -124,6 +127,10 @@ fn channel_environment_is_scoped_to_one_run() -> Result<(), Box<dyn std::error::
     assert_eq!(
         values.get("CTX_CHANNEL_CAPS").map(String::as_str),
         Some("tool.*")
+    );
+    assert_eq!(
+        values.get("CTX_CHANNEL_CONVERSATION").map(String::as_str),
+        Some("room-1")
     );
     assert!(
         values

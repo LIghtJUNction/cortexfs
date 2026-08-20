@@ -74,6 +74,10 @@ operations; old `Hello` frames may omit it and decode as an empty declaration.
 provider-neutral `RequestChoice` command. Linq URL-backed media parts use the
 same attachment URL ABI for receive and send; raw media upload is still
 adapter-owned.
+`ChannelCapabilities::tool_control` is separate from interactive `commands`:
+it means the adapter accepts runtime-to-platform `Invoke` operations emitted by
+channel-local tools. An adapter must advertise it during `Hello` before those
+operations are forwarded.
 After a valid `Hello`, the runtime gates live `Effect` frames against the
 declared `ChannelActions` and rejects runtime `Command` frames locally when
 `capabilities.commands` is false. This keeps an adapter from silently
@@ -107,9 +111,15 @@ Each channel instance owns its generic tools and read-only global state:
 ```
 
 There is intentionally no `/ctx/channel/tool`. Common operations keep generic
-names (`channel.send`, `channel.reply`, `channel.react`, and so on) but are
-installed inside every channel namespace. A platform extension uses the
-`<channel>.invoke` name and carries only a provider-neutral `Invoke` payload.
+names (`channel.send`, `channel.reply`, `channel.react`, `channel.choice`,
+`channel.draft_*`, `channel.gate_*`, `channel.room_*`, and so on) but are
+installed inside every channel namespace. Platform operations use names such as
+`telegram.send_photo`, `discord.send_embed`, `email.search`,
+`gmail.register_watch`, `matrix.create_room`, or `git.forge_request`; the
+catalog is the source of truth for the complete list. The `<channel>.invoke`
+name remains an open extension point. All platform operations carry only the
+provider-neutral `Invoke { name, payload }` shape; platform request/response
+types stay in the adapter.
 User channel tools precede global channel tools for that user. A collision with
 the Agent's existing tool path fails closed instead of silently shadowing it.
 

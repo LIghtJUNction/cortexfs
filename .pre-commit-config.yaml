@@ -30,6 +30,6 @@ repos:
 
       - id: cargo-test
         name: cargo test
-        entry: cargo test --locked --workspace --all-targets --all-features
+        entry: cargo test --locked --workspace --all-targets --all-features -- --test-threads=1
         language: system
         pass_filenames: false

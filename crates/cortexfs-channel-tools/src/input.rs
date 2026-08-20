@@ -5,9 +5,13 @@ use cortexfs_tool_sdk::{ToolError, ToolResult};
 use serde_json::Value;
 
 pub(super) fn target(input: &Value, channel: &str) -> ToolResult<MessageTarget> {
+    let conversation = optional_string(input, "conversation")
+        .or_else(|| std::env::var("CTX_CHANNEL_CONVERSATION").ok())
+        .or_else(|| std::env::var("CTX_CHANNEL_SESSION").ok())
+        .ok_or_else(|| ToolError::invalid("missing string field: conversation"))?;
     Ok(MessageTarget {
         channel: ChannelId::new(channel).map_err(|error| ToolError::invalid(error.to_string()))?,
-        conversation: ConversationId::new(string(input, "conversation")?)
+        conversation: ConversationId::new(conversation)
             .map_err(|error| ToolError::invalid(error.to_string()))?,
         thread: optional_string(input, "thread"),
         reply_to: optional_string(input, "reply_to"),
@@ -44,6 +48,21 @@ pub(super) fn choice(input: &Value) -> ToolResult<ChannelCommand> {
         question: string(input, "question")?,
         choices,
         multiple: bool_field(input, "multiple", false),
+    })
+}
+
+pub(super) fn multi_choice(input: &Value) -> ToolResult<ChannelCommand> {
+    let choices = serde_json::from_value(
+        input
+            .get("choices")
+            .cloned()
+            .ok_or_else(|| ToolError::invalid("missing choices"))?,
+    )
+    .map_err(|error| ToolError::invalid(format!("invalid choices: {error}")))?;
+    Ok(ChannelCommand::RequestChoice {
+        question: string(input, "question")?,
+        choices,
+        multiple: true,
     })
 }
 

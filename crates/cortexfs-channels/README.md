@@ -100,6 +100,10 @@ without exposing platform types. Webhook hosts consume the same
 families. Its `native` flag distinguishes built-in CortexFS hosts from
 platforms that should currently be supplied through the same isolated driver
 socket; an unconfigured third-party transport is never reported as native.
+Each `ChannelSpec::platform_tool_names()` entry is materialized below the
+matching `/ctx/channel/<name>/tool` directory. These names cover the
+adapter-owned platform surface while keeping the wire payload generic
+`ChannelCommand::Invoke { name, payload }`.
 `ChannelId` is an instance key, not merely a platform enum: `telegram.primary`
 and `telegram.secondary` are two independent channel instances in the same
 `telegram` family. Use `ChannelId::family()` for catalog/capability lookup and
@@ -124,6 +128,8 @@ platform-specific message type; `ChannelCapabilities::choices` and
 `multi_choice` describe whether the adapter can present those prompts. Linq
 supports URL-backed text and media parts in both directions; raw uploads
 remain adapter-owned.
+`tool_control` separately advertises whether the adapter accepts named
+platform operations sent by channel-local tools as `ChannelCommand::Invoke`.
 The runtime uses the `Hello` declaration for live-frame gating: an advertised
 unsupported effect is not sent, and a driver that does not advertise
 `commands` receives an immediate correlated rejection instead of a command

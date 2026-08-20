@@ -15,7 +15,7 @@ pub(crate) fn ensure_reference_channels(root: &Path) -> Result<(), ReferenceTree
                 "driver",
                 format!("{}\n", cortexfs_channels::CHANNEL_SOCKET_ABI),
             ),
-            ("cap", "tool.*\n".to_owned()),
+            ("cap", channel_capabilities(spec)),
             ("status", "unavailable\n".to_owned()),
             ("health", "unknown\n".to_owned()),
         ] {
@@ -29,6 +29,15 @@ pub(crate) fn ensure_reference_channels(root: &Path) -> Result<(), ReferenceTree
         }
     }
     Ok(())
+}
+
+fn channel_capabilities(spec: &cortexfs_channels::ChannelSpec) -> String {
+    spec.tool_names()
+        .into_iter()
+        .map(|tool| format!("tool.{tool}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
 fn ensure_channel_tool(root: &Path, channel: &str, name: &str) -> Result<(), ReferenceTreeError> {

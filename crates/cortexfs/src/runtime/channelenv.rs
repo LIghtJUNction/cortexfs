@@ -15,6 +15,7 @@ use crate::{ToolPath, is_object_name};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ChannelRuntimeContext {
     channel: String,
+    conversation: Option<String>,
     caps: Vec<String>,
     tool_path: ToolPath,
     tools: BTreeSet<String>,
@@ -23,6 +24,9 @@ pub(crate) struct ChannelRuntimeContext {
 impl ChannelRuntimeContext {
     pub(crate) fn channel(&self) -> &str {
         &self.channel
+    }
+    pub(crate) fn conversation(&self) -> Option<&str> {
+        self.conversation.as_deref()
     }
     pub(crate) fn caps(&self) -> String {
         self.caps.join(" ")
@@ -106,6 +110,7 @@ pub(crate) fn resolve(
     let caps = read_caps(source, uid, channel)?;
     let mut context = ChannelRuntimeContext {
         channel: channel.to_owned(),
+        conversation: origin.conversation.clone(),
         caps,
         tool_path: ToolPath::new(all_dirs),
         tools,

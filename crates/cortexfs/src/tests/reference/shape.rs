@@ -190,13 +190,9 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     assert!(root.join("bin").join("cortexfs-channel-tool").is_file());
     assert!(root.join("channel").join("discord").join("tool").is_dir());
     assert!(root.join("channel").join("discord.d").join("cap").is_file());
-    assert!(
-        root.join("channel")
-            .join("discord")
-            .join("tool")
-            .join("channel.reply")
-            .is_file()
-    );
+    for tool in ["channel.reply", "discord.send_embed"] {
+        assert_channel_tool(&root, tool);
+    }
     assert!(!root.join("channel").join("tool").exists());
     assert_reference_bin_placeholders(&root);
     assert_file_text(
@@ -282,9 +278,20 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     assert_eq!(ensure_reference_tree(&root), Ok(bootstrapped));
 }
 
+fn assert_channel_tool(root: &Path, name: &str) {
+    assert!(
+        root.join("channel")
+            .join("discord")
+            .join("tool")
+            .join(name)
+            .is_file()
+    );
+}
+
 fn assert_reference_agents(root: &Path) {
     for agent in ["architect", "coder", "reviewer", "worker"] {
-        assert!(inspect_object_layout(root, ObjectClass::Agent, agent).is_ok());
+        let report = inspect_object_layout(root, ObjectClass::Agent, agent);
+        assert!(report.is_ok(), "{agent}: {:?}", report.issues());
         assert_object_hook_dirs(&root.join("agent").join(format!("{agent}.d")));
     }
     for old_agent in ["base", "executor"] {

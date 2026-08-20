@@ -1,3 +1,4 @@
+use super::tool;
 use crate::{ChannelActions, ChannelCapabilities};
 
 /// Transport family used by a platform adapter.
@@ -34,24 +35,42 @@ pub const COMMON_CHANNEL_TOOLS: &[&str] = &[
     "channel.unpin",
     "channel.redact",
     "channel.choice",
+    "channel.multi_choice",
+    "channel.input",
     "channel.approval",
+    "channel.ask",
+    "channel.escalate",
+    "channel.poll",
     "channel.notify",
     "channel.room_create",
     "channel.room_invite",
     "channel.draft",
+    "channel.draft_update",
+    "channel.draft_progress",
+    "channel.draft_finalize",
+    "channel.draft_cancel",
     "channel.gate",
+    "channel.gate_finalize",
     "channel.forge",
+    "channel.forge_request",
 ];
 
 impl ChannelSpec {
-    /// Returns common tools plus one namespaced escape hatch for platform APIs.
+    /// Returns common tools, platform operations, and the generic invoke tool.
     #[must_use]
     pub fn tool_names(self) -> Vec<String> {
         COMMON_CHANNEL_TOOLS
             .iter()
             .map(|name| (*name).to_owned())
+            .chain(tool::names(self.id))
             .chain(std::iter::once(format!("{}.invoke", self.id)))
             .collect()
+    }
+
+    /// Returns only the adapter-owned platform operations for this family.
+    #[must_use]
+    pub fn platform_tool_names(self) -> Vec<String> {
+        tool::names(self.id)
     }
 }
 

@@ -7,8 +7,9 @@ use std::{
 };
 
 use cortexfs_channels::{
-    ChannelActions, ChannelCapabilities, ChannelFrame, ChannelFrameBody, ChannelId, ConversationId,
-    DeliveryReceipt, MessageBody, MessageTarget, OutboundMessage,
+    ChannelActions, ChannelCapabilities, ChannelCommand, ChannelControlAction, ChannelFrame,
+    ChannelFrameBody, ChannelId, ConversationId, DeliveryReceipt, MessageBody, MessageTarget,
+    OutboundMessage,
 };
 
 use super::DriverHub;
@@ -61,6 +62,58 @@ fn hub_waits_for_driver_receipt() -> Result<(), Box<dyn std::error::Error + Send
     worker
         .join()
         .map_err(|error| std::io::Error::other(format!("worker panicked: {error:?}")))??;
+    Ok(())
+}
+
+#[test]
+fn hub_forwards_invoke_when_driver_advertises_tool_control()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let channel = ChannelId::from_static("discord");
+    let hub = DriverHub::default();
+    let (runtime, adapter) = UnixStream::pair()?;
+    let writer = Arc::new(Mutex::new(runtime));
+    let _registration = hub.attach(
+        &channel,
+        Arc::clone(&writer),
+        ChannelCapabilities {
+            tool_control: true,
+            ..ChannelCapabilities::text()
+        },
+        ChannelActions::empty(),
+    );
+    let worker = thread::spawn(
+        move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let mut reader = BufReader::new(adapter);
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            let ChannelFrameBody::Command { command, .. } =
+                ChannelFrame::decode(line.as_bytes())?.frame
+            else {
+                return Err("invoke command missing".into());
+            };
+            assert!(matches!(
+                command,
+                ChannelCommand::Invoke { ref name, .. } if name == "discord.send_embed"
+            ));
+            Ok(())
+        },
+    );
+    hub.dispatch(
+        &channel,
+        "tool-1",
+        ChannelControlAction::Command {
+            session: "session".to_owned(),
+            command_id: "command-1".to_owned(),
+            command: ChannelCommand::Invoke {
+                name: "discord.send_embed".to_owned(),
+                payload: serde_json::json!({"title":"hello"}),
+            },
+            target: Some(target()?),
+        },
+    )?;
+    worker
+        .join()
+        .map_err(|error| format!("invoke worker panicked: {error:?}"))??;
     Ok(())
 }
 

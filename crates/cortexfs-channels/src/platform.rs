@@ -34,6 +34,8 @@ pub mod twitter;
 pub mod wecom;
 pub mod whatsapp;
 
+mod tool;
+
 /// Platform-neutral HTTP operation emitted by a webhook codec.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutboundRequest {

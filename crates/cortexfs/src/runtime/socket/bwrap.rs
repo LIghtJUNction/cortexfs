@@ -175,6 +175,12 @@ pub(crate) fn agent_executable_socket_env(
                     .to_string(),
             ),
         ]);
+        if let Some(conversation) = channel.conversation() {
+            environment.push((
+                "CTX_CHANNEL_CONVERSATION".to_owned(),
+                conversation.to_owned(),
+            ));
+        }
     }
     if let Some(token) = provider_egress_token {
         environment.push((

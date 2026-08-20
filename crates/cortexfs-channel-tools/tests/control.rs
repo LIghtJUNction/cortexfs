@@ -87,4 +87,63 @@ mod tests {
         let _ignored = std::fs::remove_file(&socket);
         Ok(())
     }
+
+    #[test]
+    fn named_platform_tool_preserves_operation_name()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let socket = std::env::temp_dir().join(format!(
+            "cortexfs-channel-platform-tool-test-{}",
+            std::process::id()
+        ));
+        let _ignored = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket)?;
+        let server = thread::spawn(
+            move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                let (stream, _) = listener.accept()?;
+                let mut reader = BufReader::new(stream.try_clone()?);
+                let mut writer = stream;
+                let mut line = String::new();
+                reader.read_line(&mut line)?;
+                line.clear();
+                reader.read_line(&mut line)?;
+                let ChannelFrameBody::ControlRequest { request_id, action } =
+                    ChannelFrame::decode(line.as_bytes())?.frame
+                else {
+                    return Err("missing platform request".into());
+                };
+                let cortexfs_channels::ChannelControlAction::Command { command, .. } = action
+                else {
+                    return Err("wrong platform action".into());
+                };
+                assert!(matches!(
+                    command,
+                    cortexfs_channels::ChannelCommand::Invoke { ref name, .. }
+                        if name == "discord.send_embed"
+                ));
+                writer.write_all(
+                    &ChannelFrame::new(ChannelFrameBody::ControlResponse {
+                        request_id,
+                        accepted: true,
+                        error: None,
+                    })
+                    .encode()?,
+                )?;
+                Ok(())
+            },
+        );
+        let binary = std::env::var("CARGO_BIN_EXE_cortexfs-channel-tool")?;
+        let output = Command::new(binary)
+            .env("CTX_CHANNEL_ID", "discord")
+            .env("CTX_CHANNEL_SOCKET", &socket)
+            .env("CTX_RUN_ID", "platform-run")
+            .env("CTX_TOOL_NAME", "discord.send_embed")
+            .arg(r#"{"conversation":"room-1","title":"hello"}"#)
+            .output()?;
+        assert!(output.status.success());
+        server
+            .join()
+            .map_err(|error| format!("platform tool server panicked: {error:?}"))??;
+        let _ignored = std::fs::remove_file(&socket);
+        Ok(())
+    }
 }
