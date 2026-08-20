@@ -95,7 +95,7 @@ fn channel_environment_is_scoped_to_one_run() -> Result<(), Box<dyn std::error::
         network_allowed: false,
         agent_name: "coder",
         agent_executable: Path::new("/agent"),
-        execution: AgentExecutableSocketExecution::Direct,
+        environment: RunEnvironment::Native,
     };
     let request = crate::runtime::socket::exec::AgentExecutableRunRequest {
         request_id: "request-1",

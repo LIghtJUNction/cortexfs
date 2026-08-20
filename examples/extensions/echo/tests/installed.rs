@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use cortexfs::object::install::{InstallTier, install_object};
 use cortexfs::{
-    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, derive_agent_runtime_view,
-    ensure_reference_tree, serve_agent_executable_socket_stream_once,
+    AgentExecutableSocketRuntime, RunEnvironment, derive_agent_runtime_view, ensure_reference_tree,
+    serve_agent_executable_socket_stream_once,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -103,7 +103,7 @@ fn canonical_echo_installs_and_runs_two_native_calls() -> Result<(), Box<dyn std
             network_allowed: false,
             agent_name: "example-echo",
             agent_executable: &executable,
-            execution: AgentExecutableSocketExecution::Direct,
+            environment: RunEnvironment::Native,
         },
     )
     .map_err(|error| io::Error::other(format!("canonical echo runtime failed: {error:?}")))?;

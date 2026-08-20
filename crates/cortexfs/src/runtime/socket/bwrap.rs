@@ -26,8 +26,8 @@ pub(crate) fn agent_executable_socket_command(
         Some((socket, environment, gate)) => (Some(socket), Some(environment), Some(gate)),
         None => (None, None, None),
     };
-    match runtime.execution {
-        AgentExecutableSocketExecution::Direct => {
+    match runtime.environment {
+        RunEnvironment::Native => {
             let mut command = command_for_agent_identity(
                 support::plain::proc_fd_path(agent_executable),
                 runtime.identity,
@@ -40,7 +40,7 @@ pub(crate) fn agent_executable_socket_command(
             command.stdout(Stdio::piped()).process_group(0);
             Ok((command, None))
         }
-        AgentExecutableSocketExecution::Bwrap {
+        RunEnvironment::Sandbox {
             program,
             mount_table,
             ..

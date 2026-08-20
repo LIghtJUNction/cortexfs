@@ -280,7 +280,7 @@ mod stop_tests {
             network_allowed: false,
             agent_name: "parent",
             agent_executable: Path::new("/agent"),
-            execution: AgentExecutableSocketExecution::Direct,
+            environment: RunEnvironment::Native,
         }
     }
 

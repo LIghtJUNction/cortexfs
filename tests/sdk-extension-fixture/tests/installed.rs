@@ -14,9 +14,9 @@ mod tests {
 
     use cortexfs::object::install::{InstallTier, install_object};
     use cortexfs::{
-        AgentExecutableSocketExecution, AgentExecutableSocketRuntime, ObjectClass,
-        derive_agent_runtime_view, ensure_reference_tree, ensure_runtime_models_from,
-        inspect_object_layout, serve_agent_executable_socket_stream_once,
+        AgentExecutableSocketRuntime, ObjectClass, RunEnvironment, derive_agent_runtime_view,
+        ensure_reference_tree, ensure_runtime_models_from, inspect_object_layout,
+        serve_agent_executable_socket_stream_once,
     };
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
@@ -55,7 +55,7 @@ mod tests {
                 network_allowed: false,
                 agent_name: "fixture-agent",
                 agent_executable: &executable,
-                execution: AgentExecutableSocketExecution::Direct,
+                environment: RunEnvironment::Native,
             },
         )
         .map_err(|_error| std::io::Error::other("cannot execute fixture socket run"))?;

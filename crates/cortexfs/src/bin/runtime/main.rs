@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
-    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, AgentStopHandler, MountTable,
-    NetworkConnectAuthority, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
+    AgentExecutableSocketRuntime, AgentStopHandler, MountTable, NetworkConnectAuthority,
+    PreparedAgentStop, RunEnvironment, SocketPeerPolicy, SocketRuntimeError,
     authorize_network_connect, derive_agent_runtime_view,
     serve_agent_executable_socket_listener_once_with_stop,
 };
@@ -135,7 +135,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
             network_allowed,
             agent_name: view.agent_name(),
             agent_executable: &agent_executable,
-            execution: runtime_agent_execution(view.mount_table(), control_dir),
+            environment: runtime_agent_environment(view.mount_table(), control_dir),
         },
         Some(&stop),
     );
@@ -188,11 +188,11 @@ impl PreparedAgentStop for RuntimePreparedStop {
     }
 }
 
-pub(crate) fn runtime_agent_execution<'a>(
+pub(crate) fn runtime_agent_environment<'a>(
     mount_table: &'a MountTable,
     control_dir: &'a Path,
-) -> AgentExecutableSocketExecution<'a> {
-    AgentExecutableSocketExecution::Bwrap {
+) -> RunEnvironment<'a> {
+    RunEnvironment::Sandbox {
         program: Path::new(BWRAP_PROGRAM),
         mount_table,
         control_dir: Some(control_dir),

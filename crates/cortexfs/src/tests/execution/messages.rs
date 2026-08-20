@@ -72,7 +72,7 @@ impl ScriptedAgentFixture {
                 network_allowed: false,
                 agent_name: "coder",
                 agent_executable: &self.executable,
-                execution: AgentExecutableSocketExecution::Direct,
+                environment: RunEnvironment::Native,
             },
         )
     }
@@ -992,7 +992,7 @@ esac
             network_allowed: false,
             agent_name: "example-agent",
             agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
+            environment: RunEnvironment::Native,
         },
     ));
     let jsonl = outcome.jsonl();
@@ -1531,7 +1531,7 @@ fn owned_bwrap_completion_survives_client_disconnect() {
             network_allowed: false,
             agent_name: "worker",
             agent_executable: &executable,
-            execution: AgentExecutableSocketExecution::Bwrap {
+            environment: RunEnvironment::Sandbox {
                 program: Path::new("/usr/bin/bwrap"),
                 mount_table: view.mount_table(),
                 control_dir: Some(&control_dir),
@@ -1791,7 +1791,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
                 network_allowed: false,
                 agent_name: "coder",
                 agent_executable: &executable,
-                execution: AgentExecutableSocketExecution::Bwrap {
+                environment: RunEnvironment::Sandbox {
                     program: Path::new("/usr/bin/bwrap"),
                     mount_table: view.mount_table(),
                     control_dir: Some(&control_dir),

@@ -150,18 +150,21 @@ pub struct AgentExecutableSocketRuntime<'a> {
     pub agent_name: &'a str,
     /// ABI executable object to invoke for `send`.
     pub agent_executable: &'a Path,
-    /// Process isolation mode for the executable agent.
-    pub execution: AgentExecutableSocketExecution<'a>,
+    /// Environment that realizes this Agent run.
+    pub environment: RunEnvironment<'a>,
 }
-
-/// Process isolation mode for socket-activated executable agents.
+/// Host environment for one socket-activated Agent run.
+///
+/// [`AgentRuntimeView`] expresses logical authority; this type realizes it for
+/// one run. Future remote drivers must preserve that view without passing host
+/// paths or credentials through this boundary.
 #[derive(Clone, Copy, Debug)]
-pub enum AgentExecutableSocketExecution<'a> {
+pub enum RunEnvironment<'a> {
     /// Execute the agent object directly on the host. The agent runtime owns
     /// model/provider/session work; shell/tool calls apply their own sandbox.
-    Direct,
-    /// Execute the agent object inside the `CortexFS` `bwrap` sandbox.
-    Bwrap {
+    Native,
+    /// Execute the agent object in a local Linux sandbox.
+    Sandbox {
         /// Bubblewrap executable.
         program: &'a Path,
         /// Agent mount table derived from `agent/<name>.d/mount`.

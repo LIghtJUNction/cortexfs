@@ -1,8 +1,8 @@
 use super::{
-    BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, RuntimeMode, runtime_agent_execution,
+    BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, RuntimeMode, runtime_agent_environment,
     runtime_model,
 };
-use cortexfs::{AgentExecutableSocketExecution, MountTable};
+use cortexfs::{MountTable, RunEnvironment};
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -128,15 +128,15 @@ pub(crate) fn packaged_socket_unit_uses_receipted_alias_lifecycle_and_safe_order
 }
 
 #[test]
-pub(crate) fn runtime_agent_execution_uses_bwrap_sandbox() -> Result<(), Box<dyn std::error::Error>>
-{
+pub(crate) fn runtime_agent_environment_uses_bwrap_sandbox()
+-> Result<(), Box<dyn std::error::Error>> {
     let mount_table = MountTable::parse("/ctx\t/ctx\tro\trbind,nosuid,nodev\n")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let AgentExecutableSocketExecution::Bwrap {
+    let RunEnvironment::Sandbox {
         program,
         mount_table: selected_mount_table,
         ..
-    } = runtime_agent_execution(&mount_table, Path::new("/run/cortexfs/control"))
+    } = runtime_agent_environment(&mount_table, Path::new("/run/cortexfs/control"))
     else {
         return Err("socket-activated agents must use the bwrap sandbox".into());
     };

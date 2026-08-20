@@ -31,7 +31,7 @@ fn direct_agent_runtime<'a>(
         network_allowed: false,
         agent_name: "coder",
         agent_executable: executable,
-        execution: AgentExecutableSocketExecution::Direct,
+        environment: RunEnvironment::Native,
     }
 }
 

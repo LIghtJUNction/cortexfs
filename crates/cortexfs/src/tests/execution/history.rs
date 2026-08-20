@@ -453,7 +453,7 @@ exit 1
             network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Bwrap {
+            environment: RunEnvironment::Sandbox {
                 program: &failing_program,
                 mount_table: view.mount_table(),
                 control_dir: None,

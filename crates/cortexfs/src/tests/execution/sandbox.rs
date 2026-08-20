@@ -153,7 +153,7 @@ printf '{"type":"delta","run":"%s","text":"secret-not-inherited"}\n' "$CTX_RUN_I
             network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
+            environment: RunEnvironment::Native,
         },
     );
     let outcome = ok!(outcome);
@@ -203,7 +203,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         network_allowed: false,
         agent_name: "coder",
         agent_executable: &agent_executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
+        environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
             mount_table: view.mount_table(),
             control_dir: None,
@@ -357,7 +357,7 @@ fn prepared_bwrap_command(
     let mut runtime = direct_agent_runtime(&root, &view, &session_root, &agent_executable);
     runtime.default_cwd = "/";
     runtime.env = &env;
-    runtime.execution = AgentExecutableSocketExecution::Bwrap {
+    runtime.environment = RunEnvironment::Sandbox {
         program: Path::new("/usr/bin/bwrap"),
         mount_table: view.mount_table(),
         control_dir: None,
@@ -414,7 +414,7 @@ fn network_denied_provider_does_not_create_egress() {
         network_allowed: false,
         agent_name: "coder",
         agent_executable: &agent_executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
+        environment: RunEnvironment::Sandbox {
             program: Path::new("/definitely/missing/bwrap"),
             mount_table: view.mount_table(),
             control_dir: Some(&control_dir),
@@ -474,7 +474,7 @@ fn debug_alias_does_not_create_provider_egress() {
             network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Bwrap {
+            environment: RunEnvironment::Sandbox {
                 program: Path::new("/definitely/missing/bwrap"),
                 mount_table: view.mount_table(),
                 control_dir: Some(&control_dir),
@@ -551,7 +551,7 @@ printf '{"type":"delta","run":"%s","text":"%s-%s-%s"}\n' "$CTX_RUN_ID" "$workspa
             network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Bwrap {
+            environment: RunEnvironment::Sandbox {
                 program: Path::new("/usr/bin/bwrap"),
                 mount_table: view.mount_table(),
                 control_dir: None,
@@ -581,7 +581,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         network_allowed: true,
         agent_name: "coder",
         agent_executable: &agent_executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
+        environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
             mount_table: view.mount_table(),
             control_dir: None,
@@ -644,7 +644,7 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         network_allowed: false,
         agent_name: "coder",
         agent_executable: &agent_executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
+        environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
             mount_table: view.mount_table(),
             control_dir: None,
@@ -754,7 +754,7 @@ fn run_registered_bwrap_capability_probe(
         network_allowed: false,
         agent_name: "coder",
         agent_executable: executable,
-        execution: AgentExecutableSocketExecution::Bwrap {
+        environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
             mount_table: view.mount_table(),
             control_dir: Some(control_dir),
