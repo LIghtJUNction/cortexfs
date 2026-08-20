@@ -20,7 +20,7 @@ pub(super) fn request(channel: &str, run: &str, action: ChannelControlAction) ->
         &std::path::PathBuf::from(socket),
         &channel,
         &id,
-        Duration::from_secs(5),
+        Duration::from_mins(2),
     )
     .map_err(|error| ToolError::new("EIO", error.to_string()))?;
     client

@@ -272,12 +272,18 @@ fn fuse_projection_exposes_complete_models_dev_record() -> std::io::Result<()> {
         "limit": {"context": 1_000_000, "output": 32_768},
         "future_field": "retained-through-file-abi"
     });
-    let metadata = cortexfs_metadatas::ModelMetadata::new("local", "known", "Known")
-        .with_context(1_000_000)
-        .with_models_dev(raw.clone());
     let cache_document = serde_json::json!({
         "schema": cortexfs_metadatas::MODEL_METADATA_SCHEMA,
-        "models": {"local/known": metadata}
+        "catalog": {
+            "providers": {"local": {
+                "id": "local", "name": "Local", "doc": "https://example.invalid",
+                "models": {"known": raw}
+            }},
+            "models": {"local/known": {
+                "id": "local/known", "name": "Known",
+                "benchmarks": [{"name": "Example", "score": 90}]
+            }}
+        }
     });
     write_text_file(
         &cache.join("model-metadata.json"),
@@ -314,7 +320,7 @@ fn fuse_projection_exposes_complete_models_dev_record() -> std::io::Result<()> {
 }
 
 #[test]
-fn fuse_projection_maps_lmm_deepseek_alias_to_verified_metadata() -> std::io::Result<()> {
+fn fuse_projection_keeps_unmapped_aggregator_metadata_unverified() -> std::io::Result<()> {
     let root = reference_tree("fuse-provider-model-deepseek-alias");
     let providers = root.join("providers.d");
     write_text_file(
@@ -337,26 +343,20 @@ fn fuse_projection_maps_lmm_deepseek_alias_to_verified_metadata() -> std::io::Re
     );
     assert_eq!(
         document.pointer("/resolution"),
-        Some(&serde_json::Value::from("mapped"))
+        Some(&serde_json::Value::from("unverified"))
     );
     assert_eq!(
         document.pointer("/canonical_id"),
-        Some(&serde_json::Value::from("deepseek/deepseek-v4-flash"))
+        Some(&serde_json::Value::from("lmm/deepseek-v4-flash-0731"))
     );
-    assert_eq!(
-        document.pointer("/metadata/models_dev/limit/context"),
-        Some(&serde_json::Value::from(1_000_000))
-    );
+    assert_eq!(document.pointer("/metadata/models_dev"), None);
     assert_eq!(
         projection.read_to_string("model/lmm/deepseek-v4-flash-0731.d/limit"),
-        Ok("1000000\n".to_owned())
+        Ok("unknown\n".to_owned())
     );
     assert_eq!(
         projection.read_to_string("model/lmm/deepseek-v4-flash-0731.d/cap"),
-        Ok(
-            "chat\ntool_call_syntax\nstream\njson_schema\nreasoning\ntemperature\ninterleaved\n"
-                .to_owned()
-        )
+        Ok("chat\nstream\n".to_owned())
     );
     Ok(())
 }

@@ -43,6 +43,9 @@ pub struct ModelMetadata {
     /// Exact model.dev model object retained for forward-compatible exposure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models_dev: Option<Value>,
+    /// Exact provider-independent model object from models.dev/catalog.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models_dev_base: Option<Value>,
     pub sources: Vec<MetadataSource>,
 }
 
@@ -80,6 +83,7 @@ impl ModelMetadata {
             open_weights: Support::Unknown,
             interleaved: Support::Unknown,
             models_dev: None,
+            models_dev_base: None,
             sources: Vec::new(),
         }
     }
@@ -167,6 +171,13 @@ impl ModelMetadata {
     #[must_use]
     pub fn with_models_dev(mut self, value: Value) -> Self {
         self.models_dev = Some(value);
+        self
+    }
+
+    /// Retains the exact provider-independent models.dev model object.
+    #[must_use]
+    pub fn with_models_dev_base(mut self, value: Value) -> Self {
+        self.models_dev_base = Some(value);
         self
     }
 

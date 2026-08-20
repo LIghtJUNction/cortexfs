@@ -19,15 +19,24 @@ pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError
         ProviderArgs::AuthMethods { ref provider } => {
             provider_auth_methods(provider).map(|()| ExitCode::SUCCESS)
         }
-        ProviderArgs::Login(ref provider, timeout, device) => {
-            provider_oauth_login(provider, timeout, device).map(|()| ExitCode::SUCCESS)
-        }
-        ProviderArgs::Status { ref provider } => {
-            provider_oauth_status(provider).map(|()| ExitCode::SUCCESS)
-        }
-        ProviderArgs::Refresh { ref provider } => {
-            provider_oauth_refresh(provider).map(|()| ExitCode::SUCCESS)
-        }
+        ProviderArgs::Login {
+            ref provider,
+            ref profile,
+            timeout,
+            device,
+        } => provider_oauth_login(provider, profile, timeout, device).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::ApiKeyLogin {
+            ref provider,
+            ref profile,
+        } => provider_api_key_login(provider, profile).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::Status {
+            ref provider,
+            ref profile,
+        } => provider_oauth_status(provider, profile).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::Refresh {
+            ref provider,
+            ref profile,
+        } => provider_oauth_refresh(provider, profile).map(|()| ExitCode::SUCCESS),
         ProviderArgs::SecretSet {
             ref provider,
             ref slot,

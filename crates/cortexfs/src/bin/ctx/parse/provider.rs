@@ -2,15 +2,42 @@ use crate::*;
 
 #[derive(Debug)]
 pub(crate) enum ProviderArgs {
-    AuthMethods { provider: String },
-    Login(String, u64, bool),
-    Status { provider: String },
-    Refresh { provider: String },
-    SecretSet { provider: String, slot: String },
-    SecretStatus { provider: String, slot: String },
+    AuthMethods {
+        provider: String,
+    },
+    Login {
+        provider: String,
+        profile: String,
+        timeout: u64,
+        device: bool,
+    },
+    ApiKeyLogin {
+        provider: String,
+        profile: String,
+    },
+    Status {
+        provider: String,
+        profile: String,
+    },
+    Refresh {
+        provider: String,
+        profile: String,
+    },
+    SecretSet {
+        provider: String,
+        slot: String,
+    },
+    SecretStatus {
+        provider: String,
+        slot: String,
+    },
     PresetList,
-    PresetShow { preset: String },
-    PresetInstall { preset: String },
+    PresetShow {
+        preset: String,
+    },
+    PresetInstall {
+        preset: String,
+    },
 }
 
 pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
@@ -57,6 +84,92 @@ pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliEr
     }
 }
 
+/// Parses the unified provider-neutral authorization entrypoint.
+pub(crate) fn parse_auth_command(args: Vec<String>) -> Result<Command, CliError> {
+    let mut values = args.into_iter();
+    let command = required_arg(
+        &mut values,
+        "auth requires methods, login, status, or refresh",
+    )?;
+    let rest = values.collect::<Vec<_>>();
+    if is_help_args(&rest) {
+        return Ok(Command::HelpTopic("auth".to_owned()));
+    }
+    let provider = match command.as_str() {
+        "methods" => parse_provider_auth_command(
+            std::iter::once(command)
+                .chain(rest)
+                .collect::<Vec<_>>()
+                .into_iter(),
+        )?,
+        "login" => parse_auth_login(rest.into_iter())?,
+        "status" | "refresh" => parse_provider_oauth_command(
+            std::iter::once(command)
+                .chain(rest)
+                .collect::<Vec<_>>()
+                .into_iter(),
+        )?,
+        _ => {
+            return Err(CliError::usage(
+                "auth expects methods, login, status, or refresh",
+            ));
+        }
+    };
+    let Command::Provider(provider) = provider else {
+        return Err(CliError::usage("invalid auth command"));
+    };
+    Ok(Command::Auth(provider))
+}
+
+fn parse_auth_login(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let provider = required_arg(&mut values, "auth login requires a provider")?;
+    let mut profile = "default".to_owned();
+    let mut timeout = 120;
+    let mut method = "auto".to_owned();
+    let mut device = false;
+    let mut stdin = false;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--profile" => {
+                profile = required_arg(&mut values, "auth login --profile requires a name")?;
+            }
+            "--method" => {
+                method = required_arg(&mut values, "auth login --method requires a value")?;
+            }
+            "--timeout" => {
+                timeout = required_arg(&mut values, "auth login --timeout requires seconds")?
+                    .parse::<u64>()
+                    .map_err(|_error| CliError::usage("invalid auth timeout"))?;
+            }
+            "--device" => device = true,
+            "--stdin" => stdin = true,
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    if !is_provider_name(&provider) || !is_provider_secret_slot(&profile) {
+        return Err(CliError::usage("invalid authentication profile"));
+    }
+    if method == "api-key" {
+        return stdin
+            .then_some(Command::Provider(ProviderArgs::ApiKeyLogin {
+                provider,
+                profile,
+            }))
+            .ok_or_else(|| CliError::usage("auth login --method api-key requires --stdin"));
+    }
+    let device = match method.as_str() {
+        "auto" | "browser" if !device => false,
+        "auto" | "device" => true,
+        _ => return Err(CliError::usage("auth login method is unsupported")),
+    };
+    Ok(Command::Provider(ProviderArgs::Login {
+        provider,
+        profile,
+        timeout,
+        device,
+    }))
+}
+
 pub(crate) fn parse_provider_auth_command(
     mut values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
@@ -81,9 +194,16 @@ pub(crate) fn parse_provider_oauth_command(
             let provider = required_arg(&mut values, "provider oauth login requires a provider")?;
             let mut timeout = 120;
             let mut device = false;
+            let mut profile = "default".to_owned();
             while let Some(value) = values.next() {
                 match value.as_str() {
                     "--device" => device = true,
+                    "--profile" => {
+                        profile = required_arg(
+                            &mut values,
+                            "provider oauth login --profile requires a name",
+                        )?;
+                    }
                     "--timeout" => {
                         let raw = required_arg(
                             &mut values,
@@ -96,24 +216,50 @@ pub(crate) fn parse_provider_oauth_command(
                     _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
                 }
             }
-            Ok(Command::Provider(ProviderArgs::Login(
-                provider, timeout, device,
-            )))
+            if !is_provider_secret_slot(&profile) {
+                return Err(CliError::usage("invalid authentication profile"));
+            }
+            Ok(Command::Provider(ProviderArgs::Login {
+                provider,
+                profile,
+                timeout,
+                device,
+            }))
         }
         "status" => {
             let provider = required_arg(&mut values, "provider oauth status requires a provider")?;
-            no_extra_args(values)?;
-            Ok(Command::Provider(ProviderArgs::Status { provider }))
+            let profile = parse_provider_profile(values)?;
+            Ok(Command::Provider(ProviderArgs::Status {
+                provider,
+                profile,
+            }))
         }
         "refresh" => {
             let provider = required_arg(&mut values, "provider oauth refresh requires a provider")?;
-            no_extra_args(values)?;
-            Ok(Command::Provider(ProviderArgs::Refresh { provider }))
+            let profile = parse_provider_profile(values)?;
+            Ok(Command::Provider(ProviderArgs::Refresh {
+                provider,
+                profile,
+            }))
         }
         _ => Err(CliError::usage(
             "provider oauth expects login, status, or refresh",
         )),
     }
+}
+
+fn parse_provider_profile(mut values: impl Iterator<Item = String>) -> Result<String, CliError> {
+    let Some(flag) = values.next() else {
+        return Ok("default".to_owned());
+    };
+    if flag != "--profile" {
+        return Err(CliError::usage(format!("unexpected argument: {flag}")));
+    }
+    let profile = required_arg(&mut values, "provider oauth --profile requires a name")?;
+    no_extra_args(values)?;
+    is_provider_secret_slot(&profile)
+        .then_some(profile)
+        .ok_or_else(|| CliError::usage("invalid authentication profile"))
 }
 
 pub(crate) fn parse_provider_preset_command(

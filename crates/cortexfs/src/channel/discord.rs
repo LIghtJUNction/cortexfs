@@ -1,4 +1,4 @@
-use std::{path::PathBuf, thread, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use cortexfs_channels::{ChannelError, ChannelId, ChannelProgressPolicy};
 
@@ -38,12 +38,22 @@ impl std::fmt::Debug for DiscordConfig {
 }
 
 mod api;
+mod component;
+mod control;
 mod effect;
+mod embed;
 mod gateway;
+mod invoke;
 mod message;
 mod parse;
 mod progress;
+mod request;
+mod thread;
 mod transport;
+mod upload;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiscordError {
@@ -57,6 +67,16 @@ pub enum DiscordError {
     WebSocket(#[from] tungstenite::Error),
     #[error("Discord I/O failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Discord authentication failed")]
+    Authentication,
+    #[error("Discord API rejected the request")]
+    Api,
+    #[error("Discord operation input is invalid: {0}")]
+    Invalid(&'static str),
+    #[error("Discord control driver failed: {0}")]
+    Driver(#[from] cortexfs_channels::ChannelDriverError),
+    #[error("Discord control runtime failed: {0}")]
+    Runtime(#[source] super::driver::DriverError),
     #[error(transparent)]
     Channel(#[from] ChannelError),
     #[error(transparent)]
@@ -68,11 +88,13 @@ pub enum DiscordError {
 pub fn run(config: &DiscordConfig, bridge: &AgentChannelBridge) -> Result<(), DiscordError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(35))
+        .user_agent(concat!("CortexFS/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(DiscordError::Http)?;
     api::verify_application(&client, config)?;
+    let control = control::start(config, bridge, &client)?;
     loop {
-        match gateway::run(config, bridge, &client) {
+        match gateway::run(config, bridge, &client, &control) {
             Ok(()) => reconnect_delay(),
             Err(error) => {
                 reconnect_delay();
@@ -83,5 +105,5 @@ pub fn run(config: &DiscordConfig, bridge: &AgentChannelBridge) -> Result<(), Di
 }
 
 pub(super) fn reconnect_delay() {
-    thread::sleep(Duration::from_secs(5));
+    std::thread::sleep(Duration::from_secs(5));
 }

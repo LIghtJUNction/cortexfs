@@ -1,14 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use serde_json::Value;
 
-/// Date of the checked-in official catalog snapshot.
-pub const CATALOG_DATE: &str = "2026-08-16";
 /// Default upstream location for remote model metadata.
 pub const MODELS_DEV_ENDPOINT: &str = "https://models.dev";
 /// Cache file for the flattened runtime catalog payload.
 pub const MODEL_METADATA_CACHE_FILE: &str = "model-metadata.json";
 /// Serialized cache schema.
-pub const MODEL_METADATA_SCHEMA: &str = "cortexfs.model-metadata/v1";
+pub const MODEL_METADATA_SCHEMA: &str = "cortexfs.model-metadata/v2";
 /// Maximum cache size in bytes.
 pub const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum number of cached canonical model records.
@@ -19,7 +17,9 @@ pub const MAX_CACHED_MODELS: usize = 8192;
 #[serde(deny_unknown_fields)]
 pub(crate) struct CachedMetadataCatalog {
     pub schema: String,
-    pub models: BTreeMap<String, crate::ModelMetadata>,
+    #[serde(default)]
+    pub observed_on: String,
+    pub catalog: Value,
 }
 
 /// Provenance confidence for a metadata record.
@@ -41,13 +41,13 @@ pub struct MetadataSource {
 }
 
 impl MetadataSource {
-    /// Creates an official source using the catalog snapshot date.
+    /// Creates an official source; refreshes fill `observed_on` from HTTP.
     #[must_use]
     pub fn official(publisher: impl Into<String>, url: impl Into<String>) -> Self {
         Self {
             publisher: publisher.into(),
             url: url.into(),
-            observed_on: CATALOG_DATE.to_owned(),
+            observed_on: String::new(),
             confidence: SourceConfidence::Official,
         }
     }

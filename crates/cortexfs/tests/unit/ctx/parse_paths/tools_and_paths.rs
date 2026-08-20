@@ -286,26 +286,29 @@ fn parses_provider_oauth_commands() {
     );
     assert!(matches!(
         login,
-        Ok(Command::Provider(ProviderArgs::Login(ref provider, 30, false)))
-            if provider == "api.openai.com"
+        Ok(Command::Provider(ProviderArgs::Login {
+            ref provider, ref profile, timeout: 30, device: false
+        })) if provider == "api.openai.com" && profile == "default"
     ));
     assert!(
         matches!(cmd!("provider", "oauth", "login", "codex", "--device"),
-        Ok(Command::Provider(ProviderArgs::Login(ref provider, 120, true))) if provider == "codex")
+        Ok(Command::Provider(ProviderArgs::Login {
+            ref provider, ref profile, timeout: 120, device: true
+        })) if provider == "codex" && profile == "default")
     );
 
     let status = cmd!("provider", "oauth", "status", "api.openai.com");
     assert!(matches!(
         status,
-        Ok(Command::Provider(ProviderArgs::Status { ref provider }))
-            if provider == "api.openai.com"
+        Ok(Command::Provider(ProviderArgs::Status { ref provider, ref profile }))
+            if provider == "api.openai.com" && profile == "default"
     ));
 
     let refresh = cmd!("provider", "oauth", "refresh", "api.openai.com");
     assert!(matches!(
         refresh,
-        Ok(Command::Provider(ProviderArgs::Refresh { ref provider }))
-            if provider == "api.openai.com"
+        Ok(Command::Provider(ProviderArgs::Refresh { ref provider, ref profile }))
+            if provider == "api.openai.com" && profile == "default"
     ));
 }
 
@@ -335,6 +338,39 @@ fn parses_provider_auth_methods_command() {
     assert!(matches!(
         cmd!("provider", "auth", "methods", "--help"),
         Ok(Command::HelpTopic(ref topic)) if topic == "provider auth methods"
+    ));
+}
+
+#[test]
+fn parses_unified_auth_commands() {
+    assert!(matches!(
+        cmd!("auth", "methods", "openai"),
+        Ok(Command::Auth(ProviderArgs::AuthMethods { ref provider })) if provider == "openai"
+    ));
+    assert!(matches!(
+        cmd!("auth", "login", "codex", "--device"),
+        Ok(Command::Auth(ProviderArgs::Login {
+            ref provider, ref profile, timeout: 120, device: true
+        })) if provider == "codex" && profile == "default"
+    ));
+    assert!(matches!(
+        cmd!("auth", "status", "openai"),
+        Ok(Command::Auth(ProviderArgs::Status { ref provider, ref profile }))
+            if provider == "openai" && profile == "default"
+    ));
+    assert!(matches!(
+        cmd!("auth", "refresh", "openai"),
+        Ok(Command::Auth(ProviderArgs::Refresh { ref provider, ref profile }))
+            if provider == "openai" && profile == "default"
+    ));
+    assert!(matches!(
+        cmd!("auth", "login", "openai", "--method", "api-key", "--stdin", "--profile", "work"),
+        Ok(Command::Auth(ProviderArgs::ApiKeyLogin { ref provider, ref profile }))
+            if provider == "openai" && profile == "work"
+    ));
+    assert!(matches!(
+        cmd!("auth", "login", "openai", "--method", "api-key"),
+        Err(ref error) if error.message.contains("requires --stdin")
     ));
 }
 

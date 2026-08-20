@@ -13,13 +13,7 @@ pub fn store(
         Credential::ApiKey {
             ref key, ref slot, ..
         } => store_key(core, key, slot.as_deref()),
-        Credential::OAuth {
-            ref access_token,
-            ref refresh_token,
-            expires_at,
-            ref scopes,
-            ..
-        } => {
+        Credential::OAuth { .. } => {
             if !core
                 .methods
                 .iter()
@@ -27,22 +21,10 @@ pub fn store(
             {
                 return Err(AuthProviderError::UnsupportedMethod);
             }
-            let config = core
-                .oauth
-                .as_ref()
-                .ok_or(AuthProviderError::UnsupportedMethod)?;
-            crate::provider::oauth::store_oauth_credential(
-                &core.id,
-                config,
-                &crate::provider::oauth::OAuthCredentialMaterial {
-                    access_token,
-                    refresh_token: refresh_token.as_deref(),
-                    expires_at,
-                    scopes,
-                },
-                now,
-            )
-            .map_err(|_error| AuthProviderError::Unavailable)
+            let _ = now;
+            super::profile::store_auth_profile(&core.id, "default", credential.clone())
+                .map(|_profile| ())
+                .map_err(|_error| AuthProviderError::Unavailable)
         }
     }
 }

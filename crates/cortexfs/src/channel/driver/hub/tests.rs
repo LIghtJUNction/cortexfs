@@ -81,19 +81,31 @@ fn hub_forwards_invoke_when_driver_advertises_tool_control()
         },
         ChannelActions::empty(),
     );
+    let command_hub = hub.clone();
     let worker = thread::spawn(
         move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut reader = BufReader::new(adapter);
             let mut line = String::new();
             reader.read_line(&mut line)?;
-            let ChannelFrameBody::Command { command, .. } =
-                ChannelFrame::decode(line.as_bytes())?.frame
+            let ChannelFrameBody::Command {
+                request_id,
+                command_id,
+                command,
+                ..
+            } = ChannelFrame::decode(line.as_bytes())?.frame
             else {
                 return Err("invoke command missing".into());
             };
             assert!(matches!(
                 command,
                 ChannelCommand::Invoke { ref name, .. } if name == "discord.send_embed"
+            ));
+            assert!(command_hub.complete_command(
+                &request_id,
+                &command_id,
+                cortexfs_channels::ChannelCommandResult::Value {
+                    payload: serde_json::json!({"id":"remote-1"}),
+                },
             ));
             Ok(())
         },

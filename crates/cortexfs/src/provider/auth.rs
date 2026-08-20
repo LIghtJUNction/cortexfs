@@ -10,9 +10,11 @@ mod factory;
 mod model;
 pub mod openai;
 mod persist;
+mod profile;
 mod protocol;
 mod registry;
 mod transport;
+mod wire;
 
 pub use adapter::{
     AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport, DeviceChallenge,
@@ -20,8 +22,10 @@ pub use adapter::{
 };
 pub use credential::{Credential, CredentialKind};
 pub use factory::{configured_adapter, configured_registry};
+pub use profile::{AuthProfile, AuthProfileError, read_auth_profile, store_auth_profile};
 pub use registry::{ProviderRegistry, ProviderRegistryError};
 use serde::{Deserialize, Serialize};
+pub use wire::{AUTH_SOCKET_ABI, AuthWireError, AuthWireFrame, AuthWireRequest, AuthWireResponse};
 
 /// Authentication mechanism advertised by a provider.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

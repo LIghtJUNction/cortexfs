@@ -101,7 +101,7 @@ pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceT
             ("id", DEBUG_ECHO_MODEL),
             (
                 "metadata.json",
-                r#"{"metadata":{"id":"debug/echo","name":"debug/echo","provider":"debug"},"schema":"cortexfs.model-metadata/v1"}"#,
+                r#"{"metadata":{"id":"debug/echo","name":"debug/echo","provider":"debug"},"schema":"cortexfs.model-metadata/v2"}"#,
             ),
             ("driver", "default=debug\nexec=debug\nagent=debug"),
             ("cap", "chat\nstream"),

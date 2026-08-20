@@ -1,0 +1,26 @@
+use cortexfs_channels::MessageTarget;
+use reqwest::blocking::Client;
+use serde_json::Value;
+
+use super::{DiscordConfig, DiscordError, component, embed, thread, upload};
+
+pub(super) fn run(
+    client: &Client,
+    config: &DiscordConfig,
+    target: &MessageTarget,
+    command_id: &str,
+    name: &str,
+    payload: &Value,
+) -> Result<Value, DiscordError> {
+    let channel = target.conversation.as_str();
+    if !channel.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(DiscordError::Invalid("conversation"));
+    }
+    match name {
+        "discord.send_embed" => embed::send(client, config, channel, command_id, payload),
+        "discord.send_file" => upload::send(client, config, channel, command_id, payload),
+        "discord.create_thread" => thread::create(client, config, channel, payload),
+        "discord.send_component" => component::send(client, config, channel, command_id, payload),
+        _ => Err(DiscordError::Invalid("unsupported operation")),
+    }
+}

@@ -488,6 +488,17 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  stores OAuth tokens in the system secret store, not /ctx/model",
             "  provider presets install ordinary JSON files under /etc/cortexfs/providers.d",
         ]),
+        "auth" => print_help_lines(&[
+            "usage:",
+            "  ctx auth methods PROVIDER",
+            "  ctx auth login PROVIDER [--profile NAME] [--method auto|browser|device] [--device] [--timeout SECONDS]",
+            "  ctx auth login PROVIDER --method api-key --stdin [--profile NAME]",
+            "  ctx auth status PROVIDER [--profile NAME]",
+            "  ctx auth refresh PROVIDER [--profile NAME]",
+            "",
+            "uses the provider declaration and root-owned CortexFS secret store",
+            "without printing credentials or creating a /ctx/provider root",
+        ]),
         "provider oauth" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--device] [--timeout SECONDS]",

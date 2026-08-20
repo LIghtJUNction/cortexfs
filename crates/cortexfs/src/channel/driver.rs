@@ -1,7 +1,9 @@
 use std::{
     io::Write,
+    net::Shutdown,
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
+    sync::mpsc::TrySendError,
 };
 
 use cortexfs_channels::{ChannelFrame, ChannelId, ChannelWireError};
@@ -9,13 +11,14 @@ use cortexfs_channels::{ChannelFrame, ChannelId, ChannelWireError};
 use super::{bridge::AgentChannelBridge, driverprogress};
 
 mod hub;
+mod pool;
 mod reader;
 mod session;
 mod worker;
 
 pub use hub::DriverHub;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DriverConfig {
     pub socket: PathBuf,
     pub channel: ChannelId,
@@ -25,9 +28,16 @@ pub struct DriverConfig {
 
 pub fn run(config: &DriverConfig) -> Result<(), DriverError> {
     let listener = UnixListener::bind(&config.socket).map_err(DriverError::Io)?;
+    let sessions = pool::spawn(config);
     loop {
         let (stream, _) = listener.accept().map_err(DriverError::Io)?;
-        session::serve(stream, config)?;
+        match sessions.try_send(stream) {
+            Ok(()) => {}
+            Err(TrySendError::Full(stream)) => {
+                let _ignored = stream.shutdown(Shutdown::Both);
+            }
+            Err(TrySendError::Disconnected(_stream)) => return Err(DriverError::SessionPool),
+        }
     }
 }
 
@@ -46,6 +56,10 @@ pub enum DriverError {
     Unavailable,
     #[error("channel driver receipt timed out")]
     ReceiptTimeout,
+    #[error("channel driver command timed out")]
+    CommandTimeout,
+    #[error("channel driver session pool stopped")]
+    SessionPool,
     #[error("channel driver lock is poisoned")]
     Lock,
     #[error("channel driver capability rejected the request")]

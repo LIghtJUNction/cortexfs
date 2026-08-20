@@ -11,6 +11,7 @@ use super::super::bridge::{AgentChannelBridge, ChannelProgressSink};
 use super::transport;
 use super::{
     DiscordConfig, DiscordError, api,
+    control::Control,
     parse::{self, GatewayEvent},
     progress,
 };
@@ -21,6 +22,7 @@ pub(super) fn run(
     config: &DiscordConfig,
     bridge: &AgentChannelBridge,
     client: &Client,
+    control: &Control,
 ) -> Result<(), DiscordError> {
     let (mut socket, _) = connect(&config.gateway_url).map_err(DiscordError::WebSocket)?;
     socket.set_config(|value| {
@@ -33,6 +35,7 @@ pub(super) fn run(
     let mut sequence = None;
     let mut heartbeat_at = Instant::now() + interval;
     loop {
+        control.check()?;
         if Instant::now() >= heartbeat_at {
             transport::heartbeat(&mut socket, sequence)?;
             heartbeat_at = Instant::now() + interval;

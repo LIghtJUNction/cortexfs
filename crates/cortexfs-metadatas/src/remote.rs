@@ -14,6 +14,7 @@ const MAX_REMOTE_BYTES: usize = 16 * 1024 * 1024;
 )]
 pub(crate) struct RemoteCatalog {
     pub raw: Value,
+    pub observed_on: String,
 }
 
 #[expect(
@@ -26,7 +27,7 @@ pub(crate) async fn fetch() -> Result<RemoteCatalog, MetadataSourceError> {
         .build()
         .map_err(|error| MetadataSourceError::FetchFailed(error.to_string()))?;
     let response = client
-        .get(format!("{MODELS_DEV_ENDPOINT}/api.json"))
+        .get(format!("{MODELS_DEV_ENDPOINT}/catalog.json"))
         .send()
         .await
         .map_err(|error| MetadataSourceError::FetchFailed(error.to_string()))?;
@@ -36,6 +37,12 @@ pub(crate) async fn fetch() -> Result<RemoteCatalog, MetadataSourceError> {
             response.status()
         )));
     }
+    let observed_on = response
+        .headers()
+        .get(reqwest::header::DATE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
     let bytes = response
         .bytes()
         .await
@@ -50,5 +57,5 @@ pub(crate) async fn fetch() -> Result<RemoteCatalog, MetadataSourceError> {
             "models.dev response is not an object".to_owned(),
         ));
     }
-    Ok(RemoteCatalog { raw })
+    Ok(RemoteCatalog { raw, observed_on })
 }

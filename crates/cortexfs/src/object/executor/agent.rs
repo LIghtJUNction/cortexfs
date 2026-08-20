@@ -265,7 +265,7 @@ fn recommended_window(
         return hard_limit;
     };
     let catalog =
-        MetadataCatalog::from_cache_or_builtins(&cortexfs_paths::provider_model_cache_path());
+        MetadataCatalog::from_cache_or_empty(&cortexfs_paths::provider_model_cache_path());
     let Some(recommended) = catalog
         .resolve(model)
         .or_else(|| catalog.resolve_for(provider, model))

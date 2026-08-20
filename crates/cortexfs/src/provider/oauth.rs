@@ -12,7 +12,7 @@ const CODEX_SYSTEM_SLOTS: [&str; 4] =
     ["default", "oauth-refresh", "oauth-account", "oauth-expires"];
 const OAUTH_EXPIRES_ACCOUNT: &str = "oauth:expires";
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OAuthProviderConfig {
     pub client_id: String,
     pub auth_url: String,

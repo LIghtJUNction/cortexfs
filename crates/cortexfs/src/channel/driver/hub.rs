@@ -5,10 +5,11 @@ use std::{
 };
 
 use cortexfs_channels::{
-    ChannelActions, ChannelCapabilities, ChannelCommand, ChannelControlAction, ChannelFrame,
-    ChannelFrameBody, ChannelId, DeliveryReceipt,
+    ChannelActions, ChannelCapabilities, ChannelCommandResult, ChannelId, DeliveryReceipt,
 };
 
+mod control;
+mod pending;
 mod send;
 
 #[cfg(test)]
@@ -23,70 +24,18 @@ struct DriverPeer {
 }
 type DriverWriters = Arc<Mutex<BTreeMap<String, DriverPeer>>>;
 type PendingReceipts = Arc<Mutex<BTreeMap<String, mpsc::SyncSender<DeliveryReceipt>>>>;
+type PendingCommands =
+    Arc<Mutex<BTreeMap<String, (String, mpsc::SyncSender<ChannelCommandResult>)>>>;
 
 /// Handle used by runtime code to send a message without an inbound trigger.
 #[derive(Clone, Debug, Default)]
 pub struct DriverHub {
     writers: DriverWriters,
     pending: PendingReceipts,
+    commands: PendingCommands,
 }
 
 impl DriverHub {
-    pub(crate) fn dispatch(
-        &self,
-        channel: &ChannelId,
-        request_id: &str,
-        action: ChannelControlAction,
-    ) -> Result<(), super::DriverError> {
-        let peer = self
-            .writers
-            .lock()
-            .map_err(|_error| super::DriverError::Lock)?
-            .get(channel.as_str())
-            .cloned()
-            .ok_or(super::DriverError::Unavailable)?;
-        let frame = match action {
-            ChannelControlAction::Send { message } if peer.capabilities.send => {
-                ChannelFrame::new(ChannelFrameBody::Outbound {
-                    request_id: request_id.to_owned(),
-                    message,
-                })
-            }
-            ChannelControlAction::Effect { target, effect }
-                if peer.actions.supports(effect.action()) =>
-            {
-                ChannelFrame::new(ChannelFrameBody::Effect {
-                    request_id: request_id.to_owned(),
-                    target,
-                    effect,
-                })
-            }
-            ChannelControlAction::Command {
-                session,
-                command_id,
-                command,
-                target,
-            } if peer.capabilities.commands
-                || (peer.capabilities.tool_control
-                    && matches!(&command, ChannelCommand::Invoke { .. })) =>
-            {
-                ChannelFrame::new(ChannelFrameBody::Command {
-                    request_id: request_id.to_owned(),
-                    session,
-                    command_id,
-                    command,
-                    target,
-                })
-            }
-            _ => return Err(super::DriverError::Rejected),
-        };
-        let mut stream = peer
-            .writer
-            .lock()
-            .map_err(|_error| super::DriverError::Lock)?;
-        super::write(&mut stream, &frame)
-    }
-
     pub(super) fn attach(
         &self,
         channel: &ChannelId,

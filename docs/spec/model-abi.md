@@ -174,10 +174,13 @@ bounded by `limit`.
 `metadata` object contains the normalized CortexFS fields (identity, aliases,
 limits, modalities, capabilities, reasoning, lifecycle and provenance). When
 the record came from the official models.dev catalog, `metadata.models_dev`
-contains the complete upstream model object without dropping fields that this
-crate does not yet normalize. This includes description, family, knowledge
-cutoff, dates, attachment, reasoning options, interleaved reasoning,
-structured output, temperature, modalities, open weights, limits and pricing.
+contains the exact provider-serving model object and
+`metadata.models_dev_base` contains the matching provider-independent model
+object. Together they retain provider details plus model-only fields that the
+serving record does not repeat, including benchmarks and weights. This includes
+description, family, knowledge cutoff, dates, attachment, reasoning options,
+interleaved reasoning, structured output, temperature, modalities, open
+weights, limits and pricing.
 The document's `effective` object reports the host projection after any
 explicit provider override; it is distinct from the upstream hard limit.
 
@@ -249,9 +252,12 @@ or duplicate words make the provider configuration invalid. An explicit empty
 list is valid and projects an empty `cap` file. Models without an override use
 the adapter-derived capability projection.
 
-CortexFS obtains the catalog from the raw `models.dev/api.json` endpoint.
-The refresh path retains each model object verbatim in `metadata.models_dev`
-and publishes it through the read-only `metadata.json` file interface.
+CortexFS obtains the catalog from the raw `models.dev/catalog.json` endpoint.
+The refresh path atomically caches the complete validated upstream document,
+then rebuilds normalized records from it at load time. It retains each serving
+and base model object verbatim in `metadata.models_dev` and
+`metadata.models_dev_base`, and publishes them through the read-only
+`metadata.json` file interface.
 Catalog provider and model map keys are matched exactly to the projected
 `<provider>/<model>` identity; transport hosts and aggregator names are not
 guessed as original providers. Only stable CortexFS provider/model names and
@@ -444,6 +450,32 @@ block is omitted; `api.githubcopilot.com` also maps to the stable
 implement the standard device challenge, bounded
 polling, and normalized credential persistence. The CLI prints the
 verification URI and user code but never stores the device code in `/ctx`.
+
+### Authentication profiles
+
+The host stores one complete API-key or OAuth credential bundle per logical
+profile. The secret-store entry is private host state at:
+
+```text
+/var/lib/cortexfs/secrets/provider/<provider>/auth-<profile>
+```
+
+It is atomically replaced as one JSON bundle with a monotonic revision; access
+token, rotated refresh token, expiry, and scopes never occupy separate durable
+files. The bundle is mode `0600` and is not projected into `/ctx`.
+
+```text
+ctx auth methods PROVIDER
+ctx auth login PROVIDER --profile PROFILE
+ctx auth login PROVIDER --method api-key --stdin --profile PROFILE
+ctx auth status PROVIDER --profile PROFILE
+ctx auth refresh PROVIDER --profile PROFILE
+```
+
+`key(PROFILE)` in an existing `model/route` group selects that profile for the
+route. If no profile exists, CortexFS retains the older raw secret-slot lookup
+only as a migration fallback. New API-key and OAuth logins write a profile
+bundle; they do not write environment variables or a keyring entry.
 
 ## Provider Presets
 

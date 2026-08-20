@@ -50,6 +50,10 @@ pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTabl
 pub use policy::{
     PolicyError, PolicyEvaluator, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0,
 };
+pub use provider::auth::{
+    AUTH_SOCKET_ABI, AuthProfile, AuthProfileError, AuthWireError, AuthWireFrame, AuthWireRequest,
+    AuthWireResponse, read_auth_profile, store_auth_profile,
+};
 pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelContextLimit, ModelDriverRouteError, ModelDriverRoutingTable,

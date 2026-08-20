@@ -2,6 +2,7 @@
 members = [
     "crates/cortexfs",
     "crates/cortexfs-channels",
+    "crates/cortexfs-channel-sdk",
     "crates/cortexfs-channel-nostr",
     "crates/cortexfs-channel-amqp",
     "crates/cortexfs-channel-wecom-ws",

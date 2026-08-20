@@ -26,7 +26,7 @@ pub(super) fn project_models(
     projected: &mut Vec<ProjectedProviderModel>,
 ) {
     let limits = cached_model_limits(cache_dir);
-    let catalog = MetadataCatalog::from_cache_or_builtins(cache_dir);
+    let catalog = MetadataCatalog::from_cache_or_empty(cache_dir);
     let driver = driver_text(&config.formats);
     for model in model_names(config, cache_dir, provider) {
         if projected
@@ -373,7 +373,7 @@ pub fn projected_control_content(model: &ProjectedProviderModel, file: &str) -> 
     reason = "projection tests inspect the single validated model document directly"
 )]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
     use std::io;
     use std::path::Path;
 
@@ -382,15 +382,27 @@ mod tests {
     use super::*;
 
     fn write_local_metadata_cache(cache_dir: &Path, context: u32) -> io::Result<()> {
-        let mut cache = BTreeMap::new();
-        let metadata = ModelMetadata::new("local", "known", "Local Known")
-            .with_capabilities(Support::Supported, Support::Supported, Support::Supported)
-            .with_context(context);
-        cache.insert("local/known".to_owned(), metadata);
+        write_local_raw_cache(
+            cache_dir,
+            &serde_json::json!({
+                "id": "known", "name": "Local Known", "attachment": false,
+                "reasoning": false, "tool_call": true, "open_weights": false,
+                "modalities": {"input": ["text"], "output": ["text"]},
+                "limit": {"context": context, "output": 0}
+            }),
+        )
+    }
 
+    fn write_local_raw_cache(cache_dir: &Path, model: &serde_json::Value) -> io::Result<()> {
         let content = serde_json::to_string(&serde_json::json!({
-            "schema": "cortexfs.model-metadata/v1",
-            "models": cache,
+            "schema": MODEL_METADATA_SCHEMA,
+            "catalog": {
+                "providers": {"local": {
+                    "id": "local", "name": "Local", "doc": "https://example.invalid",
+                    "models": {"known": model}
+                }},
+                "models": {}
+            }
         }))
         .map_err(|_error| io::Error::other("serialize metadata cache"))?;
         std::fs::write(cache_dir.join("model-metadata.json"), content)?;
@@ -476,19 +488,7 @@ mod tests {
     #[test]
     fn project_models_preserves_known_and_explicit_empty_capabilities() -> io::Result<()> {
         let dir = tempdir()?;
-        let mut cache = BTreeMap::new();
-        let known = ModelMetadata::new("local", "known", "Known")
-            .with_modalities(&[], &[])
-            .with_context(8192);
-        cache.insert("local/known".to_owned(), known);
-        std::fs::write(
-            dir.path().join("model-metadata.json"),
-            serde_json::json!({
-                "schema": "cortexfs.model-metadata/v1",
-                "models": cache,
-            })
-            .to_string(),
-        )?;
+        write_local_metadata_cache(dir.path(), 8192)?;
         let mut capabilities = HashMap::new();
         capabilities.insert("unknown".to_owned(), Vec::new());
         let config = ProviderConfig {
@@ -506,7 +506,7 @@ mod tests {
 
         let mut projected = Vec::new();
         project_models("local", &config, dir.path(), &mut projected);
-        assert_eq!(projected[0].cap, "stream\n");
+        assert_eq!(projected[0].cap, "chat\ntool_call_syntax\nstream\n");
         assert_eq!(projected[1].cap, "");
         Ok(())
     }
@@ -514,23 +514,16 @@ mod tests {
     #[test]
     fn project_models_exposes_the_complete_metadata_document() -> io::Result<()> {
         let dir = tempdir()?;
-        let mut cache = BTreeMap::new();
-        let mut metadata = ModelMetadata::new("local", "known", "Local Known")
-            .with_context(1_000_000)
-            .with_models_dev(serde_json::json!({
-                "description": "official description",
+        write_local_raw_cache(
+            dir.path(),
+            &serde_json::json!({
+                "id": "known", "name": "Local Known", "description": "official description",
+                "attachment": true, "reasoning": true, "tool_call": true,
+                "open_weights": false, "structured_output": true,
+                "modalities": {"input": ["text"], "output": ["text"]},
                 "reasoning_options": [{"type": "effort", "values": ["low", "max"]}],
-                "future_field": "retained"
-            }));
-        metadata.attachment = Support::Supported;
-        cache.insert("local/known".to_owned(), metadata);
-        std::fs::write(
-            dir.path().join("model-metadata.json"),
-            serde_json::json!({
-                "schema": "cortexfs.model-metadata/v1",
-                "models": cache,
-            })
-            .to_string(),
+                "limit": {"context": 1_000_000, "output": 0}, "future_field": "retained"
+            }),
         )?;
         let config = ProviderConfig {
             name: None,
@@ -561,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn project_models_maps_known_aliases_to_complete_builtin_capabilities() -> io::Result<()> {
+    fn project_models_keeps_unmapped_aggregator_models_unverified() -> io::Result<()> {
         let dir = tempdir()?;
         let config = ProviderConfig {
             name: None,
@@ -580,31 +573,18 @@ mod tests {
         project_models("lmm", &config, dir.path(), &mut projected);
         let model = &projected[0];
 
-        assert_eq!(model.limit.tokens(), Some(1_000_000));
-        assert_eq!(model.recommended.tokens(), Some(500_000));
-        assert_eq!(model.compact.tokens(), Some(450_000));
-        for capability in [
-            "chat",
-            "tool_call_syntax",
-            "json_schema",
-            "stream",
-            "reasoning",
-            "temperature",
-            "interleaved",
-        ] {
-            assert!(model.cap.lines().any(|line| line == capability));
-        }
+        assert_eq!(model.limit.tokens(), None);
+        assert_eq!(model.recommended.tokens(), None);
+        assert_eq!(model.compact.tokens(), None);
+        assert_eq!(model.cap, "chat\nstream\n");
         let content = projected_control_content(model, "metadata.json")
             .ok_or_else(|| io::Error::other("metadata control missing"))?;
         let document: serde_json::Value =
             serde_json::from_str(&content).map_err(|error| io::Error::other(error.to_string()))?;
-        assert_eq!(document["resolution"], "mapped");
+        assert_eq!(document["resolution"], "unverified");
         assert_eq!(document["metadata"]["provider"], "lmm");
-        assert_eq!(document["metadata"]["attachment"], "unsupported");
-        assert_eq!(
-            document["metadata"]["models_dev"]["interleaved"]["field"],
-            "reasoning_content"
-        );
+        assert_eq!(document["metadata"]["attachment"], "unknown");
+        assert_eq!(document["metadata"]["models_dev"], serde_json::Value::Null);
         Ok(())
     }
 }

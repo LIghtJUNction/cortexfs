@@ -17,7 +17,7 @@ impl FuseProjection {
         let session = self.resolve(path).ok()?.parent()?.to_owned();
         let metadata = read_session_model(&session)?;
         let reference = self.resolve_model_reference(&metadata)?;
-        let catalog = MetadataCatalog::from_cache_or_builtins(&self.provider_model_cache_dir);
+        let catalog = MetadataCatalog::from_cache_or_empty(&self.provider_model_cache_dir);
         let short = reference.split_once('/').map(|(_, model)| model);
         short
             .and_then(|model| catalog.resolve(model))

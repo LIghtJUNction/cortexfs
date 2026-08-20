@@ -166,6 +166,7 @@ const DISCORD: ChannelCapabilities = ChannelCapabilities {
     reactions: true,
     streaming: true,
     draft_updates: true,
+    tool_control: true,
     ..SOCKET
 };
 const SLACK: ChannelCapabilities = ChannelCapabilities {

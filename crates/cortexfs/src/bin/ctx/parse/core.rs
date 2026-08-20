@@ -125,6 +125,7 @@ pub(crate) enum Command {
         yes: bool,
     },
     Provider(ProviderArgs),
+    Auth(ProviderArgs),
     Ping {
         path: String,
     },
@@ -306,7 +307,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         } => success(residue::run_object_residue_cleanup(
             &source, &path, dev, ino, yes,
         )),
-        Command::Provider(args) => provider_command(&args),
+        Command::Provider(args) | Command::Auth(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
         Command::Doctor => success(doctor(&cli.root)),
@@ -549,6 +550,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "object" => install::parse_object_command(values),
         "install" => package::parse_package_install_command(values),
         "provider" => parse_provider_command(values.collect()),
+        "auth" => parse_auth_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
             no_extra_args(values)?;
@@ -643,6 +645,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "object"
             | "install"
             | "provider"
+            | "auth"
             | "ping"
             | "cancel"
             | "doctor"

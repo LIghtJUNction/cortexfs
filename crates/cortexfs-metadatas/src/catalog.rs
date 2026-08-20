@@ -10,7 +10,7 @@ use crate::source::{
     CachedMetadataCatalog, MAX_CACHE_BYTES, MAX_CACHED_MODELS, MODEL_METADATA_CACHE_FILE,
     MODEL_METADATA_SCHEMA, MODELS_DEV_ENDPOINT,
 };
-use crate::validate::{is_models_dev_record, validate_models_dev_record};
+use crate::validate::validate_models_dev_record;
 use crate::{
     MetadataError, MetadataSource, MetadataSourceError, Modality, ModelMetadata, ReasoningMetadata,
     Support,
@@ -21,6 +21,8 @@ use crate::{
 pub struct MetadataCatalog {
     models: BTreeMap<String, ModelMetadata>,
     aliases: BTreeMap<String, String>,
+    providers: BTreeMap<String, Value>,
+    base_models: BTreeMap<String, Value>,
 }
 
 impl MetadataCatalog {
@@ -30,43 +32,26 @@ impl MetadataCatalog {
         Self::default()
     }
 
-    /// Creates a catalog containing the checked-in official snapshot.
-    #[must_use]
-    pub fn builtins() -> Self {
-        let mut catalog = Self::new();
-        for model in crate::builtin_models() {
-            let registered = catalog.register(model).is_ok();
-            debug_assert!(registered);
-        }
-        catalog
-    }
-
     /// Loads a validated cache payload.
     pub fn from_cache(cache_dir: &Path) -> Result<Self, MetadataSourceError> {
         let path = catalog_cache_path(cache_dir);
-        let models = read_cached_models(&path)?;
-        catalog_from_models(&models, &path)
+        let response = read_cache(&path)?;
+        catalog_from_models_dev(&response)
+            .map_err(|error| MetadataSourceError::CacheInvalid(path, error.to_string()))
     }
 
-    /// Loads cached metadata if available, otherwise returns the checked-in snapshot.
+    /// Loads cached metadata if available, otherwise returns an empty catalog.
     #[must_use]
-    pub fn from_cache_or_builtins(cache_dir: &Path) -> Self {
-        let Some(cached) = Self::from_cache(cache_dir).ok() else {
-            return Self::builtins();
-        };
-        let mut catalog = Self::builtins();
-        for metadata in cached.models.into_values() {
-            merge_cached_model(&mut catalog, metadata);
-        }
-        catalog
+    pub fn from_cache_or_empty(cache_dir: &Path) -> Self {
+        Self::from_cache(cache_dir).unwrap_or_default()
     }
 
     /// Resolves and publishes remote metadata into cache.
     pub async fn from_models_dev(cache_dir: &Path) -> Result<Self, MetadataSourceError> {
         let response = crate::remote::fetch().await?;
-        let models = remote_model_map(response)?;
-        write_cache(cache_dir, &models)?;
-        catalog_from_models(&models, &catalog_cache_path(cache_dir))
+        let catalog = catalog_from_models_dev(&response)?;
+        write_cache(cache_dir, &response)?;
+        Ok(catalog)
     }
 
     /// Registers a canonical model and its provider-local aliases.
@@ -208,121 +193,54 @@ impl MetadataCatalog {
     pub fn is_empty(&self) -> bool {
         self.model_count() == 0
     }
+
+    /// Exact provider descriptor without its duplicated model map.
+    #[must_use]
+    pub fn provider(&self, id: &str) -> Option<&Value> {
+        self.providers.get(id)
+    }
+
+    /// Iterates over exact provider descriptors in deterministic order.
+    pub fn providers(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.providers
+            .iter()
+            .map(|(id, value)| (id.as_str(), value))
+    }
+
+    /// Exact provider-independent model metadata by path-style model id.
+    #[must_use]
+    pub fn base_model(&self, id: &str) -> Option<&Value> {
+        self.base_models.get(id)
+    }
 }
 
 pub(crate) fn catalog_cache_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join(MODEL_METADATA_CACHE_FILE)
 }
 
-fn merge_cached_model(catalog: &mut MetadataCatalog, metadata: ModelMetadata) {
-    let key = qualified(&metadata.provider, &metadata.id);
-    let target = catalog
-        .canonical_reference(&key)
-        .map_or_else(|| key.clone(), str::to_owned);
-    if let Some(base) = catalog.models.get(&target).cloned() {
-        let merged = merge_metadata(base, metadata);
-        let aliases = merged.aliases.clone();
-        catalog.models.insert(target.clone(), merged);
-        for alias in aliases {
-            let _ignored = catalog.add_provider_alias(&target, &alias);
-        }
-        return;
-    }
-    if catalog.models.contains_key(&key)
-        || catalog.aliases.contains_key(&key)
-        || metadata.aliases.iter().any(|alias| {
-            let scoped = qualified_from_key(&key, alias);
-            catalog
-                .models
-                .get(&scoped)
-                .is_some_and(|existing| qualified(&existing.provider, &existing.id) != key)
-                || catalog
-                    .aliases
-                    .get(&scoped)
-                    .is_some_and(|existing| existing != &key)
-        })
-    {
-        return;
-    }
-    let aliases = metadata.aliases.clone();
-    catalog.models.insert(key.clone(), metadata);
-    for alias in aliases {
-        let _ignored = catalog.add_provider_alias(&key, &alias);
-    }
-}
-
-fn merge_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> ModelMetadata {
-    let authoritative = is_models_dev_record(&overlay);
-    if !overlay.name.trim().is_empty() {
-        base.name = overlay.name;
-    }
-    base.status = overlay.status;
-    base.context_window_tokens = overlay.context_window_tokens.or(base.context_window_tokens);
-    base.recommended_context_tokens = overlay
-        .recommended_context_tokens
-        .or(base.recommended_context_tokens);
-    base.compaction_threshold_tokens = overlay
-        .compaction_threshold_tokens
-        .or(base.compaction_threshold_tokens);
-    base.max_output_tokens = overlay.max_output_tokens.or(base.max_output_tokens);
-    base.tools = overlay_support(base.tools, overlay.tools);
-    base.structured_output = overlay_support(base.structured_output, overlay.structured_output);
-    base.streaming = overlay_support(base.streaming, overlay.streaming);
-    base.attachment = overlay_support(base.attachment, overlay.attachment);
-    base.temperature = overlay_support(base.temperature, overlay.temperature);
-    base.open_weights = overlay_support(base.open_weights, overlay.open_weights);
-    base.interleaved = overlay_support(base.interleaved, overlay.interleaved);
-    if authoritative {
-        base.description = overlay.description;
-        base.family = overlay.family;
-        base.knowledge = overlay.knowledge;
-        base.release_date = overlay.release_date;
-        base.last_updated = overlay.last_updated;
-        base.input_modalities = overlay.input_modalities;
-        base.output_modalities = overlay.output_modalities;
-        base.reasoning = overlay.reasoning;
-    } else {
-        base.description = overlay.description.or(base.description);
-        base.family = overlay.family.or(base.family);
-        base.knowledge = overlay.knowledge.or(base.knowledge);
-        base.release_date = overlay.release_date.or(base.release_date);
-        base.last_updated = overlay.last_updated.or(base.last_updated);
-        if overlay.input_modalities != [Modality::Text] || base.input_modalities.is_empty() {
-            base.input_modalities = overlay.input_modalities;
-        }
-        if overlay.output_modalities != [Modality::Text] || base.output_modalities.is_empty() {
-            base.output_modalities = overlay.output_modalities;
-        }
-        if overlay.reasoning.support != Support::Unknown {
-            base.reasoning = overlay.reasoning;
-        }
-    }
-    for alias in overlay.aliases {
-        if !base.aliases.contains(&alias) {
-            base.aliases.push(alias);
-        }
-    }
-    base.models_dev = overlay.models_dev.or(base.models_dev);
-    base.sources.extend(overlay.sources);
-    base
-}
-
-fn overlay_support(base: Support, overlay: Support) -> Support {
-    if overlay == Support::Unknown {
-        base
-    } else {
-        overlay
-    }
-}
-
-fn remote_model_map(
-    response: RemoteCatalog,
-) -> Result<BTreeMap<String, ModelMetadata>, MetadataSourceError> {
-    let mut models = BTreeMap::new();
-    let RemoteCatalog { raw } = response;
-    let providers = raw.as_object().ok_or_else(|| {
+fn catalog_from_models_dev(
+    response: &RemoteCatalog,
+) -> Result<MetadataCatalog, MetadataSourceError> {
+    let root = response.raw.as_object().ok_or_else(|| {
         MetadataSourceError::InvalidRemote("models.dev response is not an object".to_owned())
     })?;
+    let providers = root
+        .get("providers")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            MetadataSourceError::InvalidRemote("models.dev providers are not an object".to_owned())
+        })?;
+    let base_models = root
+        .get("models")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            MetadataSourceError::InvalidRemote("models.dev models are not an object".to_owned())
+        })?;
+    let mut catalog = MetadataCatalog::new();
+    catalog.base_models = base_models
+        .iter()
+        .map(|(id, value)| (id.clone(), value.clone()))
+        .collect();
     for (provider_key, provider) in providers {
         if !is_object_token(provider_key) {
             return Err(MetadataSourceError::InvalidRemote(
@@ -343,35 +261,57 @@ fn remote_model_map(
             .ok_or_else(|| {
                 MetadataSourceError::InvalidRemote("provider models are not an object".to_owned())
             })?;
+        let mut descriptor = provider.clone();
+        if let Some(object) = descriptor.as_object_mut() {
+            object.remove("models");
+        }
+        catalog.providers.insert(provider_key.clone(), descriptor);
         for (model_key, model) in provider_models {
             if !is_model_id(model_key) {
                 return Err(MetadataSourceError::InvalidRemote(
                     "model id contains an unsafe character".to_owned(),
                 ));
             }
-            let entry = model_metadata_from_models_dev(provider_key, provider, model_key, model)?;
+            let entry = model_metadata_from_models_dev(
+                provider_key,
+                provider,
+                model_key,
+                model,
+                base_model(base_models, provider_key, model_key),
+                &response.observed_on,
+            )?;
             validate_models_dev_record(&entry)
                 .map_err(|error| MetadataSourceError::InvalidRemote(error.to_string()))?;
             let canonical = qualified(&entry.provider, &entry.id);
-            if models.contains_key(&canonical) {
+            if catalog.models.contains_key(&canonical) {
                 return Err(MetadataSourceError::InvalidRemote(
                     "duplicate canonical model key".to_owned(),
                 ));
             }
-            models.insert(canonical, entry);
+            catalog.models.insert(canonical, entry);
         }
     }
-    if models.is_empty() {
+    if catalog.models.is_empty() {
         return Err(MetadataSourceError::InvalidRemote(
             "no usable model metadata in response".to_owned(),
         ));
     }
-    if models.len() > MAX_CACHED_MODELS {
+    if catalog.models.len() > MAX_CACHED_MODELS {
         return Err(MetadataSourceError::InvalidRemote(
             "models.dev returned more records than cache policy allows".to_owned(),
         ));
     }
-    Ok(models)
+    Ok(catalog)
+}
+
+fn base_model<'a>(
+    models: &'a serde_json::Map<String, Value>,
+    provider: &str,
+    model: &str,
+) -> Option<&'a Value> {
+    models
+        .get(model)
+        .or_else(|| models.get(&qualified(provider, model)))
 }
 
 fn model_metadata_from_models_dev(
@@ -379,6 +319,8 @@ fn model_metadata_from_models_dev(
     provider: &Value,
     model_key: &str,
     raw_value: &Value,
+    base_model: Option<&Value>,
+    observed_on: &str,
 ) -> Result<ModelMetadata, MetadataSourceError> {
     let raw_model = raw_model(raw_value, model_key)?;
     let context = raw_u32(raw_model, &["limit", "context"])?;
@@ -406,6 +348,7 @@ fn model_metadata_from_models_dev(
         Support::Unknown,
     )
     .with_models_dev(raw_model.clone());
+    metadata.models_dev_base = base_model.cloned();
     if context > 0 {
         metadata = metadata.with_context(context);
     }
@@ -442,10 +385,10 @@ fn model_metadata_from_models_dev(
         max_tokens: None,
     };
 
-    metadata.sources.push(MetadataSource::official(
-        "models.dev",
-        format!("{MODELS_DEV_ENDPOINT}/api.json"),
-    ));
+    let mut models_dev =
+        MetadataSource::official("models.dev", format!("{MODELS_DEV_ENDPOINT}/catalog.json"));
+    observed_on.clone_into(&mut models_dev.observed_on);
+    metadata.sources.push(models_dev);
     let provider_object = provider.as_object().ok_or_else(|| {
         MetadataSourceError::InvalidRemote("provider metadata is not an object".to_owned())
     })?;
@@ -458,9 +401,9 @@ fn model_metadata_from_models_dev(
         .and_then(Value::as_str)
         .unwrap_or_default();
     if !provider_doc.trim().is_empty() {
-        metadata
-            .sources
-            .push(MetadataSource::official(provider_name, provider_doc));
+        let mut source = MetadataSource::official(provider_name, provider_doc);
+        observed_on.clone_into(&mut source.observed_on);
+        metadata.sources.push(source);
     }
 
     Ok(metadata)
@@ -592,51 +535,7 @@ fn reasoning_levels(value: &Value) -> Vec<String> {
         .collect()
 }
 
-fn catalog_from_models(
-    models: &BTreeMap<String, ModelMetadata>,
-    path: &Path,
-) -> Result<MetadataCatalog, MetadataSourceError> {
-    if models.is_empty() {
-        return Err(MetadataSourceError::CacheInvalid(
-            path.to_owned(),
-            "empty catalog".to_owned(),
-        ));
-    }
-
-    let mut catalog = MetadataCatalog::new();
-    for (key, metadata) in models {
-        if is_models_dev_record(metadata) {
-            validate_models_dev_record(metadata).map_err(|error| {
-                MetadataSourceError::CacheInvalid(path.to_owned(), error.to_string())
-            })?;
-        }
-        let entry_key = qualified(&metadata.provider, &metadata.id);
-        if entry_key != *key {
-            return Err(MetadataSourceError::CacheInvalid(
-                path.to_owned(),
-                "metadata key does not match provider/model identity".to_owned(),
-            ));
-        }
-        if catalog.models.contains_key(key) || catalog.aliases.contains_key(key) {
-            return Err(MetadataSourceError::InvalidRemote(
-                "duplicate canonical model key".to_owned(),
-            ));
-        }
-        let aliases = metadata.aliases.clone();
-        catalog.models.insert(key.clone(), metadata.clone());
-        for alias in aliases {
-            catalog
-                .add_provider_alias(key, &alias)
-                .map_err(|error| MetadataSourceError::InvalidRemote(error.to_string()))?;
-        }
-    }
-    Ok(catalog)
-}
-
-fn write_cache(
-    cache_dir: &Path,
-    models: &BTreeMap<String, ModelMetadata>,
-) -> Result<(), MetadataSourceError> {
+fn write_cache(cache_dir: &Path, response: &RemoteCatalog) -> Result<(), MetadataSourceError> {
     let path = catalog_cache_path(cache_dir);
 
     if let Some(parent) = path.parent() {
@@ -657,7 +556,8 @@ fn write_cache(
 
     let cache = CachedMetadataCatalog {
         schema: MODEL_METADATA_SCHEMA.to_owned(),
-        models: models.clone(),
+        observed_on: response.observed_on.clone(),
+        catalog: response.raw.clone(),
     };
     let mut bytes = to_vec(&cache).map_err(|source| MetadataSourceError::CacheCorrupt {
         path: path.clone(),
@@ -689,7 +589,7 @@ fn write_cache(
     })
 }
 
-fn read_cached_models(path: &Path) -> Result<BTreeMap<String, ModelMetadata>, MetadataSourceError> {
+fn read_cache(path: &Path) -> Result<RemoteCatalog, MetadataSourceError> {
     let metadata = path
         .symlink_metadata()
         .map_err(|source| match source.kind() {
@@ -728,46 +628,16 @@ fn read_cached_models(path: &Path) -> Result<BTreeMap<String, ModelMetadata>, Me
             "unsupported cache schema".to_owned(),
         ));
     }
-    if cache.models.is_empty() {
+    if !cache.catalog.is_object() {
         return Err(MetadataSourceError::CacheInvalid(
             path.to_owned(),
-            "empty metadata cache".to_owned(),
+            "cached models.dev catalog is not an object".to_owned(),
         ));
     }
-    if cache.models.len() > MAX_CACHED_MODELS {
-        return Err(MetadataSourceError::CacheInvalid(
-            path.to_owned(),
-            "cached catalog has too many records".to_owned(),
-        ));
-    }
-
-    let mut models = BTreeMap::new();
-    for (key, metadata) in cache.models {
-        let (provider, model_id) = key
-            .split_once('/')
-            .filter(|&(provider, model)| !provider.is_empty() && !model.is_empty())
-            .ok_or_else(|| {
-                MetadataSourceError::CacheInvalid(
-                    path.to_owned(),
-                    "invalid model key format".to_owned(),
-                )
-            })?;
-        if !is_object_token(provider) || !is_model_id(model_id) {
-            return Err(MetadataSourceError::CacheInvalid(
-                path.to_owned(),
-                "invalid model key token".to_owned(),
-            ));
-        }
-        if metadata.provider != provider || metadata.id != model_id {
-            return Err(MetadataSourceError::CacheInvalid(
-                path.to_owned(),
-                "cache metadata key mismatch".to_owned(),
-            ));
-        }
-        models.insert(key, metadata);
-    }
-
-    Ok(models)
+    Ok(RemoteCatalog {
+        raw: cache.catalog,
+        observed_on: cache.observed_on,
+    })
 }
 
 fn modalities_from(modalities: &[String]) -> Vec<Modality> {
