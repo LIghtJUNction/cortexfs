@@ -22,7 +22,9 @@ pub use adapter::{
 };
 pub use credential::{Credential, CredentialKind};
 pub use factory::{configured_adapter, configured_registry};
-pub use profile::{AuthProfile, AuthProfileError, read_auth_profile, store_auth_profile};
+pub use profile::{
+    AuthProfile, AuthProfileError, delete_auth_profile, read_auth_profile, store_auth_profile,
+};
 pub use registry::{ProviderRegistry, ProviderRegistryError};
 use serde::{Deserialize, Serialize};
 pub use wire::{AUTH_SOCKET_ABI, AuthWireError, AuthWireFrame, AuthWireRequest, AuthWireResponse};

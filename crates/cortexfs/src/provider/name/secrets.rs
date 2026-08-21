@@ -47,6 +47,17 @@ pub fn read_provider_system_secret(
     }
 }
 
+/// Removes one provider secret slot without following a symlink.
+pub fn delete_provider_system_secret(
+    provider: &str,
+    account: &str,
+) -> Result<(), ProviderSystemSecretError> {
+    let path = provider_system_secret_path(provider, account)?;
+    support::plain::remove_plain_file(&path)
+        .map(|_| ())
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)
+}
+
 /// Opens a provider API secret and clears close-on-exec so a runtime child can
 /// inherit it without exposing the secret in environment variables.
 pub fn open_provider_system_secret(

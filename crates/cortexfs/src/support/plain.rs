@@ -257,6 +257,20 @@ pub(crate) fn remove_plain_dir(path: &Path) -> Result<()> {
     parent_dir.sync_all()
 }
 
+/// Removes one plain file or symlink without following it, then syncs parent.
+pub fn remove_plain_file(path: &Path) -> Result<bool> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_plain_directory(parent)?;
+    let name = plain_file_name(path)?;
+    match nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir) {
+        Ok(()) => parent_dir.sync_all().map(|()| true),
+        Err(nix::errno::Errno::ENOENT) => Ok(false),
+        Err(error) => Err(std::io::Error::from(error)),
+    }
+}
+
 fn remove_plain_dir_at(parent: &fs::File, name: &str) -> Result<()> {
     nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::RemoveDir)
         .map_err(std::io::Error::from)

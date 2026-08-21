@@ -52,7 +52,7 @@ pub use policy::{
 };
 pub use provider::auth::{
     AUTH_SOCKET_ABI, AuthProfile, AuthProfileError, AuthWireError, AuthWireFrame, AuthWireRequest,
-    AuthWireResponse, read_auth_profile, store_auth_profile,
+    AuthWireResponse, delete_auth_profile, read_auth_profile, store_auth_profile,
 };
 pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
@@ -62,9 +62,9 @@ pub use provider::model::{
 };
 pub use provider::name::{
     ProviderNameError, ProviderSystemSecret, ProviderSystemSecretError, ProviderSystemSecretHandle,
-    open_provider_system_secret, open_provider_system_secret_for_model,
-    provider_host_from_base_url, provider_keychain_service, provider_name_from_base_url,
-    provider_name_from_config, provider_oauth_access_token_env_name,
+    delete_provider_system_secret, open_provider_system_secret,
+    open_provider_system_secret_for_model, provider_host_from_base_url, provider_keychain_service,
+    provider_name_from_base_url, provider_name_from_config, provider_oauth_access_token_env_name,
     provider_oauth_refresh_token_env_name, provider_system_secret_exists,
     read_provider_system_secret, read_provider_system_secret_for_model, selected_model_provider,
     store_provider_system_secret,
@@ -74,7 +74,7 @@ pub use provider::oauth::{
     CODEX_DEVICE_VERIFY_URL, DeviceCode, OAuthCredential, OAuthCredentialMaterial,
     OAuthDeviceConfig, OAuthError, OAuthPkce, OAuthProviderConfig, OAuthRefreshRequest,
     OAuthRefreshResult, OAuthTokenResponse, OAuthTokenState, codex_oauth_config,
-    exchange_oauth_token, exchange_oauth_token_with, oauth_account_id,
+    delete_oauth_credentials, exchange_oauth_token, exchange_oauth_token_with, oauth_account_id,
     oauth_authorization_code_form, oauth_authorization_url, oauth_keychain_secret,
     oauth_needs_refresh, oauth_post, oauth_refresh_token_form, oauth_token_state,
     parse_oauth_token_response, poll_device_code_with, read_codex_system, request_device_code_with,

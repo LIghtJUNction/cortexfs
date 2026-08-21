@@ -822,6 +822,26 @@ pub fn oauth_keychain_secret(service: &str, account: &str) -> Result<Option<Stri
     }
 }
 
+/// Removes credentials saved by the provider login flow from the OS keychain.
+pub fn delete_oauth_credentials(
+    provider: &str,
+    config: &OAuthProviderConfig,
+) -> Result<(), OAuthError> {
+    let service = crate::provider::name::provider_keychain_service(provider);
+    for slot in user_slots(config) {
+        let entry = match keyring::Entry::new(&service, slot) {
+            Ok(entry) => entry,
+            Err(keyring::Error::NoDefaultStore) => continue,
+            Err(_error) => return Err(OAuthError::KeychainUnavailable),
+        };
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(_error) => return Err(OAuthError::KeychainUnavailable),
+        }
+    }
+    Ok(())
+}
+
 fn oauth_keychain_set(service: &str, account: &str, secret: &str) -> Result<(), OAuthError> {
     keyring::Entry::new(service, account)
         .and_then(|entry| entry.set_password(secret))

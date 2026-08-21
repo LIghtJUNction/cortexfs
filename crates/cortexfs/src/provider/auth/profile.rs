@@ -66,6 +66,13 @@ pub fn store_auth_profile(
     Ok(value)
 }
 
+/// Deletes one stored authentication profile; environment credentials remain untouched.
+pub fn delete_auth_profile(provider: &str, profile: &str) -> Result<(), AuthProfileError> {
+    let account = account(profile)?;
+    crate::provider::name::delete_provider_system_secret(provider, &account)
+        .map_err(|_error| AuthProfileError::Unavailable)
+}
+
 fn account(profile: &str) -> Result<String, AuthProfileError> {
     crate::is_object_name(profile)
         .then(|| format!("auth-{profile}"))
