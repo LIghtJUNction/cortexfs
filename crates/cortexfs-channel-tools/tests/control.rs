@@ -3,11 +3,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::process::Command;
 use std::thread;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn tool_dispatches_reaction_through_control_socket()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -87,10 +85,8 @@ mod tests {
         let _ignored = std::fs::remove_file(&socket);
         Ok(())
     }
-
     #[test]
-    fn named_platform_tool_preserves_operation_name()
-    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn platform_tool_binds_conversation() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let socket = std::env::temp_dir().join(format!(
             "cortexfs-channel-platform-tool-test-{}",
             std::process::id()
@@ -111,15 +107,18 @@ mod tests {
                 else {
                     return Err("missing platform request".into());
                 };
-                let cortexfs_channels::ChannelControlAction::Command { command, .. } = action
+                let cortexfs_channels::ChannelControlAction::Command {
+                    command: cortexfs_channels::ChannelCommand::Invoke { name, .. },
+                    target: Some(target),
+                    ..
+                } = action
                 else {
                     return Err("wrong platform action".into());
                 };
-                assert!(matches!(
-                    command,
-                    cortexfs_channels::ChannelCommand::Invoke { ref name, .. }
-                        if name == "discord.send_embed"
-                ));
+                assert_eq!(
+                    (name.as_str(), target.conversation.as_str()),
+                    ("discord.send_embed", "bound-room")
+                );
                 writer.write_all(
                     &ChannelFrame::new(ChannelFrameBody::ControlResponse {
                         request_id,
@@ -135,6 +134,7 @@ mod tests {
         let output = Command::new(binary)
             .env("CTX_CHANNEL_ID", "discord")
             .env("CTX_CHANNEL_SOCKET", &socket)
+            .env("CTX_CHANNEL_CONVERSATION", "bound-room")
             .env("CTX_RUN_ID", "platform-run")
             .env("CTX_TOOL_NAME", "discord.send_embed")
             .arg(r#"{"conversation":"room-1","title":"hello"}"#)
