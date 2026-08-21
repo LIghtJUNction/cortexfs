@@ -500,7 +500,7 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("--die-with-parent"),
         OsString::from("--unshare-pid"),
     ];
-    args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
+    args.extend(bwrap_process_setup_args().into_iter().map(OsString::from));
     args.extend(bwrap_system_layout_args().into_iter().map(OsString::from));
     if let Some(channel) = request.config.channel {
         let socket = cortexfs_paths::channel_driver_socket(channel.channel());

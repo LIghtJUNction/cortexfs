@@ -20,15 +20,6 @@ pub struct StopContext {
     pub runtime_agent: String,
 }
 
-/// Domain mutations emitted by stop preparation.
-#[derive(Debug)]
-pub enum StopAction {
-    CancelOwnedChannel(PlannedCancellation),
-    StopRuntime(PlannedRuntimeStop),
-    CleanupTemp(TempCleanupPlan),
-    StopSelf(PlannedStop),
-}
-
 #[derive(Debug)]
 #[expect(
     clippy::partial_pub_fields,
@@ -73,8 +64,7 @@ pub struct PlannedCancellation {
     pub child_session_dir: PathBuf,
     pub receipt: ChildHandoffReceipt,
     pub lease: crate::runtime::record::child::ChildContextLease,
-    pub record_events: bool,
-    pub history: Option<CancellationHistoryReceipts>,
+    pub history: CancellationHistoryReceipts,
 }
 
 #[derive(Debug)]
@@ -99,9 +89,6 @@ pub struct TempCleanupEntry {
 #[derive(Debug)]
 pub struct PlannedStop {
     pub name: String,
-    pub identity: Option<AgentUnixIdentity>,
-    pub stop_system_socket: bool,
-    pub terminal_units: Vec<String>,
     pub cancellations: Vec<PlannedCancellation>,
     pub cleanup: Option<TempCleanupPlan>,
     pub runtime: Option<PlannedRuntimeStop>,
@@ -769,21 +756,15 @@ fn plan_parent_child_cancellations(
                 child_session_dir,
                 receipt,
                 lease,
-                record_events: true,
-                history: Some(history),
+                history,
             });
         }
     }
     Ok(cancellations)
 }
 
-pub type ConcreteStopPlan = StopPlan<PlannedStop>;
-
 /// Builds a complete receipt-bound stop plan without mutating runtime state.
-pub fn plan_stop(
-    context: &StopContext,
-    requested_agent: &str,
-) -> Result<ConcreteStopPlan, StopError> {
+pub fn plan_stop(context: &StopContext, requested_agent: &str) -> Result<StopPlan, StopError> {
     let ordered = ordered_owned_agents(context, requested_agent)?;
     let mut entries = Vec::with_capacity(ordered.len());
     for name in ordered {
@@ -808,9 +789,6 @@ pub fn plan_stop(
         };
         entries.push(PlannedStop {
             name,
-            identity: None,
-            stop_system_socket: false,
-            terminal_units: Vec::new(),
             cancellations,
             cleanup,
             runtime: Some(runtime),
@@ -820,17 +798,14 @@ pub fn plan_stop(
     Ok(StopPlan::new(entries))
 }
 
-fn preflight_concrete(plan: &ConcreteStopPlan) -> Result<(), StopError> {
-    for agent in plan.entries() {
+fn preflight_concrete(plan: &StopPlan) -> Result<(), StopError> {
+    for agent in &plan.entries {
         verify_file(&agent.control.status, false)?;
         verify_file(&agent.control.pid, false)?;
         verify_file(&agent.control.log, true)?;
         for cancellation in &agent.cancellations {
             preflight_child_cancellation(cancellation.receipt.path())?;
-            let history = cancellation
-                .history
-                .as_ref()
-                .ok_or_else(|| StopError::new("stop plan omitted cancellation history receipts"))?;
+            let history = &cancellation.history;
             verify_file(&history.parent_events, true)?;
             verify_read_file(&history.child_messages)?;
             verify_file(&history.child_events, true)?;
@@ -868,10 +843,7 @@ fn stop_concrete_agent(agent: PlannedStop) -> Result<(), StopError> {
             Err(_error) => return Err(StopError::new("cannot cancel owned child channel")),
         };
         if cancelled {
-            let history = cancellation
-                .history
-                .as_ref()
-                .ok_or_else(|| StopError::new("stop plan omitted cancellation history receipts"))?;
+            let history = &cancellation.history;
             let events = crate::owned_child_cancellation_events(
                 &cancellation.parent_agent,
                 &cancellation.child_agent,
@@ -919,7 +891,7 @@ fn stop_concrete_agent(agent: PlannedStop) -> Result<(), StopError> {
 }
 
 /// Executes a fully preflighted concrete plan in descendant postorder.
-pub fn execute_stop(plan: ConcreteStopPlan) -> Result<(), StopError> {
+pub fn execute_stop(plan: StopPlan) -> Result<(), StopError> {
     preflight_concrete(&plan)?;
     for agent in plan.entries {
         stop_concrete_agent(agent)?;
@@ -1018,47 +990,17 @@ impl StopError {
     }
 }
 
-/// A validated, post-order stop plan.
-///
-/// The planner owns the receipt-bound entries.  Keeping the ordering executor
-/// here lets the host CLI and privileged runtime use exactly the same lifecycle
-/// state machine without sharing either process-global CLI state or protocol
-/// framing.
+/// A receipt-bound stop plan in owned-descendant postorder.
 #[derive(Debug)]
-pub struct StopPlan<T> {
-    entries: Vec<T>,
+pub struct StopPlan {
+    entries: Vec<PlannedStop>,
 }
 
-impl<T> StopPlan<T> {
+impl StopPlan {
     #[must_use]
-    pub fn new(entries: Vec<T>) -> Self {
+    pub fn new(entries: Vec<PlannedStop>) -> Self {
         Self { entries }
     }
-
-    #[must_use]
-    pub fn entries(&self) -> &[T] {
-        &self.entries
-    }
-}
-
-/// Receipt-bound operations required by the shared stop executor.
-pub trait StopExecutor<T> {
-    fn preflight(&mut self, plan: &StopPlan<T>) -> Result<(), StopError>;
-    fn stop_entry(&mut self, entry: T) -> Result<(), StopError>;
-}
-
-/// Executes an already post-ordered stop plan.
-///
-/// Preflight covers the complete plan before the first mutation.  Entries are
-/// then consumed in their planned order (owned descendants before their
-/// parent); each adapter's `stop_entry` must retain terminal-first ordering and
-/// leave the parent's system resource until its final operation.
-pub fn execute<T>(plan: StopPlan<T>, executor: &mut impl StopExecutor<T>) -> Result<(), StopError> {
-    executor.preflight(&plan)?;
-    for entry in plan.entries {
-        executor.stop_entry(entry)?;
-    }
-    Ok(())
 }
 
 /// Receipt-bound runtime resources selected for an agent stop.
@@ -1096,55 +1038,6 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_nanos())
         ))
-    }
-
-    #[derive(Default)]
-    struct RecordingExecutor {
-        calls: Vec<String>,
-        reject_preflight: bool,
-    }
-
-    impl StopExecutor<&'static str> for RecordingExecutor {
-        fn preflight(&mut self, plan: &StopPlan<&'static str>) -> Result<(), StopError> {
-            self.calls
-                .push(format!("preflight:{}", plan.entries().len()));
-            if self.reject_preflight {
-                return Err(StopError::new("conflict"));
-            }
-            Ok(())
-        }
-
-        fn stop_entry(&mut self, entry: &'static str) -> Result<(), StopError> {
-            self.calls.push(entry.to_owned());
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn stop_plan_preflights_before_consuming_postorder_entries() {
-        let plan = StopPlan::new(vec!["grandchild", "child", "parent"]);
-        let mut executor = RecordingExecutor::default();
-
-        assert_eq!(execute(plan, &mut executor), Ok(()));
-        assert_eq!(
-            executor.calls,
-            ["preflight:3", "grandchild", "child", "parent"]
-        );
-    }
-
-    #[test]
-    fn failed_preflight_performs_no_stop_mutation() {
-        let plan = StopPlan::new(vec!["child", "parent"]);
-        let mut executor = RecordingExecutor {
-            reject_preflight: true,
-            ..RecordingExecutor::default()
-        };
-
-        assert_eq!(
-            execute(plan, &mut executor),
-            Err(StopError::new("conflict"))
-        );
-        assert_eq!(executor.calls, ["preflight:2"]);
     }
 
     #[test]
@@ -1215,9 +1108,6 @@ mod tests {
             fs::write(control.join("log"), "")?;
             entries.push(PlannedStop {
                 name: name.to_owned(),
-                identity: None,
-                stop_system_socket: false,
-                terminal_units: Vec::new(),
                 cancellations: Vec::new(),
                 cleanup: None,
                 runtime: None,

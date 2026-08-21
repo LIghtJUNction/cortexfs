@@ -154,7 +154,7 @@ struct RuntimeStopHandler {
     runtime_agent: String,
 }
 
-struct RuntimePreparedStop(cortexfs::agent::stop::ConcreteStopPlan);
+struct RuntimePreparedStop(cortexfs::agent::stop::StopPlan);
 
 impl AgentStopHandler for RuntimeStopHandler {
     fn preflight(

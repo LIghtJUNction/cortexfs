@@ -1602,7 +1602,7 @@ pub fn terminal_command(
     ]);
     command
         .args
-        .extend(crate::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+        .extend(crate::support::process::bwrap_process_setup_args());
     command
         .args
         .extend(crate::support::process::bwrap_system_layout_args());
@@ -1733,9 +1733,11 @@ pub fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         crate::ChildLifecycle::Owned => "owned",
         crate::ChildLifecycle::Temp => "temp",
     };
-    let role = crate::is_worker_agent_name(view.agent_name())
-        .then_some("worker")
-        .unwrap_or("agent");
+    let role = if crate::is_worker_agent_name(view.agent_name()) {
+        "worker"
+    } else {
+        "agent"
+    };
     let mut env = vec![
         (
             "CTX_ROOT".to_owned(),

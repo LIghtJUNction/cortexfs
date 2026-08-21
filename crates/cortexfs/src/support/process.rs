@@ -1,3 +1,4 @@
+use crate::abi::constants::DEFAULT_SANDBOX_TMPFS_BYTES;
 use std::{
     io::Read,
     process::{Child, Output},
@@ -6,18 +7,21 @@ use std::{
 };
 
 /// Ordered bubblewrap process mounts appended after namespace flags.
-pub const BWRAP_PROCESS_SETUP_ARGS: [&str; 10] = [
-    "--proc",
-    "/proc",
-    "--dev",
-    "/dev",
-    "--size",
-    "2147483648",
-    "--tmpfs",
-    "/tmp",
-    "--dir",
-    "/run",
-];
+#[must_use]
+pub fn bwrap_process_setup_args() -> Vec<String> {
+    vec![
+        "--proc".to_owned(),
+        "/proc".to_owned(),
+        "--dev".to_owned(),
+        "/dev".to_owned(),
+        "--size".to_owned(),
+        DEFAULT_SANDBOX_TMPFS_BYTES.to_string(),
+        "--tmpfs".to_owned(),
+        "/tmp".to_owned(),
+        "--dir".to_owned(),
+        "/run".to_owned(),
+    ]
+}
 
 /// Ordered bubblewrap mounts and links for the base system layout.
 const BWRAP_SYSTEM_LAYOUT_ARGS: [&str; 16] = [

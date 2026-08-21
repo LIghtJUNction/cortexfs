@@ -134,6 +134,9 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
 
 pub(crate) const DEFAULT_AGENT_STEPS: u8 = 64;
 
+/// Default private `/tmp` capacity for one sandboxed execution.
+pub const DEFAULT_SANDBOX_TMPFS_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Canonical agent control-file set materialized by bootstrap.
 pub const AGENT_CONTROL_FILES: &[&str] = &[
     "abi",

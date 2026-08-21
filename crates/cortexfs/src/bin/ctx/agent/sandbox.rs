@@ -135,7 +135,7 @@ pub(crate) fn agent_bwrap_args(
         "--unshare-pid".to_owned(),
         "--unshare-net".to_owned(),
     ]);
-    bwrap.extend(cortexfs::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    bwrap.extend(cortexfs::support::process::bwrap_process_setup_args());
     bwrap.extend(cortexfs::support::process::bwrap_system_layout_args());
     if let Some(runtime_dir) = socket_runtime_dir(socket) {
         bwrap.extend([

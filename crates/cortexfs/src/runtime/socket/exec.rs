@@ -846,13 +846,7 @@ fn run_agent_envelope_loop_with_control(
     mut control: Option<&mut StartedRunControl>,
     provider_egress: Option<&runtime::egress::ProviderEgress>,
 ) -> Result<AgentRunOutcome, SocketRuntimeError> {
-    let max_steps = runtime
-        .env
-        .iter()
-        .find_map(|(name, value)| (name == "CTX_AGENT_STEPS").then_some(value))
-        .and_then(|value| value.parse().ok())
-        .filter(|value: &u8| *value > 0)
-        .unwrap_or(abi::constants::DEFAULT_AGENT_STEPS);
+    let max_steps = agent_step_limit(runtime.env);
     let mut frames = Vec::new();
     let mut seen = HashSet::new();
     let mut observation = Value::Null;

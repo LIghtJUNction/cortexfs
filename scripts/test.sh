@@ -6,7 +6,9 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-limit=${CORTEXFS_TEST_TMPFS_BYTES:-536870912}
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+. "$script_dir/resources.sh"
+limit=${CORTEXFS_TEST_TMPFS_BYTES:-$CORTEXFS_DEFAULT_SANDBOX_TMPFS_BYTES}
 case "$limit" in
   '' | *[!0-9]*)
     printf '%s\n' 'CORTEXFS_TEST_TMPFS_BYTES must be a byte count' >&2

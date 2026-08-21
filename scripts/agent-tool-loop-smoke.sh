@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/resources.sh"
 cd "$repo_root"
 
 hosted_test=tests::installed_sdks_run_two_declared_native_tool_calls
@@ -228,7 +229,7 @@ assert_source_improved() {
     --unshare-net \
     --proc /proc \
     --dev /dev \
-    --size 2147483648 --tmpfs /tmp \
+    --size "$CORTEXFS_DEFAULT_SANDBOX_TMPFS_BYTES" --tmpfs /tmp \
     --ro-bind /usr /usr \
     --ro-bind /etc /etc \
     --dir /home \

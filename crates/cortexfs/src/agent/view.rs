@@ -439,13 +439,21 @@ pub(crate) fn derive_agent_runtime_env(
         ));
     }
     let agent_env = parse_agent_env_control(&env_content)?;
-    if let Some((_, steps)) = agent_env
-        .iter()
-        .find(|(name, _value)| name == "CTX_AGENT_STEPS")
-    {
-        env.push(("CTX_AGENT_STEPS".to_owned(), steps.clone()));
-    }
+    env.push((
+        "CTX_AGENT_STEPS".to_owned(),
+        agent_step_limit(&agent_env).to_string(),
+    ));
     Ok(env)
+}
+
+/// Resolves the single agent tool-loop limit from validated runtime controls.
+#[must_use]
+pub(crate) fn agent_step_limit(env: &[(String, String)]) -> u8 {
+    env.iter()
+        .find_map(|entry| (entry.0 == "CTX_AGENT_STEPS").then_some(entry.1.as_str()))
+        .and_then(|value| value.parse().ok())
+        .filter(|steps: &u8| *steps > 0)
+        .unwrap_or(abi::constants::DEFAULT_AGENT_STEPS)
 }
 
 fn read_agent_loop_control(control_dir: &Path) -> Result<AgentLoop, AgentRuntimeViewError> {

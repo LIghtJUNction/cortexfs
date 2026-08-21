@@ -213,7 +213,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
     ];
-    bwrap.extend(support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    bwrap.extend(support::process::bwrap_process_setup_args());
     bwrap.extend([
         "--dir".to_owned(),
         cortexfs_paths::SYSTEM_RUNTIME_DIR.to_owned(),

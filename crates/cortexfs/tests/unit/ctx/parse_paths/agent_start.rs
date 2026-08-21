@@ -960,7 +960,7 @@ fn agent_start_status_lines_follow_systemctl_shape() {
 fn visible_terminal_socket_rejects_readonly_alias_path() {
     let runtime = unique_test_dir("ctx-agent-terminal-runtime-alias").join("main.sock");
     let visible = PathBuf::from(format!(
-        "/sys/cortexfs-terminal-alias-test-{}/main.sock",
+        "/usr/cortexfs-terminal-alias-test-{}/main.sock",
         std::process::id()
     ));
 
@@ -971,7 +971,7 @@ fn visible_terminal_socket_rejects_readonly_alias_path() {
 fn visible_chat_socket_rejects_readonly_alias_path() {
     let runtime = unique_test_dir("ctx-agent-chat-runtime-alias").join("coder.sock");
     let visible = PathBuf::from(format!(
-        "/sys/cortexfs-chat-alias-test-{}.sock",
+        "/usr/cortexfs-chat-alias-test-{}.sock",
         std::process::id()
     ));
 

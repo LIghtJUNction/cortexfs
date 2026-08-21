@@ -93,13 +93,13 @@ fn agent_start_host_with_environment(
         session_workspace.as_deref(),
     )?;
     let services = start_agent_runtime_services(root, args, &cli_mounts, &view, native)?;
+    let services = commit_agent_start(root, args, &view, &session_cwd, services)?;
     let AgentStartServices {
         visible_socket,
         socket,
         unit,
         output,
-        system,
-        terminal_alias_created,
+        ..
     } = services;
     let invocation = invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
@@ -113,56 +113,6 @@ fn agent_start_host_with_environment(
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(" ");
-    let terminal =
-        match cortexfs::agent::launch::launch_receipt(view.identity(), &unit, socket.clone()) {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                cortexfs::agent::launch::stop_system_agent_socket(&system).map_err(|conflict| {
-                    CliError::unavailable(format!("agent start rollback conflict: {conflict:?}"))
-                })?;
-                let terminal_aliases = terminal_alias_created
-                    .then_some((visible_socket.as_path(), socket.as_path()))
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                rollback_agent_start_resources(
-                    view.identity(),
-                    &unit,
-                    None,
-                    &terminal_aliases,
-                    &[socket.as_path()],
-                );
-                return Err(CliError::unavailable(format!(
-                    "cannot bind agent terminal receipt: {error:?}"
-                )));
-            }
-        };
-    let source = agent_source_root(root);
-    if let Err(error) =
-        cortexfs::agent::launch::persist_agent_launch_meta(&source, &args.name, &terminal, &system)
-    {
-        rollback_receipted_agent_start(
-            &system,
-            &terminal,
-            &visible_socket,
-            &socket,
-            terminal_alias_created,
-        )?;
-        return Err(CliError::unavailable(format!(
-            "cannot persist agent launch receipt: {error:?}"
-        )));
-    }
-    if let Err(error) =
-        write_agent_terminal_record(root, args, &view, &session_cwd, "running", Some(&socket))
-    {
-        rollback_receipted_agent_start(
-            &system,
-            &terminal,
-            &visible_socket,
-            &socket,
-            terminal_alias_created,
-        )?;
-        return Err(error);
-    }
     record_agent_start_facts(root, args, &view, &unit, invocation.as_deref())?;
     let current_uid = current_uid_for_ctx(root)?;
     let pid = agent_unit_main_pid(view.identity(), &unit).unwrap_or_default();
@@ -190,6 +140,81 @@ struct AgentStartServices {
     output: std::process::Output,
     system: cortexfs::agent::launch::SystemAgentSocketReceipt,
     terminal_alias_created: bool,
+}
+
+/// Commits the receipt-bound part of an already-started agent service.
+fn commit_agent_start(
+    root: &Path,
+    args: &AgentStartArgs,
+    view: &AgentRuntimeView,
+    session_cwd: &str,
+    services: AgentStartServices,
+) -> Result<AgentStartServices, CliError> {
+    let terminal = match cortexfs::agent::launch::launch_receipt(
+        view.identity(),
+        &services.unit,
+        services.socket.clone(),
+    ) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            cortexfs::agent::launch::stop_system_agent_socket(&services.system).map_err(
+                |conflict| {
+                    CliError::unavailable(format!("agent start rollback conflict: {conflict:?}"))
+                },
+            )?;
+            let terminal_aliases = services
+                .terminal_alias_created
+                .then_some((services.visible_socket.as_path(), services.socket.as_path()))
+                .into_iter()
+                .collect::<Vec<_>>();
+            rollback_agent_start_resources(
+                view.identity(),
+                &services.unit,
+                None,
+                &terminal_aliases,
+                &[services.socket.as_path()],
+            );
+            return Err(CliError::unavailable(format!(
+                "cannot bind agent terminal receipt: {error:?}"
+            )));
+        }
+    };
+    let source = agent_source_root(root);
+    if let Err(error) = cortexfs::agent::launch::persist_agent_launch_meta(
+        &source,
+        &args.name,
+        &terminal,
+        &services.system,
+    ) {
+        rollback_receipted_agent_start(
+            &services.system,
+            &terminal,
+            &services.visible_socket,
+            &services.socket,
+            services.terminal_alias_created,
+        )?;
+        return Err(CliError::unavailable(format!(
+            "cannot persist agent launch receipt: {error:?}"
+        )));
+    }
+    if let Err(error) = write_agent_terminal_record(
+        root,
+        args,
+        view,
+        session_cwd,
+        "running",
+        Some(&services.socket),
+    ) {
+        rollback_receipted_agent_start(
+            &services.system,
+            &terminal,
+            &services.visible_socket,
+            &services.socket,
+            services.terminal_alias_created,
+        )?;
+        return Err(error);
+    }
+    Ok(services)
 }
 
 fn record_agent_start_facts(
