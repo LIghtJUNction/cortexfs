@@ -189,7 +189,7 @@ impl FuseProjection {
     }
 
     fn is_generated_hidden_child(parent: &str, name: &str) -> bool {
-        fuse_join_child_path(parent, name).ok().is_some_and(|path| {
+        fuse_join_child_path(parent, name).is_ok_and(|path| {
             Self::layout_atomic_temp_target(&path).is_some()
                 || Self::is_socket_alias_claim_path(&path)
                 || Self::is_session_store_path(&path)

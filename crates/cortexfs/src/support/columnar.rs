@@ -2015,7 +2015,7 @@ struct IndexRecord {
 impl IndexRecord {
     fn encode(self) -> [u8; INDEX_RECORD_BYTES] {
         let mut bytes = [0_u8; INDEX_RECORD_BYTES];
-        for (slot, value) in bytes.chunks_exact_mut(8).zip([
+        for (slot, value) in bytes.as_chunks_mut::<8>().0.iter_mut().zip([
             self.start_byte,
             self.end_byte,
             self.start_line,
@@ -2030,10 +2030,8 @@ impl IndexRecord {
 
     fn decode(bytes: [u8; INDEX_RECORD_BYTES]) -> Self {
         let mut values = [0_u64; 6];
-        for (value, slot) in values.iter_mut().zip(bytes.chunks_exact(8)) {
-            let mut encoded = [0_u8; 8];
-            encoded.copy_from_slice(slot);
-            *value = u64::from_le_bytes(encoded);
+        for (value, slot) in values.iter_mut().zip(bytes.as_chunks::<8>().0) {
+            *value = u64::from_le_bytes(*slot);
         }
         Self {
             start_byte: values[0],

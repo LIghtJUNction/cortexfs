@@ -16,8 +16,7 @@ pub(crate) fn normalize_agent_model_frame(frame: &str, run: &str) -> String {
 
 pub(crate) fn should_write_streamed_model_frame(frame: &str, suppress_error: bool) -> bool {
     if serde_json::from_str::<Value>(frame)
-        .ok()
-        .is_some_and(|value| value.get("recoverable").and_then(Value::as_bool) == Some(true))
+        .is_ok_and(|value| value.get("recoverable").and_then(Value::as_bool) == Some(true))
     {
         return true;
     }
