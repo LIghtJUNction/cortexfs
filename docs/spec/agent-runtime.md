@@ -179,6 +179,15 @@ ctx agent start
 `ctxterm` owns the pseudo-terminal. It exposes `watch` and `attach` modes
 through the session terminal socket.
 
+Every terminal connection must present the session's `CTXTERM_TOKEN` capability
+before it can observe output, emit output, or attach input. The token is at
+least 32 bytes. The launcher passes only its SHA-256 digest to `ctxterm` through
+the cleared launch environment; the capability itself is never placed in the
+service command line, session tree, or terminal socket path. Missing,
+malformed, and mismatched capabilities fail closed. Socket ownership and
+`SO_PEERCRED` alone are not authorization because mutually distrusting agents
+may share a Linux uid.
+
 Session terminal sockets are visible through the ABI path:
 
 ```text

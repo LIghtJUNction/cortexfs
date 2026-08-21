@@ -34,11 +34,16 @@ use std::time::Duration;
 
 use cortexfs::define_simple_cli_error;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use sha2::{Digest, Sha256};
 
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_SHELL: &str = cortexfs::support::command::TSH;
 const CLIENT_MODE_LIMIT: usize = 16;
+const CLIENT_TOKEN_LIMIT: usize = 256;
+const CLIENT_TOKEN_MIN: usize = 32;
+const CLIENT_TOKEN_ENV: &str = "CTXTERM_TOKEN";
+const CLIENT_TOKEN_HASH_ENV: &str = "CTXTERM_TOKEN_HASH";
 const CLIENT_MODE_TIMEOUT: Duration = Duration::from_secs(1);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_EMIT_PAYLOAD_BYTES: usize = 64 * 1024;
@@ -64,6 +69,7 @@ pub(crate) use cortexfs::cli::terminal;
 
 define_simple_cli_error!(CtxtermError);
 
+pub(crate) use auth::*;
 pub(crate) use cli::*;
 pub(crate) use client::*;
 pub(crate) use cortexfs::support::plain::open_plain_directory;
@@ -130,6 +136,7 @@ struct RunConfig {
     args: Vec<OsString>,
 }
 
+pub mod auth;
 pub mod cli;
 pub mod client;
 pub(crate) use cortexfs::cli::create;

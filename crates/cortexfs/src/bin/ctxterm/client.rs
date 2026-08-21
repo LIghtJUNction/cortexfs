@@ -48,12 +48,15 @@ pub(crate) fn run_client(socket: &Path, write: bool) -> Result<ExitCode, Ctxterm
     let mut stream = UnixStream::connect(socket).map_err(|error| {
         CtxtermError::unavailable(format!("cannot connect {}: {error}", socket.display()))
     })?;
-    if write {
-        stream.write_all(b"attach\n")
-    } else {
-        stream.write_all(b"watch\n")
-    }
-    .map_err(|error| CtxtermError::unavailable(format!("cannot write client mode: {error}")))?;
+    let token = env::var(CLIENT_TOKEN_ENV)
+        .ok()
+        .filter(|token| valid_client_token(token))
+        .ok_or_else(|| {
+            CtxtermError::usage("CTXTERM_TOKEN must contain a non-empty terminal capability")
+        })?;
+    let mode = if write { "attach" } else { "watch" };
+    write!(stream, "{mode}\n{token}\n")
+        .map_err(|error| CtxtermError::unavailable(format!("cannot write client mode: {error}")))?;
     let mut reader = stream
         .try_clone()
         .map_err(|error| CtxtermError::unavailable(format!("cannot clone socket: {error}")))?;

@@ -5,6 +5,15 @@ pub(crate) fn start_listener(
     pty_writer: PtyWriter,
     clients: Clients,
 ) -> Result<(), CtxtermError> {
+    let token_hash = env::var(CLIENT_TOKEN_HASH_ENV)
+        .ok()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .or_else(|| {
+            env::var(CLIENT_TOKEN_ENV)
+                .ok()
+                .filter(|token| valid_client_token(token))
+                .map(|token| token_hash(&token))
+        });
     if let Some(parent) = socket.parent() {
         create_plain_directory(
             parent,
@@ -26,9 +35,15 @@ pub(crate) fn start_listener(
     set_ctxterm_socket_permissions(socket).map_err(|error| {
         CtxtermError::unavailable(format!("cannot chmod {}: {error}", socket.display()))
     })?;
+    let Some(token_hash) = token_hash else {
+        let _ignored = std::fs::remove_file(socket);
+        return Err(CtxtermError::usage(
+            "CTXTERM_TOKEN must contain a non-empty terminal capability",
+        ));
+    };
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            handle_client(stream, Arc::clone(&pty_writer), &clients);
+            handle_client(stream, Arc::clone(&pty_writer), &clients, &token_hash);
         }
     });
     Ok(())
@@ -50,10 +65,18 @@ pub(crate) fn set_ctxterm_socket_permissions(socket: &Path) -> io::Result<()> {
     .map_err(io::Error::from)
 }
 
-pub(crate) fn handle_client(mut stream: UnixStream, pty_writer: PtyWriter, clients: &Clients) {
-    let Ok(mode) = read_client_mode_with_timeout(&mut stream) else {
+pub(crate) fn handle_client(
+    mut stream: UnixStream,
+    pty_writer: PtyWriter,
+    clients: &Clients,
+    expected_hash: &str,
+) {
+    let Ok((mode, supplied)) = read_client_mode_with_timeout(&mut stream) else {
         return;
     };
+    if !tokens_equal(expected_hash.as_bytes(), token_hash(&supplied).as_bytes()) {
+        return;
+    }
     if mode == ClientMode::Emit {
         if let Ok(payload) = read_emit_payload(stream)
             && !payload.is_empty()
@@ -82,14 +105,16 @@ pub(crate) fn handle_client(mut stream: UnixStream, pty_writer: PtyWriter, clien
     }
 }
 
-pub(crate) fn read_client_mode_with_timeout(stream: &mut UnixStream) -> io::Result<ClientMode> {
+pub(crate) fn read_client_mode_with_timeout(
+    stream: &mut UnixStream,
+) -> io::Result<(ClientMode, String)> {
     read_client_mode_with_timeout_duration(stream, CLIENT_MODE_TIMEOUT)
 }
 
 pub(crate) fn read_client_mode_with_timeout_duration(
     stream: &mut UnixStream,
     timeout: Duration,
-) -> io::Result<ClientMode> {
+) -> io::Result<(ClientMode, String)> {
     stream.set_read_timeout(Some(timeout))?;
     let mode = read_client_mode(stream);
     stream.set_read_timeout(None)?;
@@ -103,7 +128,7 @@ pub(crate) enum ClientMode {
     Emit,
 }
 
-pub(crate) fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
+pub(crate) fn read_client_mode(stream: &mut UnixStream) -> io::Result<(ClientMode, String)> {
     let mut mode = Vec::new();
     let mut byte = [0; 1];
     let mut complete = false;
@@ -124,15 +149,19 @@ pub(crate) fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode
             "ctxterm client mode must end with newline",
         ));
     }
-    match mode.as_slice() {
-        b"watch" => Ok(ClientMode::Watch),
-        b"attach" => Ok(ClientMode::Attach),
-        b"emit" => Ok(ClientMode::Emit),
-        _ => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid ctxterm client mode",
-        )),
-    }
+    let mode = match mode.as_slice() {
+        b"watch" => ClientMode::Watch,
+        b"attach" => ClientMode::Attach,
+        b"emit" => ClientMode::Emit,
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid ctxterm client mode",
+            ));
+        }
+    };
+    let token = read_client_token(stream)?;
+    Ok((mode, token))
 }
 
 pub(crate) fn read_emit_payload(stream: UnixStream) -> io::Result<Vec<u8>> {

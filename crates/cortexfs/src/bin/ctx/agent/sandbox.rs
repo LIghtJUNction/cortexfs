@@ -1,4 +1,5 @@
 use crate::*;
+use sha2::{Digest, Sha256};
 
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
@@ -144,6 +145,16 @@ pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(S
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
     ];
+    if let Ok(token) = env::var("CTXTERM_TOKEN")
+        && token.len() >= 32
+        && token.len() < 256
+        && !token.contains(['\n', '\r'])
+    {
+        env.push((
+            "CTXTERM_TOKEN_HASH".to_owned(),
+            hex_bytes(&Sha256::digest(token.as_bytes())),
+        ));
+    }
     for env_pair in view.env() {
         let key = &env_pair.0;
         let value = &env_pair.1;
@@ -162,6 +173,8 @@ pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(S
                 | "CTX_AGENT_UID"
                 | "CTX_AGENT_GID"
                 | "CTX_AGENT_GROUPS"
+                | "CTXTERM_TOKEN"
+                | "CTXTERM_TOKEN_HASH"
                 | "HOME"
                 | "USER"
                 | "LOGNAME"

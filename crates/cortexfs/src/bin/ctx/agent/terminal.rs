@@ -116,12 +116,16 @@ pub(crate) fn stream_terminal_stream(
     mut stream: UnixStream,
     write: bool,
 ) -> Result<ExitCode, CliError> {
-    if write {
-        stream.write_all(b"attach\n")
-    } else {
-        stream.write_all(b"watch\n")
+    let token = env::var("CTXTERM_TOKEN")
+        .map_err(|_error| CliError::usage("CTXTERM_TOKEN must contain a terminal capability"))?;
+    if token.len() < 32 || token.contains(['\n', '\r']) || token.len() >= 256 {
+        return Err(CliError::usage(
+            "CTXTERM_TOKEN must contain a terminal capability",
+        ));
     }
-    .map_err(|error| CliError::unavailable(format!("cannot write terminal mode: {error}")))?;
+    let mode = if write { "attach" } else { "watch" };
+    write!(stream, "{mode}\n{token}\n")
+        .map_err(|error| CliError::unavailable(format!("cannot write terminal mode: {error}")))?;
 
     let mut reader = stream
         .try_clone()

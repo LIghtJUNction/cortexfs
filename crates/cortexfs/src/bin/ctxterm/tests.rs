@@ -5,7 +5,8 @@ mod tests {
     use super::{
         ClientMode, Clients, CtxtermCommand, PtyWriter, RunConfig, env_u16_from_value,
         handle_client, open_log, parse_args, pty_command_with_env, read_client_mode,
-        read_client_mode_with_timeout_duration, remove_stale_socket, start_listener,
+        read_client_mode_with_timeout_duration, remove_stale_socket, start_listener, token_hash,
+        tokens_equal, valid_client_token,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -18,6 +19,19 @@ mod tests {
     use std::time::Duration;
 
     struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+    #[test]
+    fn terminal_capability_rejects_missing_short_and_mismatched_tokens() {
+        let token = "0123456789abcdef0123456789abcdef";
+        assert!(valid_client_token(token));
+        assert!(!valid_client_token(""));
+        assert!(!valid_client_token("too-short"));
+        assert!(tokens_equal(token.as_bytes(), token.as_bytes()));
+        assert!(!tokens_equal(
+            token.as_bytes(),
+            b"0123456789abcdef0123456789abcdeg"
+        ));
+    }
 
     impl Write for SharedBuffer {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -220,14 +234,15 @@ mod tests {
     #[test]
     fn client_mode_keeps_attach_payload_after_newline() -> Result<(), Box<dyn std::error::Error>> {
         let (mut client, mut server) = UnixStream::pair()?;
-        client.write_all(b"attach\npayload")?;
+        client.write_all(b"attach\n0123456789abcdef0123456789abcdef\npayload")?;
         client.shutdown(Shutdown::Write)?;
 
-        let mode = read_client_mode(&mut server)?;
+        let (mode, token) = read_client_mode(&mut server)?;
         let mut payload = String::new();
         server.read_to_string(&mut payload)?;
 
         assert_eq!(mode, ClientMode::Attach);
+        assert_eq!(token, "0123456789abcdef0123456789abcdef");
         assert_eq!(payload, "payload");
         Ok(())
     }
@@ -235,14 +250,15 @@ mod tests {
     #[test]
     fn client_mode_accepts_emit_payload_after_newline() -> Result<(), Box<dyn std::error::Error>> {
         let (mut client, mut server) = UnixStream::pair()?;
-        client.write_all(b"emit\npayload")?;
+        client.write_all(b"emit\n0123456789abcdef0123456789abcdef\npayload")?;
         client.shutdown(Shutdown::Write)?;
 
-        let mode = read_client_mode(&mut server)?;
+        let (mode, token) = read_client_mode(&mut server)?;
         let mut payload = String::new();
         server.read_to_string(&mut payload)?;
 
         assert_eq!(mode, ClientMode::Emit);
+        assert_eq!(token, "0123456789abcdef0123456789abcdef");
         assert_eq!(payload, "payload");
         Ok(())
     }
@@ -257,9 +273,16 @@ mod tests {
             Arc::new(Mutex::new(Box::new(SharedBuffer(Arc::clone(&pty_output)))));
         let clients: Clients = Arc::new(Mutex::new(vec![Arc::new(Mutex::new(watch_writer))]));
 
-        emit_client.write_all(b"emit\n\r\ntool bash running shell.exec 'date'\r\n")?;
+        emit_client.write_all(
+            b"emit\n0123456789abcdef0123456789abcdef\n\r\ntool bash running shell.exec 'date'\r\n",
+        )?;
         emit_client.shutdown(Shutdown::Write)?;
-        handle_client(emit_server, writer, &clients);
+        handle_client(
+            emit_server,
+            writer,
+            &clients,
+            &token_hash("0123456789abcdef0123456789abcdef"),
+        );
 
         let expected = b"\r\ntool bash running shell.exec 'date'\r\n";
         let mut payload = vec![0; expected.len()];
