@@ -79,8 +79,8 @@ pub(in crate::platform) fn encode(
 }
 
 fn sender(prefix: &str) -> (Participant, BTreeMap<String, String>) {
-    let (nick, rest) = prefix.split_once('!').map_or((prefix, ""), |value| value);
-    let (user, host) = rest.split_once('@').map_or((rest, ""), |value| value);
+    let (nick, rest) = prefix.split_once('!').unwrap_or((prefix, ""));
+    let (user, host) = rest.split_once('@').unwrap_or((rest, ""));
     let mut metadata = BTreeMap::new();
     metadata.insert("irc.nick".to_owned(), nick.to_owned());
     if !user.is_empty() {
