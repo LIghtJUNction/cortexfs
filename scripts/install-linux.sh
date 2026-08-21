@@ -11,6 +11,7 @@ TEMP_DIR=
 TTY_ECHO_OFF=0
 SECRET_VALUE=''
 ROOT_TEMP_FILES=()
+ROOT_TEMP_DIRS=()
 
 setup_style() {
     if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
@@ -31,13 +32,16 @@ setup_style() {
 }
 
 cleanup() {
-    local file
+    local directory file
     if (( TTY_ECHO_OFF )); then
         stty echo <"$TTY_PATH" 2>/dev/null || true
         TTY_ECHO_OFF=0
     fi
     for file in "${ROOT_TEMP_FILES[@]}"; do
         sudo rm -f -- "$file" >/dev/null 2>&1 || true
+    done
+    for directory in "${ROOT_TEMP_DIRS[@]}"; do
+        sudo rm -rf -- "$directory" >/dev/null 2>&1 || true
     done
     [[ -z $TEMP_DIR ]] || rm -rf -- "$TEMP_DIR"
 }
@@ -416,12 +420,57 @@ expected_binaries() {
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 }
 
+expected_units() {
+    printf '%s\n' cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
+        cortexfs-channel@.service cortexfs-channel-bluesky.service \
+        cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
+        cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
+        cortexfs-channel-wechat.service cortexfs-channel-voice.service \
+        cortexfs-channel-slack.service cortexfs-channel-mqtt.service \
+        cortexfs-channel-clawdtalk.service cortexfs-channel-dingtalk.service \
+        cortexfs-channel-email.service cortexfs-channel-gmail.service \
+        cortexfs-channel-irc.service cortexfs-channel-matrix.service \
+        cortexfs-channel-mattermost.service cortexfs-channel-mochat.service \
+        cortexfs-channel-notion.service cortexfs-channel-qq.service \
+        cortexfs-channel-reddit.service cortexfs-channel-twitch.service \
+        cortexfs-channel-twitter.service
+}
+
+artifact_paths() {
+    local binary unit
+    while IFS= read -r binary; do
+        printf 'target/release/%s\n' "$binary"
+    done < <(expected_binaries)
+    while IFS= read -r unit; do
+        printf 'packaging/systemd/%s\n' "$unit"
+    done < <(expected_units)
+    printf 'README.md\n'
+}
+
 verify_build() {
     local source=$1 binary
     while IFS= read -r binary; do
         [[ -x $source/target/release/$binary ]] ||
             die "Expected release binary is missing: $binary" "缺少预期 release 二进制：$binary"
     done < <(expected_binaries)
+}
+
+snapshot_artifacts() {
+    local source=$1 path
+    while IFS= read -r path; do
+        printf '%s %s\n' "$(sha256sum "$source/$path" | awk '{print $1}')" "$path"
+    done < <(artifact_paths)
+}
+
+stage_artifacts() {
+    local source=$1 stage=$2 snapshots=$3 digest path staged_digest
+    while read -r digest path; do
+        sudo install -D -m 0600 "$source/$path" "$stage/$path"
+        staged_digest=$(sudo sha256sum "$stage/$path" | awk '{print $1}')
+        [[ $staged_digest == "$digest" ]] ||
+            die "Installer artifact changed after validation: $path" \
+                "安装器工件在验证后发生变化：$path"
+    done <<<"$snapshots"
 }
 
 atomic_install() {
@@ -451,7 +500,7 @@ ensure_mountpoint() {
 }
 
 deploy() {
-    local source=$1 binary unit
+    local source=$1 snapshots=$2 binary unit stage
     card "$( [[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment' )"
     say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
         "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
@@ -459,11 +508,14 @@ deploy() {
         "单元：/usr/lib/systemd/system/cortexfs*.{service,socket}"
     say "Preserved: /var/lib/cortexfs/{storage,secrets}, /etc/cortexfs/providers.d, existing *.env, and /ctx user state." \
         "保留：/var/lib/cortexfs/{storage,secrets}、/etc/cortexfs/providers.d、现有 *.env 与 /ctx 用户状态。"
-    confirm "DEPLOY CORTEXFS" \
-        "Type DEPLOY CORTEXFS to atomically install the build and restart cortexfs.service." \
-        "输入 DEPLOY CORTEXFS，原子安装构建并重启 cortexfs.service。"
     # shellcheck disable=SC2024 # Force sudo's prompt onto the controlling terminal.
     sudo -v <"$TTY_PATH"
+    stage=$(sudo mktemp -d /var/tmp/cortexfs-install.XXXXXX)
+    ROOT_TEMP_DIRS+=("$stage")
+    stage_artifacts "$source" "$stage" "$snapshots"
+    confirm "DEPLOY CORTEXFS" \
+        "Type DEPLOY CORTEXFS to atomically install the validated build and restart cortexfs.service." \
+        "输入 DEPLOY CORTEXFS，原子安装已验证的构建并重启 cortexfs.service。"
     sudo install -d -m 0755 /usr/lib/systemd/system /usr/share/doc/cortexfs \
         /etc/cortexfs /etc/cortexfs/providers.d /var/lib/cortexfs \
         /var/lib/cortexfs/storage /var/lib/cortexfs/storage/generations
@@ -471,26 +523,12 @@ deploy() {
     sudo install -d -m 0700 /var/lib/cortexfs/secrets
     ensure_mountpoint
     while IFS= read -r binary; do
-        atomic_install "$source/target/release/$binary" "/usr/bin/$binary" 0755
+        atomic_install "$stage/target/release/$binary" "/usr/bin/$binary" 0755
     done < <(expected_binaries)
-    for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
-        cortexfs-channel@.service cortexfs-channel-bluesky.service \
-        cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
-        cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
-        cortexfs-channel-wechat.service cortexfs-channel-voice.service \
-        cortexfs-channel-slack.service cortexfs-channel-mqtt.service \
-        cortexfs-channel-clawdtalk.service \
-        cortexfs-channel-dingtalk.service \
-        cortexfs-channel-email.service cortexfs-channel-gmail.service \
-        cortexfs-channel-irc.service cortexfs-channel-matrix.service \
-        cortexfs-channel-mattermost.service cortexfs-channel-mochat.service \
-        cortexfs-channel-notion.service \
-        cortexfs-channel-qq.service \
-        cortexfs-channel-reddit.service cortexfs-channel-twitch.service \
-        cortexfs-channel-twitter.service; do
-        atomic_install "$source/packaging/systemd/$unit" "/usr/lib/systemd/system/$unit" 0644
-    done
-    atomic_install "$source/README.md" /usr/share/doc/cortexfs/README.md 0644
+    while IFS= read -r unit; do
+        atomic_install "$stage/packaging/systemd/$unit" "/usr/lib/systemd/system/$unit" 0644
+    done < <(expected_units)
+    atomic_install "$stage/README.md" /usr/share/doc/cortexfs/README.md 0644
     info "Reloading systemd and enabling the CortexFS mount..." "正在重载 systemd 并启用 CortexFS 挂载..."
     sudo systemctl daemon-reload
     sudo systemctl enable cortexfs.service
@@ -624,7 +662,7 @@ finish() {
 }
 
 main() {
-    local source distro family manager id
+    local source distro family manager id snapshots
     setup_style
     [[ $# -eq 2 && $1 == --source ]] ||
         die "Usage: install-linux.sh --source ABSOLUTE_PATH" \
@@ -649,7 +687,8 @@ main() {
     ensure_rust
     build_cortexfs "$source"
     verify_build "$source"
-    deploy "$source"
+    snapshots=$(snapshot_artifacts "$source")
+    deploy "$source" "$snapshots"
     onboard_ai
     verify_installation
     finish
