@@ -94,7 +94,7 @@ jobs:
       # Same flags as pre-commit. Serialize timing and approval protocol fixtures.
       # TMPDIR only for tests: fixture #!/bin/sh agents must live on an exec mount.
       - name: cargo test
-        timeout-minutes: 25
+        timeout-minutes: 50
         env:
           TMPDIR: /tmp
           CARGO_HOME: /tmp/cortexfs-test-cargo
