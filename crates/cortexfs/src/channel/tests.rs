@@ -161,9 +161,7 @@ fn bridge_returns_safe_progress_error_without_provider_details()
         let mut frame = String::new();
         BufReader::new(&mut stream).read_line(&mut frame)?;
         stream.write_all(
-            br#"{"type":"error","recoverable":false,"message":"sk-secret-provider-detail"}
-{"type":"done","status":"error"}
-"#,
+            b"{\"type\":\"delta\",\"text\":\"sensitive partial output\"}\n{\"type\":\"error\",\"recoverable\":false,\"message\":\"sk-secret-provider-detail\"}\n{\"type\":\"done\",\"status\":\"error\"}\n",
         )
     });
     let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("coder", "im")?, None);
@@ -193,6 +191,7 @@ fn bridge_returns_safe_progress_error_without_provider_details()
     };
     assert!(!message.contains("sk-secret-provider-detail"));
     assert!(message.contains("模型服务") || message.contains("model service"));
+    assert!(probe.deltas.is_empty());
     Ok(())
 }
 
