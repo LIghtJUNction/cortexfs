@@ -15,6 +15,7 @@ pub(super) fn run<S: ChannelProgressSink>(
     sink: &mut S,
 ) -> Result<OutboundMessage, ChannelBridgeError> {
     let mut events = AssistantEvents::default();
+    let mut deltas = Vec::new();
     let sink = RefCell::new(sink);
     let command = RefCell::new(None);
     let result = session::send_interaction_events_with_commands(
@@ -25,7 +26,7 @@ pub(super) fn run<S: ChannelProgressSink>(
                 *command.borrow_mut() = Some(event.clone());
             }
             if let Some(text) = events.push_interaction(&event) {
-                sink.borrow_mut().delta(&text);
+                deltas.push(text);
             }
             Ok::<(), ChannelBridgeError>(())
         },
@@ -49,6 +50,9 @@ pub(super) fn run<S: ChannelProgressSink>(
             return Err(error);
         }
     };
+    for text in &deltas {
+        sink.borrow_mut().delta(text);
+    }
     sink.borrow_mut().complete(&reply);
     target.reply_to = Some(reply_to);
     Ok(OutboundMessage {
