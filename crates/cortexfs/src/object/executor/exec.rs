@@ -103,7 +103,7 @@ pub(crate) fn prepare_agent_tool_call(
     .map_err(|denial| ExecError::new(tool_denial_message(&tool_call.name, denial)))?;
     let tool_executable = open_executable_no_follow(grant.hit().path())
         .map_err(|error| ExecError::new(format!("cannot run tool:{}: {error}", tool_call.name)))?;
-    let sandbox = prepare_optional_agent_tool_sandbox(&view, config.source)?;
+    let sandbox = prepare_agent_tool_sandbox(&view, config.source)?;
     let ctx_home_target = cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), &owner);
     let authorized_object = authorized_tool_target(config.source, grant.hit());
     let home_target =
@@ -435,20 +435,6 @@ pub(crate) fn authorized_tool_target(source: &Path, hit: &cortexfs::ToolHit) -> 
         |_error| hit.path().to_path_buf(),
         |relative| cortexfs_paths::ctx_root().join(relative),
     )
-}
-
-fn prepare_optional_agent_tool_sandbox(
-    view: &crate::AgentRuntimeView,
-    source: &Path,
-) -> Result<Option<AgentToolSandbox>, ExecError> {
-    let git_write_declared = view.mount_table().entries().iter().any(|mount| {
-        mount.target() == "/workspace/.git" && mount.mode() == cortexfs::MountMode::ReadWrite
-    });
-    if git_write_declared {
-        Ok(None)
-    } else {
-        prepare_agent_tool_sandbox(view, source)
-    }
 }
 
 pub(crate) fn prepare_agent_tool_sandbox(

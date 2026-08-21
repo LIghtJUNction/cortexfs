@@ -318,6 +318,10 @@ It is backed by:
 Shell state such as `.config`, `.cache`, and `.bash_history` must land in the
 agent home, not in the project workspace.
 
+Unless an explicit mount replaces it, `/tmp` is a private sandbox tmpfs capped
+at 2 GiB. It is never the host `/tmp`; exceeding the limit fails the write
+inside the sandbox rather than consuming unbounded host storage.
+
 The terminal process starts from an empty environment. CortexFS injects only a
 small allowlist through the sandbox launcher:
 
@@ -339,6 +343,15 @@ Host session variables and provider secrets must not be inherited by default.
 Executable agents launched from the socket runtime also start with
 `env_clear()` and receive only the derived agent environment plus runtime-owned
 `CTX_*` values.
+
+## Tool Workspace Overlay
+
+When a Tool execution receives a valid `CTX_WORKSPACE`, CortexFS mounts the
+project through the session's writable overlay. Its `upper` and `work` data
+remain below the durable session; the backing project is the lower view. The
+overlay includes `.git`, so a declared writable `/workspace/.git` mount must
+not bypass that session view. Without `CTX_WORKSPACE`, CortexFS preserves the
+declared mount table and creates no workspace overlay.
 
 ## Agent View And Authority
 

@@ -6,8 +6,17 @@ use std::{
 };
 
 /// Ordered bubblewrap process mounts appended after namespace flags.
-pub const BWRAP_PROCESS_SETUP_ARGS: [&str; 8] = [
-    "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/run",
+pub const BWRAP_PROCESS_SETUP_ARGS: [&str; 10] = [
+    "--proc",
+    "/proc",
+    "--dev",
+    "/dev",
+    "--size",
+    "2147483648",
+    "--tmpfs",
+    "/tmp",
+    "--dir",
+    "/run",
 ];
 
 /// Ordered bubblewrap mounts and links for the base system layout.

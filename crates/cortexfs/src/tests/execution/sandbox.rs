@@ -29,6 +29,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
     assert_eq!(args.first().map(String::as_str), Some("--clearenv"));
     assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
+    assert!(contains_arg_pair(args, "--size", "2147483648"));
     assert!(contains_arg_pair(args, "--tmpfs", "/tmp"));
     assert!(contains_arg_pair(args, "--ro-bind", "/usr"));
     assert!(contains_arg_pair(args, "--dir", "/workspace"));

@@ -92,6 +92,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("tool-overlay-args")?;
     let workspace = root.join("workspace");
+    let git = root.join("git");
     let upper = root.join("overlay-upper");
     let work = root.join("overlay-work");
     fs::create_dir_all(&workspace)?;
@@ -103,9 +104,10 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         ..test_agent_run_config()
     };
     let mount_table = cortexfs::MountTable::parse(&format!(
-        "{}\t/ctx\tro\trbind,nosuid,nodev\n{}\t/workspace\trw\trbind,nosuid,nodev\n",
+        "{}\t/ctx\tro\trbind,nosuid,nodev\n{}\t/workspace\trw\trbind,nosuid,nodev\n{}\t/workspace/.git\trw\trbind,nosuid,nodev\n",
         config.source.display(),
-        workspace.display()
+        workspace.display(),
+        git.display()
     ))
     .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let sandbox = AgentToolSandbox {
@@ -180,6 +182,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PROVIDER"));
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_SLOT"));
     assert!(contains_os_arg_pair(&args, "--chdir", "/workspace"));
+    assert!(!args.iter().any(|arg| arg == git.as_os_str()));
     assert!(args.iter().any(|arg| arg == "--unshare-net"));
     assert!(contains_os_arg_triplet(
         &args,

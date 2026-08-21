@@ -225,7 +225,7 @@ assert_source_improved() {
     --unshare-net \
     --proc /proc \
     --dev /dev \
-    --tmpfs /tmp \
+    --size 2147483648 --tmpfs /tmp \
     --ro-bind /usr /usr \
     --ro-bind /etc /etc \
     --dir /home \
