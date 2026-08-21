@@ -154,6 +154,15 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 return;
             }
             if socket_alias {
+                if let Some(agent) = path
+                    .strip_prefix("agent/")
+                    .and_then(|path| path.strip_suffix(".sock"))
+                    .filter(|agent| cortexfs::is_object_name(agent))
+                    && self.projection.getattr(&format!("agent/{agent}")).is_ok()
+                {
+                    reply.error(readonly_mutation_errno());
+                    return;
+                }
                 match self.projection.remove_socket_alias(&path, req.uid()) {
                     Ok(()) => {
                         if let Err(error) = self.forget_path(&path) {

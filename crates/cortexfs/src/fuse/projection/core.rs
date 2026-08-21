@@ -286,11 +286,41 @@ impl FuseProjection {
         fs::remove_dir(&path).map_err(|error| fuse_remove_dir_error(&error))
     }
 
+    /// Removes an owner-authorized stopped Agent definition and its companion paths.
+    pub fn remove_agent_definition(&self, abi_path: &str, uid: u32) -> Result<(), FuseError> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        let agent = Self::agent_wrapper_name(&normalized).ok_or(FuseError::NotControlFile)?;
+        self.authorize_agent_owner(agent, uid)?;
+        let object = self.resolve(&normalized)?;
+        let object_meta =
+            fs::symlink_metadata(&object).map_err(|error| fuse_metadata_error(&error))?;
+        if object_meta.file_type().is_symlink() || !object_meta.is_file() {
+            return Err(FuseError::InvalidPath);
+        }
+        if object_meta.uid() != uid {
+            return Err(FuseError::PermissionDenied);
+        }
+        match agent::remove::remove_definition(&self.root, agent, uid) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(FuseError::Busy),
+            Err(_error) => Err(FuseError::Io),
+        }
+    }
+
     /// Removes one owner-authorized agent lifecycle file without following links.
     pub fn remove_layout_file(&self, abi_path: &str, uid: u32) -> Result<(), FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         let target =
             Self::layout_atomic_temp_target(&normalized).unwrap_or_else(|| normalized.clone());
+        if target == normalized && Self::is_agent_wrapper_path(&target) {
+            return self.remove_agent_definition(&target, uid);
+        }
+        if Self::layout_atomic_temp_target(&normalized).is_none()
+            && let Some((agent, _control)) = Self::agent_control_target(&normalized)
+            && self.getattr(&format!("agent/{agent}")).is_ok()
+        {
+            return Err(FuseError::ReadOnly);
+        }
         if !Self::is_agent_wrapper_path(&target) && Self::agent_control_target(&target).is_none() {
             return Err(FuseError::NotControlFile);
         }
@@ -320,6 +350,11 @@ impl FuseProjection {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !Self::is_agent_lifecycle_dir_path(&normalized) {
             return Err(FuseError::NotControlFile);
+        }
+        if let Some(agent) = Self::agent_control_dir_name(&normalized)
+            && self.getattr(&format!("agent/{agent}")).is_ok()
+        {
+            return Err(FuseError::ReadOnly);
         }
         self.authorize_layout_path(&normalized, uid)?;
         let path = self.resolve(&normalized)?;

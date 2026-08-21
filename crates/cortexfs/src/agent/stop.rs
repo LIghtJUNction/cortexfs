@@ -1,6 +1,5 @@
 use crate::agent::launch::{
-    AgentLaunchError, AgentLaunchReceipt, SystemAgentSocketReceipt, stop_launch,
-    stop_system_agent_socket,
+    AgentLaunchReceipt, SystemAgentSocketReceipt, stop_launch, stop_system_agent_socket,
 };
 use crate::support::{columnar, plain::open_plain_directory};
 use crate::{ChildHandoffReceipt, agent::runtime::AgentUnixIdentity};
@@ -68,8 +67,8 @@ pub struct PlannedCancellation {
 }
 
 #[derive(Debug)]
-pub struct TempCleanupPlan {
-    pub entries: Vec<TempCleanupEntry>,
+pub struct AgentCleanupPlan {
+    pub entries: Vec<AgentCleanupEntry>,
 }
 
 #[derive(Debug)]
@@ -77,9 +76,8 @@ pub struct TempCleanupPlan {
     clippy::partial_pub_fields,
     reason = "held descriptor is private receipt integrity state"
 )]
-pub struct TempCleanupEntry {
+pub struct AgentCleanupEntry {
     pub path: PathBuf,
-    pub directory: bool,
     pub dev: u64,
     pub ino: u64,
     pub kind: u32,
@@ -90,10 +88,13 @@ pub struct TempCleanupEntry {
 pub struct PlannedStop {
     pub name: String,
     pub cancellations: Vec<PlannedCancellation>,
-    pub cleanup: Option<TempCleanupPlan>,
+    pub cleanup: Option<AgentCleanupPlan>,
     pub runtime: Option<PlannedRuntimeStop>,
     pub control: StopControlReceipts,
 }
+
+const MAX_AGENT_CLEANUP_DEPTH: usize = 32;
+const MAX_AGENT_CLEANUP_ENTRIES: usize = 16_384;
 
 pub fn bind_file(path: &std::path::Path, write: bool) -> Result<StopFileReceipt, StopError> {
     let parent = path
@@ -304,9 +305,11 @@ pub fn parse_runtime_stop_receipt(
     let control_meta = fs::symlink_metadata(control)
         .map_err(|error| StopError::new(format!("cannot stat {}: {error}", control.display())))?;
     let receipt_path = control.join("meta.json");
-    let receipt_file = fs::File::open(&receipt_path)
-        .map_err(|error| StopError::new(format!("cannot read runtime receipt: {error}")))?;
-    let content = crate::support::process::read_limited_text(receipt_file, 65_536);
+    let content = crate::support::plain::read_small_text_file(
+        &receipt_path,
+        crate::agent::MAX_AGENT_RUNTIME_CONTROL_BYTES,
+    )
+    .map_err(|error| StopError::new(format!("cannot read runtime receipt: {error}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|_error| StopError::new("invalid runtime receipt"))?;
     let receipt = value
@@ -411,28 +414,23 @@ fn require_receipt_keys(value: &serde_json::Value, expected: &[&str]) -> Result<
     Ok(())
 }
 
-pub fn plan_temp_cleanup(context: &StopContext, name: &str) -> Result<TempCleanupPlan, StopError> {
-    let agent_root = cortexfs_paths::agent_root_path(&context.source);
-    plan_temp_cleanup_paths(
-        context.owner_uid,
-        &agent_root,
-        &cortexfs_paths::agent_path(&context.source, name),
-        &cortexfs_paths::agent_socket_path(&context.source, name),
-        &cortexfs_paths::agent_control_path(&context.source, name),
-    )
-}
-
-/// Plans temp agent cleanup for explicit object/socket/control paths.
-pub fn plan_temp_cleanup_paths(
+/// Plans bounded receipt-bound cleanup for one Agent definition.
+pub fn plan_agent_cleanup(
+    root: &std::path::Path,
+    name: &str,
     owner_uid: u32,
-    agent_root: &std::path::Path,
-    object: &std::path::Path,
-    socket: &std::path::Path,
-    control_dir: &std::path::Path,
-) -> Result<TempCleanupPlan, StopError> {
-    preflight_cleanup_directory(agent_root, owner_uid)?;
+) -> Result<AgentCleanupPlan, StopError> {
+    if !crate::is_object_name(name) {
+        return Err(StopError::new("invalid agent cleanup name"));
+    }
+    let agent_root = cortexfs_paths::agent_root_path(root);
+    let object = cortexfs_paths::agent_path(root, name);
+    let socket = cortexfs_paths::agent_socket_path(root, name);
+    let control_dir = cortexfs_paths::agent_control_path(root, name);
+    preflight_cleanup_directory(&agent_root, owner_uid)?;
     let mut entries = Vec::new();
-    for path in [object, socket] {
+    plan_agent_cleanup_tree(&control_dir, owner_uid, 0, &mut entries)?;
+    for path in [&socket, &object] {
         match fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_dir() => {
                 return Err(StopError::new(format!(
@@ -440,15 +438,8 @@ pub fn plan_temp_cleanup_paths(
                     path.display()
                 )));
             }
-            Ok(metadata) => {
-                let entry = bind_temp_cleanup_entry(path)?;
-                if entry.directory || metadata.file_type().is_dir() {
-                    return Err(StopError::new(format!(
-                        "temp agent path is not a file or socket: {}",
-                        path.display()
-                    )));
-                }
-                entries.push(entry);
+            Ok(_metadata) => {
+                push_agent_cleanup_entry(&mut entries, path)?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
@@ -459,15 +450,18 @@ pub fn plan_temp_cleanup_paths(
             }
         }
     }
-    plan_temp_cleanup_tree(control_dir, owner_uid, &mut entries)?;
-    Ok(TempCleanupPlan { entries })
+    Ok(AgentCleanupPlan { entries })
 }
 
-fn plan_temp_cleanup_tree(
+fn plan_agent_cleanup_tree(
     directory: &std::path::Path,
     owner_uid: u32,
-    entries: &mut Vec<TempCleanupEntry>,
+    depth: usize,
+    entries: &mut Vec<AgentCleanupEntry>,
 ) -> Result<(), StopError> {
+    if depth >= MAX_AGENT_CLEANUP_DEPTH || entries.len() >= MAX_AGENT_CLEANUP_ENTRIES {
+        return Err(StopError::new("agent cleanup traversal exceeds limit"));
+    }
     preflight_cleanup_directory(directory, owner_uid)?;
     let mut children = fs::read_dir(directory)
         .map_err(|error| StopError::new(format!("cannot read {}: {error}", directory.display())))?
@@ -482,16 +476,27 @@ fn plan_temp_cleanup_tree(
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| StopError::new(format!("cannot stat {}: {error}", path.display())))?;
         if metadata.file_type().is_dir() {
-            plan_temp_cleanup_tree(&path, owner_uid, entries)?;
+            plan_agent_cleanup_tree(&path, owner_uid, depth + 1, entries)?;
         } else {
-            entries.push(bind_temp_cleanup_entry(&path)?);
+            push_agent_cleanup_entry(entries, &path)?;
         }
     }
-    entries.push(bind_temp_cleanup_entry(directory)?);
+    push_agent_cleanup_entry(entries, directory)?;
     Ok(())
 }
 
-fn bind_temp_cleanup_entry(path: &std::path::Path) -> Result<TempCleanupEntry, StopError> {
+fn push_agent_cleanup_entry(
+    entries: &mut Vec<AgentCleanupEntry>,
+    path: &std::path::Path,
+) -> Result<(), StopError> {
+    if entries.len() >= MAX_AGENT_CLEANUP_ENTRIES {
+        return Err(StopError::new("agent cleanup traversal exceeds limit"));
+    }
+    entries.push(bind_agent_cleanup_entry(path)?);
+    Ok(())
+}
+
+fn bind_agent_cleanup_entry(path: &std::path::Path) -> Result<AgentCleanupEntry, StopError> {
     let flags =
         nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC;
     let file = nix::fcntl::open(path, flags, nix::sys::stat::Mode::empty())
@@ -513,9 +518,8 @@ fn bind_temp_cleanup_entry(path: &std::path::Path) -> Result<TempCleanupEntry, S
             path.display()
         )));
     }
-    Ok(TempCleanupEntry {
+    Ok(AgentCleanupEntry {
         path: path.to_owned(),
-        directory: metadata.is_dir(),
         dev: metadata.dev(),
         ino: metadata.ino(),
         kind: metadata.mode() & libc::S_IFMT,
@@ -548,10 +552,13 @@ fn preflight_cleanup_directory(path: &std::path::Path, owner_uid: u32) -> Result
     Ok(())
 }
 
-pub fn execute_temp_cleanup(plan: TempCleanupPlan) -> Result<(), StopError> {
+pub fn execute_agent_cleanup(plan: AgentCleanupPlan) -> Result<(), StopError> {
+    for entry in &plan.entries {
+        verify_agent_cleanup_entry(entry)?;
+    }
     for entry in plan.entries {
-        verify_temp_cleanup_entry(&entry)?;
-        let result = if entry.directory {
+        verify_agent_cleanup_entry(&entry)?;
+        let result = if entry.kind == libc::S_IFDIR {
             fs::remove_dir(&entry.path)
         } else {
             fs::remove_file(&entry.path)
@@ -563,7 +570,7 @@ pub fn execute_temp_cleanup(plan: TempCleanupPlan) -> Result<(), StopError> {
     Ok(())
 }
 
-fn verify_temp_cleanup_entry(entry: &TempCleanupEntry) -> Result<(), StopError> {
+fn verify_agent_cleanup_entry(entry: &AgentCleanupEntry) -> Result<(), StopError> {
     let held = entry.file.metadata().map_err(|error| {
         StopError::new(format!("cannot stat {}: {error}", entry.path.display()))
     })?;
@@ -571,10 +578,8 @@ fn verify_temp_cleanup_entry(entry: &TempCleanupEntry) -> Result<(), StopError> 
         StopError::new(format!("cannot stat {}: {error}", entry.path.display()))
     })?;
     if (held.dev(), held.ino(), held.mode() & libc::S_IFMT) != (entry.dev, entry.ino, entry.kind)
-        || held.file_type().is_dir() != entry.directory
         || (visible.dev(), visible.ino(), visible.mode() & libc::S_IFMT)
             != (entry.dev, entry.ino, entry.kind)
-        || visible.file_type().is_dir() != entry.directory
     {
         return Err(StopError::new(format!(
             "temp cleanup receipt conflict: {}",
@@ -783,7 +788,11 @@ pub fn plan_stop(context: &StopContext, requested_agent: &str) -> Result<StopPla
             |parent| plan_parent_child_cancellations(context, &name, parent),
         )?;
         let cleanup = if temporary {
-            Some(plan_temp_cleanup(context, &name)?)
+            Some(plan_agent_cleanup(
+                &context.source,
+                &name,
+                context.owner_uid,
+            )?)
         } else {
             None
         };
@@ -813,7 +822,7 @@ fn preflight_concrete(plan: &StopPlan) -> Result<(), StopError> {
         }
         agent.cleanup.as_ref().map_or(Ok(()), |cleanup| {
             for entry in &cleanup.entries {
-                verify_temp_cleanup_entry(entry)?;
+                verify_agent_cleanup_entry(entry)?;
             }
             Ok(())
         })?;
@@ -875,19 +884,21 @@ fn stop_concrete_agent(agent: PlannedStop) -> Result<(), StopError> {
         .to_string(),
     )?;
     if let Some(cleanup) = agent.cleanup {
-        execute_temp_cleanup(cleanup)?;
+        execute_agent_cleanup(cleanup)?;
     }
     let runtime = agent
         .runtime
         .as_ref()
         .ok_or_else(|| StopError::new("stop plan omitted runtime receipt"))?;
-    stop_runtime(AgentRuntimeStop {
-        terminal: &runtime.terminal,
-        system: &runtime.system,
-        terminal_live: runtime.terminal_live,
-        system_live: runtime.system_live,
-    })
-    .map_err(|_error| StopError::new("agent stop runtime receipt conflict"))
+    if runtime.terminal_live {
+        stop_launch(&runtime.terminal)
+            .map_err(|_error| StopError::new("agent stop runtime receipt conflict"))?;
+    }
+    if runtime.system_live {
+        stop_system_agent_socket(&runtime.system)
+            .map_err(|_error| StopError::new("agent stop runtime receipt conflict"))?;
+    }
+    Ok(())
 }
 
 /// Executes a fully preflighted concrete plan in descendant postorder.
@@ -1001,28 +1012,6 @@ impl StopPlan {
     pub fn new(entries: Vec<PlannedStop>) -> Self {
         Self { entries }
     }
-}
-
-/// Receipt-bound runtime resources selected for an agent stop.
-#[derive(Clone, Copy, Debug)]
-pub struct AgentRuntimeStop<'a> {
-    pub terminal: &'a AgentLaunchReceipt,
-    pub system: &'a SystemAgentSocketReceipt,
-    pub terminal_live: bool,
-    pub system_live: bool,
-}
-
-/// Stops receipt-bound runtime resources in terminal-first order.
-///
-/// Each stop operation verifies the receipt before removing its resource.
-pub fn stop_runtime(stop: AgentRuntimeStop<'_>) -> Result<(), AgentLaunchError> {
-    if stop.terminal_live {
-        stop_launch(stop.terminal)?;
-    }
-    if stop.system_live {
-        stop_system_agent_socket(stop.system)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1162,13 +1151,13 @@ mod tests {
         fs::create_dir_all(&root)?;
         let path = root.join("agent");
         fs::write(&path, "old")?;
-        let plan = TempCleanupPlan {
-            entries: vec![bind_temp_cleanup_entry(&path)?],
+        let plan = AgentCleanupPlan {
+            entries: vec![bind_agent_cleanup_entry(&path)?],
         };
         fs::remove_file(&path)?;
         fs::write(&path, "replacement")?;
 
-        assert!(execute_temp_cleanup(plan).is_err());
+        assert!(execute_agent_cleanup(plan).is_err());
         assert_eq!(fs::read_to_string(&path)?, "replacement");
         fs::remove_dir_all(root)?;
         Ok(())

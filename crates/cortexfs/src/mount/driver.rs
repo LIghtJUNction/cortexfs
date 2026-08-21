@@ -147,6 +147,30 @@ impl CortexFuse {
         Ok(())
     }
 
+    fn forget_agent_definition(&self, path: &str) -> Result<(), FuseError> {
+        let Some(agent) = path.strip_prefix("agent/") else {
+            return Err(FuseError::InvalidPath);
+        };
+        let socket = format!("agent/{agent}.sock");
+        let control = format!("agent/{agent}.d");
+        self.paths
+            .lock()
+            .map_err(|_error| FuseError::Io)?
+            .retain(|_inode, known| {
+                known != path
+                    && known != &socket
+                    && known != &control
+                    && !known
+                        .strip_prefix(&control)
+                        .is_some_and(|suffix| suffix.starts_with('/'))
+            });
+        self.socket_overlays
+            .lock()
+            .map_err(|_error| FuseError::Io)?
+            .remove(&socket);
+        Ok(())
+    }
+
     fn rename_path(&self, from: &str, to: &str) -> Result<(), FuseError> {
         for known in self
             .paths

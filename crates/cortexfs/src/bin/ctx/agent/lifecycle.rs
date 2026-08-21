@@ -1,21 +1,10 @@
 use crate::*;
-use cortexfs::agent::stop::{TempCleanupPlan, execute_temp_cleanup, plan_temp_cleanup_paths};
-
-fn plan_temp_cleanup(root: &Path, name: &str) -> Result<TempCleanupPlan, CliError> {
-    let owner_uid = nix::unistd::Uid::effective().as_raw();
-    plan_temp_cleanup_paths(
-        owner_uid,
-        &cortexfs_paths::agent_root_path(root),
-        &agent_object_path(root, name),
-        &agent_socket_path(root, name)?,
-        &agent_control_dir(root, name),
-    )
-    .map_err(|error| CliError::unavailable(error.to_string()))
-}
+use cortexfs::agent::stop::{execute_agent_cleanup, plan_agent_cleanup};
 
 pub(crate) fn remove_temp_agent_object(root: &Path, child: &str) -> Result<(), CliError> {
-    execute_temp_cleanup(plan_temp_cleanup(root, child)?)
-        .map_err(|error| CliError::unavailable(error.to_string()))
+    let plan = plan_agent_cleanup(root, child, nix::unistd::Uid::effective().as_raw())
+        .map_err(|error| CliError::unavailable(error.to_string()))?;
+    execute_agent_cleanup(plan).map_err(|error| CliError::unavailable(error.to_string()))
 }
 
 pub(crate) fn write_agent_control_plain(path: &Path, content: &str) -> Result<(), CliError> {

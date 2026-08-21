@@ -56,6 +56,8 @@ pub enum FuseError {
     NotEmpty,
     /// Exclusive creation found an existing path.
     AlreadyExists,
+    /// Mutation requires a stopped runtime instance.
+    Busy,
     /// Mutation is outside writable durable ABI state.
     ReadOnly,
     /// Writes through this projection are limited to ABI control files.
@@ -214,6 +216,7 @@ impl FuseError {
             Self::NotFile => "EISDIR",
             Self::NotEmpty => "ENOTEMPTY",
             Self::AlreadyExists => "EEXIST",
+            Self::Busy => "EBUSY",
             Self::ReadOnly => "EROFS",
             Self::TooLarge => "EMSGSIZE",
             Self::PermissionDenied => "EACCES",

@@ -807,6 +807,23 @@ fn fuse_projection_creates_owned_agent_lifecycle_paths() {
         fs::read_to_string(root.join("agent/scratch.d/owner")).unwrap_or_default(),
         uid.to_string()
     );
+    assert!(fs::write(root.join("agent/scratch.d/meta.json"), "{}\n").is_ok());
+    assert!(
+        root.join(format!("home/{uid}/agent/scratch/session/index/by-cwd"))
+            .is_dir()
+    );
+    assert!(
+        projection
+            .create_socket_placeholder("agent/scratch.sock", uid, gid, 0o660)
+            .is_ok()
+    );
+    assert_eq!(
+        projection.remove_agent_definition("agent/scratch", uid),
+        Ok(())
+    );
+    for path in ["agent/scratch", "agent/scratch.d", "agent/scratch.sock"] {
+        assert!(!root.join(path).exists(), "definition residue: {path}");
+    }
     assert!(
         root.join(format!("home/{uid}/agent/scratch/session/index/by-cwd"))
             .is_dir()
@@ -940,9 +957,8 @@ fn fuse_projection_persists_owned_agent_and_terminal_socket_aliases() {
     );
 }
 
-#[test]
-fn fuse_projection_renames_owner_socket_alias_to_generated_claim_and_back() {
-    let root = reference_tree("fuse-socket-alias-claim");
+fn agent_socket_claim_fixture(label: &str) -> (TestDir, FuseProjection, u32, PathBuf) {
+    let root = reference_tree(label);
     let projection =
         FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
     let uid = nix::unistd::Uid::current().as_raw();
@@ -955,6 +971,12 @@ fn fuse_projection_renames_owner_socket_alias_to_generated_claim_and_back() {
         Ok(())
     );
     assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    (root, projection, uid, target)
+}
+
+#[test]
+fn fuse_projection_renames_owner_socket_alias_to_generated_claim_and_back() {
+    let (root, projection, uid, target) = agent_socket_claim_fixture("fuse-socket-alias-claim");
     let claim = "agent/.coder.sock.claim-1-1-0";
 
     assert_eq!(
@@ -975,19 +997,8 @@ fn fuse_projection_renames_owner_socket_alias_to_generated_claim_and_back() {
 
 #[test]
 fn fuse_projection_rejects_foreign_socket_claim_without_moving_alias() {
-    let root = reference_tree("fuse-socket-alias-claim-foreign");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
-    let uid = nix::unistd::Uid::current().as_raw();
-    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
-    let target = PathBuf::from(format!(
-        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
-    ));
-    assert_eq!(
-        projection.remove_socket_alias("agent/coder.sock", uid),
-        Ok(())
-    );
-    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    let (root, projection, uid, target) =
+        agent_socket_claim_fixture("fuse-socket-alias-claim-foreign");
 
     assert_eq!(
         projection.rename_socket_alias_claim(
@@ -1013,19 +1024,8 @@ fn fuse_projection_rejects_foreign_socket_claim_without_moving_alias() {
 
 #[test]
 fn fuse_projection_hides_but_resolves_and_removes_generated_socket_claim() {
-    let root = reference_tree("fuse-socket-alias-claim-remove");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
-    let uid = nix::unistd::Uid::current().as_raw();
-    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
-    let target = PathBuf::from(format!(
-        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
-    ));
-    assert_eq!(
-        projection.remove_socket_alias("agent/coder.sock", uid),
-        Ok(())
-    );
-    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    let (_root, projection, uid, _target) =
+        agent_socket_claim_fixture("fuse-socket-alias-claim-remove");
     let claim = "agent/.coder.sock.claim-1-1-0";
     assert_eq!(
         projection.rename_socket_alias_claim("agent/coder.sock", claim, uid),

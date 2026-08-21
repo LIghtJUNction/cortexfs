@@ -105,5 +105,20 @@ fn fuse_projection_rolls_back_owned_agent_lifecycle_paths_only() {
         projection.remove_layout_file("home/1000/.profile", uid),
         Err(FuseError::NotControlFile)
     );
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let target = format!("/run/user/{uid}/cortexfs/agent/test/coder.sock");
+    assert!(fs::remove_file(root.join("agent/coder.sock")).is_ok());
+    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+
+    assert_eq!(
+        projection.remove_agent_definition("agent/coder", uid),
+        Err(FuseError::Busy)
+    );
+    assert_eq!(
+        projection.remove_empty_layout_dir("agent/coder.d", uid),
+        Err(FuseError::ReadOnly)
+    );
+    assert!(root.join("agent/coder").is_file());
+    assert!(root.join("agent/coder.d").is_dir());
 }
 use super::*;

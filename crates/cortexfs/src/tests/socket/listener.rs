@@ -6,6 +6,23 @@ fn system_socket_policy_allows_owner_or_root_only() {
     assert!(!policy.allows(PeerCredentials::new(Some(3), 1001, 1000)));
 }
 
+fn send_frame(client: &mut UnixStream) -> std::io::Result<()> {
+    client.write_all(
+        br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
+"#,
+    )?;
+    client.shutdown(Shutdown::Write)
+}
+
+fn read_response(client: &mut UnixStream) -> std::io::Result<String> {
+    let mut buffer = [0_u8; 256];
+    let read = client.read(&mut buffer)?;
+    let bytes = buffer
+        .get(..read)
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidData))?;
+    Ok(String::from_utf8_lossy(bytes).into_owned())
+}
+
 #[test]
 fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     let root = clean_test_dir("socket-stream-runtime");
@@ -17,15 +34,7 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     let peer = ok!(peer);
     let policy = SocketPeerPolicy::uid_gid(peer.uid(), peer.gid());
 
-    assert!(
-        client
-            .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
-"#,
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
+    assert!(send_frame(&mut client).is_ok());
 
     let outcome = serve_unix_socket_stream_once(
         &mut socket,
@@ -37,13 +46,7 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     let outcome = ok!(outcome);
     assert_eq!(outcome.frames().len(), 1);
 
-    let mut buffer = [0_u8; 256];
-    let read = client.read(&mut buffer);
-    let read = ok!(read);
-    let Some(bytes) = buffer.get(..read) else {
-        return;
-    };
-    let response = String::from_utf8_lossy(bytes);
+    let response = ok!(read_response(&mut client));
     assert!(response.contains("\"type\":\"start\""));
     let run = ok!(canonical_run(&response).ok_or("missing canonical run"));
     assert_ne!(run, "msg-1");
@@ -66,15 +69,7 @@ fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
     };
     let policy = SocketPeerPolicy::uid(denied_uid);
 
-    assert!(
-        client
-            .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
-"#,
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
+    assert!(send_frame(&mut client).is_ok());
 
     let outcome = serve_unix_socket_stream_once(
         &mut socket,
@@ -85,13 +80,7 @@ fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
     );
     assert_eq!(outcome, Err(SocketRuntimeError::PeerDenied));
 
-    let mut buffer = [0_u8; 256];
-    let read = client.read(&mut buffer);
-    let read = ok!(read);
-    let Some(bytes) = buffer.get(..read) else {
-        return;
-    };
-    let response = String::from_utf8_lossy(bytes);
+    let response = ok!(read_response(&mut client));
     assert!(response.contains("\"type\":\"error\""));
     assert!(response.contains("\"code\":\"EACCES\""));
     assert!(!session_root.exists());
@@ -113,13 +102,7 @@ fn socket_stream_runtime_times_out_idle_client_before_mutating_session() {
     let outcome = serve_unix_socket_stream_once(&mut socket, None, &session_root, "/work", None);
 
     assert_eq!(outcome, Err(SocketRuntimeError::CannotReadFrame));
-    let mut buffer = [0_u8; 256];
-    let read = client.read(&mut buffer);
-    let read = ok!(read);
-    let Some(bytes) = buffer.get(..read) else {
-        return;
-    };
-    let response = String::from_utf8_lossy(bytes);
+    let response = ok!(read_response(&mut client));
     assert!(response.contains("\"type\":\"error\""));
     assert!(response.contains("\"code\":\"EIO\""));
     assert!(!session_root.exists());
@@ -152,15 +135,7 @@ fn socket_listener_runtime_accepts_and_serves_one_connection() {
 
     let client = UnixStream::connect(&socket_path);
     let mut client = ok!(client);
-    assert!(
-        client
-            .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
-"#,
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
+    assert!(send_frame(&mut client).is_ok());
 
     let outcome = serve_unix_socket_listener_once(
         &listener,
@@ -172,13 +147,7 @@ fn socket_listener_runtime_accepts_and_serves_one_connection() {
     let outcome = ok!(outcome);
     assert_eq!(outcome.frames().len(), 1);
 
-    let mut buffer = [0_u8; 256];
-    let read = client.read(&mut buffer);
-    let read = ok!(read);
-    let Some(bytes) = buffer.get(..read) else {
-        return;
-    };
-    let response = String::from_utf8_lossy(bytes);
+    let response = ok!(read_response(&mut client));
     assert!(response.contains("\"type\":\"start\""));
     let run = ok!(canonical_run(&response).ok_or("missing canonical run"));
     assert_ne!(run, "msg-1");

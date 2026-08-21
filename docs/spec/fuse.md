@@ -211,3 +211,11 @@ FUSE supports `rmdir` only for empty durable plain directories under
 It must not remove `/ctx`, top-level ABI directories, global object projections,
 virtual paths, sockets, symlinks, or non-empty directories. Non-empty directories
 fail with `ENOTEMPTY`; read-only ABI/projection paths fail with `EROFS`.
+
+Deleting an owner-authorized stopped `agent/<name>` definition through `unlink`
+also removes its exact `agent/<name>.sock` placeholder and `agent/<name>.d/`
+control tree after receipt-bound preflight. Untrusted or live runtime receipts
+fail with `EBUSY`; callers must stop the Agent first. This operation never
+removes the Agent home, sessions, or durable history. `agent/<name>` is the
+only delete handle: direct removal of its `.sock`, `.d`, or concrete `.d/*`
+control file fails with `EROFS` (atomic write temporary files are exempt).

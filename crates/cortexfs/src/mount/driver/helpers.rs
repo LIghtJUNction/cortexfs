@@ -172,7 +172,12 @@ impl CortexFuse {
     ) -> Option<ReplyEmpty> {
         match remove(layout_path) {
             Ok(()) => {
-                if let Err(error) = self.forget_path(layout_path) {
+                let forget = if FuseProjection::is_agent_wrapper_path(layout_path) {
+                    self.forget_agent_definition(layout_path)
+                } else {
+                    self.forget_path(layout_path)
+                };
+                if let Err(error) = forget {
                     reply.error(errno(error));
                     return None;
                 }
@@ -605,6 +610,7 @@ pub(crate) fn errno(error: FuseError) -> Errno {
         FuseError::NotFile => Errno::EISDIR,
         FuseError::NotEmpty => Errno::ENOTEMPTY,
         FuseError::AlreadyExists => Errno::EEXIST,
+        FuseError::Busy => Errno::EBUSY,
         FuseError::ReadOnly => Errno::EROFS,
         FuseError::TooLarge => Errno::EMSGSIZE,
         FuseError::PermissionDenied => Errno::EACCES,

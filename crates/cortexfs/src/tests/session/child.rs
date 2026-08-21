@@ -394,9 +394,12 @@ fn agent_create_home_skeleton_is_child_owned() {
     }
 }
 
-#[test]
-fn agent_create_rollback_surfaces_nonempty_owned_directory() {
-    let root = clean_test_dir("agent-create-rollback-nonempty");
+fn assert_agent_create_injected_rollback(
+    label: &str,
+    injected_stage: AgentCreateStage,
+    injected_path: &str,
+) {
+    let root = clean_test_dir(label);
     let result = create_agent_files_with_hook(
         &root,
         "1000",
@@ -404,11 +407,8 @@ fn agent_create_rollback_surfaces_nonempty_owned_directory() {
         "#!/bin/sh\nexit 0\n",
         &[],
         |stage| {
-            if stage == AgentCreateStage::SessionBound {
-                write_text_file(
-                    &root.join("home/1000/agent/worker-1/cache/injected"),
-                    "keep\n",
-                );
+            if stage == injected_stage {
+                write_text_file(&root.join(injected_path), "keep\n");
                 Err(AgentCreateError::CannotCreate)
             } else {
                 Ok(())
@@ -427,32 +427,21 @@ fn agent_create_rollback_surfaces_nonempty_owned_directory() {
 }
 
 #[test]
-fn agent_create_control_injection_after_receipts_is_preserved_as_conflict() {
-    let root = clean_test_dir("agent-create-control-injection");
-    let result = create_agent_files_with_hook(
-        &root,
-        "1000",
-        "worker-1",
-        "#!/bin/sh\nexit 0\n",
-        &[],
-        |stage| {
-            if stage == AgentCreateStage::Executable {
-                write_text_file(&root.join("agent/worker-1.d/injected"), "keep\n");
-                Err(AgentCreateError::CannotCreate)
-            } else {
-                Ok(())
-            }
-        },
+fn agent_create_rollback_surfaces_nonempty_owned_directory() {
+    assert_agent_create_injected_rollback(
+        "agent-create-rollback-nonempty",
+        AgentCreateStage::SessionBound,
+        "home/1000/agent/worker-1/cache/injected",
     );
-    assert!(matches!(result, Err(AgentCreateError::RollbackConflict(_))));
-    let Err(AgentCreateError::RollbackConflict(conflict)) = result else {
-        return;
-    };
-    assert_eq!(conflict.stage, "rmdir");
-    let Some(quarantine) = conflict.quarantine else {
-        return;
-    };
-    assert_file_text(&quarantine.join("injected"), "keep\n");
+}
+
+#[test]
+fn agent_create_control_injection_after_receipts_is_preserved_as_conflict() {
+    assert_agent_create_injected_rollback(
+        "agent-create-control-injection",
+        AgentCreateStage::Executable,
+        "agent/worker-1.d/injected",
+    );
 }
 
 #[test]
