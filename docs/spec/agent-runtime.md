@@ -200,8 +200,11 @@ one newline, with no other bytes, and is at most 1 MiB including that newline:
 Unknown or missing fields are invalid. `run` and `step` must equal the
 host-owned launch environment. Step 0 requires null `observation`; later steps
 require exactly the immediately preceding host result. Context strings are at
-most 64 KiB each and observation content at most 16 KiB. The host permits at
-most eight calls and nine process starts, rejects replayed call ids before
+most 64 KiB each and observation content at most 16 KiB. The host reads the
+canonical positive `CTX_AGENT_STEPS` value from `agent/<name>.d/env` as the
+per-run tool continuation budget; bootstrap writes 64. The derived value is
+informational to the executable Agent, while the host enforces the budget. The
+host rejects replayed call ids before
 authorization, rechecks policy for every call, and checks cancellation before,
 during, and after each SDK/tool process. Only the host writes tool results and
 the logical run's lifecycle frames. It records the original user message once,
@@ -302,6 +305,19 @@ If both locations are unavailable, it returns a socket-availability error.
 overridden, it binds the caller's current working directory at `/workspace` with
 read-write access and starts the terminal there. If the host directory contains
 `.git`, `.git` is over-mounted at `/workspace/.git` read-only.
+
+An explicit host-native terminal is available only through:
+
+```text
+ctx agent start NAME --environment native --ack-host-access
+```
+
+It starts `ctxterm -> bash` at the resolved host working directory, without
+Bubblewrap filesystem, network, or `/tmp` isolation. The acknowledgement is
+per invocation and is never written to Agent control files. CortexFS still
+clears the inherited environment, records the session, and applies its normal
+terminal lifecycle. This mode is for an operator deliberately granting host
+access; it is not a policy escape hatch for ordinary Agent runs.
 
 The sandbox home is:
 

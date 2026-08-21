@@ -1715,8 +1715,8 @@ fn terminal_events_path(
             .to_string(),
     )
 }
-
-fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
+/// Returns the fixed environment for an Agent terminal process.
+pub fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
     let groups = view
         .identity()
         .groups()
@@ -1733,6 +1733,9 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         crate::ChildLifecycle::Owned => "owned",
         crate::ChildLifecycle::Temp => "temp",
     };
+    let role = crate::is_worker_agent_name(view.agent_name())
+        .then_some("worker")
+        .unwrap_or("agent");
     let mut env = vec![
         (
             "CTX_ROOT".to_owned(),
@@ -1751,7 +1754,7 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
                 .to_string(),
         ),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
-        ("CTX_AGENT_ROLE".to_owned(), "agent".to_owned()),
+        ("CTX_AGENT_ROLE".to_owned(), role.to_owned()),
         ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
         ("CTX_AGENT_LIFE".to_owned(), life.to_owned()),
         (

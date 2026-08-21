@@ -92,6 +92,10 @@ The `abi` control is required and accepts only `sdk-envelope-v1`; it must not be
 inferred from executable contents or other controls. `approval=ask` uses this
 host-mediated exchange.
 
+`CTX_AGENT_STEPS` in `env` is a host-enforced per-run resource budget. Bootstrap
+writes `64`; a legacy environment without it retains that default. The budget
+does not weaken policy, cancellation, output, or repeated-call protections.
+
 The optional `tools` control declares the agent's static direct-native tool set.
 It is empty when missing or empty and otherwise contains one canonical tool
 name per line with a final newline. Blank, whitespace-padded, duplicate,

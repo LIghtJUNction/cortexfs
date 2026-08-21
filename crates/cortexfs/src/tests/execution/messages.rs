@@ -1017,7 +1017,7 @@ esac
 }
 
 #[test]
-fn sdk_envelope_rejects_replay_and_ninth_call_before_execution() {
+fn sdk_envelope_rejects_replay_and_configured_tool_step_limit() {
     for replay in [true, false] {
         let root = reference_tree(if replay {
             "sdk-envelope-replay"
@@ -1025,16 +1025,17 @@ fn sdk_envelope_rejects_replay_and_ninth_call_before_execution() {
             "sdk-envelope-limit"
         });
         write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+        write_text_file(&root.join("agent/coder.d/env"), "CTX_AGENT_STEPS=2\n");
         let agent_executable = root.join("agent/coder");
-        let id = if replay {
-            "call-1"
-        } else {
-            "call-$CTX_AGENT_STEP"
-        };
         write_text_file(
             &agent_executable,
             &format!(
-                "#!/bin/sh\nIFS= read -r envelope\nid={id}\nprintf '{{\"type\":\"tool_call\",\"run\":\"%s\",\"id\":\"%s\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}\\n' \"$CTX_RUN_ID\" \"$id\"\n"
+                "#!/bin/sh\nIFS= read -r envelope\nid={}\nprintf '{{\"type\":\"tool_call\",\"run\":\"%s\",\"id\":\"%s\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}\\n' \"$CTX_RUN_ID\" \"$id\"\n",
+                if replay {
+                    "call-1"
+                } else {
+                    "call-$CTX_AGENT_STEP"
+                }
             ),
         );
         set_file_mode(&agent_executable, 0o755);
@@ -1055,10 +1056,9 @@ fn sdk_envelope_rejects_replay_and_ninth_call_before_execution() {
             direct_agent_runtime(&root, &view, &session_root, &agent_executable),
         ));
         let jsonl = outcome.jsonl();
-        let expected_results = if replay { 1 } else { 8 };
         assert_eq!(
             jsonl.matches("\"type\":\"tool_result\"").count(),
-            expected_results,
+            if replay { 1 } else { 2 },
             "{jsonl}"
         );
         assert_eq!(jsonl.matches("\"type\":\"error\"").count(), 1, "{jsonl}");

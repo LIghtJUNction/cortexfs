@@ -7,7 +7,10 @@ pub(crate) enum AgentArgs {
         name: String,
         from: String,
     },
-    Start(AgentStartArgs),
+    Start {
+        args: AgentStartArgs,
+        native: bool,
+    },
     Stop {
         name: String,
     },
@@ -161,7 +164,7 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             require_cli_name("agent name", name)?;
             agent_apply(root, name, Path::new(from))
         }
-        AgentArgs::Start(ref args) => agent_start(root, args),
+        AgentArgs::Start { ref args, native } => agent_start(root, args, native),
         AgentArgs::Stop { ref name } => {
             require_cli_name("agent name", name)?;
             agent_stop(root, name)

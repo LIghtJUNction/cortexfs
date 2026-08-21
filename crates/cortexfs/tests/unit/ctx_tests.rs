@@ -15,7 +15,7 @@ use super::{
     agent_lifecycle_tool_selected, agent_new, agent_new_args_from_profile, agent_new_host_fallback,
     agent_new_request_json, agent_runtime_context_matches_values, agent_send_request_json,
     agent_session_archive, agent_session_gc, agent_start_mounts_with_default_source,
-    agent_start_process_command, agent_start_sandbox_cwd, agent_start_status_lines,
+    agent_start_sandbox_cwd, agent_start_status_lines,
     agent_start_systemd_command, agent_status_lines, agent_stop, agent_terminal_socket,
     agent_trajectory, agent_wait, append_agent_log_event, atomic_write_provider_config,
     bootstrap_reference_tree_default, build_agent_system_prompt, cat_path, child_wait_exit_code,
@@ -64,7 +64,7 @@ use cortexfs::{
     DEFAULT_WORKER_MODEL, EventStreamIssue, MessageStreamIssue, ModelCapabilityIssue,
     ModelDriverRouteError, SESSION_REQUIRED_FILES, SessionControlKind, SessionIndexKind,
     ToolSchemaIssue, columnar, derive_agent_runtime_view, ensure_reference_tree,
-    install_executable_object_wrapper, parse_abi_path,
+    install_executable_object_wrapper, launch_process_for, parse_abi_path,
 };
 use std::cell::Cell;
 use std::fs;

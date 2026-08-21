@@ -97,7 +97,8 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
     match command.as_str() {
         "new" => Ok(Command::Agent(AgentArgs::New(parse_agent_new(values)?))),
         "apply" => Ok(Command::Agent(parse_agent_apply(values)?)),
-        "start" => Ok(Command::Agent(AgentArgs::Start(parse_agent_start(values)?))),
+        "start" => parse_agent_start(values)
+            .map(|(args, native)| Command::Agent(AgentArgs::Start { args, native })),
         "stop" => {
             let name = required_arg(&mut values, "agent stop requires an agent name")?;
             no_extra_args(values)?;
@@ -526,7 +527,7 @@ pub(crate) fn parse_agent_cancel_args(
 /// Parse `agent start` arguments and session/mount/startup options.
 pub(crate) fn parse_agent_start(
     mut values: impl Iterator<Item = String>,
-) -> Result<AgentStartArgs, CliError> {
+) -> Result<(AgentStartArgs, bool), CliError> {
     let name = required_arg(&mut values, "agent start requires an agent name")?;
     let mut args = AgentStartArgs {
         name,
@@ -535,6 +536,8 @@ pub(crate) fn parse_agent_start(
         default_workspace: true,
         mounts: Vec::new(),
     };
+    let mut native = false;
+    let mut host_access_acknowledged = false;
     while let Some(value) = values.next() {
         match value.as_str() {
             "--session" | "-s" => {
@@ -544,6 +547,23 @@ pub(crate) fn parse_agent_start(
             "--cwd" => {
                 args.cwd = required_arg(&mut values, "agent start --cwd requires a path")?;
             }
+            "--environment" => {
+                native = match required_arg(
+                    &mut values,
+                    "agent start --environment requires sandbox or native",
+                )?
+                .as_str()
+                {
+                    "sandbox" => false,
+                    "native" => true,
+                    _ => {
+                        return Err(CliError::usage(
+                            "agent start --environment requires sandbox or native",
+                        ));
+                    }
+                };
+            }
+            "--ack-host-access" => host_access_acknowledged = true,
             "--mount" => {
                 let source =
                     required_arg(&mut values, "agent start --mount requires a source path")?;
@@ -562,7 +582,15 @@ pub(crate) fn parse_agent_start(
             _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }
     }
-    Ok(args)
+    match (native, host_access_acknowledged) {
+        (true, false) => Err(CliError::usage(
+            "native environment requires --ack-host-access",
+        )),
+        (false, true) => Err(CliError::usage(
+            "--ack-host-access requires --environment native",
+        )),
+        _ => Ok((args, native)),
+    }
 }
 
 /// Parse `agent new` arguments and optional profile fallback.

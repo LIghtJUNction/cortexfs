@@ -72,7 +72,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(env_value(view.env(), "CTX_PROVIDER_SECRET_PATH"), None);
     assert_eq!(env_value(view.env(), "CTX_CONTEXT_WINDOW_TOKENS"), None);
     assert_eq!(env_value(view.env(), "CTX_CONTEXT_WINDOW_CHARS"), None);
-    assert_eq!(view.loop_kind(), &crate::AgentLoop::Chat);
+    assert_eq!(env_value(view.env(), "CTX_AGENT_STEPS"), Some("64"));
     assert_eq!(env_value(view.env(), "CTX_AGENT_LOOP"), Some("chat"));
 }
 

@@ -9,25 +9,50 @@ pub(crate) fn agent_start_systemd_command(
     unit: &str,
 ) -> AgentLaunchCommand {
     let home = view.ctx_home();
-    let mut command = AgentLaunchCommand {
-        program: SYSTEMD_RUN_PROGRAM.to_owned(),
-        args: vec![
-            "--user".to_owned(),
-            "--unit".to_owned(),
-            unit.to_owned(),
-            "--property".to_owned(),
-            "Restart=always".to_owned(),
-            "--property".to_owned(),
-            "RestartSec=250ms".to_owned(),
-            cortexfs::support::command::ENV.to_owned(),
-            "-i".to_owned(),
-            format!("PATH={}", cortexfs::support::command::TRUSTED_PATH),
-            cortexfs::support::command::BWRAP.to_owned(),
-        ],
-    };
+    let mut command = agent_systemd_command(unit, None);
+    command.args.extend([
+        cortexfs::support::command::ENV.to_owned(),
+        "-i".to_owned(),
+        format!("PATH={}", cortexfs::support::command::TRUSTED_PATH),
+        cortexfs::support::command::BWRAP.to_owned(),
+    ]);
     command
         .args
         .extend(agent_bwrap_args(root, args, cli_mounts, view, socket, home));
+    command
+}
+
+pub(crate) fn agent_start_native_systemd_command(
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+    socket: &Path,
+    unit: &str,
+) -> AgentLaunchCommand {
+    let cwd = agent_start_workspace_source(mounts).unwrap_or_else(|| args.cwd.clone());
+    let mut command = agent_systemd_command(unit, Some(&cwd));
+    command
+        .args
+        .extend([cortexfs::support::command::ENV.to_owned(), "-i".to_owned()]);
+    for (key, value) in cortexfs::agent::launch::terminal_env(view) {
+        command.args.push(format!("{key}={value}"));
+    }
+    command.args.extend([
+        format!("HOME={}", view.home().display()),
+        format!("CTX_AGENT_CWD={cwd}"),
+    ]);
+    if let Some(workspace) = agent_start_workspace_source(mounts) {
+        command.args.push(format!("CTX_WORKSPACE={workspace}"));
+    }
+    command.args.extend([
+        "CTX_RUN_ENVIRONMENT=native".to_owned(),
+        cortexfs::support::command::CTXTERM.to_owned(),
+        "--listen".to_owned(),
+        socket.display().to_string(),
+        "--no-stdio".to_owned(),
+        "--".to_owned(),
+        cortexfs::support::command::BASH.to_owned(),
+    ]);
     command
 }
 
@@ -82,103 +107,6 @@ pub(crate) fn agent_runtime_program() -> String {
     cortexfs::support::command::CORTEXFS_AGENT_RUNTIME.to_owned()
 }
 
-pub(crate) fn agent_start_process_command(
-    identity: &AgentUnixIdentity,
-    command: &AgentLaunchCommand,
-) -> io::Result<ProcessCommand> {
-    launch_process_for(identity, command)
-}
-
-pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
-    let sandbox_ctx_home = sandbox_ctx_home(view);
-    let groups = view
-        .identity()
-        .groups()
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut env = vec![
-        ("CTX_ROOT".to_owned(), CTX_ROOT.to_owned()),
-        (
-            "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-            cortexfs_paths::shared_path(&cortexfs_paths::ctx_root(), "providers.d")
-                .display()
-                .to_string(),
-        ),
-        ("CTX_HOME".to_owned(), sandbox_ctx_home),
-        ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
-        (
-            "CTX_AGENT_ROLE".to_owned(),
-            agent_role_for_display(view.agent_name()).to_owned(),
-        ),
-        ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
-        (
-            "CTX_AGENT_LIFE".to_owned(),
-            agent_lifecycle_name(view.lifecycle()).to_owned(),
-        ),
-        (
-            "CTX_AGENT_ROOT_PATH".to_owned(),
-            view.root().display().to_string(),
-        ),
-        ("CTX_AGENT_CWD".to_owned(), view.cwd().display().to_string()),
-        (
-            "CTX_AGENT_SUBJECT".to_owned(),
-            view.policy_subject().to_owned(),
-        ),
-        (
-            "CTX_AGENT_UID".to_owned(),
-            view.identity().uid().to_string(),
-        ),
-        (
-            "CTX_AGENT_GID".to_owned(),
-            view.identity().gid().to_string(),
-        ),
-        ("CTX_AGENT_GROUPS".to_owned(), groups),
-        ("HOME".to_owned(), AGENT_SANDBOX_HOME.to_owned()),
-        ("USER".to_owned(), view.agent_name().to_owned()),
-        ("LOGNAME".to_owned(), view.agent_name().to_owned()),
-        (
-            "SHELL".to_owned(),
-            cortexfs::support::command::BASH.to_owned(),
-        ),
-        ("TERM".to_owned(), "xterm-256color".to_owned()),
-        ("LANG".to_owned(), "C.UTF-8".to_owned()),
-        ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
-    ];
-    for env_pair in view.env() {
-        let key = &env_pair.0;
-        let value = &env_pair.1;
-        if matches!(
-            key.as_str(),
-            "CTX_ROOT"
-                | "CTX_PROVIDER_CONFIG_DIR"
-                | "CTX_HOME"
-                | "CTX_AGENT"
-                | "CTX_AGENT_ROLE"
-                | "CTX_AGENT_MODEL"
-                | "CTX_AGENT_LIFE"
-                | "CTX_AGENT_ROOT_PATH"
-                | "CTX_AGENT_CWD"
-                | "CTX_AGENT_SUBJECT"
-                | "CTX_AGENT_UID"
-                | "CTX_AGENT_GID"
-                | "CTX_AGENT_GROUPS"
-                | "HOME"
-                | "USER"
-                | "LOGNAME"
-                | "SHELL"
-                | "TERM"
-                | "LANG"
-                | "GIT_OPTIONAL_LOCKS"
-        ) {
-            continue;
-        }
-        env.push((key.clone(), value.clone()));
-    }
-    env
-}
-
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
     match lifecycle {
         cortexfs::ChildLifecycle::Owned => "owned",
@@ -196,7 +124,7 @@ pub(crate) fn agent_bwrap_args(
 ) -> Vec<String> {
     let agent_home = view.home();
     let mut bwrap = vec!["--clearenv".to_owned()];
-    for (key, value) in agent_sandbox_env(root, view) {
+    for (key, value) in cortexfs::agent::launch::terminal_env(view) {
         bwrap.extend(["--setenv".to_owned(), key, value]);
     }
     if let Some(workspace) = agent_start_workspace_source(cli_mounts) {
@@ -291,17 +219,6 @@ pub(crate) fn agent_bwrap_args(
     bwrap
 }
 
-pub(crate) fn sandbox_ctx_home(view: &AgentRuntimeView) -> String {
-    let owner = view
-        .ctx_home()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("1000");
-    cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), owner)
-        .display()
-        .to_string()
-}
-
 pub(crate) fn agent_host_mount_source(root: &Path, source: &str) -> String {
     let source = Path::new(source);
     let ctx_root = cortexfs_paths::ctx_root();
@@ -328,6 +245,21 @@ pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMoun
         return target.display().to_string();
     }
     args.cwd.clone()
+}
+fn agent_systemd_command(unit: &str, cwd: Option<&str>) -> AgentLaunchCommand {
+    let mut args = vec![
+        "--user".to_owned(),
+        format!("--unit={unit}"),
+        "--property=Restart=always".to_owned(),
+        "--property=RestartSec=250ms".to_owned(),
+    ];
+    if let Some(cwd) = cwd {
+        args.push(format!("--property=WorkingDirectory={cwd}"));
+    }
+    AgentLaunchCommand {
+        program: SYSTEMD_RUN_PROGRAM.to_owned(),
+        args,
+    }
 }
 
 pub(crate) fn agent_start_mounts_with_default_source(

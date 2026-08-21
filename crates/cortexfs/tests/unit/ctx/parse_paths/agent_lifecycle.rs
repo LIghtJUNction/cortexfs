@@ -47,7 +47,7 @@ fn parses_agent_lifecycle_commands() {
     );
     assert!(matches!(
         start,
-        Ok(Command::Agent(AgentArgs::Start(ref args)))
+        Ok(Command::Agent(AgentArgs::Start { ref args, native: false }))
             if args.name == "reviewer"
                 && args.session == "test"
                 && args.cwd == "/workspace"

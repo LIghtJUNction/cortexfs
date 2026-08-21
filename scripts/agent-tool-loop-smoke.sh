@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$repo_root"
+
 hosted_test=tests::installed_sdks_run_two_declared_native_tool_calls
-cargo test --locked -p cortexfs-sdk-extension-fixture --test installed \
+scripts/test.sh cargo test --locked -p cortexfs-sdk-extension-fixture --test installed \
     "$hosted_test" -- --list | grep -Fqx "$hosted_test: test"
-cargo test --locked -p cortexfs-sdk-extension-fixture --test installed \
+scripts/test.sh cargo test --locked -p cortexfs-sdk-extension-fixture --test installed \
     "$hosted_test" -- --exact
-cargo test --locked -p cortexfs agent_tool_call_executes_visible_tsh_for_search_and_load --all-features
-cargo test --locked -p cortexfs --bin tsh tool_context --all-features
+scripts/test.sh cargo test --locked -p cortexfs agent_tool_call_executes_visible_tsh_for_search_and_load --all-features
+scripts/test.sh cargo test --locked -p cortexfs --bin tsh tool_context --all-features
 cargo build --locked -p cortexfs \
     --bin ctx \
     --bin tsh \

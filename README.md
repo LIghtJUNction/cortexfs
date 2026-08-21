@@ -110,7 +110,7 @@ For a source checkout:
 ```bash
 cargo run -p cortexfs --bin ctx -- bootstrap
 cargo run -p cortexfs --bin ctx -- doctor
-cargo test --workspace
+scripts/test.sh cargo test --workspace
 ```
 
 Continue with [getting started](docs/getting-started.md),

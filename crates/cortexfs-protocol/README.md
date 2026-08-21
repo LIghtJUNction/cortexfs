@@ -131,7 +131,7 @@ validation, all four response dialects, and all response matrix directions.
 Run the checks yourself:
 
 ```text
-TMPDIR=/tmp cargo test --locked -p cortexfs-protocol
+scripts/test.sh cargo test --locked -p cortexfs-protocol
 TMPDIR=/tmp cargo clippy --locked -p cortexfs-protocol --all-targets -- -D warnings
 TMPDIR=/tmp cargo run --locked --release -p cortexfs-protocol --example bench
 ```

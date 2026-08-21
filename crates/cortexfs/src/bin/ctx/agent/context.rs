@@ -144,7 +144,7 @@ pub(crate) fn agent_env_lines(root: &Path, name: &str) -> Result<Vec<String>, Cl
     require_cli_name("agent name", name)?;
     let view = derive_agent_runtime_view(root, name)
         .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
-    Ok(agent_sandbox_env(root, &view)
+    Ok(cortexfs::agent::launch::terminal_env(&view)
         .into_iter()
         .map(|(key, value)| {
             format!(

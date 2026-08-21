@@ -1,4 +1,5 @@
 use super::*;
+use crate::abi::constants::DEFAULT_AGENT_STEPS;
 
 /// Materializes the documented reference tree under `root`.
 ///
@@ -228,7 +229,10 @@ pub(crate) fn ensure_reference_agent(
         ("life", "owned\n".to_owned()),
         ("root", home_root),
         ("cwd", "/workspace\n".to_owned()),
-        ("env", format!("CTX_ROOT={CTX_ROOT}\n")),
+        (
+            "env",
+            format!("CTX_ROOT={CTX_ROOT}\nCTX_AGENT_STEPS={DEFAULT_AGENT_STEPS}\n"),
+        ),
         (
             "path",
             format!(

@@ -132,6 +132,8 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
     "native_stateless",
 ];
 
+pub(crate) const DEFAULT_AGENT_STEPS: u8 = 64;
+
 /// Canonical agent control-file set materialized by bootstrap.
 pub const AGENT_CONTROL_FILES: &[&str] = &[
     "abi",

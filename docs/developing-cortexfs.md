@@ -339,9 +339,14 @@ state remains plain files and stable events.
 Common checks:
 
 ```bash
-cargo test
+scripts/test.sh cargo test
 npm --prefix docs-site run build
 ```
+
+`scripts/test.sh` runs the test command with a private `/tmp` tmpfs (512 MiB
+by default), so test fixtures cannot fill the host temporary filesystem. Set
+`CORTEXFS_TEST_TMPFS_BYTES` to a decimal byte limit when a larger bounded test
+scratch space is required.
 
 The fixed FUSE integration test mount point is:
 

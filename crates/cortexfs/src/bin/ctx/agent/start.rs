@@ -1,7 +1,11 @@
 use crate::*;
 
-pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
-    let started = agent_start_host(root, args)?;
+pub(crate) fn agent_start(
+    root: &Path,
+    args: &AgentStartArgs,
+    native: bool,
+) -> Result<ExitCode, CliError> {
+    let started = agent_start_host_with_environment(root, args, native)?;
     for line in agent_start_status_lines(
         color_enabled(),
         &args.name,
@@ -48,6 +52,14 @@ pub(crate) fn agent_start_host(
     root: &Path,
     args: &AgentStartArgs,
 ) -> Result<AgentStartHostReceipt, CliError> {
+    agent_start_host_with_environment(root, args, false)
+}
+
+fn agent_start_host_with_environment(
+    root: &Path,
+    args: &AgentStartArgs,
+    native: bool,
+) -> Result<AgentStartHostReceipt, CliError> {
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
     require_sandbox_cwd(&args.cwd)?;
@@ -71,8 +83,16 @@ pub(crate) fn agent_start_host(
         ))
     })?;
     validate_agent_start_mounts(&view, &cli_mounts)?;
-    let (session_cwd, session_workspace, services) =
-        prepare_agent_start(root, args, &view, &cli_mounts)?;
+    let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
+    let session_workspace = agent_start_workspace_source(&cli_mounts);
+    ensure_agent_start_session(
+        root,
+        args,
+        &view,
+        &session_cwd,
+        session_workspace.as_deref(),
+    )?;
+    let services = start_agent_runtime_services(root, args, &cli_mounts, &view, native)?;
     let AgentStartServices {
         visible_socket,
         socket,
@@ -172,19 +192,6 @@ struct AgentStartServices {
     terminal_alias_created: bool,
 }
 
-fn prepare_agent_start(
-    root: &Path,
-    args: &AgentStartArgs,
-    view: &AgentRuntimeView,
-    cli_mounts: &[AgentMount],
-) -> Result<(String, Option<String>, AgentStartServices), CliError> {
-    let cwd = agent_start_sandbox_cwd(args, cli_mounts);
-    let workspace = agent_start_workspace_source(cli_mounts);
-    ensure_agent_start_session(root, args, view, &cwd, workspace.as_deref())?;
-    let services = start_agent_runtime_services(root, args, cli_mounts, view)?;
-    Ok((cwd, workspace, services))
-}
-
 fn record_agent_start_facts(
     root: &Path,
     args: &AgentStartArgs,
@@ -217,6 +224,7 @@ fn start_agent_runtime_services(
     args: &AgentStartArgs,
     cli_mounts: &[AgentMount],
     view: &AgentRuntimeView,
+    native: bool,
 ) -> Result<AgentStartServices, CliError> {
     let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
@@ -227,8 +235,12 @@ fn start_agent_runtime_services(
         .into_iter()
         .collect::<Vec<_>>();
     reset_agent_terminal_unit(view.identity(), &unit);
-    let command = agent_start_systemd_command(root, args, cli_mounts, view, &socket, &unit);
-    let output = match agent_start_process_command(view.identity(), &command)
+    let command = if native {
+        agent_start_native_systemd_command(args, cli_mounts, view, &socket, &unit)
+    } else {
+        agent_start_systemd_command(root, args, cli_mounts, view, &socket, &unit)
+    };
+    let output = match launch_process_for(view.identity(), &command)
         .and_then(|mut process| process.output())
     {
         Ok(output) => output,

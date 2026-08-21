@@ -846,12 +846,18 @@ fn run_agent_envelope_loop_with_control(
     mut control: Option<&mut StartedRunControl>,
     provider_egress: Option<&runtime::egress::ProviderEgress>,
 ) -> Result<AgentRunOutcome, SocketRuntimeError> {
-    const MAX_CALLS: u8 = 8;
+    let max_steps = runtime
+        .env
+        .iter()
+        .find_map(|(name, value)| (name == "CTX_AGENT_STEPS").then_some(value))
+        .and_then(|value| value.parse().ok())
+        .filter(|value: &u8| *value > 0)
+        .unwrap_or(abi::constants::DEFAULT_AGENT_STEPS);
     let mut frames = Vec::new();
     let mut seen = HashSet::new();
     let mut observation = Value::Null;
     let mut tool_context = request.tool_context.to_owned();
-    for step in 0..=MAX_CALLS {
+    for step in 0..=max_steps {
         if agent_run_cancelled(
             &runtime.session_root.join(request.session),
             request.cancellation_id,
@@ -987,12 +993,12 @@ fn run_agent_envelope_loop_with_control(
             )
             .map_err(SocketRuntimeError::Record)?;
         }
-        if step == MAX_CALLS || !seen.insert(call.id.clone()) {
+        if step == max_steps || !seen.insert(call.id.clone()) {
             return Ok(agent_error_outcome(
                 frames,
                 agent_process_failed_frames(
                     request.run_id,
-                    if step == MAX_CALLS {
+                    if step == max_steps {
                         "agent tool loop limit exceeded"
                     } else {
                         "agent replayed tool call id"

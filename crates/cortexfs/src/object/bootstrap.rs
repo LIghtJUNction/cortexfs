@@ -1,3 +1,4 @@
+use crate::abi::constants::DEFAULT_AGENT_STEPS;
 use crate::*;
 use cortexfs_runtime_client::agent::{AGENT_LAUNCH_ABI, is_agent_launch_abi};
 
@@ -234,7 +235,7 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
         "iso" => "shared".to_owned(),
         "life" => "owned".to_owned(),
         "root" | "cwd" => "/".to_owned(),
-        "env" => format!("CTX_ROOT={CTX_ROOT}"),
+        "env" => format!("CTX_ROOT={CTX_ROOT}\nCTX_AGENT_STEPS={DEFAULT_AGENT_STEPS}"),
         "path" => cortexfs_paths::tool_root_path(&cortexfs_paths::ctx_root())
             .display()
             .to_string(),

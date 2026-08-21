@@ -438,7 +438,13 @@ pub(crate) fn derive_agent_runtime_env(
             budget.tokens().to_string(),
         ));
     }
-    let _validated_env = parse_agent_env_control(&env_content)?;
+    let agent_env = parse_agent_env_control(&env_content)?;
+    if let Some((_, steps)) = agent_env
+        .iter()
+        .find(|(name, _value)| name == "CTX_AGENT_STEPS")
+    {
+        env.push(("CTX_AGENT_STEPS".to_owned(), steps.clone()));
+    }
     Ok(env)
 }
 
@@ -459,7 +465,10 @@ pub(crate) fn parse_agent_env_control(
         let (key, value) = raw_line
             .split_once('=')
             .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("env".to_owned()))?;
-        if !is_valid_env_key(key) || value.bytes().any(|byte| byte.is_ascii_control()) {
+        if !is_valid_env_key(key)
+            || value.bytes().any(|byte| byte.is_ascii_control())
+            || key == "CTX_AGENT_STEPS" && !value.parse::<u8>().is_ok_and(|steps| steps > 0)
+        {
             return Err(AgentRuntimeViewError::InvalidControlFile("env".to_owned()));
         }
         env.push((key.to_owned(), value.to_owned()));

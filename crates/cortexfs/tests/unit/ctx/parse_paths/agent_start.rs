@@ -828,8 +828,8 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
     assert!(
         command.program == "/usr/bin/systemd-run"
                 && command.args.contains(&"--user".to_owned())
-                && contains_arg_pair(&command.args, "--property", "Restart=always")
-                && contains_arg_pair(&command.args, "--property", "RestartSec=250ms")
+                && command.args.contains(&"--property=Restart=always".to_owned())
+                && command.args.contains(&"--property=RestartSec=250ms".to_owned())
                 && command.args.contains(&"-i".to_owned())
                 && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
                 && command.args.contains(&"/usr/bin/bwrap".to_owned())
@@ -866,13 +866,13 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
 }
 
 #[test]
-fn agent_start_process_command_rejects_unavailable_user_manager() {
+fn launch_process_for_rejects_unavailable_user_manager() {
     let command = AgentLaunchCommand {
         program: "/usr/bin/systemd-run".to_owned(),
         args: vec!["--user".to_owned(), "/usr/bin/env".to_owned()],
     };
     let identity = AgentUnixIdentity::new(u32::MAX, u32::MAX, []);
-    let result = agent_start_process_command(&identity, &command);
+    let result = launch_process_for(&identity, &command);
     assert!(
         matches!(result, Err(ref error) if error.kind() == std::io::ErrorKind::NotFound),
         "unavailable manager must fail closed: {result:?}"
