@@ -82,15 +82,8 @@ fn start_run_control(
     session: &str,
     run: &str,
 ) -> Result<Option<StartedRunControl>, SocketRuntimeError> {
-    let control_dir = match runtime.environment {
-        RunEnvironment::Native
-        | RunEnvironment::Sandbox {
-            control_dir: None, ..
-        } => return Ok(None),
-        RunEnvironment::Sandbox {
-            control_dir: Some(control_dir),
-            ..
-        } => control_dir,
+    let Some(control_dir) = runtime.environment.control_dir() else {
+        return Ok(None);
     };
     let (capability, listener) = runtime::control::RunCapability::create_with_source(
         control_dir,
@@ -640,16 +633,7 @@ fn record_owned_child_completion(
     run_id: &str,
     outcome: &AgentRunOutcome,
 ) -> Result<(), SocketRuntimeError> {
-    let Some(control_dir) = (match runtime.environment {
-        RunEnvironment::Sandbox {
-            control_dir: Some(control_dir),
-            ..
-        } => Some(control_dir),
-        RunEnvironment::Native
-        | RunEnvironment::Sandbox {
-            control_dir: None, ..
-        } => None,
-    }) else {
+    let Some(control_dir) = runtime.environment.control_dir() else {
         return Ok(());
     };
     let view = derive_agent_runtime_view(runtime.source_root, runtime.agent_name)
@@ -843,7 +827,7 @@ fn run_agent_envelope_loop(
 
 fn provider_network_denied(runtime: AgentExecutableSocketRuntime<'_>) -> bool {
     !runtime.network_allowed
-        && matches!(runtime.environment, RunEnvironment::Sandbox { .. })
+        && runtime.environment.is_sandboxed()
         && runtime.model.is_some_and(|model| {
             runtime::egress::is_provider_model(runtime.ctx_root, model)
                 .is_ok_and(|provider| provider)
@@ -1145,28 +1129,22 @@ fn create_run_provider_egress(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
 ) -> Result<Option<runtime::egress::ProviderEgress>, SocketRuntimeError> {
-    let provider_model = match runtime.environment {
-        RunEnvironment::Sandbox { .. } if runtime.network_allowed => runtime
-            .model
-            .map(|model| runtime::egress::is_provider_model(runtime.ctx_root, model))
-            .transpose()
-            .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
-            .unwrap_or(false),
-        _ => false,
-    };
+    if !runtime.environment.is_sandboxed() || !runtime.network_allowed {
+        return Ok(None);
+    }
+    let provider_model = runtime
+        .model
+        .map(|model| runtime::egress::is_provider_model(runtime.ctx_root, model))
+        .transpose()
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+        .unwrap_or(false);
     if !provider_model {
         return Ok(None);
     }
-    let control_dir = match runtime.environment {
-        RunEnvironment::Sandbox {
-            control_dir: Some(control_dir),
-            ..
-        } => control_dir,
-        RunEnvironment::Sandbox {
-            control_dir: None, ..
-        }
-        | RunEnvironment::Native => return Err(SocketRuntimeError::CannotRunAgent),
-    };
+    let control_dir = runtime
+        .environment
+        .control_dir()
+        .ok_or(SocketRuntimeError::CannotRunAgent)?;
     let plan = runtime::egress::ProviderEgressPlan::from_controls(
         runtime.ctx_root,
         runtime.model.ok_or(SocketRuntimeError::CannotRunAgent)?,

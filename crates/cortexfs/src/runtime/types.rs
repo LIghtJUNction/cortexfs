@@ -174,6 +174,27 @@ pub enum RunEnvironment<'a> {
     },
 }
 
+impl<'a> RunEnvironment<'a> {
+    /// Returns the environment class without exposing implementation paths.
+    #[must_use]
+    pub const fn kind(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Sandbox { .. } => "sandbox",
+        }
+    }
+    pub(crate) const fn is_sandboxed(self) -> bool {
+        matches!(self, Self::Sandbox { .. })
+    }
+
+    pub(crate) const fn control_dir(self) -> Option<&'a Path> {
+        match self {
+            Self::Native => None,
+            Self::Sandbox { control_dir, .. } => control_dir,
+        }
+    }
+}
+
 impl SocketRuntimeError {
     /// Returns a stable errno name for this runtime failure.
     #[must_use]
