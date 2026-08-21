@@ -186,7 +186,7 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     assert!(!root.join("model").join("debug").join("echo").exists());
     let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
         .map(|metadata| metadata.permissions().mode() & 0o777);
-    assert!(matches!(agent_socket_mode, Ok(0o777)));
+    assert!(matches!(agent_socket_mode, Ok(0o700)));
     if nix::unistd::Uid::effective().is_root() {
         assert!(matches!(
             fs::symlink_metadata(root.join("agent").join("coder.sock")),

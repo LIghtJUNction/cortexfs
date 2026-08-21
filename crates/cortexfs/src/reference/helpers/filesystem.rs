@@ -172,7 +172,7 @@ pub(crate) fn ensure_reference_socket(
     uid: u32,
     gid: u32,
 ) -> Result<(), ReferenceTreeError> {
-    support::plain::ensure_socket_placeholder(path, 0o777)
+    support::plain::ensure_socket_placeholder(path, 0o700)
         .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
