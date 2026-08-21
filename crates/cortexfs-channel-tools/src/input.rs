@@ -3,10 +3,10 @@ use cortexfs_channels::{
 };
 use cortexfs_tool_sdk::{ToolError, ToolResult};
 use serde_json::Value;
-
 pub(super) fn target(input: &Value, channel: &str) -> ToolResult<MessageTarget> {
-    let conversation = optional_string(input, "conversation")
-        .or_else(|| std::env::var("CTX_CHANNEL_CONVERSATION").ok())
+    let conversation = std::env::var("CTX_CHANNEL_CONVERSATION")
+        .ok()
+        .or_else(|| optional_string(input, "conversation"))
         .or_else(|| std::env::var("CTX_CHANNEL_SESSION").ok())
         .ok_or_else(|| ToolError::invalid("missing string field: conversation"))?;
     Ok(MessageTarget {
