@@ -103,8 +103,7 @@ pub(super) fn runner_path() -> Result<PathBuf, CliError> {
         .ok_or_else(|| CliError::unavailable("cannot locate auth runner"))?;
     let runner = parent.join("cortexfs-auth-runner");
     fs::symlink_metadata(&runner)
-        .ok()
-        .is_some_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
         .then_some(runner)
         .ok_or_else(|| CliError::unavailable("cortexfs-auth-runner is not installed"))
 }
