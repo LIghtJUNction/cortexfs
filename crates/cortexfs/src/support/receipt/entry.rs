@@ -11,6 +11,7 @@ pub enum EntryKind {
     Directory,
     File,
     Executable,
+    Socket,
     Symlink,
 }
 
@@ -43,6 +44,7 @@ fn kind_matches(mode: libc::mode_t, kind: EntryKind) -> bool {
         EntryKind::Directory => actual == SFlag::S_IFDIR,
         EntryKind::File => actual == SFlag::S_IFREG,
         EntryKind::Executable => actual == SFlag::S_IFREG && mode & 0o111 != 0,
+        EntryKind::Socket => actual == SFlag::S_IFSOCK,
         EntryKind::Symlink => actual == SFlag::S_IFLNK,
     }
 }

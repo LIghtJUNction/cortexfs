@@ -3,6 +3,9 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::support::receipt::{
+    EntryKind, EntryReceipt, entry_matches, park_entry, receipt_at, remove_parked_entry,
+};
 use crate::{ObjectClass, is_agent_alias, is_object_name};
 
 /// Files created for one ordinary agent object.
@@ -18,9 +21,8 @@ pub struct AgentCreatePaths {
 #[derive(Debug)]
 struct OwnedPath {
     path: PathBuf,
-    dev: u64,
-    ino: u64,
-    directory: bool,
+    receipt: EntryReceipt,
+    kind: EntryKind,
 }
 
 static ROLLBACK_ID: AtomicU64 = AtomicU64::new(0);
@@ -41,24 +43,19 @@ impl AgentCreatePaths {
     fn own(&mut self, path: &Path) -> Result<(), AgentCreateError> {
         let metadata =
             fs::symlink_metadata(path).map_err(|_error| AgentCreateError::CannotCreate)?;
+        let kind = owned_kind(&metadata)?;
+        let parent = path.parent().ok_or(AgentCreateError::CannotCreate)?;
+        let directory = crate::support::plain::open_plain_directory(parent)
+            .map_err(|_error| AgentCreateError::CannotCreate)?;
+        let name = crate::support::plain::plain_file_name(path)
+            .map_err(|_error| AgentCreateError::CannotCreate)?;
+        let receipt = receipt_at(&directory, name, kind)
+            .map_err(|_error| AgentCreateError::CannotCreate)?
+            .ok_or(AgentCreateError::CannotCreate)?;
         self.owned.push(OwnedPath {
             path: path.to_owned(),
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-            directory: metadata.is_dir(),
-        });
-        Ok(())
-    }
-
-    fn own_dir(&mut self, path: PathBuf, file: &fs::File) -> Result<(), AgentCreateError> {
-        let metadata = file
-            .metadata()
-            .map_err(|_error| AgentCreateError::CannotCreate)?;
-        self.owned.push(OwnedPath {
-            path,
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-            directory: true,
+            receipt,
+            kind,
         });
         Ok(())
     }
@@ -70,11 +67,29 @@ impl AgentCreatePaths {
                 .into_iter()
                 .map(|receipt| OwnedPath {
                     path: receipt.path,
-                    dev: receipt.dev,
-                    ino: receipt.ino,
-                    directory: receipt.directory,
+                    receipt: EntryReceipt {
+                        dev: receipt.dev,
+                        ino: receipt.ino,
+                    },
+                    kind: if receipt.directory {
+                        EntryKind::Directory
+                    } else {
+                        EntryKind::File
+                    },
                 }),
         );
+    }
+}
+
+fn owned_kind(metadata: &fs::Metadata) -> Result<EntryKind, AgentCreateError> {
+    if metadata.is_dir() {
+        Ok(EntryKind::Directory)
+    } else if metadata.is_file() {
+        Ok(EntryKind::File)
+    } else if metadata.mode() & nix::libc::S_IFMT == nix::libc::S_IFSOCK {
+        Ok(EntryKind::Socket)
+    } else {
+        Err(AgentCreateError::CannotCreate)
     }
 }
 
@@ -140,15 +155,10 @@ fn own_control_children_bounded(
         }
         let path = directory_path.join(name);
         if metadata.is_dir() {
-            paths.own_dir(path.clone(), &fd)?;
+            paths.own(&path)?;
             own_control_children_bounded(paths, &path, &fd, depth + 1, count)?;
         } else if metadata.is_file() {
-            paths.owned.push(OwnedPath {
-                path,
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-                directory: false,
-            });
+            paths.own(&path)?;
         } else {
             return Err(AgentCreateError::CannotCreate);
         }
@@ -163,7 +173,7 @@ fn own_control_children_bounded(
 pub(crate) fn rollback_agent_files(
     mut receipt: AgentCreatePaths,
 ) -> Result<(), AgentRollbackError> {
-    rollback(&mut receipt, |_stage, _path| {})
+    rollback(&mut receipt)
 }
 
 pub(crate) fn rollback_session_layout(
@@ -171,15 +181,7 @@ pub(crate) fn rollback_session_layout(
 ) -> Result<(), AgentRollbackError> {
     let mut paths = AgentCreatePaths::new(Path::new("/"), "0", "receipt");
     paths.own_session_layout(receipts);
-    rollback(&mut paths, |_stage, _path| {})
-}
-
-#[cfg(test)]
-pub(crate) fn rollback_agent_files_with_hook(
-    mut receipt: AgentCreatePaths,
-    hook: impl FnMut(AgentRollbackStage, &Path),
-) -> Result<(), AgentRollbackError> {
-    rollback(&mut receipt, hook)
+    rollback(&mut paths)
 }
 
 /// Failure while transactionally materialising an ordinary child agent.
@@ -224,11 +226,6 @@ pub fn format_agent_rollback_conflict(conflict: &AgentRollbackConflict) -> Strin
         conflict.ino,
         conflict.stage
     )
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentRollbackStage {
-    Quarantined,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,24 +328,24 @@ pub(crate) fn create_agent_files_with_hook(
         let home_fd = crate::support::plain::create_plain_dir_exclusive(&paths.home, 0o755)
             .map_err(|_error| AgentCreateError::CannotCreate)?;
         let home = paths.home.clone();
-        paths.own_dir(home, &home_fd)?;
+        paths.own(&home)?;
         chown_home_entry(&home_fd, uid_number, gid_number)?;
         hook(AgentCreateStage::HomeBound)?;
         hook(AgentCreateStage::Skeleton)?;
         for name in ["root", "data", "cache", "log"] {
             let file = crate::support::plain::create_plain_dir_at(&home_fd, name, 0o755)
                 .map_err(|_error| AgentCreateError::CannotCreate)?;
-            paths.own_dir(paths.home.join(name), &file)?;
+            paths.own(&paths.home.join(name))?;
             chown_home_entry(&file, uid_number, gid_number)?;
         }
         let session_fd = crate::support::plain::create_plain_dir_at(&home_fd, "session", 0o755)
             .map_err(|_error| AgentCreateError::CannotCreate)?;
-        paths.own_dir(paths.home.join("session"), &session_fd)?;
+        paths.own(&paths.home.join("session"))?;
         chown_home_entry(&session_fd, uid_number, gid_number)?;
         hook(AgentCreateStage::SessionBound)?;
         let index_fd = crate::support::plain::create_plain_dir_at(&session_fd, "index", 0o755)
             .map_err(|_error| AgentCreateError::CannotCreate)?;
-        paths.own_dir(paths.home.join("session/index"), &index_fd)?;
+        paths.own(&paths.home.join("session/index"))?;
         chown_home_entry(&index_fd, uid_number, gid_number)?;
         for name in [
             "by-cwd",
@@ -358,13 +355,13 @@ pub(crate) fn create_agent_files_with_hook(
         ] {
             let file = crate::support::plain::create_plain_dir_at(&index_fd, name, 0o755)
                 .map_err(|_error| AgentCreateError::CannotCreate)?;
-            paths.own_dir(paths.home.join("session/index").join(name), &file)?;
+            paths.own(&paths.home.join("session/index").join(name))?;
             chown_home_entry(&file, uid_number, gid_number)?;
         }
         Ok(())
     })();
     if let Err(error) = result {
-        return match rollback(&mut paths, |_stage, _path| {}) {
+        return match rollback(&mut paths) {
             Ok(()) => Err(error),
             Err(AgentRollbackError::Conflict(conflict)) => {
                 Err(AgentCreateError::RollbackConflict(conflict))
@@ -393,10 +390,7 @@ pub(crate) fn chown_home_entry(
     .map_err(|_error| AgentCreateError::CannotCreate)
 }
 
-fn rollback(
-    paths: &mut AgentCreatePaths,
-    mut hook: impl FnMut(AgentRollbackStage, &Path),
-) -> Result<(), AgentRollbackError> {
+fn rollback(paths: &mut AgentCreatePaths) -> Result<(), AgentRollbackError> {
     let mut result = Ok(());
     let mut conflicted_paths = Vec::new();
     for owned in paths.owned.drain(..).rev() {
@@ -406,7 +400,7 @@ fn rollback(
         {
             continue;
         }
-        if let Err(error) = rollback_owned(&owned, &mut hook) {
+        if let Err(error) = rollback_owned(&owned) {
             let AgentRollbackError::Conflict(ref conflict) = error;
             conflicted_paths.push(conflict.original.clone());
             if result.is_ok() {
@@ -417,23 +411,17 @@ fn rollback(
     result
 }
 
-fn rollback_owned(
-    owned: &OwnedPath,
-    hook: &mut impl FnMut(AgentRollbackStage, &Path),
-) -> Result<(), AgentRollbackError> {
+fn rollback_owned(owned: &OwnedPath) -> Result<(), AgentRollbackError> {
     let Some(parent) = owned.path.parent() else {
         return Err(rollback_conflict(owned, None, "parent"));
     };
     let Ok(parent_dir) = crate::support::plain::open_plain_directory(parent) else {
         return Err(rollback_conflict(owned, None, "parent-open"));
     };
-    let Some(name) = owned.path.file_name().and_then(|name| name.to_str()) else {
+    let Ok(name) = crate::support::plain::plain_file_name(&owned.path) else {
         return Err(rollback_conflict(owned, None, "name"));
     };
-    let original_matches =
-        nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-            .is_ok_and(|stat| (stat.st_dev, stat.st_ino) == (owned.dev, owned.ino));
-    if !original_matches {
+    if !entry_matches(&parent_dir, name, owned.receipt, owned.kind) {
         return Err(rollback_conflict(owned, None, "original-precheck"));
     }
     let quarantine = format!(
@@ -441,80 +429,60 @@ fn rollback_owned(
         std::process::id(),
         ROLLBACK_ID.fetch_add(1, Ordering::Relaxed)
     );
-    if nix::fcntl::renameat2(
+    let quarantine_path = parent.join(&quarantine);
+    if park_entry(
         &parent_dir,
         name,
         &parent_dir,
         quarantine.as_str(),
-        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+        owned.receipt,
+        owned.kind,
     )
     .is_err()
     {
         return Err(rollback_conflict(
             owned,
-            Some(parent.join(&quarantine)),
-            "rename",
-        ));
-    }
-    hook(AgentRollbackStage::Quarantined, &owned.path);
-    let matches = nix::sys::stat::fstatat(
-        &parent_dir,
-        quarantine.as_str(),
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .is_ok_and(|stat| {
-        let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
-        (stat.st_dev, stat.st_ino) == (owned.dev, owned.ino)
-            && if owned.directory {
-                kind.contains(nix::sys::stat::SFlag::S_IFDIR)
-            } else {
-                kind.contains(nix::sys::stat::SFlag::S_IFREG)
-                    || kind.contains(nix::sys::stat::SFlag::S_IFSOCK)
-            }
-    });
-    if !matches {
-        let _ignored = nix::fcntl::renameat2(
-            &parent_dir,
-            quarantine.as_str(),
-            &parent_dir,
-            name,
-            nix::fcntl::RenameFlags::RENAME_NOREPLACE,
-        );
-        return Err(rollback_conflict(
-            owned,
-            Some(parent.join(&quarantine)),
-            "quarantine-postcheck",
+            Some(quarantine_path),
+            rollback_park_stage(&parent_dir, name, quarantine.as_str(), owned),
         ));
     }
     if nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW).is_ok()
     {
         return Err(rollback_conflict(
             owned,
-            Some(parent.join(&quarantine)),
+            Some(quarantine_path),
             "original-recreated",
         ));
     }
-    let removal = if owned.directory {
-        nix::unistd::unlinkat(
-            &parent_dir,
-            quarantine.as_str(),
-            nix::unistd::UnlinkatFlags::RemoveDir,
-        )
-    } else {
-        nix::unistd::unlinkat(
-            &parent_dir,
-            quarantine.as_str(),
-            nix::unistd::UnlinkatFlags::NoRemoveDir,
-        )
-    };
-    if removal.is_err() {
+    if remove_parked_entry(&parent_dir, quarantine.as_str(), owned.receipt, owned.kind).is_err() {
         return Err(rollback_conflict(
             owned,
-            Some(parent.join(&quarantine)),
-            if owned.directory { "rmdir" } else { "unlink" },
+            Some(quarantine_path),
+            if owned.kind == EntryKind::Directory {
+                "rmdir"
+            } else {
+                "unlink"
+            },
         ));
     }
     Ok(())
+}
+
+fn rollback_park_stage(
+    parent: &fs::File,
+    name: &str,
+    quarantine: &str,
+    owned: &OwnedPath,
+) -> &'static str {
+    if !entry_matches(parent, name, owned.receipt, owned.kind)
+        && nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW).is_ok()
+    {
+        "original-recreated"
+    } else if entry_matches(parent, quarantine, owned.receipt, owned.kind) {
+        "quarantine-postcheck"
+    } else {
+        "rename"
+    }
 }
 
 fn rollback_conflict(
@@ -525,8 +493,8 @@ fn rollback_conflict(
     AgentRollbackError::Conflict(AgentRollbackConflict {
         original: owned.path.clone(),
         quarantine,
-        dev: owned.dev,
-        ino: owned.ino,
+        dev: owned.receipt.dev,
+        ino: owned.receipt.ino,
         stage,
     })
 }

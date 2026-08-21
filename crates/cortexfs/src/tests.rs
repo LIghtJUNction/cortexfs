@@ -1,7 +1,6 @@
 use super::agent::create::{
-    AgentCreateError, AgentCreateStage, AgentRollbackError, AgentRollbackStage, chown_home_entry,
-    create_agent_files, create_agent_files_with_hook, rollback_agent_files,
-    rollback_agent_files_with_hook,
+    AgentCreateError, AgentCreateStage, AgentRollbackError, chown_home_entry, create_agent_files,
+    create_agent_files_with_hook, rollback_agent_files,
 };
 use super::runtime::record::socket::record_unindexed_socket_request_for_test;
 use super::support::columnar;

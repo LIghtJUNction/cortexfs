@@ -584,24 +584,41 @@ fn agent_rollback_conflict_preserves_replacement_after_quarantine() {
         "#!/bin/sh\nexec /bin/false \"$@\"\n",
         &[],
     ));
-    let mut injected = false;
-    let mut replacement_identity = None;
-    let mut replacement_path = None;
-    let result = rollback_agent_files_with_hook(receipt, |stage, path| {
-        if stage == AgentRollbackStage::Quarantined && path.ends_with("worker-1") && !injected {
-            injected = true;
-            assert!(fs::create_dir_all(path).is_ok());
-            write_text_file(&path.join("third-party"), "keep\n");
-            let metadata = ok!(fs::symlink_metadata(path));
-            replacement_identity = Some((metadata.dev(), metadata.ino()));
-            replacement_path = Some(path.to_path_buf());
+    let injected = std::rc::Rc::new(std::cell::Cell::new(false));
+    let identity = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let replacement = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let hook_path = root.join("home/1000/agent/worker-1");
+    let home_agent_root = ok!(fs::metadata(root.join("home/1000/agent")));
+    let home_agent_identity = (home_agent_root.dev(), home_agent_root.ino());
+    let hook_injected = injected;
+    let hook_identity = std::rc::Rc::clone(&identity);
+    let hook_replacement = std::rc::Rc::clone(&replacement);
+    let previous = crate::support::receipt::set_park_hook(Some(Box::new(move |parent, name| {
+        let metadata = parent.metadata().map_err(std::io::Error::other)?;
+        if name == "worker-1"
+            && (metadata.dev(), metadata.ino()) == home_agent_identity
+            && !hook_injected.replace(true)
+        {
+            assert!(fs::create_dir_all(&hook_path).is_ok());
+            write_text_file(&hook_path.join("third-party"), "keep\n");
+            let replacement_metadata =
+                fs::symlink_metadata(&hook_path).map_err(std::io::Error::other)?;
+            hook_identity.replace(Some((
+                replacement_metadata.dev(),
+                replacement_metadata.ino(),
+            )));
+            hook_replacement.replace(Some(hook_path.clone()));
         }
-    });
+        Ok(())
+    })));
+    let result = rollback_agent_files(receipt);
+    let _previous = crate::support::receipt::set_park_hook(previous);
 
     assert!(matches!(result, Err(AgentRollbackError::Conflict(_))));
     let Err(AgentRollbackError::Conflict(conflict)) = result else {
         return;
     };
+    let replacement_path = replacement.borrow().clone();
     assert_eq!(Some(&conflict.original), replacement_path.as_ref());
     assert_eq!(conflict.stage, "original-recreated");
     assert!(conflict.quarantine.is_some());
@@ -611,7 +628,7 @@ fn agent_rollback_conflict_preserves_replacement_after_quarantine() {
     };
     assert_file_text(&replacement.join("third-party"), "keep\n");
     let metadata = ok!(fs::symlink_metadata(&replacement));
-    assert_eq!(replacement_identity, Some((metadata.dev(), metadata.ino())));
+    assert_eq!(*identity.borrow(), Some((metadata.dev(), metadata.ino())));
     assert!(replacement.parent().is_some());
     let Some(parent) = replacement.parent() else {
         return;

@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Seek, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::Path;
 
 const INSTALL_RECEIPT_FILE: &str = ".cortexfs-receipt.json";
@@ -447,6 +447,7 @@ pub(crate) fn receipt_for(file: &fs::File, kind: EntryKind) -> Result<EntryRecei
         EntryKind::Directory => metadata.is_dir(),
         EntryKind::File => metadata.is_file(),
         EntryKind::Executable => metadata.is_file() && metadata.permissions().mode() & 0o111 != 0,
+        EntryKind::Socket => metadata.file_type().is_socket(),
         EntryKind::Symlink => metadata.file_type().is_symlink(),
     };
     if !valid || metadata.file_type().is_symlink() {
