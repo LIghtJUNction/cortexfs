@@ -135,6 +135,20 @@ atomic_install "$source_file" "$destination" 0755
 assert_eq release-v1 "$(<"$destination")" "atomic install publishes the release"
 atomic_install "$source_file" "$destination" 0755
 assert_eq keep "$(<"$unrelated")" "idempotent install preserves unrelated state"
+
+artifact_source="$TEST_TEMP/artifacts"
+artifact_stage="$TEST_TEMP/stage"
+mkdir -p "$artifact_source"
+printf 'trusted\n' >"$artifact_source/file"
+snapshots="$(sha256sum "$artifact_source/file" | awk '{print $1}') file"
+stage_artifacts "$artifact_source" "$artifact_stage" "$snapshots"
+assert_eq trusted "$(<"$artifact_stage/file")" "validated artifact is staged"
+printf 'tampered\n' >"$artifact_source/file"
+reject_changed_artifact() (
+    stage_artifacts "$artifact_source" "$TEST_TEMP/rejected-stage" "$snapshots"
+)
+assert_false "changed artifact is rejected before deployment" reject_changed_artifact
+
 STATE_FILE="$TEST_TEMP/state"
 TEMP_DIR="$TEST_TEMP"
 LANGUAGE=zh
