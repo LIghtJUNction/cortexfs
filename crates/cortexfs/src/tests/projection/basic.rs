@@ -1532,7 +1532,7 @@ fn fuse_projection_exposes_reference_tree_ops() {
     assert!(matches!(
         socket_attr,
         Ok(ref attr)
-            if attr.file_type() == FuseFileType::Socket && attr.mode() & 0o777 == 0o777
+            if attr.file_type() == FuseFileType::Socket && attr.mode() & 0o777 == 0o700
     ));
     assert_eq!(
         projection.getattr("home/1000/tool/fs.read"),
