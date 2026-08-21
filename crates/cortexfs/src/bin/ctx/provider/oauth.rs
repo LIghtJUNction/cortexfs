@@ -123,6 +123,16 @@ pub(crate) fn provider_oauth_refresh(provider: &str, profile: &str) -> Result<()
     print_line("oauth refresh ok")
 }
 
+pub(crate) fn provider_auth_logout(provider: &str, profile: &str) -> Result<(), CliError> {
+    cortexfs::delete_auth_profile(provider, profile)
+        .map_err(|_error| CliError::unavailable("authentication credential store unavailable"))?;
+    if let Ok(config) = provider_oauth_config(provider) {
+        cortexfs::delete_oauth_credentials(provider, &config)
+            .map_err(|_error| CliError::unavailable("OAuth credential store unavailable"))?;
+    }
+    print_line("provider authentication removed")
+}
+
 fn provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {
     if !is_provider_name(provider) {
         return Err(CliError::usage("invalid provider name"));

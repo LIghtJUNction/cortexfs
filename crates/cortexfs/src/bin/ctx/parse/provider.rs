@@ -15,6 +15,10 @@ pub(crate) enum ProviderArgs {
         provider: String,
         profile: String,
     },
+    Logout {
+        provider: String,
+        profile: String,
+    },
     Status {
         provider: String,
         profile: String,
@@ -51,7 +55,7 @@ pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliEr
         return Ok(Command::HelpTopic(format!("provider {command}")));
     }
     if command == "oauth"
-        && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && matches!(subcommand.as_str(), "login" | "status" | "refresh"))
+        && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && matches!(subcommand.as_str(), "login" | "logout" | "status" | "refresh"))
     {
         let Some(subcommand) = rest.first() else {
             return Err(CliError::usage(
@@ -89,7 +93,7 @@ pub(crate) fn parse_auth_command(args: Vec<String>) -> Result<Command, CliError>
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "auth requires methods, login, status, or refresh",
+        "auth requires methods, login, logout, status, or refresh",
     )?;
     let rest = values.collect::<Vec<_>>();
     if is_help_args(&rest) {
@@ -103,7 +107,7 @@ pub(crate) fn parse_auth_command(args: Vec<String>) -> Result<Command, CliError>
                 .into_iter(),
         )?,
         "login" => parse_auth_login(rest.into_iter())?,
-        "status" | "refresh" => parse_provider_oauth_command(
+        "logout" | "status" | "refresh" => parse_provider_oauth_command(
             std::iter::once(command)
                 .chain(rest)
                 .collect::<Vec<_>>()
@@ -111,7 +115,7 @@ pub(crate) fn parse_auth_command(args: Vec<String>) -> Result<Command, CliError>
         )?,
         _ => {
             return Err(CliError::usage(
-                "auth expects methods, login, status, or refresh",
+                "auth expects methods, login, logout, status, or refresh",
             ));
         }
     };
@@ -187,7 +191,7 @@ pub(crate) fn parse_provider_oauth_command(
 ) -> Result<Command, CliError> {
     let command = required_arg(
         &mut values,
-        "provider oauth requires login, status, or refresh",
+        "provider oauth requires login, logout, status, or refresh",
     )?;
     match command.as_str() {
         "login" => {
@@ -234,6 +238,17 @@ pub(crate) fn parse_provider_oauth_command(
                 profile,
             }))
         }
+        "logout" => {
+            let provider = required_arg(&mut values, "auth logout requires a provider")?;
+            let profile = parse_provider_profile(values)?;
+            if !is_provider_name(&provider) {
+                return Err(CliError::usage("invalid provider name"));
+            }
+            Ok(Command::Provider(ProviderArgs::Logout {
+                provider,
+                profile,
+            }))
+        }
         "refresh" => {
             let provider = required_arg(&mut values, "provider oauth refresh requires a provider")?;
             let profile = parse_provider_profile(values)?;
@@ -243,7 +258,7 @@ pub(crate) fn parse_provider_oauth_command(
             }))
         }
         _ => Err(CliError::usage(
-            "provider oauth expects login, status, or refresh",
+            "provider oauth expects login, logout, status, or refresh",
         )),
     }
 }

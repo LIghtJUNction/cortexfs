@@ -504,6 +504,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx auth methods PROVIDER",
             "  ctx auth login PROVIDER [--profile NAME] [--method auto|browser|device] [--device] [--timeout SECONDS]",
             "  ctx auth login PROVIDER --method api-key --stdin [--profile NAME]",
+            "  ctx auth logout PROVIDER [--profile NAME]",
             "  ctx auth status PROVIDER [--profile NAME]",
             "  ctx auth refresh PROVIDER [--profile NAME]",
             "",

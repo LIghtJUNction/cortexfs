@@ -29,6 +29,10 @@ pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError
             ref provider,
             ref profile,
         } => provider_api_key_login(provider, profile).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::Logout {
+            ref provider,
+            ref profile,
+        } => provider_auth_logout(provider, profile).map(|()| ExitCode::SUCCESS),
         ProviderArgs::Status {
             ref provider,
             ref profile,
