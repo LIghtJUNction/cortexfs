@@ -2,6 +2,8 @@ schema = "cortexfs.package/v1"
 name = "echo-extension"
 version = "0.1.0"
 
+# This source example is built locally. Prebuilt distributions should add an
+# exact sha256 to every member and use ctx install --require-hashes.
 [[tools]]
 name = "example.echo"
 run = "target/release/cortexfs-echo-tool"

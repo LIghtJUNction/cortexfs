@@ -43,7 +43,24 @@ ctx install --check ./review-kit
 ctx install ./review-kit
 ```
 
-`ctx install --check` 会发现 `cortexfs.toml`、哈希每个可执行文件、渲染并检查所有严格对象 manifest，然后在选择或写入 backing tree 前退出。普通 `ctx install` 会重复这些检查，再通过现有原子对象安装器发布每个对象。若挂载树有固定来源代际，请加 `--source PATH`，若工具只对当前用户可见请加 `--tier user`：
+分发预构建包时，请在每个成员的 `run` 旁写入所分发文件的精确小写摘要，并要求所有成员都携带摘要：
+
+```toml
+[[tools]]
+name = "git.summary"
+run = "bin/git-summary"
+sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+```
+
+```bash
+ctx install --check --require-hashes ./review-kit
+```
+
+请将示例摘要替换为 `sha256sum` 的输出。即使没有 `--require-hashes`，任何已声明的 `sha256` 也都会被检查；该参数还会在任一工具或 Agent 省略摘要时拒绝整包。
+
+`ctx install --check` 会发现 `cortexfs.toml`、哈希每个可执行文件、渲染并检查所有严格对象 manifest，然后在选择或写入 backing tree 前退出。普通 `ctx install` 会重复这些检查，再通过现有原子对象安装器发布每个对象。摘要匹配只能把描述符绑定到可执行文件字节，不能认证发布者或注册表。请通过经过认证的可信通道取得描述符和预期摘要；`cortexfs.package/v1` 尚未定义签名。
+
+若挂载树有固定来源代际，请加 `--source PATH`，若工具只对当前用户可见请加 `--tier user`：
 
 ```bash
 ctx install ./review-kit --source /var/lib/cortexfs/storage/current

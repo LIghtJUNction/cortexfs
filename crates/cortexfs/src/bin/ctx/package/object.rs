@@ -1,46 +1,52 @@
 use crate::CliError;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub(super) fn write_manifest(
     staging: &Path,
-    class: &str,
-    name: &str,
+    object: (&str, &str),
     executable: &Path,
     controls: &BTreeMap<String, String>,
     version: Option<&str>,
+    integrity: (Option<&str>, bool),
 ) -> Result<PathBuf, CliError> {
+    let (class, name) = object;
+    let (expected_sha256, require_hash) = integrity;
     let sha256 = executable_sha256(executable)?;
+    if expected_sha256.is_some_and(|expected| expected != sha256) {
+        return Err(CliError::usage(format!(
+            "package executable sha256 mismatch: {class}/{name}"
+        )));
+    }
+    if require_hash && expected_sha256.is_none() {
+        return Err(CliError::usage(format!(
+            "package executable sha256 is required: {class}/{name}"
+        )));
+    }
     let manifest = staging.join(format!("{class}-{name}.json"));
-    let value = version.map_or_else(
-        || {
-            json!({
-                "schema": "cortexfs.object/v1",
-                "class": class,
-                "name": name,
-                "executable": {"path": executable, "sha256": sha256},
-                "controls": controls,
-            })
-        },
-        |version| {
-            json!({
-                "schema": "cortexfs.object/v2",
-                "version": version,
-                "compatibility": {
-                    "cortexfs": format!(">={}, <0.2.0", env!("CARGO_PKG_VERSION"))
-                },
-                "class": class,
-                "name": name,
-                "executable": {"path": executable, "sha256": sha256},
-                "controls": controls,
-            })
-        },
-    );
+    let schema = version.map_or("cortexfs.object/v1", |_| "cortexfs.object/v2");
+    let mut value = json!({
+        "schema": schema,
+        "class": class,
+        "name": name,
+        "executable": {"path": executable, "sha256": sha256},
+        "controls": controls,
+    });
+    if let Some(version) = version {
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| CliError::unavailable("cannot build package manifest"))?;
+        object.extend([
+            ("version".to_owned(), json!(version)),
+            (
+                "compatibility".to_owned(),
+                json!({"cortexfs": format!(">={}, <0.2.0", env!("CARGO_PKG_VERSION"))}),
+            ),
+        ]);
+    }
     let text = serde_json::to_vec(&value).map_err(|error| {
         CliError::unavailable(format!("cannot encode package manifest: {error}"))
     })?;
@@ -69,24 +75,11 @@ fn executable_sha256(path: &Path) -> Result<String, CliError> {
             path.display()
         )));
     }
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let count = file.read(&mut buffer).map_err(|error| {
-            CliError::unavailable(format!("cannot hash package executable: {error}"))
-        })?;
-        if count == 0 {
-            break;
-        }
-        let chunk = buffer
-            .get(..count)
-            .ok_or_else(|| CliError::unavailable("invalid package hash read"))?;
-        digest.update(chunk);
-    }
-    let mut output = String::with_capacity(64);
-    for byte in digest.finalize() {
-        std::fmt::Write::write_fmt(&mut output, format_args!("{byte:02x}"))
-            .map_err(|error| CliError::unavailable(error.to_string()))?;
-    }
-    Ok(output)
+    cortexfs::object::receipt::executable_sha256(&mut file, None).map_err(|error| {
+        CliError::unavailable(error.message().replacen(
+            "cannot read executable",
+            "cannot hash package executable",
+            1,
+        ))
+    })
 }

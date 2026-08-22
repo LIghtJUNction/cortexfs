@@ -9,12 +9,15 @@ rtk cargo test -p cortexfs-agent-sdk
 rtk cargo check --manifest-path examples/extensions/echo/Cargo.toml
 ctx object check MANIFEST
 ctx install --check PACKAGE
+ctx install --check --require-hashes DISTRIBUTED_PACKAGE
 rtk git diff --check
 ```
 
-`ctx object check MANIFEST` and `ctx install --check PACKAGE` need no source
-fixture and perform no backing-tree writes. Cover strict parsing, unknown-field and unknown-control rejection,
-symlink and non-executable rejection, and SHA-256 mismatch through this
+`ctx object check MANIFEST` and both package check modes need no source fixture
+and perform no backing-tree writes. Use `--require-hashes` for a distributed or
+prebuilt package. Cover strict parsing, missing/invalid member hashes,
+unknown-field and unknown-control rejection, symlink and non-executable
+rejection, and SHA-256 mismatch through this
 read-only path. Installer integration tests separately use an explicit
 temporary durable `--source` tree and cover absence of a visible executable on
 failure, possible hidden `.cortexfs-install-*` safety residue, and collision

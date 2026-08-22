@@ -82,7 +82,7 @@ pub(super) fn agent_controls(agent: &PackageAgent) -> Result<BTreeMap<String, St
 
 pub(super) fn tool_controls(
     tool: &PackageTool,
-    policy: Option<&String>,
+    policy: &str,
 ) -> Result<BTreeMap<String, String>, CliError> {
     let schema = tool
         .schema
@@ -103,6 +103,6 @@ pub(super) fn tool_controls(
             "cap".to_owned(),
             tool.cap.clone().unwrap_or_else(|| "text".to_owned()),
         ),
-        ("policy".to_owned(), policy.cloned().unwrap_or_default()),
+        ("policy".to_owned(), policy.to_owned()),
     ]))
 }

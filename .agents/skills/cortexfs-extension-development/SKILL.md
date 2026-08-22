@@ -31,14 +31,19 @@ provider special case, watcher, queue, or alternate orchestration path.
    `compatibility` completely. Read `references/manifest.md` before choosing
    controls, compatibility, or an install tier.
 6. Build the executable, calculate its SHA-256, and place the exact digest in
-   the manifest. Do not put commands, arguments, wrappers, secrets, or policy
-   grants for unrelated objects in the manifest.
+   the object manifest. For a distributed `cortexfs.package/v1` bundle, also
+   place the exact lowercase digest in every tool and agent `sha256` field.
+   Do not put commands, arguments, wrappers, secrets, or policy grants for
+   unrelated objects in the manifest.
 7. Validate source and manifest changes without installing first. Run
    `ctx object check MANIFEST` for each rendered manifest; it requires no
    source tree and performs no backing-tree writes. A v2 manifest incompatible
-   with the compiled CortexFS version is invalid and exits 2. For a
-   `cortexfs.package/v1` bundle, run `ctx install --check PACKAGE`; it renders
-   and checks every object without writing a backing tree. Follow
+   with the compiled CortexFS version is invalid and exits 2. For a local
+   source `cortexfs.package/v1` bundle, run `ctx install --check PACKAGE`. For
+   a distributed/prebuilt bundle, run
+   `ctx install --check --require-hashes PACKAGE`; declared digests are always
+   checked and this flag also rejects missing digests. Both modes render and
+   check every object without writing a backing tree. Follow
    `references/testing.md` for the staged test ladder.
 8. Perform installation only after an explicit mutation request. Invoke
    `ctx object install --source PATH MANIFEST --tier user|system`, where PATH
@@ -87,6 +92,9 @@ provider special case, watcher, queue, or alternate orchestration path.
 - Preserve executable plugins as the supported extension path. Do not claim
   the Tool SDK `DynamicTool` loader or native resident cache is wired into the
   core runtime until a core consumer and end-to-end proof exist.
+- Treat package hashes as descriptor-to-payload integrity, not publisher or
+  registry authentication. `cortexfs.package/v1` has no signature field; use
+  an authenticated trusted channel to acquire its descriptor and digests.
 
 ## Canonical Example
 

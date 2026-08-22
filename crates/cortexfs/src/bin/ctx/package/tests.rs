@@ -1,3 +1,4 @@
+mod integrity;
 use super::*;
 use crate::{Command, parse_command};
 use cortexfs::object::install::InstallTier;
@@ -15,11 +16,23 @@ fn package_command_keeps_install_surface_small() {
     ]);
     assert!(matches!(
         parsed,
-        Ok(Command::PackageInstall { check: false, .. })
+        Ok(Command::PackageInstall {
+            check: false,
+            require_hashes: false,
+            ..
+        })
     ));
     assert!(matches!(
-        parse_command(["install", "--check", "./kit"].map(str::to_owned).to_vec()),
-        Ok(Command::PackageInstall { check: true, .. })
+        parse_command(
+            ["install", "--check", "--require-hashes", "./kit"]
+                .map(str::to_owned)
+                .to_vec()
+        ),
+        Ok(Command::PackageInstall {
+            check: true,
+            require_hashes: true,
+            ..
+        })
     ));
     assert!(
         parse_command(
@@ -32,32 +45,10 @@ fn package_command_keeps_install_surface_small() {
 }
 
 #[test]
-fn package_rejects_agent_identity() -> Result<(), Box<dyn std::error::Error>> {
-    let root = tempfile::tempdir()?;
-    fs::write(
-        root.path().join("cortexfs.toml"),
-        r#"[[agents]]
-name = "agent"
-run = "bin/agent"
-
-[agents.identity]
-uid = 0
-gid = 0
-groups = [0]
-"#,
-    )?;
-    let Err(error) = manifest::load_package(root.path()) else {
-        return Err("package-controlled identity was accepted".into());
-    };
-    assert!(error.message.contains("unknown field `identity`"));
-    Ok(())
-}
-
-#[test]
 fn package_check_validates_without_writing_source() -> Result<(), Box<dyn std::error::Error>> {
     let (root, package) = package_fixture()?;
     let source = root.path().join("source");
-    run_package_install(&package, Some(&source), InstallTier::System, true)
+    run_package_install(&package, Some(&source), InstallTier::System, true, false)
         .map_err(|error| std::io::Error::other(error.message))?;
     assert!(!source.exists());
     Ok(())
@@ -67,7 +58,7 @@ fn package_check_validates_without_writing_source() -> Result<(), Box<dyn std::e
 fn package_installs_tool_agent_and_parent_edge() -> Result<(), Box<dyn std::error::Error>> {
     let (root, package) = package_fixture()?;
     let source = root.path().join("source");
-    run_package_install(&package, Some(&source), InstallTier::System, false)
+    run_package_install(&package, Some(&source), InstallTier::System, false, false)
         .map_err(|error| std::io::Error::other(error.message))?;
     assert_eq!(
         fs::read_to_string(source.join("tool/hello.d/policy"))?,

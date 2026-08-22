@@ -459,11 +459,11 @@ pub(crate) fn receipt_for(file: &fs::File, kind: EntryKind) -> Result<EntryRecei
     })
 }
 
-pub(crate) fn verify_executable(
+#[doc(hidden)]
+pub fn executable_sha256(
     source: &mut fs::File,
-    expected: &str,
     mut target: Option<&mut fs::File>,
-) -> Result<(), InstallError> {
+) -> Result<String, InstallError> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024];
     loop {
@@ -483,13 +483,21 @@ pub(crate) fn verify_executable(
             })?;
         }
     }
-    let actual = hasher
+    Ok(hasher
         .finalize()
         .iter()
         .fold(String::with_capacity(64), |mut output, byte| {
             let _ignored = write!(output, "{byte:02x}");
             output
-        });
+        }))
+}
+
+pub(crate) fn verify_executable(
+    source: &mut fs::File,
+    expected: &str,
+    target: Option<&mut fs::File>,
+) -> Result<(), InstallError> {
+    let actual = executable_sha256(source, target)?;
     if !actual.eq_ignore_ascii_case(expected) {
         return Err(InstallError::invalid(format!(
             "executable sha256 mismatch: expected {expected}, got {actual}"

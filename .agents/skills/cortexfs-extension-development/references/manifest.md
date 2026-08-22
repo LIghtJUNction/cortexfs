@@ -28,6 +28,19 @@ The legacy v1 shape is strict: use `schema: cortexfs.object/v1` and omit both
 `version` and `compatibility`. Supplying either field to v1 is invalid; no
 cross-version inference or fallback occurs.
 
+## Package member integrity
+
+A `cortexfs.package/v1` member may declare an exact lowercase `sha256` next to
+its relative `run` path. CortexFS always checks a declared digest before
+rendering the object manifest. Use `ctx install --check --require-hashes
+PACKAGE` for distributed/prebuilt bundles so a missing digest also rejects the
+package. Local source packages may omit it when the executable has just been
+built from the reviewed source.
+
+Package hashes bind the descriptor to the bytes but do not authenticate a
+publisher or registry. The package v1 schema has no signature field; acquire
+the descriptor and expected digests over an authenticated trusted channel.
+
 Resolve a relative executable path against the manifest directory. Keep the
 install tier outside the manifest and pass it explicitly to the CLI.
 

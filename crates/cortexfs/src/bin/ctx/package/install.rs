@@ -15,6 +15,7 @@ pub(crate) fn parse_package_install_command(
     let mut source = None;
     let mut tier = InstallTier::System;
     let mut check = false;
+    let mut require_hashes = false;
     while let Some(value) = values.next() {
         match value.as_str() {
             "--source" => {
@@ -24,6 +25,7 @@ pub(crate) fn parse_package_install_command(
                 )?));
             }
             "--check" => check = true,
+            "--require-hashes" => require_hashes = true,
             "--tier" => {
                 let value = required_arg(&mut values, "install --tier requires user or system")?;
                 tier = InstallTier::parse(&value)
@@ -47,6 +49,7 @@ pub(crate) fn parse_package_install_command(
         source,
         tier,
         check,
+        require_hashes,
     })
 }
 
@@ -55,6 +58,7 @@ pub(crate) fn run_package_install(
     source: Option<&Path>,
     tier: InstallTier,
     check: bool,
+    require_hashes: bool,
 ) -> Result<(), CliError> {
     let package = load_package(spec)?;
     if tier == InstallTier::User && !package.document.agents.is_empty() {
@@ -66,7 +70,7 @@ pub(crate) fn run_package_install(
     let temp = tempfile::tempdir().map_err(|error| {
         CliError::unavailable(format!("cannot create package staging directory: {error}"))
     })?;
-    let manifests = write_manifests(&package, temp.path())?;
+    let manifests = write_manifests(&package, temp.path(), require_hashes)?;
     for manifest in &manifests {
         cortexfs::object::install::check_object(manifest).map_err(|error| {
             CliError::usage(format!("invalid package object: {}", error.message()))

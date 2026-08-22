@@ -642,7 +642,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
         ]),
         "install" => print_help_lines(&[
             "usage:",
-            "  ctx install [--check] [--source PATH] [--tier user|system] PACKAGE",
+            "  ctx install [--check] [--require-hashes] [--source PATH] [--tier user|system] PACKAGE",
             "",
             "PACKAGE is a directory or cortexfs.toml file.",
             "  tools and agents are installed through the existing atomic object ABI",
@@ -650,6 +650,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  default source: CTX_SOURCE, then ~/.local/share/cortexfs/root",
             "  agents require the system tier; use parent: agent:NAME for topology",
             "  --check validates every generated object without writing a backing tree",
+            "  --require-hashes rejects members without a matching package sha256",
         ]),
         "doctor" => print_help_lines(&["usage:", "  ctx [--root PATH] doctor"]),
         "validate-name" => print_help_lines(&["usage:", "  ctx validate-name NAME"]),

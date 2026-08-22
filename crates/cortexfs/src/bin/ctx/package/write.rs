@@ -3,33 +3,45 @@ use super::manifest::Package;
 use super::object::write_manifest;
 use crate::CliError;
 use cortexfs::object::install::InstallTier;
-use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub(super) fn write_manifests(package: &Package, staging: &Path) -> Result<Vec<PathBuf>, CliError> {
-    let policies = tool_policies(package);
+pub(super) fn write_manifests(
+    package: &Package,
+    staging: &Path,
+    require_hashes: bool,
+) -> Result<Vec<PathBuf>, CliError> {
     let tools = package.document.tools.iter().map(|tool| {
-        let controls = tool_controls(tool, policies.get(&tool.name))?;
+        let policy = tool.policy.clone().unwrap_or_else(|| {
+            package
+                .document
+                .agents
+                .iter()
+                .filter(|agent| agent.tools.iter().any(|name| name == &tool.name))
+                .map(|agent| format!("allow {}_t tool:{} execute", agent.name, tool.name))
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        let controls = tool_controls(tool, &policy)?;
         write_manifest(
             staging,
-            "tool",
-            &tool.name,
+            ("tool", &tool.name),
             &package.root.join(&tool.run),
             &controls,
             package.document.version.as_deref(),
+            (tool.sha256.as_deref(), require_hashes),
         )
     });
     let agents = package.document.agents.iter().map(|agent| {
         let controls = agent_controls(agent)?;
         write_manifest(
             staging,
-            "agent",
-            &agent.name,
+            ("agent", &agent.name),
             &package.root.join(&agent.run),
             &controls,
             package.document.version.as_deref(),
+            (agent.sha256.as_deref(), require_hashes),
         )
     });
     tools.chain(agents).collect()
@@ -80,25 +92,4 @@ pub(super) fn ensure_targets_absent(
         }
     }
     Ok(())
-}
-
-fn tool_policies(package: &Package) -> BTreeMap<String, String> {
-    package
-        .document
-        .tools
-        .iter()
-        .map(|tool| {
-            let policy = tool.policy.clone().unwrap_or_else(|| {
-                package
-                    .document
-                    .agents
-                    .iter()
-                    .filter(|agent| agent.tools.iter().any(|name| name == &tool.name))
-                    .map(|agent| format!("allow {}_t tool:{} execute", agent.name, tool.name))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            });
-            (tool.name.clone(), policy)
-        })
-        .collect()
 }

@@ -44,13 +44,35 @@ ctx install --check ./review-kit
 ctx install ./review-kit
 ```
 
+For a prebuilt package, bind each member to its distributed bytes by adding the
+exact lowercase digest next to `run`, then require every member to have one:
+
+```toml
+[[tools]]
+name = "git.summary"
+run = "bin/git-summary"
+sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+```
+
+```bash
+ctx install --check --require-hashes ./review-kit
+```
+
+Replace the example digest with the output of `sha256sum`. Every declared
+`sha256` is checked, even without `--require-hashes`; the flag additionally
+rejects a package when any tool or agent omits its digest.
+
 `ctx install --check` finds `cortexfs.toml`, hashes every executable, renders
 and checks every strict object manifest, then exits before choosing or writing
 a backing tree. Normal `ctx install` repeats those checks before publishing
-each object through the existing atomic object installer. Use `--source PATH` when the mounted tree is backed by a specific
-generation, and use `--tier user` for tools that should only be visible to the
-current user. Agent objects are system-tier because their runtime socket is
-host-owned:
+each object through the existing atomic object installer. A matching digest
+binds the descriptor to the executable bytes, but does not authenticate a
+publisher or registry. Obtain the descriptor and expected digest through an
+authenticated trusted channel; `cortexfs.package/v1` does not define signatures.
+
+Use `--source PATH` when the mounted tree is backed by a specific generation,
+and use `--tier user` for tools that should only be visible to the current user.
+Agent objects are system-tier because their runtime socket is host-owned:
 
 ```bash
 ctx install ./review-kit --source /var/lib/cortexfs/storage/current

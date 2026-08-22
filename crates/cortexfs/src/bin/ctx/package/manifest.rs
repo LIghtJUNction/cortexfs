@@ -22,6 +22,7 @@ pub(crate) struct PackageTool {
     pub(crate) name: String,
     #[serde(alias = "executable")]
     pub(crate) run: PathBuf,
+    pub(crate) sha256: Option<String>,
     pub(crate) description: Option<String>,
     pub(crate) schema: Option<serde_json::Value>,
     pub(crate) cap: Option<String>,
@@ -33,6 +34,7 @@ pub(crate) struct PackageAgent {
     pub(crate) name: String,
     #[serde(alias = "executable")]
     pub(crate) run: PathBuf,
+    pub(crate) sha256: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) instructions: Option<String>,
     pub(crate) description: Option<String>,
