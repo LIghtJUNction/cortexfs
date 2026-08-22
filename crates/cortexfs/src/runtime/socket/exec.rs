@@ -1104,27 +1104,19 @@ fn continuation_tool_context(
     call: &object::executor::AgentToolCall,
     status: &str,
 ) -> String {
-    let mut context = base.to_owned();
-    if !context.trim().is_empty() {
-        context.push_str("\n\n");
-    }
-    context.push_str("Latest host tool completion:\n- tool: ");
-    context.push_str(&call.name);
-    context.push_str("\n- args: ");
     let args = object::executor::tool_call_args_strings(call);
-    context.push_str(&serde_json::to_string(&args).unwrap_or_else(|_error| "[]".to_owned()));
-    context.push_str("\n- status: ");
-    context.push_str(status);
-    context.push('\n');
-    if status == "ok" {
-        context.push_str(
-            "Use the result, then make a different necessary call or answer. Do not blindly repeat this call.",
-        );
+    let marker = serde_json::json!({
+        "id": call.id, "name": call.name, "arguments": {"args": args}
+    });
+    let spacing = if base.trim().is_empty() { "" } else { "\n\n" };
+    let guidance = if status == "ok" {
+        "Use the result, then make a different necessary call or answer. Do not blindly repeat this call."
     } else {
-        context.push_str(
-            "The host rejected or failed this call. Inspect the error before choosing a different action; do not blindly repeat it.",
-        );
-    }
+        "The host rejected or failed this call. Inspect the error before choosing a different action; do not blindly repeat it."
+    };
+    let prefix = agent::TOOL_CALL_CONTEXT_PREFIX;
+    let mut context =
+        format!("{base}{spacing}{prefix}{marker}\nLatest host tool status: {status}\n{guidance}");
     object::executor::trim_tool_context_to_limit(&mut context);
     context
 }
@@ -2278,9 +2270,10 @@ mod completion_tests {
             args: vec![OsString::from("shell.exec"), OsString::from("pwd")],
         };
         let context = continuation_tool_context("base", &call, "ok");
-        assert!(context.contains("Latest host tool completion:"));
+        assert!(context.contains(agent::TOOL_CALL_CONTEXT_PREFIX));
+        assert!(context.contains(r#""id":"call-1""#));
         assert!(context.contains(r#"["shell.exec","pwd"]"#));
-        assert!(context.contains("do not repeat this call"));
+        assert!(context.contains("Do not blindly repeat this call"));
     }
 
     #[test]

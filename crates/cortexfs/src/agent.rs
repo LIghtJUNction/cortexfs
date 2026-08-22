@@ -16,3 +16,6 @@ pub mod window;
 
 pub use loopconfig::AgentLoop;
 pub(crate) const MAX_AGENT_RUNTIME_CONTROL_BYTES: u64 = 64 * 1024;
+pub(crate) const TOOL_CALL_CONTEXT_PREFIX: &str = "CORTEXFS_TOOL_CALL ";
+pub(crate) const TOOL_CONTINUATION_CONTEXT_PREFIX: &str = "CORTEXFS_TOOL_CONTINUATION ";
+pub(crate) const TOOL_RESULT_CONTEXT_PREFIX: &str = "CORTEXFS_TOOL_RESULT ";

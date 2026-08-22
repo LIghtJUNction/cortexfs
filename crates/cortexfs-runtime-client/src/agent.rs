@@ -8,7 +8,7 @@
 //! - [modelcontextprotocol/servers#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 
 use crate::interaction::InteractionOrigin;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 mod wire;
 
@@ -108,7 +108,7 @@ pub struct AgentInvocationEnvelope {
 /// Validation logic reference:
 /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 /// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentToolObservation {
     /// Tool call id for correlation with downstream tool state.

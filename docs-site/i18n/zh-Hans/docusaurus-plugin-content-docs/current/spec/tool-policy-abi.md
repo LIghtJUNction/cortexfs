@@ -298,7 +298,7 @@ stdin/stdout 是主要工具接口。`schema` 为输入 JSON schema，不授予�
 
 ## 编程式工具调用
 
-当前 ABI 内未启用编程式工具调用。CortexFS 不应宣告 OpenAI `programmatic_tool_calling` 工具、`allowed_callers`，也不应把 `schema` 当作 `output_schema`。当前仍保持 single-call host loop 作为唯一 executable-agent 工具协议。OpenAI function call 的 caller 缺失、为 null 或为 `{ "type": "direct" }` 时属于普通 native call；`program` 及未知 caller 类型必须 fail closed，视为尚不支持的 host-owned continuation。
+当前 ABI 内未启用编程式工具调用。CortexFS 不应宣告 OpenAI `programmatic_tool_calling` 工具、`allowed_callers`，也不应把 `schema` 当作 `output_schema`。当前仍保持 single-call host loop 作为唯一 executable-agent 工具协议。OpenAI function call 的 caller 缺失、为 null 或为 `{ "type": "direct" }` 时属于普通 native call；`program` 及未知 caller 类型必须 fail closed，视为尚不支持的 host-owned continuation。普通 direct call 执行后，下一次 OpenAI Chat/Responses 请求会重放一个规范 assistant tool call 及与其 ID 匹配的 tool result；这种协议原生重放不会启用编程式工具调用，也不会绕过 host 授权。
 
 未来启用前，工具需要显式 default-deny 的程序化声明。可选 `tool/<name>.d/program` 是工具作者的
 `readonly`/确定性声明和成功结果 JSON Schema，例如：

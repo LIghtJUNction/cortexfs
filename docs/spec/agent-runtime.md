@@ -261,7 +261,11 @@ fields carry bounded prompt context; the agent boundary does not expose legacy
 `CTX_AGENT_HISTORY_MESSAGES` or `CTX_AGENT_TOOL_CONTEXT` environment inputs.
 When a run makes several tool calls, `tool_context` retains earlier authoritative
 observations in order while `observation` carries the immediately preceding
-result. The host keeps this transcript bounded by the tool-context limit.
+result. The host keeps this transcript bounded by the tool-context limit. The
+built-in hosted agent converts the latest matched call and observation into
+canonical assistant-tool-call and tool-result messages for OpenAI Chat and
+Responses continuation. The call IDs must match; missing or malformed metadata
+falls back to bounded text context and never invents a tool result.
 
 If a human sends `SIGINT` while a run is active, `ctx agent chat` sends a
 `cancel` request for the active run id and returns to the prompt. In an idle

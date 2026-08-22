@@ -128,7 +128,7 @@ socket runtime 在调用代理/模型路径前先记录用户消息。助手文�
 
 根权威 system socket 接受 agent owner UID 或 UID 0 进行内部子进程分发与停止。该 UID 0 例外不适用于每次 run 的收据绑定能力 socket，后者仍只接受 owner UID。
 
-在调用可执行代理之前，socket runtime 向 stdin 写入恰好一个 `sdk-envelope-v1` frame。`history_messages` 与 `tool_context` 字段承载有界提示上下文；代理边界不再暴露遗留环境输入 `CTX_AGENT_HISTORY_MESSAGES` 或 `CTX_AGENT_TOOL_CONTEXT`。同一 run 连续调用多个工具时，`tool_context` 会按顺序保留更早的权威 observation，而 `observation` 承载紧邻的上一次结果；host 始终按工具上下文上限约束这段记录。
+在调用可执行代理之前，socket runtime 向 stdin 写入恰好一个 `sdk-envelope-v1` frame。`history_messages` 与 `tool_context` 字段承载有界提示上下文；代理边界不再暴露遗留环境输入 `CTX_AGENT_HISTORY_MESSAGES` 或 `CTX_AGENT_TOOL_CONTEXT`。同一 run 连续调用多个工具时，`tool_context` 会按顺序保留更早的权威 observation，而 `observation` 承载紧邻的上一次结果；host 始终按工具上下文上限约束这段记录。内置 hosted agent 会把最新且相互匹配的 call 与 observation 转成 OpenAI Chat/Responses continuation 所需的规范 assistant tool call 与 tool result message。两者的 call ID 必须一致；元数据缺失或畸形时只回退到有界文本上下文，绝不伪造工具结果。
 
 人类在运行活动期间发送 `SIGINT` 时，`ctx agent chat` 会发起该活动 run 的 `cancel` 请求并返回提示符；空闲交互聊天中，`Ctrl+C` 直接退出聊天 UI。
 

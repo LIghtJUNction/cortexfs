@@ -21,6 +21,8 @@ pub(crate) mod responses;
 pub(crate) mod retry;
 pub(crate) mod routes;
 pub(crate) mod streaming;
+#[cfg(test)]
+pub(crate) mod tests;
 pub(crate) mod types;
 
 pub(crate) use completion::*;
@@ -35,4 +37,6 @@ pub(crate) use responses::*;
 pub(crate) use retry::*;
 pub(crate) use routes::*;
 pub(crate) use streaming::*;
+#[cfg(test)]
+pub(crate) use tests::*;
 pub(crate) use types::*;

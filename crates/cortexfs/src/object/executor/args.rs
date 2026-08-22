@@ -74,7 +74,7 @@ pub(crate) fn trim_tool_context_to_limit(context: &mut String) {
         start = start.saturating_add(1);
     }
     let tail = context.get(start..).unwrap_or_default();
-    if let Some(offset) = tail.find("\n\nTool result ") {
+    if let Some(offset) = tail.find("\n\nCORTEXFS_TOOL_") {
         start = start.saturating_add(offset).saturating_add(2);
     }
     let mut trimmed = String::with_capacity(marker.len() + context.len().saturating_sub(start));

@@ -378,7 +378,10 @@ not advertise an OpenAI `programmatic_tool_calling` tool, set
 single-call host loop remains the only executable-agent tool protocol. An
 OpenAI function call with an absent, null, or `{ "type": "direct" }` caller is
 an ordinary native call; `program` and unknown caller types fail closed as
-unsupported host-owned continuation.
+unsupported host-owned continuation. After a direct call executes, the next
+OpenAI Chat or Responses request replays one canonical assistant tool call and
+its ID-matched tool result. This protocol-native replay does not enable
+programmatic tool calling or bypass host authorization.
 
 Before enablement, a tool needs an explicit, default-deny programmatic
 declaration. The optional `tool/<name>.d/program` control is the tool author's

@@ -307,7 +307,13 @@ fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
             "step": 1,
             "input": "hello",
             "history_messages": "previous message",
-            "tool_context": "",
+            "tool_context": format!(
+                "{}{}",
+                crate::agent::TOOL_CALL_CONTEXT_PREFIX,
+                serde_json::json!({
+                    "id": "call-1", "name": "tsh", "arguments": {"args": ["tools"]}
+                })
+            ),
             "observation": {
                 "tool_call_id": "call-1",
                 "name": "tsh",
@@ -326,6 +332,7 @@ fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
         return;
     };
     config.apply_invocation(&envelope);
+    assert!(agent_continuation_messages(&config.tool_context).is_some());
     assert_eq!(admit_agent_prompt(&config, "hello"), Ok(false));
 }
 

@@ -1,4 +1,5 @@
 use cortexfs_metadatas::MetadataCatalog;
+use cortexfs_protocol::{Message, ToolCall};
 use cortexfs_runtime_client::agent::{
     AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI, AgentInvocationEnvelope, read_agent_invocation,
 };
@@ -200,21 +201,12 @@ impl AgentModelRunConfig {
         self.history_messages.push_str(envelope.history_messages());
         self.tool_context.clear();
         self.tool_context.push_str(envelope.tool_context());
-        if let Some(observation) = envelope.observation() {
+        if let Some((prefix, encoded)) = encoded_tool_context(envelope) {
             if !self.tool_context.trim().is_empty() {
                 self.tool_context.push_str("\n\n");
             }
-            self.tool_context.push_str("Tool result ");
-            self.tool_context.push_str(observation.tool_call_id());
-            self.tool_context.push_str(" from ");
-            self.tool_context.push_str(observation.name());
-            self.tool_context.push_str(" status ");
-            self.tool_context.push_str(observation.status());
-            if observation.truncated() {
-                self.tool_context.push_str(" (truncated)");
-            }
-            self.tool_context.push_str(":\n");
-            self.tool_context.push_str(observation.content());
+            self.tool_context.push_str(prefix);
+            self.tool_context.push_str(&encoded);
             trim_tool_context_to_limit(&mut self.tool_context);
         }
         if let Some(event) = envelope.event()
@@ -228,6 +220,28 @@ impl AgentModelRunConfig {
             trim_tool_context_to_limit(&mut self.tool_context);
         }
     }
+}
+
+fn encoded_tool_context(envelope: &AgentInvocationEnvelope) -> Option<(&'static str, String)> {
+    let observation = envelope.observation()?;
+    let call = envelope
+        .tool_context()
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(crate::agent::TOOL_CALL_CONTEXT_PREFIX))
+        .and_then(|value| serde_json::from_str::<ToolCall>(value).ok());
+    if let Some(call) = call.filter(|call| call.id == observation.tool_call_id()) {
+        let mut assistant = Message::assistant("");
+        assistant.tool_calls.push(call);
+        let mut tool = Message::new("tool", observation.content());
+        tool.tool_call_id = Some(observation.tool_call_id().to_owned());
+        return serde_json::to_string(&[assistant, tool])
+            .ok()
+            .map(|encoded| (crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX, encoded));
+    }
+    serde_json::to_string(observation)
+        .ok()
+        .map(|encoded| (crate::agent::TOOL_RESULT_CONTEXT_PREFIX, encoded))
 }
 
 pub(crate) fn candidate_window_budget(
