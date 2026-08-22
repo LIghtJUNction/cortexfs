@@ -5,8 +5,6 @@ pub mod alias;
 #[doc(hidden)]
 pub mod create;
 #[doc(hidden)]
-pub mod directory;
-#[doc(hidden)]
 pub mod error;
 #[doc(hidden)]
 pub mod input;

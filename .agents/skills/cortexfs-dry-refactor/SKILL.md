@@ -53,7 +53,7 @@ rtk proxy jscpd --reporters ai --min-lines 10 --min-tokens 80 crates/cortexfs/sr
 
 新增 Rust helper 或本地实现前，先查相邻模块和共享 helper 是否已有等价行为。优先检查这些族：
 
-- `support/plain.rs` 和 `cli/directory.rs`：普通目录、文件创建和同步。
+- `support/plain.rs`：普通目录、文件创建和同步。
 - `support/path.rs`：host workspace 路径校验。
 - `support/process.rs`：有限读取进程输出、终止进程组。
 - `cli/nofollow.rs`：CLI 侧 no-follow 打开文件。
