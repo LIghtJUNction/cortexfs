@@ -32,15 +32,8 @@ pub(super) async fn handle(
         } => {
             let target = message.target.clone();
             message::proactive(client, message).await?;
-            session.send_receipt(
-                request_id,
-                DeliveryReceipt {
-                    channel: target.channel.clone(),
-                    message_id: format!("nostr-{}", target.conversation),
-                    target,
-                    timestamp_ms: None,
-                },
-            )?;
+            let message_id = format!("nostr-{}", target.conversation);
+            session.send_receipt(request_id, DeliveryReceipt::new(target, message_id))?;
         }
         ChannelFrameBody::Command {
             request_id,
@@ -50,18 +43,8 @@ pub(super) async fn handle(
             target: Some(target),
         } => {
             let result = message::invoke(client, &target, &name, &payload).await;
-            let result = result.map_or_else(
-                |error| ChannelCommandResult::Rejected {
-                    reason: error.to_string(),
-                },
-                |payload| ChannelCommandResult::Value { payload },
-            );
-            session.send_frame(ChannelFrameBody::CommandResult {
-                request_id,
-                session: session_id,
-                command_id,
-                result,
-            })?;
+            let result = ChannelCommandResult::from_value_result(result);
+            session.send_command_result(request_id, session_id, command_id, result)?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,

@@ -28,12 +28,7 @@ pub(super) async fn handle(
             let topic = message::publish(client, config, &message).await?;
             session.send_receipt(
                 request_id,
-                DeliveryReceipt {
-                    channel: message.target.channel.clone(),
-                    message_id: format!("mqtt-{topic}"),
-                    target: message.target,
-                    timestamp_ms: None,
-                },
+                DeliveryReceipt::new(message.target, format!("mqtt-{topic}")),
             )?;
         }
         ChannelFrameBody::Command {
@@ -49,17 +44,12 @@ pub(super) async fn handle(
                 }
                 _ => Err(Error::Config("MQTT command is unsupported".to_owned())),
             };
-            session.send_frame(ChannelFrameBody::CommandResult {
+            session.send_command_result(
                 request_id,
-                session: session_id,
+                session_id,
                 command_id,
-                result: result.map_or_else(
-                    |error| ChannelCommandResult::Rejected {
-                        reason: error.to_string(),
-                    },
-                    |payload| ChannelCommandResult::Value { payload },
-                ),
-            })?;
+                ChannelCommandResult::from_value_result(result),
+            )?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,

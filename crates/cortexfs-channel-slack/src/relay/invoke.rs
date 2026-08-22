@@ -19,14 +19,9 @@ pub(super) async fn handle(
     name: String,
     payload: Value,
 ) -> Result<()> {
-    let result = api::invoke(client, config, &target, &name, &payload)
-        .await
-        .map_or_else(
-            |error| ChannelCommandResult::Rejected {
-                reason: error.to_string(),
-            },
-            |payload| ChannelCommandResult::Value { payload },
-        );
+    let result = ChannelCommandResult::from_value_result(
+        api::invoke(client, config, &target, &name, &payload).await,
+    );
     session.command_result(
         crate::socket::CommandReply {
             request_id,

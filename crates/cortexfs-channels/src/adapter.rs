@@ -30,6 +30,19 @@ pub struct DeliveryReceipt {
     pub timestamp_ms: Option<u64>,
 }
 
+impl DeliveryReceipt {
+    /// Creates an untimestamped receipt for the target channel.
+    #[must_use]
+    pub fn new(target: MessageTarget, message_id: String) -> Self {
+        Self {
+            channel: target.channel.clone(),
+            message_id,
+            target,
+            timestamp_ms: None,
+        }
+    }
+}
+
 /// Object-safe contract implemented by Telegram, Slack, Discord, or custom adapters.
 pub trait ChannelAdapter: Send + Sync {
     fn id(&self) -> ChannelId;

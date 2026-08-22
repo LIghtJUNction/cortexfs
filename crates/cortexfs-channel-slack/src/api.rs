@@ -50,12 +50,7 @@ pub(crate) async fn send_message(
         .get("ts")
         .and_then(Value::as_str)
         .map_or_else(|| format!("slack-{}", target.conversation), str::to_owned);
-    Ok(DeliveryReceipt {
-        channel: target.channel.clone(),
-        message_id: id,
-        target,
-        timestamp_ms: None,
-    })
+    Ok(DeliveryReceipt::new(target, id))
 }
 
 pub(super) async fn post(

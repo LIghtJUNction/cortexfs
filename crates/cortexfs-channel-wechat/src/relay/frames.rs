@@ -47,17 +47,12 @@ pub(super) async fn handle(
                 }
                 _ => Err(Error::Protocol("WeChat command is unsupported".to_owned())),
             };
-            session.send_frame(ChannelFrameBody::CommandResult {
+            session.send_command_result(
                 request_id,
-                session: session_id,
+                session_id,
                 command_id,
-                result: result.map_or_else(
-                    |error| ChannelCommandResult::Rejected {
-                        reason: error.to_string(),
-                    },
-                    |payload| ChannelCommandResult::Value { payload },
-                ),
-            })?;
+                ChannelCommandResult::from_value_result(result),
+            )?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,
@@ -108,15 +103,8 @@ async fn proactive(
         .get("wechat_context_token")
         .map_or("", String::as_str);
     api::send_message(client, config, user, context, &message.body.text).await?;
-    Ok(session.send_receipt(
-        request_id,
-        DeliveryReceipt {
-            channel: message.target.channel.clone(),
-            message_id: format!("wechat-{}", message.target.conversation),
-            target: message.target,
-            timestamp_ms: None,
-        },
-    )?)
+    let message_id = format!("wechat-{}", message.target.conversation);
+    Ok(session.send_receipt(request_id, DeliveryReceipt::new(message.target, message_id))?)
 }
 
 fn validate(message: &OutboundMessage) -> Result<()> {

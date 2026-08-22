@@ -7,8 +7,8 @@ use std::{
 };
 
 use crate::{
-    ChannelFrame, ChannelFrameBody, ChannelIncoming, ChannelIncomingEvent, DeliveryReceipt,
-    InboundMessage,
+    ChannelCommandResult, ChannelFrame, ChannelFrameBody, ChannelIncoming, ChannelIncomingEvent,
+    DeliveryReceipt, InboundMessage,
 };
 
 use super::ChannelDriverError;
@@ -65,6 +65,22 @@ impl ChannelDriverSession {
         self.send_frame(ChannelFrameBody::Receipt {
             request_id,
             receipt,
+        })
+    }
+
+    /// Returns one correlated command result to the runtime.
+    pub fn send_command_result(
+        &self,
+        request_id: String,
+        session: String,
+        command_id: String,
+        result: ChannelCommandResult,
+    ) -> Result<(), ChannelDriverError> {
+        self.send_frame(ChannelFrameBody::CommandResult {
+            request_id,
+            session,
+            command_id,
+            result,
         })
     }
 

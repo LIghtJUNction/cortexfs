@@ -19,7 +19,11 @@ pub(super) fn run(
                 message,
             } => {
                 handler.outbound(&message)?;
-                session.send_receipt(request_id, receipt(&message))?;
+                let receipt = DeliveryReceipt::new(
+                    message.target.clone(),
+                    format!("control-{}", message.target.conversation),
+                );
+                session.send_receipt(request_id, receipt)?;
             }
             ChannelFrameBody::Effect { target, effect, .. } => handler.effect(&target, &effect)?,
             ChannelFrameBody::Command {
@@ -34,26 +38,12 @@ pub(super) fn run(
                     .unwrap_or_else(|error| ChannelCommandResult::Rejected {
                         reason: error.to_string(),
                     });
-                session.send_frame(ChannelFrameBody::CommandResult {
-                    request_id,
-                    session: run,
-                    command_id,
-                    result,
-                })?;
+                session.send_command_result(request_id, run, command_id, result)?;
             }
             ChannelFrameBody::Stop { .. } | ChannelFrameBody::Error { .. } => {
                 return Err(ChannelControlError::Stopped);
             }
             _ => {}
         }
-    }
-}
-
-fn receipt(message: &cortexfs_channels::OutboundMessage) -> DeliveryReceipt {
-    DeliveryReceipt {
-        channel: message.target.channel.clone(),
-        message_id: format!("control-{}", message.target.conversation),
-        target: message.target.clone(),
-        timestamp_ms: None,
     }
 }

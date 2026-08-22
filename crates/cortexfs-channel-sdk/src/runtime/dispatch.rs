@@ -37,12 +37,8 @@ impl<S: ChannelService> ChannelRuntime<S> {
                         .unwrap_or_else(|_error| ChannelCommandResult::Rejected {
                             reason: "channel operation failed".to_owned(),
                         });
-                    self.session.send_frame(ChannelFrameBody::CommandResult {
-                        request_id,
-                        session,
-                        command_id,
-                        result,
-                    })?;
+                    self.session
+                        .send_command_result(request_id, session, command_id, result)?;
                 }
                 ChannelFrameBody::HealthRequest { request_id } => {
                     let health = self

@@ -54,15 +54,8 @@ pub(super) async fn handle(
                 target.conversation.as_str(),
             )
             .await?;
-            session.send_receipt(
-                request_id,
-                DeliveryReceipt {
-                    channel: target.channel.clone(),
-                    message_id: format!("amqp-{}", target.conversation),
-                    target,
-                    timestamp_ms: None,
-                },
-            )?;
+            let message_id = format!("amqp-{}", target.conversation);
+            session.send_receipt(request_id, DeliveryReceipt::new(target, message_id))?;
         }
         ChannelFrameBody::Command {
             request_id,
@@ -78,17 +71,12 @@ pub(super) async fn handle(
                 }
                 _ => Err(Error::Config("AMQP command is unsupported".to_owned())),
             };
-            session.send_frame(ChannelFrameBody::CommandResult {
+            session.send_command_result(
                 request_id,
-                session: session_id,
+                session_id,
                 command_id,
-                result: result.map_or_else(
-                    |error| ChannelCommandResult::Rejected {
-                        reason: error.to_string(),
-                    },
-                    |payload| ChannelCommandResult::Value { payload },
-                ),
-            })?;
+                ChannelCommandResult::from_value_result(result),
+            )?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,

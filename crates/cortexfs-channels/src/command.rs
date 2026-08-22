@@ -43,3 +43,15 @@ pub enum ChannelCommandResult {
     Rejected { reason: String },
     Value { payload: Value },
 }
+
+impl ChannelCommandResult {
+    /// Converts one provider invocation result into its wire-neutral form.
+    pub fn from_value_result<E: std::fmt::Display>(result: Result<Value, E>) -> Self {
+        result.map_or_else(
+            |error| Self::Rejected {
+                reason: error.to_string(),
+            },
+            |payload| Self::Value { payload },
+        )
+    }
+}

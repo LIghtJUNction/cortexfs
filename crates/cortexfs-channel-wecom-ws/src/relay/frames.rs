@@ -48,17 +48,12 @@ pub(super) async fn handle(
                 }
                 _ => Err(Error::Protocol("WeCom command is unsupported".to_owned())),
             };
-            session.send_frame(ChannelFrameBody::CommandResult {
+            session.send_command_result(
                 request_id,
-                session: session_id,
+                session_id,
                 command_id,
-                result: result.map_or_else(
-                    |error| ChannelCommandResult::Rejected {
-                        reason: error.to_string(),
-                    },
-                    |payload| ChannelCommandResult::Value { payload },
-                ),
-            })?;
+                ChannelCommandResult::from_value_result(result),
+            )?;
         }
         ChannelFrameBody::Event {
             event: ChannelRuntimeEvent::Disconnected,
@@ -101,15 +96,8 @@ async fn proactive(
         .cloned()
         .unwrap_or_else(|| runtime_request_id.clone());
     reply(output_tx, &platform_request_id, &message).await?;
-    Ok(session.send_receipt(
-        runtime_request_id,
-        DeliveryReceipt {
-            channel: target.channel.clone(),
-            message_id: format!("wecom-{}", target.conversation),
-            target,
-            timestamp_ms: None,
-        },
-    )?)
+    let message_id = format!("wecom-{}", target.conversation);
+    Ok(session.send_receipt(runtime_request_id, DeliveryReceipt::new(target, message_id))?)
 }
 
 async fn send(output_tx: &mpsc::Sender<Message>, text: String) -> Result<()> {

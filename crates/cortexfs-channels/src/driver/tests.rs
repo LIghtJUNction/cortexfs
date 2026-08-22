@@ -517,6 +517,19 @@ fn persistent_session_keeps_unsolicited_frames_available()
                 ChannelFrame::decode(line.as_bytes())?.frame,
                 ChannelFrameBody::Receipt { ref request_id, .. } if request_id == "idle-send"
             ));
+            line.clear();
+            reader.read_line(&mut line)?;
+            assert!(matches!(
+                ChannelFrame::decode(line.as_bytes())?.frame,
+                ChannelFrameBody::CommandResult {
+                    ref request_id,
+                    ref session,
+                    ref command_id,
+                    result: ChannelCommandResult::Accepted,
+                } if request_id == "command-request"
+                    && session == "command-session"
+                    && command_id == "command-id"
+            ));
             Ok(())
         },
     );
@@ -534,12 +547,13 @@ fn persistent_session_keeps_unsolicited_frames_available()
         {
             session.send_receipt(
                 request_id,
-                DeliveryReceipt {
-                    channel: ChannelId::from_static("test"),
-                    message_id: "idle-reply".to_owned(),
-                    target: target()?,
-                    timestamp_ms: None,
-                },
+                DeliveryReceipt::new(target()?, "idle-reply".to_owned()),
+            )?;
+            session.send_command_result(
+                "command-request".to_owned(),
+                "command-session".to_owned(),
+                "command-id".to_owned(),
+                ChannelCommandResult::Accepted,
             )?;
             break;
         }
@@ -549,6 +563,21 @@ fn persistent_session_keeps_unsolicited_frames_available()
         .map_err(|error| std::io::Error::other(format!("worker panicked: {error:?}")))??;
     std::fs::remove_file(path)?;
     Ok(())
+}
+
+#[test]
+fn command_result_maps_values_and_errors() {
+    let payload = serde_json::json!({"ok": true});
+    assert_eq!(
+        ChannelCommandResult::from_value_result(Result::<_, &str>::Ok(payload.clone())),
+        ChannelCommandResult::Value { payload }
+    );
+    assert_eq!(
+        ChannelCommandResult::from_value_result(Result::<serde_json::Value, _>::Err("failed")),
+        ChannelCommandResult::Rejected {
+            reason: "failed".to_owned()
+        }
+    );
 }
 
 fn target() -> Result<MessageTarget, crate::ChannelError> {
