@@ -1579,21 +1579,10 @@ pub(crate) fn prompt_quoted(value: &str) -> String {
 mod completion_tests {
     use super::*;
     use crate::reference::bootstrap::ensure_runtime_models_from;
-    use cortexfs_runtime_client::interaction::{
-        InteractionFrame, InteractionRequest, InteractionResult,
-    };
     use std::ffi::OsString;
     use std::io;
     use std::net::{Shutdown, TcpListener};
     use std::os::unix::fs::PermissionsExt;
-
-    fn approval_call() -> object::executor::AgentToolCall {
-        object::executor::AgentToolCall {
-            id: "call-1".to_owned(),
-            name: "example.echo".to_owned(),
-            args: vec![OsString::from("one")],
-        }
-    }
 
     #[test]
     fn provider_network_denial_names_the_required_policy_permission() {
@@ -1604,94 +1593,6 @@ mod completion_tests {
                 .first()
                 .is_some_and(|frame| frame.contains("network:default connect"))
         );
-    }
-
-    #[test]
-    fn approval_response_accepts_only_emitted_run_and_exact_call()
-    -> Result<(), Box<dyn std::error::Error>> {
-        for response in [
-            "",
-            "not-json\n",
-            "{\"op\":\"approve\",\"run\":\"client-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
-            "{\"op\":\"approve\",\"run\":\"wrong\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
-            "{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"wrong\",\"decision\":\"allow_once\"}\n",
-            "{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"deny\"}\n",
-        ] {
-            let (mut client, mut server) = UnixStream::pair()?;
-            client.write_all(response.as_bytes())?;
-            client.shutdown(Shutdown::Write)?;
-            let approval =
-                request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
-                    .map_err(|error| io::Error::other(format!("{error:?}")))?;
-            assert!(!approval.allowed, "{response:?}");
-        }
-        let (_client, mut server) = UnixStream::pair()?;
-        server.set_read_timeout(Some(Duration::from_millis(10)))?;
-        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        assert!(!approval.allowed);
-
-        let (mut client, mut server) = UnixStream::pair()?;
-        client.write_all(
-            b"{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
-        )?;
-        client.shutdown(Shutdown::Write)?;
-        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        assert!(approval.allowed);
-
-        let (mut client, mut server) = UnixStream::pair()?;
-        let response = InteractionFrame::request(InteractionRequest::CommandResult {
-            request_id: "other-request".to_owned(),
-            session: "default".to_owned(),
-            command_id: "call-1".to_owned(),
-            result: InteractionResult::Accepted,
-        })
-        .encode()
-        .map_err(io::Error::other)?;
-        client.write_all(&response)?;
-        client.shutdown(Shutdown::Write)?;
-        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        assert!(!approval.allowed);
-
-        let (mut client, mut server) = UnixStream::pair()?;
-        let response = InteractionFrame::request(InteractionRequest::CommandResult {
-            request_id: "request-1".to_owned(),
-            session: "default".to_owned(),
-            command_id: "call-1".to_owned(),
-            result: InteractionResult::Accepted,
-        })
-        .encode()
-        .map_err(io::Error::other)?;
-        client.write_all(&response)?;
-        client.shutdown(Shutdown::Write)?;
-        let approval = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        assert!(approval.allowed);
-        Ok(())
-    }
-
-    #[test]
-    fn approval_response_denies_replayed_allow_once_for_previous_call()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let (mut client, mut server) = UnixStream::pair()?;
-        client.write_all(
-            b"{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n\
-              {\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
-        )?;
-        client.shutdown(Shutdown::Write)?;
-
-        let first = request_tool_approval(&mut server, "request-1", "run-1", &approval_call())
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        assert!(first.allowed);
-
-        let mut second_call = approval_call();
-        second_call.id = "call-2".to_owned();
-        let replayed = request_tool_approval(&mut server, "request-1", "run-1", &second_call)
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        assert!(!replayed.allowed);
-        Ok(())
     }
 
     #[test]

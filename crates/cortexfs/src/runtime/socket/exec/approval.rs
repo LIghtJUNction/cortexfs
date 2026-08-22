@@ -1,6 +1,5 @@
-use std::os::unix::net::UnixStream;
-
 use serde_json::Value;
+use std::os::unix::net::UnixStream;
 
 use super::super::{
     MAX_SOCKET_FRAME_BYTES, read_socket_request_frame_from_stream, write_socket_frame,
@@ -10,13 +9,11 @@ use crate::object::executor::AgentToolCall;
 use cortexfs_runtime_client::interaction::{
     InteractionFrame, InteractionPayload, InteractionRequest, InteractionResult,
 };
-
 pub(super) struct ToolApproval {
     pub(super) frames: [String; 2],
     pub(super) allowed: bool,
     pub(super) reason: &'static str,
 }
-
 pub(super) fn request_tool_approval(
     stream: &mut UnixStream,
     request_id: &str,
@@ -68,7 +65,6 @@ pub(super) fn request_tool_approval(
         reason,
     })
 }
-
 fn approval_decision(line: &str, request_id: &str, run: &str, call_id: &str) -> Option<String> {
     if let Some(decision) = serde_json::from_str::<Value>(line)
         .ok()
@@ -118,3 +114,6 @@ fn approval_result_frame(run: &str, call: &AgentToolCall, allowed: bool, reason:
     })
     .to_string()
 }
+
+#[cfg(test)]
+mod tests;
