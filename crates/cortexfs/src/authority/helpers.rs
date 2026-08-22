@@ -1,6 +1,8 @@
 use crate::*;
 
-use crate::support::plain::{open_plain_directory, path_metadata_no_follow, plain_file_name};
+use crate::support::plain::{
+    create_exclusive_file_at, open_plain_directory, path_metadata_no_follow, plain_file_name,
+};
 #[cfg(test)]
 use std::os::unix::fs::FileExt;
 
@@ -245,21 +247,12 @@ fn atomic_replace_text_in_parent(
 ) -> Result<AtomicReplaceOutcome, std::io::Error> {
     for attempt in 0..16 {
         let temp_name = generated_sibling_name(file_name, "tmp", attempt);
-        let file_fd = match nix::fcntl::openat(
-            parent_dir,
-            temp_name.as_str(),
-            nix::fcntl::OFlag::O_CREAT
-                | nix::fcntl::OFlag::O_EXCL
-                | nix::fcntl::OFlag::O_WRONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::from_bits_truncate(metadata.mode),
-        ) {
-            Ok(file_fd) => file_fd,
+        let mut file = match create_exclusive_file_at(parent_dir, temp_name.as_str(), metadata.mode)
+        {
+            Ok(file) => file,
             Err(nix::errno::Errno::EEXIST) => continue,
             Err(error) => return Err(nix_errno_to_io(error)),
         };
-        let mut file = fs::File::from(file_fd);
         if let Some((uid, gid)) = metadata.owner {
             let created = match file.metadata() {
                 Ok(created) => created,

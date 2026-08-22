@@ -1,7 +1,9 @@
 use super::*;
 use crate::*;
 
-use crate::support::plain::{open_plain_directory, plain_file_name, read_small_text_file};
+use crate::support::plain::{
+    create_exclusive_file_at, open_plain_directory, plain_file_name, read_small_text_file,
+};
 
 impl Tool for FsReadTool {
     fn spec(&self) -> ToolSpec {
@@ -212,18 +214,8 @@ pub(crate) fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<(
             .duration_since(UNIX_EPOCH)
             .map_or(0, |duration| duration.as_nanos());
         let tmp_name = format!(".{file_name}.tmp-{}-{nonce}-{attempt}", std::process::id());
-        match nix::fcntl::openat(
-            &parent_dir,
-            tmp_name.as_str(),
-            nix::fcntl::OFlag::O_CREAT
-                | nix::fcntl::OFlag::O_EXCL
-                | nix::fcntl::OFlag::O_WRONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::from_bits_truncate(0o644),
-        ) {
-            Ok(fd) => {
-                let mut file = fs::File::from(fd);
+        match create_exclusive_file_at(&parent_dir, tmp_name.as_str(), 0o644) {
+            Ok(mut file) => {
                 if let Err(error) = file.write_all(content.as_bytes()) {
                     let _ignored = nix::unistd::unlinkat(
                         &parent_dir,

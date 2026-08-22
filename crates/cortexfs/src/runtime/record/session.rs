@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::plain::create_exclusive_file_at;
 use std::os::unix::fs::MetadataExt;
 
 use nix::{
@@ -607,14 +608,8 @@ pub(crate) fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::
         Err(nix::errno::Errno::ENOENT) => {}
         Err(error) => return Err(std::io::Error::from(error)),
     }
-    let file_fd = openat(
-        &parent_dir,
-        name,
-        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-        Mode::from_bits_truncate(0o600),
-    )
-    .map_err(std::io::Error::from)?;
-    let mut file = fs::File::from(file_fd);
+    let mut file =
+        create_exclusive_file_at(&parent_dir, name, 0o600).map_err(std::io::Error::from)?;
     file.write_all(content.as_bytes())?;
     file.flush()?;
     file.sync_all()?;

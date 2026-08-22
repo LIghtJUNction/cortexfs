@@ -177,9 +177,9 @@ pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> R
     Ok(created)
 }
 
-pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u32) -> Result<()> {
-    validate_plain_name(name)?;
-    let fd = nix::fcntl::openat(
+#[doc(hidden)]
+pub fn create_exclusive_file_at(parent: &fs::File, name: &str, mode: u32) -> nix::Result<fs::File> {
+    nix::fcntl::openat(
         parent,
         name,
         nix::fcntl::OFlag::O_WRONLY
@@ -187,10 +187,15 @@ pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u3
             | nix::fcntl::OFlag::O_EXCL
             | nix::fcntl::OFlag::O_NOFOLLOW
             | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+        nix::sys::stat::Mode::from_bits_truncate(mode),
     )
-    .map_err(std::io::Error::from)?;
-    let mut file = fs::File::from(fd);
+    .map(fs::File::from)
+}
+
+pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u32) -> Result<()> {
+    validate_plain_name(name)?;
+    let mut file =
+        create_exclusive_file_at(parent, name, mode & 0o7777).map_err(std::io::Error::from)?;
     file.write_all(content.as_bytes())?;
     nix::sys::stat::fchmod(
         &file,
@@ -211,18 +216,8 @@ pub fn write_file_atomic_at(
 ) -> Result<()> {
     validate_plain_name(name)?;
     let temp = format!(".{name}.tmp-{}", std::process::id());
-    let fd = nix::fcntl::openat(
-        parent,
-        temp.as_str(),
-        nix::fcntl::OFlag::O_WRONLY
-            | nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_EXCL
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
-    )
-    .map_err(std::io::Error::from)?;
-    let mut file = fs::File::from(fd);
+    let mut file = create_exclusive_file_at(parent, temp.as_str(), mode & 0o7777)
+        .map_err(std::io::Error::from)?;
     let publish = file
         .write_all(content)
         .and_then(|()| file.sync_all())

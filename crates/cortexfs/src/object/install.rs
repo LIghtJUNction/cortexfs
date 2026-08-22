@@ -3,7 +3,9 @@ use crate::object::present;
 use crate::object::receipt::{
     InstallReceiptData, receipt_for, verify_executable, write_install_receipt,
 };
-use crate::support::plain::{open_plain_directory, open_plain_file, write_text_file_at};
+use crate::support::plain::{
+    create_exclusive_file_at, open_plain_directory, open_plain_file, write_text_file_at,
+};
 use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches};
 use crate::{
     AgentWindowSetting, MountTable, ObjectClass, PolicyV0, is_model_alias, is_model_name,
@@ -717,18 +719,8 @@ fn copy_executable(
     stage: &fs::File,
     expected: &str,
 ) -> Result<fs::File, InstallError> {
-    let fd = nix::fcntl::openat(
-        stage,
-        "executable",
-        nix::fcntl::OFlag::O_WRONLY
-            | nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_EXCL
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::from_bits_truncate(0o755),
-    )
-    .map_err(|error| InstallError::unavailable(format!("cannot stage executable: {error}")))?;
-    let mut target_file = fs::File::from(fd);
+    let mut target_file = create_exclusive_file_at(stage, "executable", 0o755)
+        .map_err(|error| InstallError::unavailable(format!("cannot stage executable: {error}")))?;
     verify_executable(source, expected, Some(&mut target_file))?;
     target_file
         .sync_all()

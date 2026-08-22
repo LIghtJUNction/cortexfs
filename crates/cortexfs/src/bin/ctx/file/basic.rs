@@ -124,17 +124,8 @@ pub(crate) fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliEr
 
     for attempt in 0..16 {
         let temp_name = temp_file_name(attempt);
-        let file_fd = match nix::fcntl::openat(
-            &parent_dir,
-            temp_name.as_str(),
-            nix::fcntl::OFlag::O_CREAT
-                | nix::fcntl::OFlag::O_EXCL
-                | nix::fcntl::OFlag::O_WRONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::from_bits_truncate(0o644),
-        ) {
-            Ok(file_fd) => file_fd,
+        let mut file = match create_exclusive_file_at(&parent_dir, temp_name.as_str(), 0o644) {
+            Ok(file) => file,
             Err(nix::errno::Errno::EEXIST) => continue,
             Err(error) => {
                 return Err(CliError::unavailable(format!(
@@ -142,7 +133,6 @@ pub(crate) fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliEr
                 )));
             }
         };
-        let mut file = fs::File::from(file_fd);
         file.write_all(content.as_bytes())
             .and_then(|()| file.sync_all())
             .map_err(|error| {

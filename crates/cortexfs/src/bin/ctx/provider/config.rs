@@ -29,17 +29,8 @@ pub(crate) fn atomic_write_provider_config(path: &Path, content: &str) -> Result
         .ok_or_else(|| CliError::unavailable("provider config path has no file name"))?;
     for attempt in 0..16 {
         let temp_name = temp_file_name(attempt);
-        let file_fd = match nix::fcntl::openat(
-            &parent_dir,
-            temp_name.as_str(),
-            nix::fcntl::OFlag::O_CREAT
-                | nix::fcntl::OFlag::O_EXCL
-                | nix::fcntl::OFlag::O_WRONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::from_bits_truncate(0o600),
-        ) {
-            Ok(file_fd) => file_fd,
+        let mut temp = match create_exclusive_file_at(&parent_dir, temp_name.as_str(), 0o600) {
+            Ok(file) => file,
             Err(nix::errno::Errno::EEXIST) => continue,
             Err(error) => {
                 return Err(CliError::unavailable(format!(
@@ -47,7 +38,6 @@ pub(crate) fn atomic_write_provider_config(path: &Path, content: &str) -> Result
                 )));
             }
         };
-        let mut temp = fs::File::from(file_fd);
         temp.write_all(content.as_bytes())
             .and_then(|()| temp.flush())
             .and_then(|()| temp.sync_all())

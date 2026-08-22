@@ -88,7 +88,7 @@ pub(crate) use cortexfs::cli::json;
 pub(crate) use cortexfs::cli::stderr;
 pub(crate) use cortexfs::cli::terminal::*;
 pub(crate) use cortexfs::cli::uid;
-pub(crate) use cortexfs::support::plain::open_plain_directory;
+pub(crate) use cortexfs::support::plain::{create_exclusive_file_at, open_plain_directory};
 #[cfg(test)]
 pub(crate) use cortexfs::{agent_host_mount_source, cli::stale::*};
 pub(crate) use create::*;

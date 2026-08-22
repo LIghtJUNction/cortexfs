@@ -1,5 +1,7 @@
 use super::install::InstallError;
 #[cfg(test)]
+use crate::support::plain::create_exclusive_file_at;
+#[cfg(test)]
 use crate::support::plain::proc_fd_path;
 use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches, park_entry, restore_entry};
 
@@ -227,18 +229,8 @@ pub(super) fn sync_dirs(first: &fs::File, second: &fs::File) -> Result<(), Strin
 pub(super) fn create_foreign_executable(parent: &fs::File, name: &str) -> Result<(), String> {
     use std::io::Write as _;
 
-    let fd = nix::fcntl::openat(
-        parent,
-        name,
-        nix::fcntl::OFlag::O_WRONLY
-            | nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_EXCL
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::from_bits_truncate(0o755),
-    )
-    .map_err(|error| format!("cannot create foreign executable: {error}"))?;
-    let mut file = fs::File::from(fd);
+    let mut file = create_exclusive_file_at(parent, name, 0o755)
+        .map_err(|error| format!("cannot create foreign executable: {error}"))?;
     file.write_all(b"foreign")
         .map_err(|error| format!("cannot write foreign executable: {error}"))?;
     file.sync_all()

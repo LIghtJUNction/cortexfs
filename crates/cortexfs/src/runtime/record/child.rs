@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::plain::create_exclusive_file_at;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -188,18 +189,8 @@ fn replace_child_file(
     if original.st_mode & libc::S_IFMT != libc::S_IFREG {
         return Err(ChildContextRecordError::CannotRecord);
     }
-    let created = nix::fcntl::openat(
-        directory,
-        temporary,
-        nix::fcntl::OFlag::O_WRONLY
-            | nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_EXCL
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::from_bits_truncate(0o600),
-    )
-    .map(fs::File::from)
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let created = create_exclusive_file_at(directory, temporary, 0o600)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let publish = (|| {
         nix::unistd::fchown(
             &created,
