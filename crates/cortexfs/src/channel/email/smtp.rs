@@ -34,18 +34,7 @@ pub(super) fn send(config: &EmailConfig, message: &OutboundMessage) -> Result<()
     let email = builder
         .body(message.body.text.clone())
         .map_err(|error| EmailError::Smtp(error.to_string()))?;
-    let mailer = SmtpTransport::starttls_relay(&config.smtp_host)
-        .map_err(|error| EmailError::Smtp(error.to_string()))?
-        .port(config.smtp_port)
-        .credentials(Credentials::new(
-            config.username.clone(),
-            config.password.clone(),
-        ))
-        .build();
-    mailer
-        .send(&email)
-        .map_err(|error| EmailError::Smtp(error.to_string()))?;
-    Ok(())
+    deliver(config, &email)
 }
 
 pub(super) fn send_request(
@@ -81,6 +70,10 @@ pub(super) fn send_request(
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_owned())
         .map_err(|error| EmailError::Smtp(error.to_string()))?;
+    deliver(config, &email)
+}
+
+pub(super) fn deliver(config: &EmailConfig, email: &Message) -> Result<(), EmailError> {
     let mailer = SmtpTransport::starttls_relay(&config.smtp_host)
         .map_err(|error| EmailError::Smtp(error.to_string()))?
         .port(config.smtp_port)
@@ -90,7 +83,7 @@ pub(super) fn send_request(
         ))
         .build();
     mailer
-        .send(&email)
+        .send(email)
         .map_err(|error| EmailError::Smtp(error.to_string()))?;
     Ok(())
 }

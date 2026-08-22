@@ -6,17 +6,21 @@ use serde_json::{Value, json};
 use super::super::bridge::AgentChannelBridge;
 use super::{EmailConfig, EmailError, smtp};
 
-pub(super) fn run_once(
-    config: &EmailConfig,
-    bridge: &AgentChannelBridge,
-) -> Result<(), EmailError> {
+fn login(config: &EmailConfig) -> Result<imap::Session<imap::Connection>, EmailError> {
     let client = imap::ClientBuilder::new(&config.imap_host, config.imap_port)
         .tls_kind(imap::TlsKind::Rust)
         .connect()
         .map_err(|error| EmailError::Imap(error.to_string()))?;
-    let mut session = client
+    client
         .login(&config.username, &config.password)
-        .map_err(|(error, _client)| EmailError::Imap(error.to_string()))?;
+        .map_err(|(error, _client)| EmailError::Imap(error.to_string()))
+}
+
+pub(super) fn run_once(
+    config: &EmailConfig,
+    bridge: &AgentChannelBridge,
+) -> Result<(), EmailError> {
+    let mut session = login(config)?;
     session
         .select(&config.mailbox)
         .map_err(|error| EmailError::Imap(error.to_string()))?;
@@ -32,13 +36,7 @@ pub(super) fn run_once(
 }
 
 pub(super) fn tool(config: &EmailConfig, name: &str, payload: &Value) -> Result<Value, EmailError> {
-    let client = imap::ClientBuilder::new(&config.imap_host, config.imap_port)
-        .tls_kind(imap::TlsKind::Rust)
-        .connect()
-        .map_err(|error| EmailError::Imap(error.to_string()))?;
-    let mut session = client
-        .login(&config.username, &config.password)
-        .map_err(|(error, _client)| EmailError::Imap(error.to_string()))?;
+    let mut session = login(config)?;
     session
         .select(&config.mailbox)
         .map_err(|error| EmailError::Imap(error.to_string()))?;

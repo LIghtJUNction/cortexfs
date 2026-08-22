@@ -1,11 +1,10 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use lettre::{
-    Message, SmtpTransport, Transport,
+    Message,
     message::{Attachment, MultiPart, SinglePart, header::ContentType},
-    transport::smtp::authentication::Credentials,
 };
 
-use super::{EmailConfig, EmailError};
+use super::{EmailConfig, EmailError, smtp};
 
 pub(super) struct Request<'a> {
     pub(super) recipient: &'a str,
@@ -45,16 +44,5 @@ pub(super) fn send(config: &EmailConfig, request: &Request<'_>) -> Result<(), Em
                 .singlepart(Attachment::new(request.name.to_owned()).body(bytes, content_type)),
         )
         .map_err(|error| EmailError::Smtp(error.to_string()))?;
-    let mailer = SmtpTransport::starttls_relay(&config.smtp_host)
-        .map_err(|error| EmailError::Smtp(error.to_string()))?
-        .port(config.smtp_port)
-        .credentials(Credentials::new(
-            config.username.clone(),
-            config.password.clone(),
-        ))
-        .build();
-    mailer
-        .send(&email)
-        .map_err(|error| EmailError::Smtp(error.to_string()))?;
-    Ok(())
+    smtp::deliver(config, &email)
 }

@@ -1,5 +1,6 @@
 use cortexfs_channels::{
-    Attachment, ChannelCommand, ChannelId, ConversationId, MessageBody, MessageTarget,
+    Attachment, ChannelChoice, ChannelCommand, ChannelId, ConversationId, MessageBody,
+    MessageTarget,
 };
 use cortexfs_tool_sdk::{ToolError, ToolResult};
 use serde_json::Value;
@@ -37,33 +38,29 @@ pub(super) fn body(input: &Value) -> ToolResult<MessageBody> {
 }
 
 pub(super) fn choice(input: &Value) -> ToolResult<ChannelCommand> {
-    let choices = serde_json::from_value(
-        input
-            .get("choices")
-            .cloned()
-            .ok_or_else(|| ToolError::invalid("missing choices"))?,
-    )
-    .map_err(|error| ToolError::invalid(format!("invalid choices: {error}")))?;
     Ok(ChannelCommand::RequestChoice {
         question: string(input, "question")?,
-        choices,
+        choices: choices(input)?,
         multiple: bool_field(input, "multiple", false),
     })
 }
 
 pub(super) fn multi_choice(input: &Value) -> ToolResult<ChannelCommand> {
-    let choices = serde_json::from_value(
+    Ok(ChannelCommand::RequestChoice {
+        question: string(input, "question")?,
+        choices: choices(input)?,
+        multiple: true,
+    })
+}
+
+fn choices(input: &Value) -> ToolResult<Vec<ChannelChoice>> {
+    serde_json::from_value(
         input
             .get("choices")
             .cloned()
             .ok_or_else(|| ToolError::invalid("missing choices"))?,
     )
-    .map_err(|error| ToolError::invalid(format!("invalid choices: {error}")))?;
-    Ok(ChannelCommand::RequestChoice {
-        question: string(input, "question")?,
-        choices,
-        multiple: true,
-    })
+    .map_err(|error| ToolError::invalid(format!("invalid choices: {error}")))
 }
 
 pub(super) fn approval(input: &Value) -> ToolResult<ChannelCommand> {
