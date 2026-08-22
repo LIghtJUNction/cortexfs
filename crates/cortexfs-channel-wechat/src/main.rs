@@ -6,7 +6,6 @@ mod error;
 mod invoke;
 mod message;
 mod relay;
-mod socket;
 
 use error::Result;
 use std::io::Write as _;

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use cortexfs_channels::{
-    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+    ChannelCommand, ChannelCommandResult, ChannelDriverSession, ChannelFrameBody,
+    ChannelRuntimeEvent, DeliveryReceipt,
 };
 use lapin::{
     message::Delivery,
@@ -11,13 +12,13 @@ use lapin::{
 use crate::{
     config::Config,
     error::{Error, Result},
-    message, socket,
+    message,
 };
 
 pub(super) async fn handle(
     config: &Config,
     channel: &lapin::Channel,
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     pending: &mut BTreeMap<String, Delivery>,
     frame: ChannelFrameBody,
 ) -> Result<()> {
@@ -53,7 +54,7 @@ pub(super) async fn handle(
                 target.conversation.as_str(),
             )
             .await?;
-            session.receipt(
+            session.send_receipt(
                 request_id,
                 DeliveryReceipt {
                     channel: target.channel.clone(),

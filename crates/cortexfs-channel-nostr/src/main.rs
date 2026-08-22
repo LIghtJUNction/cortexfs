@@ -4,7 +4,6 @@ mod config;
 mod error;
 mod message;
 mod relay;
-mod socket;
 
 use error::Result;
 use std::io::Write as _;

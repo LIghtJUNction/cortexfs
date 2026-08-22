@@ -3,9 +3,11 @@
     reason = "the relay runner is called by the private binary entry point"
 )]
 
-use std::{collections::BTreeMap, io::Write as _, time::Duration};
+use std::{collections::BTreeMap, io::Write as _, path::PathBuf, time::Duration};
 
-use cortexfs_channels::ChannelFrameBody;
+use cortexfs_channels::{
+    ChannelActions, ChannelCapabilities, ChannelDriverSession, ChannelFrameBody, ChannelId,
+};
 use serde_json::Value;
 
 use crate::{
@@ -13,7 +15,6 @@ use crate::{
     config::Config,
     error::{Error, Result},
     message::{self, Incoming},
-    socket,
 };
 
 mod frames;
@@ -38,7 +39,7 @@ pub(crate) async fn run(config: Config) -> Result<()> {
 
 async fn run_once(config: &Config) -> Result<()> {
     let client = api::client(config)?;
-    let session = socket::Session::connect(config.socket.clone(), config.reply_timeout).await?;
+    let session = connect_session(config.socket.clone(), config.reply_timeout).await?;
     let mut cursor = String::new();
     let mut pending = BTreeMap::new();
     let mut frame = Box::pin(next_frame(session.clone()));
@@ -69,15 +70,35 @@ async fn poll_updates(
     api::get_updates(client, config, &cursor).await
 }
 
-async fn next_frame(session: socket::Session) -> Result<ChannelFrameBody> {
-    tokio::task::spawn_blocking(move || session.next())
+async fn connect_session(path: PathBuf, timeout: Duration) -> Result<ChannelDriverSession> {
+    tokio::task::spawn_blocking(move || -> Result<ChannelDriverSession> {
+        Ok(ChannelDriverSession::connect_retry(
+            &path,
+            &ChannelId::from_static("wechat"),
+            ChannelCapabilities {
+                polling: true,
+                long_polling: true,
+                tool_control: true,
+                ..ChannelCapabilities::text()
+            },
+            ChannelActions::empty(),
+            "wechat",
+            timeout,
+        )?)
+    })
+    .await
+    .map_err(|error| Error::Task(error.to_string()))?
+}
+
+async fn next_frame(session: ChannelDriverSession) -> Result<ChannelFrameBody> {
+    Ok(tokio::task::spawn_blocking(move || session.recv())
         .await
-        .map_err(|error| Error::Task(error.to_string()))?
+        .map_err(|error| Error::Task(error.to_string()))??)
 }
 
 fn enqueue(
     config: &Config,
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     pending: &mut BTreeMap<String, Incoming>,
     value: &Value,
 ) -> Result<()> {

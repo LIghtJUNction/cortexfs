@@ -1,19 +1,19 @@
 use std::collections::BTreeMap;
 
 use cortexfs_channels::{
-    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+    ChannelCommand, ChannelCommandResult, ChannelDriverSession, ChannelFrameBody,
+    ChannelRuntimeEvent, DeliveryReceipt,
 };
 use nostr_sdk::Client;
 
 use crate::{
     error::{Error, Result},
     message::{self, Incoming},
-    socket,
 };
 
 pub(super) async fn handle(
     client: &Client,
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     pending: &mut BTreeMap<String, Incoming>,
     frame: ChannelFrameBody,
 ) -> Result<()> {
@@ -32,7 +32,7 @@ pub(super) async fn handle(
         } => {
             let target = message.target.clone();
             message::proactive(client, message).await?;
-            session.receipt(
+            session.send_receipt(
                 request_id,
                 DeliveryReceipt {
                     channel: target.channel.clone(),

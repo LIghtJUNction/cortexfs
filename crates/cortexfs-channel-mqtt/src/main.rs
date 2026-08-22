@@ -5,7 +5,6 @@ mod error;
 mod invoke;
 mod message;
 mod relay;
-mod socket;
 
 #[cfg(test)]
 mod tests;

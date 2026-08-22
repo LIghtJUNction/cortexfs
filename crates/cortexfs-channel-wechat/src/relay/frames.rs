@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use cortexfs_channels::{
-    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
-    OutboundMessage,
+    ChannelCommand, ChannelCommandResult, ChannelDriverSession, ChannelFrameBody,
+    ChannelRuntimeEvent, DeliveryReceipt, OutboundMessage,
 };
 
 use crate::{
@@ -10,13 +10,12 @@ use crate::{
     config::Config,
     error::{Error, Result},
     message::Incoming,
-    socket,
 };
 
 pub(super) async fn handle(
     client: &reqwest::Client,
     config: &Config,
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     pending: &mut BTreeMap<String, Incoming>,
     frame: ChannelFrameBody,
 ) -> Result<()> {
@@ -95,7 +94,7 @@ async fn reply(
 async fn proactive(
     client: &reqwest::Client,
     config: &Config,
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     request_id: String,
     message: OutboundMessage,
 ) -> Result<()> {
@@ -109,7 +108,7 @@ async fn proactive(
         .get("wechat_context_token")
         .map_or("", String::as_str);
     api::send_message(client, config, user, context, &message.body.text).await?;
-    session.receipt(
+    Ok(session.send_receipt(
         request_id,
         DeliveryReceipt {
             channel: message.target.channel.clone(),
@@ -117,7 +116,7 @@ async fn proactive(
             target: message.target,
             timestamp_ms: None,
         },
-    )
+    )?)
 }
 
 fn validate(message: &OutboundMessage) -> Result<()> {

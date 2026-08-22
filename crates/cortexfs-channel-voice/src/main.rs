@@ -6,7 +6,6 @@ mod http;
 mod invoke;
 mod provider;
 mod relay;
-mod socket;
 mod wake;
 
 use error::Result;

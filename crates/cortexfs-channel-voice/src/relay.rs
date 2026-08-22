@@ -5,13 +5,14 @@
 
 use std::{collections::BTreeMap, io::Write as _, time::Duration};
 
+use cortexfs_channels::{ChannelActions, ChannelDriverSession, ChannelFrameBody, ChannelId};
 use reqwest::Client;
 use tokio::sync::mpsc;
 
 use crate::{
     config::{ChannelKind, Config},
     error::{Error, Result},
-    http, socket,
+    http,
 };
 
 mod frames;
@@ -36,7 +37,7 @@ async fn run_once(config: &Config) -> Result<()> {
     if config.channel == ChannelKind::VoiceWake {
         return run_wake_once(config).await;
     }
-    let session = socket::Session::connect(config).await?;
+    let session = connect_session(config).await?;
     let client = Client::new();
     let (sender, mut receiver) = mpsc::channel(64);
     let mut webhook = tokio::spawn(http::serve(
@@ -65,7 +66,7 @@ async fn run_once(config: &Config) -> Result<()> {
 }
 
 async fn run_wake_once(config: &Config) -> Result<()> {
-    let session = socket::Session::connect(config).await?;
+    let session = connect_session(config).await?;
     let client = Client::new();
     let mut calls = BTreeMap::new();
     let mut frame = Box::pin(next_frame(session.clone()));
@@ -75,8 +76,26 @@ async fn run_wake_once(config: &Config) -> Result<()> {
     }
 }
 
-async fn next_frame(session: socket::Session) -> Result<cortexfs_channels::ChannelFrameBody> {
-    tokio::task::spawn_blocking(move || session.next())
+async fn connect_session(config: &Config) -> Result<ChannelDriverSession> {
+    let path = config.socket.clone();
+    let channel = ChannelId::new(config.channel.id())?;
+    let capabilities = Config::capabilities(config.channel);
+    tokio::task::spawn_blocking(move || -> Result<ChannelDriverSession> {
+        Ok(ChannelDriverSession::connect_retry(
+            &path,
+            &channel,
+            capabilities,
+            ChannelActions::empty(),
+            "voice",
+            Duration::from_secs(10),
+        )?)
+    })
+    .await
+    .map_err(|error| Error::Task(error.to_string()))?
+}
+
+async fn next_frame(session: ChannelDriverSession) -> Result<ChannelFrameBody> {
+    Ok(tokio::task::spawn_blocking(move || session.recv())
         .await
-        .map_err(|error| Error::Task(error.to_string()))?
+        .map_err(|error| Error::Task(error.to_string()))??)
 }

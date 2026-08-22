@@ -3,8 +3,11 @@
     reason = "the relay runner is called by the private binary entry point"
 )]
 
-use std::{collections::BTreeMap, io::Write as _};
+use std::{collections::BTreeMap, io::Write as _, path::PathBuf, time::Duration};
 
+use cortexfs_channels::{
+    ChannelActions, ChannelCapabilities, ChannelDriverSession, ChannelFrameBody, ChannelId,
+};
 use futures_util::StreamExt;
 use lapin::{
     Connection, ConnectionProperties,
@@ -17,7 +20,7 @@ use tokio_reactor_trait::Tokio as TokioReactor;
 use crate::{
     config::Config,
     error::{Error, Result},
-    message, socket,
+    message,
 };
 
 mod frames;
@@ -30,7 +33,7 @@ pub(crate) async fn run(config: Config) -> Result<()> {
             Err(error) if matches!(error, Error::Config(_)) => return Err(error),
             Err(_error) => {
                 let _ignored = writeln!(std::io::stderr(), "cortexfs-channel-amqp: reconnecting");
-                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                tokio::time::sleep(Duration::from_secs(delay)).await;
                 delay = (delay * 2).min(60);
             }
         }
@@ -79,7 +82,7 @@ async fn consume(config: &Config, channel: &lapin::Channel) -> Result<()> {
             FieldTable::default(),
         )
         .await?;
-    let session = socket::Session::connect(config.socket.clone()).await?;
+    let session = connect_session(config.socket.clone()).await?;
     let mut pending = BTreeMap::new();
     let mut frame = Box::pin(next_frame(session.clone()));
     loop {
@@ -102,15 +105,33 @@ async fn consume(config: &Config, channel: &lapin::Channel) -> Result<()> {
                     frames::reject(config, &delivery).await?;
                     continue;
                 }
-                session.send(inbound.clone())?;
+                session.send_inbound(inbound.clone())?;
                 pending.insert(inbound.id, delivery);
             }
         }
     }
 }
 
-async fn next_frame(session: socket::Session) -> Result<cortexfs_channels::ChannelFrameBody> {
-    tokio::task::spawn_blocking(move || session.next())
+async fn connect_session(path: PathBuf) -> Result<ChannelDriverSession> {
+    tokio::task::spawn_blocking(move || -> Result<ChannelDriverSession> {
+        Ok(ChannelDriverSession::connect_retry(
+            &path,
+            &ChannelId::from_static("amqp"),
+            ChannelCapabilities {
+                tool_control: true,
+                ..ChannelCapabilities::text()
+            },
+            ChannelActions::empty(),
+            "amqp",
+            Duration::from_secs(10),
+        )?)
+    })
+    .await
+    .map_err(|error| Error::Task(error.to_string()))?
+}
+
+async fn next_frame(session: ChannelDriverSession) -> Result<ChannelFrameBody> {
+    Ok(tokio::task::spawn_blocking(move || session.recv())
         .await
-        .map_err(|error| Error::Task(error.to_string()))?
+        .map_err(|error| Error::Task(error.to_string()))??)
 }

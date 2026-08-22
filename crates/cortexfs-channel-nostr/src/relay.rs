@@ -3,9 +3,11 @@
     reason = "the relay runner is called by the private binary entry point"
 )]
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 
-use cortexfs_channels::ChannelFrameBody;
+use cortexfs_channels::{
+    ChannelActions, ChannelCapabilities, ChannelDriverSession, ChannelFrameBody, ChannelId,
+};
 use nostr_sdk::prelude::{Filter, Kind, Timestamp};
 use nostr_sdk::{Client, ClientBuilder, RelayPoolNotification};
 use tokio::sync::mpsc;
@@ -14,7 +16,6 @@ use crate::{
     config::Config,
     error::{Error, Result, nostr},
     message::{self, Incoming},
-    socket,
 };
 
 mod frames;
@@ -24,7 +25,7 @@ const MAX_PENDING: usize = 64;
 pub(crate) async fn run(config: Config) -> Result<()> {
     let config = Arc::new(config);
     let client = build_client(&config).await?;
-    let session = socket::Session::connect(config.socket.clone(), config.reply_timeout).await?;
+    let session = connect_session(config.socket.clone(), config.reply_timeout).await?;
     let (sender, receiver) = mpsc::channel(MAX_PENDING);
     let notifications = Box::pin(notifications(client.clone(), Arc::clone(&config), sender));
     event_loop(client, session, receiver, notifications).await
@@ -83,7 +84,7 @@ async fn notifications(
 
 async fn event_loop(
     client: Client,
-    session: socket::Session,
+    session: ChannelDriverSession,
     mut receiver: mpsc::Receiver<Incoming>,
     mut notifications: Pin<Box<impl Future<Output = Result<()>>>>,
 ) -> Result<()> {
@@ -99,7 +100,7 @@ async fn event_loop(
                 if pending.len() >= MAX_PENDING {
                     return Err(Error::Protocol("too many pending Nostr replies".to_owned()));
                 }
-                session.send(incoming.message.clone())?;
+                session.send_inbound(incoming.message.clone())?;
                 pending.insert(incoming.message.id.clone(), incoming);
             }
             result = &mut notifications => return result,
@@ -107,8 +108,27 @@ async fn event_loop(
     }
 }
 
-async fn next_frame(session: socket::Session) -> Result<ChannelFrameBody> {
-    tokio::task::spawn_blocking(move || session.next())
+async fn connect_session(path: PathBuf, timeout: Duration) -> Result<ChannelDriverSession> {
+    tokio::task::spawn_blocking(move || -> Result<ChannelDriverSession> {
+        Ok(ChannelDriverSession::connect_retry(
+            &path,
+            &ChannelId::from_static("nostr"),
+            ChannelCapabilities {
+                tool_control: true,
+                websocket: true,
+                ..ChannelCapabilities::text()
+            },
+            ChannelActions::empty(),
+            "nostr",
+            timeout,
+        )?)
+    })
+    .await
+    .map_err(|error| Error::Task(error.to_string()))?
+}
+
+async fn next_frame(session: ChannelDriverSession) -> Result<ChannelFrameBody> {
+    Ok(tokio::task::spawn_blocking(move || session.recv())
         .await
-        .map_err(|error| Error::Task(error.to_string()))?
+        .map_err(|error| Error::Task(error.to_string()))??)
 }

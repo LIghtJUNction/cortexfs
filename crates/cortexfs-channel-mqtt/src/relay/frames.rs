@@ -1,5 +1,6 @@
 use cortexfs_channels::{
-    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+    ChannelCommand, ChannelCommandResult, ChannelDriverSession, ChannelFrameBody,
+    ChannelRuntimeEvent, DeliveryReceipt,
 };
 use rumqttc::AsyncClient;
 
@@ -7,13 +8,12 @@ use crate::{
     config::Config,
     error::{Error, Result},
     message,
-    socket::Session,
 };
 
 pub(super) async fn handle(
     config: &Config,
     client: &AsyncClient,
-    session: &Session,
+    session: &ChannelDriverSession,
     frame: ChannelFrameBody,
 ) -> Result<()> {
     match frame {
@@ -26,7 +26,7 @@ pub(super) async fn handle(
             message,
         } => {
             let topic = message::publish(client, config, &message).await?;
-            session.receipt(
+            session.send_receipt(
                 request_id,
                 DeliveryReceipt {
                     channel: message.target.channel.clone(),

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use cortexfs_channels::{
-    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
-    OutboundMessage,
+    ChannelCommand, ChannelCommandResult, ChannelDriverSession, ChannelFrameBody,
+    ChannelRuntimeEvent, DeliveryReceipt, OutboundMessage,
 };
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -10,11 +10,11 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::{
     error::{Error, Result},
     message::InboundEvent,
-    output, socket,
+    output,
 };
 
 pub(super) async fn handle(
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     output_tx: &mpsc::Sender<Message>,
     pending: &mut BTreeMap<String, InboundEvent>,
     frame: ChannelFrameBody,
@@ -88,7 +88,7 @@ async fn reply(
 }
 
 async fn proactive(
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     output_tx: &mpsc::Sender<Message>,
     request_id: String,
     message: OutboundMessage,
@@ -101,7 +101,7 @@ async fn proactive(
         .cloned()
         .unwrap_or_else(|| runtime_request_id.clone());
     reply(output_tx, &platform_request_id, &message).await?;
-    session.receipt(
+    Ok(session.send_receipt(
         runtime_request_id,
         DeliveryReceipt {
             channel: target.channel.clone(),
@@ -109,7 +109,7 @@ async fn proactive(
             target,
             timestamp_ms: None,
         },
-    )
+    )?)
 }
 
 async fn send(output_tx: &mpsc::Sender<Message>, text: String) -> Result<()> {

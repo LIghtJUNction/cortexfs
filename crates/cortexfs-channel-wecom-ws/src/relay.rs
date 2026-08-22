@@ -3,8 +3,11 @@
     reason = "the relay runner is called by the private binary entry point"
 )]
 
-use std::{collections::BTreeMap, io::Write as _, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, io::Write as _, path::PathBuf, sync::Arc, time::Duration};
 
+use cortexfs_channels::{
+    ChannelActions, ChannelCapabilities, ChannelDriverSession, ChannelFrameBody, ChannelId,
+};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{WebSocketStream, connect_async, tungstenite::Message};
@@ -13,7 +16,6 @@ use crate::{
     config::Config,
     error::{Error, Result},
     message::InboundEvent,
-    socket,
 };
 
 mod frames;
@@ -45,7 +47,7 @@ async fn run_once(
     stream: WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     config: Arc<Config>,
 ) -> Result<()> {
-    let session = socket::Session::connect(config.socket.clone(), config.reply_timeout).await?;
+    let session = connect_session(config.socket.clone(), config.reply_timeout).await?;
     let (mut writer, mut reader) = stream.split();
     subscribe::run(&mut writer, &mut reader, &config).await?;
     let (out_tx, mut out_rx) = mpsc::channel::<Message>(32);
@@ -72,8 +74,29 @@ async fn run_once(
     Err(Error::Protocol("WeCom WebSocket closed".to_owned()))
 }
 
-async fn next_frame(session: socket::Session) -> Result<cortexfs_channels::ChannelFrameBody> {
-    tokio::task::spawn_blocking(move || session.next())
+async fn connect_session(path: PathBuf, timeout: Duration) -> Result<ChannelDriverSession> {
+    tokio::task::spawn_blocking(move || -> Result<ChannelDriverSession> {
+        Ok(ChannelDriverSession::connect_retry(
+            &path,
+            &ChannelId::from_static("wecom-ws"),
+            ChannelCapabilities {
+                group: true,
+                streaming: true,
+                websocket: true,
+                tool_control: true,
+                ..ChannelCapabilities::text()
+            },
+            ChannelActions::empty(),
+            "wecom-ws",
+            timeout,
+        )?)
+    })
+    .await
+    .map_err(|error| Error::Task(error.to_string()))?
+}
+
+async fn next_frame(session: ChannelDriverSession) -> Result<ChannelFrameBody> {
+    Ok(tokio::task::spawn_blocking(move || session.recv())
         .await
-        .map_err(|error| Error::Task(error.to_string()))?
+        .map_err(|error| Error::Task(error.to_string()))??)
 }

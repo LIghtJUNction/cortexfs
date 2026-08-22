@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use cortexfs_channels::ChannelDriverSession;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -8,13 +9,13 @@ use crate::{
     config::Config,
     error::{Error, Result},
     message::{self, InboundEvent},
-    output, socket,
+    output,
 };
 
 pub(super) async fn receive(
     result: std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
     config: &Config,
-    session: &socket::Session,
+    session: &ChannelDriverSession,
     output_tx: &mpsc::Sender<Message>,
     pending: &mut BTreeMap<String, InboundEvent>,
 ) -> Result<bool> {
@@ -25,7 +26,7 @@ pub(super) async fn receive(
                 return Ok(false);
             }
             if let Some(event) = message::decode(&frame, config)? {
-                session.send(event.message.clone())?;
+                session.send_inbound(event.message.clone())?;
                 pending.insert(event.message.id.clone(), event);
             } else if is_enter_chat(&frame)
                 && let Some(request_id) = message::request_id(&frame)

@@ -1,5 +1,6 @@
 use cortexfs_channels::{
-    ChannelCommand, ChannelCommandResult, ChannelFrameBody, ChannelRuntimeEvent, DeliveryReceipt,
+    ChannelCommand, ChannelCommandResult, ChannelDriverSession, ChannelFrameBody,
+    ChannelRuntimeEvent, DeliveryReceipt,
 };
 use reqwest::Client;
 
@@ -7,13 +8,12 @@ use crate::{
     config::Config,
     error::{Error, Result},
     provider::{self, Calls},
-    socket::Session,
 };
 
 pub(super) async fn handle(
     config: &Config,
     client: &Client,
-    session: &Session,
+    session: &ChannelDriverSession,
     calls: &mut Calls,
     frame: ChannelFrameBody,
 ) -> Result<()> {
@@ -69,7 +69,7 @@ pub(super) async fn handle(
     };
     let target = message.target.clone();
     let id = provider::send(config, client, calls, &message).await?;
-    session.receipt(
+    Ok(session.send_receipt(
         request_id,
         DeliveryReceipt {
             channel: target.channel.clone(),
@@ -77,5 +77,5 @@ pub(super) async fn handle(
             target,
             timestamp_ms: None,
         },
-    )
+    )?)
 }
