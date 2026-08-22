@@ -3,7 +3,8 @@ Description=CortexFS agent runtime for %i
 Documentation=file:/usr/share/doc/cortexfs/README.md
 BindsTo=cortexfs.service
 PartOf=cortexfs.service
-After=cortexfs.service cortexfs-terminal-broker.socket
+After=cortexfs.service
+After=cortexfs-terminal-broker.socket
 StartLimitIntervalSec=0
 
 [Service]
