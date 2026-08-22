@@ -8,7 +8,9 @@ use serde_json::Map;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt as _, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt as _;
+#[cfg(test)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
@@ -654,141 +656,14 @@ fn finish_session_layout(
     }
 }
 
-#[derive(Clone, Copy)]
-struct StartupStubReceipt {
-    dev: u64,
-    ino: u64,
-    created: bool,
-}
-
-fn prepare_startup_stub(parent: &fs::File, uid: u32, gid: u32) -> io::Result<StartupStubReceipt> {
-    let flags =
-        nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC;
-    let (fd, created) = match nix::fcntl::openat(
-        parent,
-        ".empty-shell-startup",
-        flags | nix::fcntl::OFlag::O_CREAT | nix::fcntl::OFlag::O_EXCL,
-        nix::sys::stat::Mode::from_bits_truncate(0o600),
-    ) {
-        Ok(fd) => (fd, true),
-        Err(nix::errno::Errno::EEXIST) => (
-            nix::fcntl::openat(
-                parent,
-                ".empty-shell-startup",
-                flags,
-                nix::sys::stat::Mode::empty(),
-            )
-            .map_err(io::Error::from)?,
-            false,
-        ),
-        Err(error) => return Err(io::Error::from(error)),
-    };
-    let file = fs::File::from(fd);
-    // Without an fd-derived inode receipt, unlinking by pathname could delete a replacement.
-    let metadata = file.metadata().map_err(|error| {
-        io::Error::other(format!(
-            "startup stub cleanup conflict: cannot establish inode receipt: {error}"
-        ))
-    })?;
-    let receipt = StartupStubReceipt {
-        dev: metadata.dev(),
-        ino: metadata.ino(),
-        created,
-    };
-    let result = (|| {
-        if created {
-            nix::unistd::fchown(
-                &file,
-                Some(nix::unistd::Uid::from_raw(uid)),
-                Some(nix::unistd::Gid::from_raw(gid)),
-            )
-            .map_err(io::Error::from)?;
-            nix::sys::stat::fchmod(&file, nix::sys::stat::Mode::from_bits_truncate(0o600))
-                .map_err(io::Error::from)?;
-        }
-        let metadata = file.metadata()?;
-        if !metadata.is_file()
-            || metadata.nlink() != 1
-            || metadata.uid() != uid
-            || metadata.gid() != gid
-            || metadata.permissions().mode() & 0o7777 != 0o600
-        {
-            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
-        }
-        let rebound = nix::sys::stat::fstatat(
-            parent,
-            ".empty-shell-startup",
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        )
-        .map_err(io::Error::from)?;
-        if (rebound.st_dev, rebound.st_ino) != (receipt.dev, receipt.ino) {
-            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
-        }
-        file.set_len(0)?;
-        file.sync_all()?;
-        Ok(receipt)
-    })();
-    match result {
-        Ok(receipt) => Ok(receipt),
-        Err(error) if !created => Err(error),
-        Err(error) => {
-            cleanup_created_startup_stub(parent, receipt).map_or_else(Err, |()| Err(error))
-        }
-    }
-}
-
-fn cleanup_created_startup_stub(parent: &fs::File, receipt: StartupStubReceipt) -> io::Result<()> {
-    if !receipt.created {
-        return Ok(());
-    }
-    let matches = nix::sys::stat::fstatat(
-        parent,
-        ".empty-shell-startup",
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .is_ok_and(|stat| {
-        (stat.st_dev, stat.st_ino) == (receipt.dev, receipt.ino) && stat.st_nlink == 1
-    });
-    if !matches {
-        return Err(io::Error::other("startup stub cleanup conflict"));
-    }
-    nix::unistd::unlinkat(
-        parent,
-        ".empty-shell-startup",
-        nix::unistd::UnlinkatFlags::NoRemoveDir,
-    )
-    .map_err(|error| io::Error::other(format!("startup stub cleanup conflict: {error}")))
-}
-
-fn startup_failure(
-    parent: &fs::File,
-    receipt: StartupStubReceipt,
-    original: AgentChildCreateError,
-) -> AgentChildCreateError {
-    cleanup_created_startup_stub(parent, receipt)
-        .map_or_else(|error| child_error("EIO", error.to_string()), |()| original)
-}
-
 fn launch_child(
     source: &Path,
     view: &crate::AgentRuntimeView,
     session: &str,
 ) -> ChildCreateResult<ChildLaunch> {
-    use std::time::Duration;
-    let runtime = cortexfs_paths::user_runtime_root(view.identity().uid());
-    let terminal_socket =
-        cortexfs_paths::terminal_runtime_socket(&runtime, view.agent_name(), session);
-    let terminal_fd = crate::agent::launch::ensure_terminal_runtime_dir(
-        &runtime,
-        view.agent_name(),
-        session,
-        view.identity(),
-    )
-    .map_err(|error| child_error("EIO", error.to_string()))?;
-    let startup = prepare_startup_stub(&terminal_fd, view.identity().uid(), view.identity().gid())
-        .map_err(|error| child_error("EIO", error.to_string()))?;
-    let terminal_unit = format!("cortexfs-agent-{}-{session}-terminal", view.agent_name());
-    crate::agent::launch::reset_unit_for(view.identity(), &terminal_unit);
+    let socket = PathBuf::from(crate::runtime::terminal::broker::BROKER_SOCKET);
+    let unit = crate::agent::launch::agent_terminal_unit(view.agent_name(), session);
+    crate::agent::launch::reset_unit_for(view.identity(), &unit);
     let request = crate::agent::launch::AgentLaunchRequest {
         agent: view.agent_name().to_owned(),
         session: session.to_owned(),
@@ -797,56 +672,39 @@ fn launch_child(
         mounts: Vec::new(),
         default_workspace: false,
     };
-    let command =
-        crate::agent::launch::terminal_command(&request, view, &terminal_socket, &terminal_unit);
-    let output = match crate::agent::launch::launch_process_for(view.identity(), &command)
+    let command = crate::agent::launch::terminal_command(&request, view, &socket, &unit);
+    let output = crate::agent::launch::launch_process_for(view.identity(), &command)
         .and_then(|mut command| command.output())
-    {
-        Ok(output) => output,
-        Err(error) => {
-            return Err(startup_failure(
-                &terminal_fd,
-                startup,
-                child_error("EIO", error.to_string()),
-            ));
-        }
-    };
-    if !output.status.success()
-        || crate::agent::launch::wait_socket(&terminal_socket, 50, Duration::from_millis(100))
-            .is_err()
-    {
-        crate::agent::launch::reset_unit_for(view.identity(), &terminal_unit);
-        return Err(startup_failure(
-            &terminal_fd,
-            startup,
-            child_error("EIO", "child terminal did not become ready"),
-        ));
+        .map_err(|error| child_error("EIO", error.to_string()))?;
+    let not_ready = !output.status.success()
+        || crate::runtime::terminal::broker::await_terminal(view.agent_name(), session, &unit)
+            .is_err();
+    if not_ready {
+        crate::agent::launch::reset_unit_for(view.identity(), &unit);
+        return Err(child_error("EIO", "child terminal did not become ready"));
     }
     let terminal =
-        crate::agent::launch::launch_receipt(view.identity(), &terminal_unit, terminal_socket)
-            .map_err(|_error| {
-                crate::agent::launch::reset_unit_for(view.identity(), &terminal_unit);
-                startup_failure(
-                    &terminal_fd,
-                    startup,
-                    child_error("EIO", "child terminal has no live pid"),
-                )
-            })?;
+        crate::agent::launch::launch_receipt(view.identity(), &unit, socket).map_err(|_error| {
+            crate::agent::launch::reset_unit_for(view.identity(), &unit);
+            child_error("EIO", "child terminal has no live pid")
+        })?;
     let pid = terminal.pid;
     let chat_visible = cortexfs_paths::agent_backing_socket(source, view.agent_name());
-    let system =
-        match crate::agent::launch::ensure_system_agent_socket(view.agent_name(), &chat_visible) {
-            Ok(receipt) => receipt,
-            Err(_error) => {
-                let original = crate::agent::launch::stop_launch(&terminal)
-                    .err()
-                    .map_or_else(
-                        || child_error("EIO", "child system chat socket did not become ready"),
-                        |_conflict| child_error("EIO", "child terminal cleanup conflict"),
-                    );
-                return Err(startup_failure(&terminal_fd, startup, original));
-            }
-        };
+    let system = crate::agent::launch::ensure_system_agent_socket(view.agent_name(), &chat_visible)
+        .map_err(|_error| {
+            crate::agent::launch::stop_launch(&terminal)
+                .err()
+                .map_or_else(
+                    || child_error("EIO", "child system chat socket did not become ready"),
+                    |_conflict| child_error("EIO", "child terminal cleanup conflict"),
+                )
+        })?;
+    let launch = ChildLaunch {
+        terminal,
+        system,
+        pid,
+        session: session.to_owned(),
+    };
     for (file, value) in [
         ("status", "ready\n".to_owned()),
         ("pid", format!("{pid}\n")),
@@ -855,24 +713,12 @@ fn launch_child(
             &cortexfs_paths::agent_control_file_path(source, view.agent_name(), file),
             &value,
         ) {
-            let launch = ChildLaunch {
-                terminal,
-                system,
-                pid,
-                session: session.to_owned(),
-            };
-            let original = stop_child(&launch)
+            return Err(stop_child(&launch)
                 .err()
-                .unwrap_or_else(|| child_error("EIO", error.to_string()));
-            return Err(startup_failure(&terminal_fd, startup, original));
+                .unwrap_or_else(|| child_error("EIO", error.to_string())));
         }
     }
-    Ok(ChildLaunch {
-        terminal,
-        system,
-        pid,
-        session: session.to_owned(),
-    })
+    Ok(launch)
 }
 
 fn write_control(path: &Path, value: &str) -> io::Result<()> {
@@ -2295,25 +2141,5 @@ allow coder_t agent:window-child start\n",
                 .and_then(serde_json::Value::as_bool),
             Some(true)
         );
-    }
-
-    #[test]
-    fn startup_stub_accepts_valid_retry_and_rejects_hardlink() -> io::Result<()> {
-        let root = tempfile::tempdir()?;
-        let parent = crate::support::plain::open_plain_directory(root.path())?;
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-        let created = prepare_startup_stub(&parent, uid, gid)?;
-        assert!(created.created);
-        let retry = prepare_startup_stub(&parent, uid, gid)?;
-        assert!(!retry.created);
-        fs::hard_link(
-            root.path().join(".empty-shell-startup"),
-            root.path().join("alias"),
-        )?;
-        assert!(prepare_startup_stub(&parent, uid, gid).is_err());
-        assert!(cleanup_created_startup_stub(&parent, created).is_err());
-        assert!(root.path().join(".empty-shell-startup").exists());
-        Ok(())
     }
 }

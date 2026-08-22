@@ -531,21 +531,17 @@ ctx agent start <agent> --session <session> \
   --cwd /workspace
 ```
 
-`ctxterm --listen SOCKET` exposes the PTY for observation and attachment.
-Session terminals use:
+`ctxterm --broker AGENT SESSION UNIT` registers the PTY supervisor before
+spawning the agent. Session terminals use:
 
 ```text
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-The ABI socket may be a symlink to a runtime socket. User-started terminals
-prefer `/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock` so
-ordinary users do not need write access to `/ctx` or `/run/cortexfs`.
-Existing installations may still expose
-`/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock` as historical
-artifacts, but `ctx agent attach` does not use this legacy fallback anymore.
-`ctx agent attach` should try the ABI path first, then the user runtime path.
-If both locations are unavailable, it returns a socket-availability error.
+The ABI socket aliases `/run/cortexfs/terminal/broker.sock`. `ctx agent watch`
+and `ctx agent attach` authenticate that root peer, then request a mode-bound,
+session-bound, one-shot descriptor grant. They never connect to a per-user
+terminal listener and never send a line mode prefix.
 
 The corresponding human commands are:
 

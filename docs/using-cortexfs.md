@@ -323,10 +323,10 @@ The terminal socket lives at:
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-The FUSE-visible path may be a symlink to
-`/run/user/<uid>/cortexfs/terminal/.../main.sock`; older installs may also
-point to `/run/cortexfs/terminal/.../main.sock`. `watch` is read-only; `attach`
-connects your stdin to the terminal.
+The FUSE-visible path aliases the root-owned
+`/run/cortexfs/terminal/broker.sock`. `ctx` authenticates the broker and asks
+for the named agent/session; it does not connect to legacy per-user terminal
+sockets. `watch` is read-only; `attach` connects your stdin to the terminal.
 
 Control the sandbox explicitly when needed:
 

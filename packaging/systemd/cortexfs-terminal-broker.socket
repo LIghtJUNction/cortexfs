@@ -1,0 +1,13 @@
+[Unit]
+Description=CortexFS terminal broker socket
+Documentation=file:/usr/share/doc/cortexfs/docs/spec/terminal-broker.md
+Before=cortexfs.service
+
+[Socket]
+ListenStream=/run/cortexfs/terminal/broker.sock
+SocketMode=0666
+RemoveOnStop=yes
+ExecStartPre=/usr/bin/install -d -o root -g root -m 0755 /run/cortexfs/terminal
+
+[Install]
+WantedBy=sockets.target

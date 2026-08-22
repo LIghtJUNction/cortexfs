@@ -135,14 +135,8 @@ fn contains_arg_triplet(args: &[String], first: &str, second: &str, third: &str)
     })
 }
 
-fn contains_ro_bind_stub(args: &[String], target: &str) -> bool {
-    args.windows(3).any(|window| {
-        window.first().map(String::as_str) == Some("--ro-bind")
-            && window
-                .get(1)
-                .is_some_and(|source| source.ends_with("/.empty-shell-startup"))
-            && window.get(2).map(String::as_str) == Some(target)
-    })
+fn contains_empty_startup_bind(args: &[String], target: &str) -> bool {
+    contains_arg_triplet(args, "--ro-bind", "/dev/null", target)
 }
 
 fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid: &str) {

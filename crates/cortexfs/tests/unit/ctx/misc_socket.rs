@@ -59,111 +59,6 @@ fn ctx_latest_run_id_reads_projected_columnar_events() {
 }
 
 #[test]
-fn agent_terminal_runtime_dir_refuses_symlink_parent() {
-    let root = clean_test_dir("ctx-agent-terminal-runtime-dir-symlink");
-    let outside = clean_test_dir("ctx-agent-terminal-runtime-dir-outside");
-    assert!(fs::create_dir_all(root.join("cortexfs")).is_ok());
-    assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(std::os::unix::fs::symlink(&outside, root.join("cortexfs").join("terminal")).is_ok());
-
-    let path = root
-        .join("cortexfs")
-        .join("terminal")
-        .join("coder")
-        .join("default");
-
-    assert!(create_agent_terminal_runtime_dir(&path).is_err());
-    assert!(!outside.join("coder").exists());
-    assert!(
-        root.join("cortexfs")
-            .join("terminal")
-            .symlink_metadata()
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    );
-}
-
-#[test]
-fn ensure_agent_terminal_socket_rejects_symlink_runtime_parent() {
-    let root = clean_test_dir("ctx-agent-terminal-socket-runtime-symlink");
-    let outside = clean_test_dir("ctx-agent-terminal-socket-runtime-symlink-outside");
-    assert!(fs::create_dir_all(root.join("runtime").join("cortexfs")).is_ok());
-    assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(
-        std::os::unix::fs::symlink(
-            &outside,
-            root.join("runtime").join("cortexfs").join("terminal")
-        )
-        .is_ok()
-    );
-    let visible_socket = root.join("visible").join("main.sock");
-    let runtime_socket = root
-        .join("runtime")
-        .join("cortexfs")
-        .join("terminal")
-        .join("coder")
-        .join("default")
-        .join("main.sock");
-
-    assert!(ensure_agent_terminal_socket(&visible_socket, &runtime_socket).is_err());
-    assert!(!outside.join("coder").exists());
-    assert!(!visible_socket.exists());
-}
-
-#[test]
-fn ensure_agent_terminal_socket_rejects_symlink_runtime_parent_with_existing_target_dirs() {
-    let root = clean_test_dir("ctx-agent-terminal-socket-runtime-existing-symlink");
-    let outside = clean_test_dir("ctx-agent-terminal-socket-runtime-existing-symlink-outside");
-    assert!(fs::create_dir_all(root.join("runtime").join("cortexfs")).is_ok());
-    assert!(fs::create_dir_all(outside.join("coder").join("default")).is_ok());
-    assert!(
-        std::os::unix::fs::symlink(
-            &outside,
-            root.join("runtime").join("cortexfs").join("terminal")
-        )
-        .is_ok()
-    );
-    let visible_socket = root.join("visible").join("main.sock");
-    let runtime_socket = root
-        .join("runtime")
-        .join("cortexfs")
-        .join("terminal")
-        .join("coder")
-        .join("default")
-        .join("main.sock");
-
-    assert!(ensure_agent_terminal_socket(&visible_socket, &runtime_socket).is_err());
-    assert!(
-        !outside
-            .join("coder")
-            .join("default")
-            .join(".empty-shell-startup")
-            .exists()
-    );
-    assert!(!visible_socket.exists());
-}
-
-#[test]
-fn ensure_agent_terminal_socket_rejects_symlink_visible_parent_without_writing_target() {
-    let root = clean_test_dir("ctx-agent-terminal-socket-visible-symlink");
-    let outside = clean_test_dir("ctx-agent-terminal-socket-visible-symlink-outside");
-    assert!(fs::create_dir_all(root.join("runtime")).is_ok());
-    assert!(fs::create_dir_all(root.join("visible")).is_ok());
-    assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(std::os::unix::fs::symlink(&outside, root.join("visible").join("terminal")).is_ok());
-    let visible_socket = root.join("visible").join("terminal").join("main.sock");
-    let runtime_socket = root.join("runtime").join("main.sock");
-
-    assert!(ensure_agent_terminal_socket(&visible_socket, &runtime_socket).is_err());
-    assert!(!outside.join("main.sock").exists());
-    assert!(
-        root.join("visible")
-            .join("terminal")
-            .symlink_metadata()
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    );
-}
-
-#[test]
 fn remove_stale_socket_refuses_plain_file() {
     let root = clean_test_dir("ctx-agent-terminal-remove-plain-file");
     assert!(fs::create_dir_all(&root).is_ok());
@@ -254,26 +149,6 @@ fn agent_chat_request_socket_prefers_runtime_socket_over_visible_socket()
     drop(visible_listener);
     let _ignored = fs::remove_file(runtime_socket);
     Ok(())
-}
-
-#[test]
-fn socket_bind_path_rejects_symlink_parent() {
-    let root = clean_test_dir("ctx-terminal-socket-bind-parent-symlink");
-    let outside = clean_test_dir("ctx-terminal-socket-bind-parent-symlink-outside");
-    assert!(fs::create_dir_all(&root).is_ok());
-    assert!(fs::create_dir_all(outside.join("runtime")).is_ok());
-    assert!(
-        std::os::unix::fs::symlink(
-            outside.join("runtime").join("main.sock"),
-            outside.join("main.sock")
-        )
-        .is_ok()
-    );
-    assert!(std::os::unix::fs::symlink(&outside, root.join("visible")).is_ok());
-
-    let socket = root.join("visible").join("main.sock");
-
-    assert_eq!(socket_bind_path(&socket), socket);
 }
 
 #[test]

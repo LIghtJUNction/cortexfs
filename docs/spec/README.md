@@ -82,6 +82,7 @@ agent-tool-security.md  agent identity, view, mount, and creation
 agent-runtime.md        end-to-end agent runtime, REPL, terminal, tsh, sandbox
 module-abi.md           static module API and stable external wire contract
 terminal-abi.md         durable terminal resources, PTY events, and attach
+terminal-broker.md      root broker authentication and descriptor grants
 tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
 ctx-coreutils.md        ctx command contract
 rolling-upgrades.md     rolling reference-tree update and storage switch rules

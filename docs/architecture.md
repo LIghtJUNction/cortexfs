@@ -209,7 +209,7 @@ generation each time.
 | Control | `/ctx/agent/<name>.d/*` | policy, mount, cwd, system.md, loop |
 | Agent home | `/ctx/home/<uid>/agent/<name>/` | session, data, cache, log |
 | Session | `.../session/<session>/` | messages, events, state.json, context, load snapshots |
-| Runtime IPC | `/run/user/<uid>/cortexfs/...` | terminal sockets only |
+| Runtime IPC | `/run/user/<uid>/cortexfs/...`, `/run/cortexfs/terminal/broker.sock` | Agent sockets and the root terminal broker |
 
 Sandbox mapping (typical):
 
@@ -219,7 +219,9 @@ caller project cwd            →  /workspace         (rw, default cwd)
 /ctx                          →  /ctx               (often ro)
 ```
 
-`/run` holds sockets. Agent cwd is usually `/workspace`. Private session files
+`/run` holds sockets. The root-owned terminal broker authenticates operators
+and passes accepted descriptors to sandboxed supervisors; it does not relay
+PTY bytes. Agent cwd is usually `/workspace`. Private session files
 live under agent home, not under `/run`.
 
 ## Prompt load observability

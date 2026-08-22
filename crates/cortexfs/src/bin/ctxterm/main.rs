@@ -7,26 +7,14 @@
     unfulfilled_lint_expectations,
     reason = "expected target-specific lint results"
 )]
-#![expect(
-    clippy::wildcard_imports,
-    reason = "uniform submodules with wildcard imports"
-)]
+#![expect(clippy::wildcard_imports, reason = "uniform submodule imports")]
 #![expect(clippy::redundant_pub_crate, reason = "submodule visibility alignment")]
-#![expect(
-    clippy::field_scoped_visibility_modifiers,
-    reason = "internal structs with scoped fields"
-)]
 #![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::env;
-use std::ffi::OsStr;
-use std::ffi::OsString;
-use std::fs::OpenOptions;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
-use std::path::PathBuf;
+use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -38,10 +26,8 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_SHELL: &str = cortexfs::support::command::TSH;
-const CLIENT_MODE_LIMIT: usize = 16;
-const CLIENT_MODE_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_CLIENTS: usize = 16;
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
-const MAX_EMIT_PAYLOAD_BYTES: usize = 64 * 1024;
 const PRESERVED_PTY_ENV: &[&str] = &[
     "CTX_ROOT",
     "CTX_HOME",
@@ -60,49 +46,34 @@ type Client = Arc<Mutex<UnixStream>>;
 type Clients = Arc<Mutex<Vec<Client>>>;
 
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use cortexfs::cli::terminal;
 
 define_simple_cli_error!(CtxtermError);
 
 pub(crate) use cli::*;
 pub(crate) use client::*;
-pub(crate) use cortexfs::support::plain::open_plain_directory;
-pub(crate) use create::*;
-pub(crate) use fs::*;
 pub(crate) use pty::*;
 pub(crate) use socket::*;
-pub(crate) use stale::*;
 pub(crate) use stderr::*;
-pub(crate) use terminal::*;
 
 pub(crate) fn main() -> ExitCode {
-    match run(env::args_os().skip(1).collect()) {
-        Ok(code) => code,
-        Err(error) => {
-            let _ignored = write_error(&format!("ctxterm: {}", error.message));
-            ExitCode::from(error.code)
-        }
-    }
+    run(env::args_os().skip(1).collect()).unwrap_or_else(|error| {
+        let _ignored = write_error(&format!("ctxterm: {}", error.message));
+        ExitCode::from(error.code)
+    })
 }
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CtxtermError> {
-    let command = parse_args(args)?;
-    match command {
+    match parse_args(args)? {
         CtxtermCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
         CtxtermCommand::Run {
-            listen,
-            log,
-            stdio,
+            broker,
             program,
             args,
-        } => run_pty(RunConfig {
-            listen,
-            log,
-            stdio,
+        } => run_pty(&RunConfig {
+            broker,
             program,
             args,
         }),
-        CtxtermCommand::Client { socket, write } => run_client(&socket, write),
     }
 }
 
@@ -110,33 +81,29 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CtxtermError> {
 enum CtxtermCommand {
     Help,
     Run {
-        listen: Option<PathBuf>,
-        log: Option<PathBuf>,
-        stdio: bool,
+        broker: BrokerConfig,
         program: OsString,
         args: Vec<OsString>,
     },
-    Client {
-        socket: PathBuf,
-        write: bool,
-    },
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct BrokerConfig {
+    agent: String,
+    session: String,
+    unit: String,
 }
 
 struct RunConfig {
-    listen: Option<PathBuf>,
-    log: Option<PathBuf>,
-    stdio: bool,
+    broker: BrokerConfig,
     program: OsString,
     args: Vec<OsString>,
 }
 
 pub mod cli;
 pub mod client;
-pub(crate) use cortexfs::cli::create;
-pub mod fs;
 pub mod pty;
 pub mod socket;
-pub(crate) use cortexfs::cli::stale;
 
 #[cfg(test)]
 pub mod tests;

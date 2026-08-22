@@ -54,16 +54,6 @@ pub fn user_systemd_transient_path(uid: &str, unit: &str) -> PathBuf {
 }
 
 #[must_use]
-pub fn terminal_runtime_socket(runtime_root: &Path, agent: &str, session: &str) -> PathBuf {
-    runtime_root
-        .join("cortexfs")
-        .join("terminal")
-        .join(agent)
-        .join(session)
-        .join("main.sock")
-}
-
-#[must_use]
 pub fn user_agent_runtime_socket(runtime_root: &Path, scope: &str, agent: &str) -> PathBuf {
     runtime_root
         .join("cortexfs")

@@ -10,16 +10,21 @@ if [ "$1" = configure ]; then
         systemctl daemon-reload || true
         if command -v deb-systemd-helper >/dev/null 2>&1; then
             deb-systemd-helper enable cortexfs.service >/dev/null || true
+            deb-systemd-helper enable cortexfs-terminal-broker.socket >/dev/null || true
         else
-        systemctl enable cortexfs.service >/dev/null 2>&1 || true
+            systemctl enable cortexfs.service cortexfs-terminal-broker.socket >/dev/null 2>&1 || true
         fi
-        if [ -n "${2:-}" ] && systemctl is-active --quiet cortexfs.service; then
-            systemctl try-restart cortexfs.service >/dev/null 2>&1 || true
-            for socket_path in /etc/systemd/system/sockets.target.wants/cortexfs-agent@*.socket; do
-                [ -e "$socket_path" ] || continue
-                socket=$(basename "$socket_path")
-                systemctl start "$socket" >/dev/null 2>&1 || true
-            done
+        systemctl start cortexfs-terminal-broker.socket >/dev/null 2>&1 || true
+        if [ -n "${2:-}" ]; then
+            systemctl try-restart cortexfs-terminal-broker.service >/dev/null 2>&1 || true
+            if systemctl is-active --quiet cortexfs.service; then
+                systemctl try-restart cortexfs.service >/dev/null 2>&1 || true
+                for socket_path in /etc/systemd/system/sockets.target.wants/cortexfs-agent@*.socket; do
+                    [ -e "$socket_path" ] || continue
+                    socket=$(basename "$socket_path")
+                    systemctl start "$socket" >/dev/null 2>&1 || true
+                done
+            fi
         fi
     fi
 fi

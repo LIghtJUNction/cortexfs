@@ -50,8 +50,9 @@ sudo tar -C / -xzf dist/cortexfs-0.1.7-linux-x86_64.tar.gz
 
 The output directory is `dist/` by default. The package installer creates the
 configuration and storage parents but does not delete them on removal. It
-enables `cortexfs.service` without starting it on a first install; start it
-after reviewing the host's FUSE and bubblewrap setup:
+enables `cortexfs.service` and `cortexfs-terminal-broker.socket` without
+starting the mount on a first install; start it after reviewing the host's
+FUSE and bubblewrap setup:
 
 ```bash
 sudo systemctl start cortexfs.service
@@ -59,8 +60,9 @@ ctx doctor
 ```
 
 The package does not create a new `/ctx` ABI entry or a second configuration
-store. Agent sockets remain the existing `cortexfs-agent@.socket` instances,
-and package upgrades restart an already active mount service only after the new
+store. Agent control sockets remain the existing `cortexfs-agent@.socket`
+instances. Terminal sessions use the root-owned socket-activated broker, and
+package upgrades restart an already active mount service only after the new
 files have been installed.
 
 For a source-only deployment with no native package builder, the existing

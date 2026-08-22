@@ -251,7 +251,7 @@ visible tools and authority-bearing core tools such as `fs.write` and
 `shell.exec`, because direct execution from `CTX_PATH` would skip the
 agent/tool authorization stack.
 
-When a terminal needs to be observable, `ctxterm` listens on the session
+When a terminal needs to be observable, its stable locator is the session
 terminal socket:
 
 ```text
@@ -259,25 +259,11 @@ terminal socket:
 ```
 
 Because FUSE mounts generally cannot host a bound Unix socket directly, this
-visible ABI path may be a symlink to a runtime socket under the user's runtime
-directory:
-
-```text
-/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
-```
-
-Older installations may use:
-
-```text
-/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock
-```
-
-The socket protocol is raw PTY bytes after a one-line client mode:
-
-```text
-watch\n   read PTY output only
-attach\n  read PTY output and write stdin to the PTY
-```
+entry aliases `/run/cortexfs/terminal/broker.sock`. The bounded broker protocol
+authenticates the peer and passes an accepted descriptor to `ctxterm`; raw PTY
+bytes begin only after the offer/prepared/accepted/commit transaction. Per-user
+terminal sockets and one-line mode prefixes are invalid. See
+[terminal-broker.md](terminal-broker.md).
 
 Human clients should use:
 

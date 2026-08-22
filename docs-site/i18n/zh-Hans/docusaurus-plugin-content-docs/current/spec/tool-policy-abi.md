@@ -203,30 +203,13 @@ ctx tool NAME PATH...
 
 它仍要求 `NAME` 在 `CTX_PATH` 可见，但必须拒绝普通可见工具与有权限语义的核心工具（如 `fs.write`、`shell.exec`），因为从 `CTX_PATH` 直接执行这些会绕过 agent/tool 授权链。
 
-当终端需要观察时，`ctxterm` 在会话终端 socket 监听：
+当终端需要观察时，其稳定定位器是会话终端 socket：
 
 ```text
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-由于 FUSE 挂载通常不能直接承载 UNIX socket，以上 ABI 可见路径可为用户运行目录 socket 的符号链接：
-
-```text
-/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
-```
-
-旧安装可能使用：
-
-```text
-/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock
-```
-
-socket 协议是客户端模式行后的原始 PTY bytes：
-
-```text
-watch\n   仅读 PTY 输出
-attach\n  读 PTY 输出并写 stdin 到 PTY
-```
+由于 FUSE 挂载通常不能直接承载 UNIX socket，此入口统一指向 `/run/cortexfs/terminal/broker.sock`。有界 broker 协议认证对端并把已接受的描述符传给 `ctxterm`；只有 offer/prepared/accepted/commit 事务完成后才开始原始 PTY 字节流。用户级终端 socket 和旧的一行模式前缀均无效。
 
 人类客户端应使用：
 

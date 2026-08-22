@@ -47,8 +47,9 @@ attachment   zero or more watch or attach clients
 ~~~
 
 The session owns the resource directory. The supervisor owns live process
-truth. A socket is only a locator for an active PTY and may disappear without
-deleting metadata or history.
+truth. The projected socket is a locator for the root-owned broker, not a
+per-user PTY listener. Its authenticated transport is defined by
+[terminal-broker.md](terminal-broker.md).
 
 ## Files
 
@@ -63,7 +64,7 @@ meta.json is the complete inspectable record:
   "cwd": "/workspace",
   "command": ["/ctx/bin/tsh"],
   "state": "running",
-  "socket": "/run/user/1000/cortexfs/terminal/coder/default/main.sock",
+  "socket": "/ctx/agents/coder/default/terminal/main.sock",
   "created_at": 1735689600
 }
 ~~~
@@ -122,8 +123,9 @@ terminal.kill
 
 The policy layer must grant each operation independently. A caller that can
 read or write a PTY does not automatically gain signal or kill authority.
-Current watch and attach routes reuse the existing Agent socket policy; the
-capability names are reserved for the detached terminal supervisor revision.
+Current watch and attach routes use the terminal broker's peer, cgroup,
+session, mode, generation, and nonce checks. The capability names remain
+reserved for finer-grained detached-terminal policy.
 
 ## Attach and lifetime
 
@@ -138,6 +140,6 @@ terminal resource
 ~~~
 
 The resource outlives a particular attachment and retains events after the PTY
-exits. Agent teardown may stop the current compatibility process, but it does
-not remove the session resource or its event history. A future detached
-supervisor must make this lifetime independence the default.
+exits. Agent teardown stops the current supervisor but does not remove the
+session resource or its event history. Broker restart deliberately terminates
+the live generation; durable history remains.

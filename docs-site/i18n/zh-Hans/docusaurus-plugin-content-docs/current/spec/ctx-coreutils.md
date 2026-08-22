@@ -326,22 +326,13 @@ ctx agent start <agent> --session <session> \
   --cwd /workspace
 ```
 
-`ctxterm --listen SOCKET` 为 PTY 提供可观察和可附加入口。会话终端路径为：
+`ctxterm --broker AGENT SESSION UNIT` 在启动 Agent 前注册 PTY supervisor。会话终端路径为：
 
 ```text
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-该 ABI path 可为用户运行时 socket 的符号链接：
-
-```text
-/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
-```
-
-旧安装可能仍有
-`/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock`，但 `ctx agent attach` 不再用此 legacy fallback。
-
-`ctx agent attach` 应先尝试 ABI 路径，再尝试用户运行路径；两者都不可用则返回 socket-availability error。
+该 ABI path 统一指向 `/run/cortexfs/terminal/broker.sock`。`ctx agent watch` 与 `ctx agent attach` 先认证 root broker，再请求绑定模式、会话和一次性 nonce 的描述符授权；它们不会连接用户级终端监听器，也不会发送一行模式前缀。
 
 对应人类命令：
 

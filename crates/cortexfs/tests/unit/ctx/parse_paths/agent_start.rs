@@ -1,4 +1,6 @@
-use crate::{agent_socket_path, agent_start_host, agent_start_workspace_source, ensure_agent_start_session};
+use crate::{
+    agent_socket_path, agent_start_host, agent_start_workspace_source, ensure_agent_start_session,
+};
 
 fn current_uid_for_test() -> String {
     std::process::Command::new("id")
@@ -104,13 +106,34 @@ fn run_bwrap_script(mut args: Vec<String>, script: &str) -> Option<std::process:
         .ok()
 }
 
+fn command_bwrap_args(
+    root: &Path,
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+) -> Option<Vec<String>> {
+    let command = agent_start_systemd_command(
+        root,
+        args,
+        mounts,
+        view,
+        Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET),
+        "cortexfs-agent-coder-test-terminal",
+    );
+    let start = command
+        .args
+        .iter()
+        .position(|arg| arg == cortexfs::support::command::BWRAP)?
+        .checked_add(1)?;
+    command.args.get(start..).map(<[String]>::to_vec)
+}
+
 fn agent_bwrap_test_args(args: &AgentStartArgs, mounts: &[AgentMount]) -> Option<Vec<String>> {
     let root = clean_test_dir("ctx-agent-git-bwrap-args");
     ensure_reference_tree(&root).ok()?;
     ensure_runtime_model_fixture(&root);
     let view = derive_agent_runtime_view(&root, "coder").ok()?;
-    let socket = root.join("runtime").join("main.sock");
-    Some(agent_bwrap_args(&root, args, mounts, &view, &socket, &root))
+    command_bwrap_args(&root, args, mounts, &view)
 }
 
 fn run_agent_bwrap(
@@ -126,10 +149,7 @@ fn run_agent_bwrap(
         write_text_file(&root.join("agent").join("coder.d").join("mount"), policy);
     }
     let view = derive_agent_runtime_view(&root, "coder").ok()?;
-    let socket = root.join("runtime").join("main.sock");
-    fs::create_dir_all(socket.parent()?).ok()?;
-    write_text_file(&root.join("runtime").join(".empty-shell-startup"), "");
-    let bwrap = agent_bwrap_args(&root, args, mounts, &view, &socket, &root);
+    let bwrap = command_bwrap_args(&root, args, mounts, &view)?;
     let output = run_bwrap_script(bwrap.clone(), script)?;
     Some((bwrap, output))
 }
@@ -177,14 +197,14 @@ fn agent_start_builds_sandboxed_terminal_command() {
             mode: "rw".to_owned(),
         }],
     };
-    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
-    let home = PathBuf::from("/ctx/home/1000");
     let cli_mounts = vec![AgentMount {
         source: "/repo".to_owned(),
         target: "/workspace".to_owned(),
         mode: "rw".to_owned(),
     }];
-    let bwrap = agent_bwrap_args(&root, &args, &cli_mounts, &view, &socket, &home);
+    let Some(bwrap) = command_bwrap_args(&root, &args, &cli_mounts, &view) else {
+        return;
+    };
     assert!(contains_arg_triplet(
         &bwrap,
         "--ro-bind",
@@ -203,7 +223,12 @@ fn agent_start_builds_sandboxed_terminal_command() {
             .to_string(),
         "/home/agent"
     ));
-    assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_ROLE", "agent"));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--setenv",
+        "CTX_AGENT_ROLE",
+        "agent"
+    ));
     assert!(contains_arg_triplet(
         &bwrap,
         "--setenv",
@@ -211,16 +236,42 @@ fn agent_start_builds_sandboxed_terminal_command() {
         "/ctx/shared/providers.d"
     ));
     assert!(!bwrap.iter().any(|arg| arg == "/bad/providers.d"));
-    assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_MODEL", "main"));
-    assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_LIFE", "owned"));
-    assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--setenv",
+        "CTX_AGENT_MODEL",
+        "main"
+    ));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--setenv",
+        "CTX_AGENT_LIFE",
+        "owned"
+    ));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--bind",
+        "/repo",
+        "/workspace"
+    ));
     assert!(bwrap.contains(&"--unshare-net".to_owned()));
     assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
-    assert!(contains_ro_bind_stub(&bwrap, "/etc/profile"));
-    assert!(contains_ro_bind_stub(&bwrap, "/etc/bash.bashrc"));
+    assert!(contains_empty_startup_bind(&bwrap, "/etc/profile"));
+    assert!(contains_empty_startup_bind(&bwrap, "/etc/bash.bashrc"));
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/etc/profile.d"));
     assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
-    assert!(contains_arg_pair(&bwrap, "--listen", socket.to_str().unwrap_or_default()));
+    assert!(contains_arg_pair(&bwrap, "--broker", "coder"));
+    assert!(bwrap.contains(&"cortexfs-agent-coder-test-terminal".to_owned()));
+    assert_eq!(
+        contains_arg_triplet(
+            &bwrap,
+            "--ro-bind",
+            cortexfs::runtime::terminal::broker::BROKER_SOCKET,
+            cortexfs::runtime::terminal::broker::BROKER_SOCKET,
+        ),
+        Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET).exists()
+    );
+    assert!(!bwrap.iter().any(|arg| arg == "--listen"));
     assert_eq!(bwrap.last().map(String::as_str), Some("/ctx/bin/tsh"));
 }
 
@@ -291,9 +342,11 @@ fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() 
         return;
     };
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/workspace/.git"));
-    assert!(!bwrap
-        .iter()
-        .any(|arg| arg == &source.join(".git").display().to_string()));
+    assert!(
+        !bwrap
+            .iter()
+            .any(|arg| arg == &source.join(".git").display().to_string())
+    );
     assert!(output.status.success(), "masked sandbox failed: {output:?}");
     assert!(!source.join(".git").join("sandbox-only").exists());
 
@@ -330,7 +383,10 @@ fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() 
         source.join(".git").to_str().unwrap_or_default(),
         "/workspace/.git"
     ));
-    assert!(output.status.success(), "explicit sandbox failed: {output:?}");
+    assert!(
+        output.status.success(),
+        "explicit sandbox failed: {output:?}"
+    );
     assert!(!source.join(".git").join("blocked").exists());
 }
 
@@ -371,9 +427,11 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
         "/dev/null",
         "/workspace/.git"
     ));
-    assert!(!bwrap
-        .iter()
-        .any(|arg| arg == &external.display().to_string()));
+    assert!(
+        !bwrap
+            .iter()
+            .any(|arg| arg == &external.display().to_string())
+    );
 
     assert!(fs::remove_file(source.join(".git")).is_ok());
     assert!(std::os::unix::fs::symlink(&external, source.join(".git")).is_ok());
@@ -383,7 +441,11 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
         "/dev/null",
         "/workspace/.git"
     ));
-    assert!(!bwrap.iter().any(|arg| arg == &source.join(".git").display().to_string()));
+    assert!(
+        !bwrap
+            .iter()
+            .any(|arg| arg == &source.join(".git").display().to_string())
+    );
 }
 
 #[test]
@@ -590,7 +652,10 @@ fn agent_start_real_worktree_requires_explicit_metadata_mounts() {
 fn agent_start_maps_ctx_mount_sources_to_selected_root() {
     let root = clean_test_dir("ctx-agent-start-alt-root-mount-source");
 
-    assert_eq!(agent_host_mount_source(&root, "/ctx"), root.display().to_string());
+    assert_eq!(
+        agent_host_mount_source(&root, "/ctx"),
+        root.display().to_string()
+    );
     assert_eq!(
         agent_host_mount_source(&root, "/ctx/home/1000/agent/coder"),
         root.join("home")
@@ -637,7 +702,14 @@ fn agent_start_records_ready_status_and_start_event() {
         mounts: Vec::new(),
     };
 
-    let facts = [("model", "main"), ("life", "owned"), ("role", "agent"), ("uid", "1000"), ("gid", "100"), ("groups", "10 20")];
+    let facts = [
+        ("model", "main"),
+        ("life", "owned"),
+        ("role", "agent"),
+        ("uid", "1000"),
+        ("gid", "100"),
+        ("groups", "10 20"),
+    ];
     let identity = AgentUnixIdentity::new(
         nix::unistd::geteuid().as_raw(),
         nix::unistd::getegid().as_raw(),
@@ -647,11 +719,24 @@ fn agent_start_records_ready_status_and_start_event() {
             .map(nix::unistd::Gid::as_raw),
     );
     assert_eq!(
-        record_agent_start_state(&root, &args, &identity, "cortexfs-agent-scratch-default", &facts, Some("abc123")),
+        record_agent_start_state(
+            &root,
+            &args,
+            &identity,
+            "cortexfs-agent-scratch-default",
+            &facts,
+            Some("abc123")
+        ),
         Ok(())
     );
-    assert_eq!(fs::read_to_string(control.join("status")).unwrap_or_default(), "ready\n");
-    assert_eq!(fs::read_to_string(control.join("pid")).unwrap_or_default(), "\n");
+    assert_eq!(
+        fs::read_to_string(control.join("status")).unwrap_or_default(),
+        "ready\n"
+    );
+    assert_eq!(
+        fs::read_to_string(control.join("pid")).unwrap_or_default(),
+        "\n"
+    );
     assert_eq!(
         fs::read_to_string(control.join("log")).unwrap_or_default(),
         "{\"type\":\"agent.start\",\"agent\":\"scratch\",\"session\":\"default\",\"unit\":\"cortexfs-agent-scratch-default\",\"model\":\"main\",\"life\":\"owned\",\"role\":\"agent\",\"uid\":\"1000\",\"gid\":\"100\",\"groups\":\"10 20\",\"status\":\"ready\",\"invocation\":\"abc123\"}\n"
@@ -684,7 +769,10 @@ fn agent_start_prepares_session_workspace_hint() {
     let cwd = agent_start_sandbox_cwd(&args, &mounts);
     let workspace_hint = agent_start_workspace_source(&mounts);
 
-    assert_eq!(workspace_hint.as_deref(), Some(workspace.to_str().unwrap_or_default()));
+    assert_eq!(
+        workspace_hint.as_deref(),
+        Some(workspace.to_str().unwrap_or_default())
+    );
     assert_eq!(
         ensure_agent_start_session(&root, &args, &view, &cwd, workspace_hint.as_deref()),
         Ok(())
@@ -697,7 +785,10 @@ fn agent_start_prepares_session_workspace_hint() {
         .join("coder")
         .join("session")
         .join("selfedit");
-    assert_eq!(fs::read_to_string(session.join("cwd")).unwrap_or_default(), "/workspace\n");
+    assert_eq!(
+        fs::read_to_string(session.join("cwd")).unwrap_or_default(),
+        "/workspace\n"
+    );
     assert_eq!(
         fs::read_to_string(session.join("workspace")).unwrap_or_default(),
         format!("{}\n", workspace.display())
@@ -827,32 +918,44 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
     );
     assert!(
         command.program == "/usr/bin/systemd-run"
-                && command.args.contains(&"--user".to_owned())
-                && command.args.contains(&"--property=Restart=always".to_owned())
-                && command.args.contains(&"--property=RestartSec=250ms".to_owned())
-                && command.args.contains(&"-i".to_owned())
-                && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
-                && command.args.contains(&"/usr/bin/bwrap".to_owned())
-                && contains_arg_pair(&command.args, "--clearenv", "--setenv")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_ROOT", "/ctx")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_HOME", "/ctx/home/1000")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT", "coder")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_ROLE", "agent")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_MODEL", "main")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_LIFE", "owned")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_SUBJECT", "coder_t")
-                && contains_arg_triplet(&command.args, "--setenv", "HOME", "/home/agent")
-                && contains_arg_triplet(&command.args, "--setenv", "PATH", "/usr/bin:/bin")
-                && contains_arg_triplet(&command.args, "--setenv", "USER", "coder")
-                && contains_arg_triplet(&command.args, "--setenv", "LOGNAME", "coder")
-                && contains_arg_triplet(&command.args, "--setenv", "SHELL", "/usr/bin/bash")
-                && contains_arg_triplet(&command.args, "--setenv", "TERM", "xterm-256color")
-                && contains_arg_triplet(&command.args, "--setenv", "LANG", "C.UTF-8")
-                && contains_arg_triplet(&command.args, "--setenv", "GIT_OPTIONAL_LOCKS", "0")
-                && contains_arg_triplet(&command.args, "--setenv", "CTX_PATH", "/ctx/tool:/ctx/home/1000/tool")
+            && command.args.contains(&"--user".to_owned())
+            && command
+                .args
+                .contains(&"--property=Restart=always".to_owned())
+            && command
+                .args
+                .contains(&"--property=RestartSec=250ms".to_owned())
+            && command.args.contains(&"-i".to_owned())
+            && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
+            && command.args.contains(&"/usr/bin/bwrap".to_owned())
+            && contains_arg_pair(&command.args, "--clearenv", "--setenv")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_ROOT", "/ctx")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_HOME", "/ctx/home/1000")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT", "coder")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_ROLE", "agent")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_MODEL", "main")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_LIFE", "owned")
+            && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_SUBJECT", "coder_t")
+            && contains_arg_triplet(&command.args, "--setenv", "HOME", "/home/agent")
+            && contains_arg_triplet(&command.args, "--setenv", "PATH", "/usr/bin:/bin")
+            && contains_arg_triplet(&command.args, "--setenv", "USER", "coder")
+            && contains_arg_triplet(&command.args, "--setenv", "LOGNAME", "coder")
+            && contains_arg_triplet(&command.args, "--setenv", "SHELL", "/usr/bin/bash")
+            && contains_arg_triplet(&command.args, "--setenv", "TERM", "xterm-256color")
+            && contains_arg_triplet(&command.args, "--setenv", "LANG", "C.UTF-8")
+            && contains_arg_triplet(&command.args, "--setenv", "GIT_OPTIONAL_LOCKS", "0")
+            && contains_arg_triplet(
+                &command.args,
+                "--setenv",
+                "CTX_PATH",
+                "/ctx/tool:/ctx/home/1000/tool"
+            )
     );
     let bwrap_index = command.args.iter().position(|arg| arg == "/usr/bin/bwrap");
-    assert!(bwrap_index.is_some(), "missing bwrap in command: {command:?}");
+    assert!(
+        bwrap_index.is_some(),
+        "missing bwrap in command: {command:?}"
+    );
     let Some(bwrap_index) = bwrap_index else {
         return;
     };
@@ -939,19 +1042,27 @@ fn agent_start_status_lines_follow_systemctl_shape() {
         "/workspace",
         Some("/repo"),
         Path::new("/ctx/home/1000/agent/coder/session/default/terminal/main.sock"),
-        Path::new("/run/user/1000/cortexfs/terminal/coder/default/main.sock"),
+        Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET),
         "1000",
     );
 
     let expected = [
         "● cortexfs-agent-coder-default-terminal.service - CortexFS agent terminal",
         "     Loaded: loaded (/run/user/1000/systemd/transient/cortexfs-agent-coder-default-terminal.service; transient)",
-        "     Active: active (running)", " Invocation: abc123", "      Agent: coder",
-        "      Model: main", "       Life: owned", "       Role: agent", "     UID: 1000",
-        "     GID: 100", "     Groups: 10 20", "    Session: default", "        CWD: /workspace",
+        "     Active: active (running)",
+        " Invocation: abc123",
+        "      Agent: coder",
+        "      Model: main",
+        "       Life: owned",
+        "       Role: agent",
+        "     UID: 1000",
+        "     GID: 100",
+        "     Groups: 10 20",
+        "    Session: default",
+        "        CWD: /workspace",
         "  Workspace: /repo",
         "     Socket: /ctx/home/1000/agent/coder/session/default/terminal/main.sock",
-        " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
+        " Runtime Socket: /run/cortexfs/terminal/broker.sock",
     ];
     assert_eq!(lines, expected.map(str::to_owned));
 }
@@ -1024,7 +1135,8 @@ fn agent_attach_missing_terminal_suggests_start_command() {
 #[test]
 fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
     let socket = unique_test_dir("agent-attach-missing-terminal-unsafe-session").join("main.sock");
-    let result = stream_terminal_socket(&socket, true, "coder", "safe; touch CORTEXFS_HINT_PWNED #");
+    let result =
+        stream_terminal_socket(&socket, true, "coder", "safe; touch CORTEXFS_HINT_PWNED #");
     assert!(matches!(
         result,
         Err(ref error)
@@ -1057,10 +1169,12 @@ fn agent_start_chat_socket_command_uses_socket_activation() {
         "SocketMode=0666"
     ));
     assert!(contains_arg_pair(&command.args, "--agent", "coder"));
-    assert!(command
-        .args
-        .iter()
-        .any(|arg| arg.ends_with("cortexfs-agent-runtime")));
+    assert!(
+        command
+            .args
+            .iter()
+            .any(|arg| arg.ends_with("cortexfs-agent-runtime"))
+    );
 }
 
 #[test]
@@ -1073,8 +1187,14 @@ fn agent_start_chat_socket_path_is_root_scoped() {
 
     assert!(matches!(left_socket, Ok(ref socket) if socket.ends_with("coder.sock")));
     assert!(matches!((&left_socket, &right_socket), (Ok(left), Ok(right)) if left != right));
-    assert_eq!(agent_chat_unit(&left, "coder"), agent_chat_unit(&left, "coder"));
-    assert_ne!(agent_chat_unit(&left, "coder"), agent_chat_unit(&right, "coder"));
+    assert_eq!(
+        agent_chat_unit(&left, "coder"),
+        agent_chat_unit(&left, "coder")
+    );
+    assert_ne!(
+        agent_chat_unit(&left, "coder"),
+        agent_chat_unit(&right, "coder")
+    );
 }
 
 #[test]
@@ -1294,12 +1414,9 @@ fn exact_socket_alias_cleanup_restores_mismatched_alias_after_claim() {
     ));
     assert!(matches!(fs::read_link(&visible), Ok(target) if target == other));
     assert!(fs::read_dir(&root).is_ok_and(|entries| {
-        entries.flatten().all(|entry| {
-            !entry
-                .file_name()
-                .to_string_lossy()
-                .contains(".claim-")
-        })
+        entries
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".claim-"))
     }));
 }
 #[test]

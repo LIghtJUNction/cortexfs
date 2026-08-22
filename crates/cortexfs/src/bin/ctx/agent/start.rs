@@ -1,11 +1,7 @@
 use crate::*;
 
-pub(crate) fn agent_start(
-    root: &Path,
-    args: &AgentStartArgs,
-    native: bool,
-) -> Result<ExitCode, CliError> {
-    let started = agent_start_host_with_environment(root, args, native)?;
+pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
+    let started = agent_start_host(root, args)?;
     for line in agent_start_status_lines(
         color_enabled(),
         &args.name,
@@ -52,14 +48,6 @@ pub(crate) fn agent_start_host(
     root: &Path,
     args: &AgentStartArgs,
 ) -> Result<AgentStartHostReceipt, CliError> {
-    agent_start_host_with_environment(root, args, false)
-}
-
-fn agent_start_host_with_environment(
-    root: &Path,
-    args: &AgentStartArgs,
-    native: bool,
-) -> Result<AgentStartHostReceipt, CliError> {
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
     require_sandbox_cwd(&args.cwd)?;
@@ -92,7 +80,7 @@ fn agent_start_host_with_environment(
         &session_cwd,
         session_workspace.as_deref(),
     )?;
-    let services = start_agent_runtime_services(root, args, &cli_mounts, &view, native)?;
+    let services = start_agent_runtime_services(root, args, &cli_mounts, &view)?;
     let services = commit_agent_start(root, args, &view, &session_cwd, services)?;
     let AgentStartServices {
         visible_socket,
@@ -172,7 +160,7 @@ fn commit_agent_start(
                 &services.unit,
                 None,
                 &terminal_aliases,
-                &[services.socket.as_path()],
+                &[],
             );
             return Err(CliError::unavailable(format!(
                 "cannot bind agent terminal receipt: {error:?}"
@@ -249,77 +237,45 @@ fn start_agent_runtime_services(
     args: &AgentStartArgs,
     cli_mounts: &[AgentMount],
     view: &AgentRuntimeView,
-    native: bool,
 ) -> Result<AgentStartServices, CliError> {
     let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
-    let socket = agent_runtime_socket(root, &args.name, &args.session)?;
+    let socket = PathBuf::from(cortexfs::runtime::terminal::broker::BROKER_SOCKET);
     let unit = agent_terminal_unit(&args.name, &args.session);
-    let terminal_alias_created = ensure_agent_terminal_socket(&visible_socket, &socket)?;
+    let terminal_alias_created =
+        ensure_best_effort_visible_terminal_socket(&visible_socket, &socket)?;
     let terminal_aliases = terminal_alias_created
         .then_some((visible_socket.as_path(), socket.as_path()))
         .into_iter()
         .collect::<Vec<_>>();
     reset_agent_terminal_unit(view.identity(), &unit);
-    let command = if native {
-        agent_start_native_systemd_command(args, cli_mounts, view, &socket, &unit)
-    } else {
-        agent_start_systemd_command(root, args, cli_mounts, view, &socket, &unit)
-    };
-    let output = match launch_process_for(view.identity(), &command)
+    let command = agent_start_systemd_command(root, args, cli_mounts, view, &socket, &unit);
+    let output = launch_process_for(view.identity(), &command)
         .and_then(|mut process| process.output())
-    {
-        Ok(output) => output,
-        Err(error) => {
-            rollback_agent_start_resources(
-                view.identity(),
-                &unit,
-                None,
-                &terminal_aliases,
-                &[socket.as_path()],
-            );
-            return Err(CliError::unavailable(format!(
-                "cannot start systemd-run: {error}"
-            )));
-        }
-    };
-    if !output.status.success() {
-        let diagnostics = systemd_run_diagnostics(&output);
-        let error = CliError::unavailable(format!(
-            "agent terminal service failed to start with {}{diagnostics}",
-            output.status
-        ));
-        rollback_agent_start_resources(
-            view.identity(),
-            &unit,
-            None,
-            &terminal_aliases,
-            &[socket.as_path()],
-        );
+        .inspect_err(|_error| {
+            rollback_agent_start_resources(view.identity(), &unit, None, &terminal_aliases, &[]);
+        })
+        .map_err(|error| CliError::unavailable(format!("cannot start systemd-run: {error}")))?;
+    let start_error = (!output.status.success()).then(|| {
+        CliError::unavailable(format!(
+            "agent terminal service failed to start with {}{}",
+            output.status,
+            systemd_run_diagnostics(&output)
+        ))
+    });
+    let ready_error = start_error.or_else(|| {
+        cortexfs::runtime::terminal::broker::await_terminal(&args.name, &args.session, &unit)
+            .err()
+            .map(|error| {
+                CliError::unavailable(format!("terminal broker readiness failed: {error}"))
+            })
+    });
+    if let Some(error) = ready_error {
+        rollback_agent_start_resources(view.identity(), &unit, None, &terminal_aliases, &[]);
         return Err(error);
     }
-    if let Err(error) = wait_for_agent_terminal_socket(&socket) {
-        rollback_agent_start_resources(
-            view.identity(),
-            &unit,
-            None,
-            &terminal_aliases,
-            &[socket.as_path()],
-        );
-        return Err(error);
-    }
-    let system = match ensure_system_agent_socket(root, &args.name) {
-        Ok(receipt) => receipt,
-        Err(error) => {
-            rollback_agent_start_resources(
-                view.identity(),
-                &unit,
-                None,
-                &terminal_aliases,
-                &[socket.as_path()],
-            );
-            return Err(error);
-        }
-    };
+    let system = ensure_system_agent_socket(root, &args.name).inspect_err(|_error| {
+        rollback_agent_start_resources(view.identity(), &unit, None, &terminal_aliases, &[]);
+    })?;
     Ok(AgentStartServices {
         visible_socket,
         socket,
@@ -366,7 +322,6 @@ fn rollback_receipted_agent_start(
     if terminal_alias_created {
         remove_matching_socket_alias(visible_socket, socket);
     }
-    remove_plain_runtime_socket(socket);
     system_result
         .and(terminal_result)
         .map_err(|error| CliError::unavailable(format!("agent start rollback conflict: {error:?}")))

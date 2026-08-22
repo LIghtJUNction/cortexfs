@@ -1,11 +1,5 @@
 use crate::*;
 
-pub(crate) fn copy_stdin_to_pty(pty_writer: &PtyWriter) -> io::Result<()> {
-    let stdin = io::stdin();
-    let stdin = stdin.lock();
-    copy_reader_to_pty(stdin, pty_writer)
-}
-
 pub(crate) fn copy_stream_to_pty(stream: UnixStream, pty_writer: &PtyWriter) -> io::Result<()> {
     copy_reader_to_pty(stream, pty_writer)
 }
@@ -42,40 +36,6 @@ pub(crate) fn broadcast(clients: &Clients, chunk: &[u8]) {
             .and_then(|()| stream.flush())
             .is_ok()
     });
-}
-
-pub(crate) fn run_client(socket: &Path, write: bool) -> Result<ExitCode, CtxtermError> {
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        CtxtermError::unavailable(format!("cannot connect {}: {error}", socket.display()))
-    })?;
-    if write {
-        stream.write_all(b"attach\n")
-    } else {
-        stream.write_all(b"watch\n")
-    }
-    .map_err(|error| CtxtermError::unavailable(format!("cannot write client mode: {error}")))?;
-    let mut reader = stream
-        .try_clone()
-        .map_err(|error| CtxtermError::unavailable(format!("cannot clone socket: {error}")))?;
-    let output = thread::spawn(move || copy_reader_to_stdout(&mut reader));
-    if write {
-        let _raw_mode =
-            RawTerminalMode::maybe_new().map_err(|error| write_error_to_ctxterm(&error))?;
-        let input = thread::spawn(move || copy_stdin_to_stream_and_shutdown(stream));
-        match input.join() {
-            Ok(Ok(_bytes)) => {}
-            Ok(Err(error)) if is_terminal_disconnect(&error) => {}
-            Ok(Err(error)) => return Err(write_error_to_ctxterm(&error)),
-            Err(_error) => return Err(CtxtermError::unavailable("input thread failed")),
-        }
-    }
-    match output.join() {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) if is_terminal_disconnect(&error) => {}
-        Ok(Err(error)) => return Err(write_error_to_ctxterm(&error)),
-        Err(_error) => return Err(CtxtermError::unavailable("output thread failed")),
-    }
-    Ok(ExitCode::SUCCESS)
 }
 
 pub(crate) fn pty_size() -> PtySize {

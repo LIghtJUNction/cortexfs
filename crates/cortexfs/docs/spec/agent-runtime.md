@@ -221,12 +221,14 @@ The terminal flow is:
 ctx agent start
   -> systemd-run --user
   -> bwrap sandbox
-  -> ctxterm --listen SOCKET -- /ctx/bin/tsh
+  -> ctxterm --broker AGENT SESSION UNIT -- /ctx/bin/tsh
+  -> register and activate with the root broker
   -> tsh
 ```
 
-`ctxterm` owns the pseudo-terminal. It exposes `watch` and `attach` modes
-through the session terminal socket.
+`ctxterm` owns the pseudo-terminal. The root broker authenticates `watch` and
+`attach` clients and passes accepted descriptors directly to `ctxterm`; it does
+not relay PTY bytes.
 
 Session terminal sockets are visible through the ABI path:
 
@@ -234,14 +236,10 @@ Session terminal sockets are visible through the ABI path:
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-User-started terminals may place the real socket under:
-
-```text
-/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
-```
-
-`ctx agent attach` should try the ABI path first, then the user runtime path.
-If both locations are unavailable, it returns a socket-availability error.
+The visible entry aliases the immutable root-owned endpoint
+`/run/cortexfs/terminal/broker.sock`. `ctx agent attach` sends a bounded v1
+broker request containing the agent, session, mode, and fresh nonce. It MUST
+NOT fall back to a per-user socket or the legacy line protocol.
 
 ## Sandbox Contract
 

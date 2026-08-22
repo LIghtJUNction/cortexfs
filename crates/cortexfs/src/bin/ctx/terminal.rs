@@ -56,16 +56,7 @@ fn terminal_status(root: &Path, id: &str) -> Result<ExitCode, CliError> {
 
 fn terminal_attach(root: &Path, id: &str, write: bool) -> Result<ExitCode, CliError> {
     let (_directory, record) = find_terminal(root, id)?;
-    let socket = record
-        .socket
-        .as_deref()
-        .map(PathBuf::from)
-        .filter(|path| terminal_socket_exists(path))
-        .unwrap_or(agent_terminal_connect_socket(
-            root,
-            &record.agent,
-            &record.session,
-        )?);
+    let socket = agent_terminal_socket(root, &record.agent, &record.session)?;
     stream_terminal_socket(&socket, write, &record.agent, &record.session)
 }
 

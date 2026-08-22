@@ -30,7 +30,7 @@ The same agent can have several paths. They are intentionally different:
 | User terminal ABI | session_terminal_path | /ctx/home/1000/agent/coder/session/default/terminal/main.sock |
 | Attach channel index | session_channel_index_path | /ctx/home/1000/agent/coder/session/index/channel |
 | Attach channel file | session_channel_path | /ctx/home/1000/agent/coder/session/index/channel/terminal_coder_default |
-| User terminal runtime | terminal_runtime_socket | /run/user/1000/cortexfs/terminal/coder/default/main.sock |
+| Terminal broker endpoint | BROKER_SOCKET | /run/cortexfs/terminal/broker.sock |
 
 An IM adapter normally reads its configured agent_socket from
 agent_client_socket or from the explicitly configured runtime contract. It

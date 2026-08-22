@@ -49,12 +49,13 @@ install -d -m 0755 \
     %{buildroot}%{_sharedstatedir}/cortexfs/storage/generations
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/cortexfs/secrets
 for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-    cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr \
+    cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr \
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp; do
     install -m 0755 "target/release/$binary" "%{buildroot}%{_bindir}/$binary"
 done
 for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
+    cortexfs-terminal-broker.service cortexfs-terminal-broker.socket \
     cortexfs-channel@.service cortexfs-channel-bluesky.service \
     cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
     cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
@@ -80,9 +81,11 @@ install -m 0644 docs/spec/*.md %{buildroot}%{_datadir}/doc/cortexfs/docs/spec/
 %post
 if [ "$1" -eq 1 ]; then
     /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
-    /usr/bin/systemctl enable cortexfs.service >/dev/null 2>&1 || :
+    /usr/bin/systemctl enable cortexfs.service cortexfs-terminal-broker.socket >/dev/null 2>&1 || :
 else
     /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
+    /usr/bin/systemctl enable --now cortexfs-terminal-broker.socket >/dev/null 2>&1 || :
+    /usr/bin/systemctl try-restart cortexfs-terminal-broker.service >/dev/null 2>&1 || :
     if /usr/bin/systemctl is-active --quiet cortexfs.service; then
         /usr/bin/systemctl try-restart cortexfs.service >/dev/null 2>&1 || :
         for socket_path in /etc/systemd/system/sockets.target.wants/cortexfs-agent@*.socket; do
@@ -95,7 +98,8 @@ fi
 
 %preun
 if [ "$1" -eq 0 ]; then
-    /usr/bin/systemctl disable --now cortexfs.service >/dev/null 2>&1 || :
+    /usr/bin/systemctl disable --now cortexfs.service cortexfs-terminal-broker.service \
+        cortexfs-terminal-broker.socket >/dev/null 2>&1 || :
 fi
 
 %postun
@@ -112,6 +116,7 @@ fi
 %{_bindir}/tsh
 %{_bindir}/cortexfs-mount
 %{_bindir}/cortexfs-object-runner
+%{_bindir}/cortexfs-terminal-broker
 %{_bindir}/cortexfs-agent-runtime
 %{_bindir}/cortexfs-channel
 %{_bindir}/cortexfs-channel-nostr
@@ -125,6 +130,8 @@ fi
 %{_prefix}/lib/systemd/system/cortexfs.service
 %{_prefix}/lib/systemd/system/cortexfs-agent@.service
 %{_prefix}/lib/systemd/system/cortexfs-agent@.socket
+%{_prefix}/lib/systemd/system/cortexfs-terminal-broker.service
+%{_prefix}/lib/systemd/system/cortexfs-terminal-broker.socket
 %{_prefix}/lib/systemd/system/cortexfs-channel@.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-bluesky.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-driver@.service

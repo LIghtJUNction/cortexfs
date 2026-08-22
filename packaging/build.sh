@@ -10,12 +10,13 @@ WORK_DIR=
 
 readonly BINARIES=(
     ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner
-    cortexfs-agent-runtime cortexfs-auth-runner cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr
+    cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 )
 readonly UNITS=(
     cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket
+    cortexfs-terminal-broker.service cortexfs-terminal-broker.socket
     cortexfs-channel@.service cortexfs-channel-bluesky.service
     cortexfs-channel-driver@.service cortexfs-channel-nostr.service
     cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service

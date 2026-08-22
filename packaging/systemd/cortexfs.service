@@ -1,7 +1,8 @@
 [Unit]
 Description=CortexFS FUSE mount
 Documentation=file:/usr/share/doc/cortexfs/README.md
-After=local-fs.target
+Wants=cortexfs-terminal-broker.socket
+After=local-fs.target cortexfs-terminal-broker.socket
 
 [Service]
 Type=simple

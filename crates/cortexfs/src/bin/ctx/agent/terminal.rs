@@ -9,7 +9,7 @@ pub(crate) fn agent_terminal(
     require_cli_name("agent name", name)?;
     let session = agent_session_name(root, name, session)?;
     require_session_name(&session)?;
-    let socket = agent_terminal_connect_socket(root, name, &session)?;
+    let socket = agent_terminal_socket(root, name, &session)?;
     stream_terminal_socket(&socket, write, name, &session)
 }
 
@@ -24,22 +24,6 @@ pub(crate) fn agent_terminal_socket(
         session,
         "main.sock",
     ))
-}
-
-pub(crate) fn agent_terminal_connect_socket(
-    root: &Path,
-    name: &str,
-    session: &str,
-) -> Result<PathBuf, CliError> {
-    for socket in [
-        agent_terminal_socket(root, name, session)?,
-        agent_runtime_socket(root, name, session)?,
-    ] {
-        if terminal_socket_exists(&socket) {
-            return Ok(socket);
-        }
-    }
-    agent_terminal_socket(root, name, session)
 }
 
 pub(crate) fn terminal_socket_exists(socket: &Path) -> bool {
@@ -83,45 +67,44 @@ pub(crate) fn stream_terminal_socket(
     name: &str,
     session: &str,
 ) -> Result<ExitCode, CliError> {
-    let stream = open_terminal_socket(socket)
+    let mode = if write {
+        cortexfs::runtime::terminal::broker::TerminalMode::Attach
+    } else {
+        cortexfs::runtime::terminal::broker::TerminalMode::Watch
+    };
+    let stream = cortexfs::runtime::terminal::broker::connect_terminal(name, session, mode)
         .map_err(|error| terminal_connect_cli_error(socket, name, session, &error))?;
     stream_terminal_stream(stream, write)
-}
-
-pub(crate) fn open_terminal_socket(socket: &Path) -> Result<UnixStream, io::Error> {
-    UnixStream::connect(socket)
 }
 
 pub(crate) fn terminal_connect_cli_error(
     socket: &Path,
     name: &str,
     session: &str,
-    error: &io::Error,
+    error: &cortexfs::runtime::terminal::broker::BrokerProtocolError,
 ) -> CliError {
+    use cortexfs::runtime::terminal::broker::BrokerProtocolError::{Io, Rejected};
+    let reason = match *error {
+        Io(ref error) => match error.kind() {
+            io::ErrorKind::NotFound => "terminal is not running",
+            io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
+            _ => "cannot connect terminal",
+        },
+        Rejected(ref code, _) if code == "not_ready" => "terminal is not running",
+        _ => "cannot connect terminal",
+    };
     let hint = format!(
         "run: ctx agent start {} --session {}",
         shell_quote_arg(name),
         shell_quote_arg(session)
     );
-    let reason = match error.kind() {
-        io::ErrorKind::NotFound => "terminal is not running",
-        io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
-        _ => "cannot connect terminal socket",
-    };
     CliError::unavailable(format!("{reason} {}: {error}\n{hint}", socket.display()))
 }
 
 pub(crate) fn stream_terminal_stream(
-    mut stream: UnixStream,
+    stream: UnixStream,
     write: bool,
 ) -> Result<ExitCode, CliError> {
-    if write {
-        stream.write_all(b"attach\n")
-    } else {
-        stream.write_all(b"watch\n")
-    }
-    .map_err(|error| CliError::unavailable(format!("cannot write terminal mode: {error}")))?;
-
     let mut reader = stream
         .try_clone()
         .map_err(|error| CliError::unavailable(format!("cannot clone terminal socket: {error}")))?;

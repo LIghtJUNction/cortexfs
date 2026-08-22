@@ -142,11 +142,12 @@ socket 激活的可执行代理运行时会观察该 active run 的持久会话�
 ctx agent start
   -> systemd-run --user
   -> bwrap sandbox
-  -> ctxterm --listen SOCKET -- /ctx/bin/tsh
+  -> ctxterm --broker AGENT SESSION UNIT -- /ctx/bin/tsh
+  -> 向 root broker 注册并激活
   -> tsh
 ```
 
-`ctxterm` 持有伪终端，并通过会话终端 socket 暴露 `watch` 与 `attach` 模式。
+`ctxterm` 持有伪终端。root broker 认证 `watch` 与 `attach` 客户端，并把已接受的描述符直接传给 `ctxterm`；broker 不中继 PTY 字节。
 
 会话终端 socket 可通过以下 ABI 路径访问：
 
@@ -154,13 +155,13 @@ ctx agent start
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-用户启动的终端可能把真实 socket 放在：
+可见入口统一指向不可变的 root 所有端点：
 
 ```text
-/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
+/run/cortexfs/terminal/broker.sock
 ```
 
-`ctx agent attach` 应先尝试 ABI 路径，再尝试用户运行时路径；两者都不可用则返回 socket 可用性错误。
+`ctx agent attach` 发送包含 Agent、会话、模式和新 nonce 的有界 v1 broker 请求；不得回退到用户级 socket 或旧行协议。
 
 ## 沙箱约定
 

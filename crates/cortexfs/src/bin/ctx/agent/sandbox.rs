@@ -8,52 +8,26 @@ pub(crate) fn agent_start_systemd_command(
     socket: &Path,
     unit: &str,
 ) -> AgentLaunchCommand {
-    let home = view.ctx_home();
-    let mut command = agent_systemd_command(unit, None);
-    command.args.extend([
-        cortexfs::support::command::ENV.to_owned(),
-        "-i".to_owned(),
-        format!("PATH={}", cortexfs::support::command::TRUSTED_PATH),
-        cortexfs::support::command::BWRAP.to_owned(),
-    ]);
-    command
-        .args
-        .extend(agent_bwrap_args(root, args, cli_mounts, view, socket, home));
-    command
-}
-
-pub(crate) fn agent_start_native_systemd_command(
-    args: &AgentStartArgs,
-    mounts: &[AgentMount],
-    view: &AgentRuntimeView,
-    socket: &Path,
-    unit: &str,
-) -> AgentLaunchCommand {
-    let cwd = agent_start_workspace_source(mounts).unwrap_or_else(|| args.cwd.clone());
-    let mut command = agent_systemd_command(unit, Some(&cwd));
-    command
-        .args
-        .extend([cortexfs::support::command::ENV.to_owned(), "-i".to_owned()]);
-    for (key, value) in cortexfs::agent::launch::terminal_env(view) {
-        command.args.push(format!("{key}={value}"));
-    }
-    command.args.extend([
-        format!("HOME={}", view.home().display()),
-        format!("CTX_AGENT_CWD={cwd}"),
-    ]);
-    if let Some(workspace) = agent_start_workspace_source(mounts) {
-        command.args.push(format!("CTX_WORKSPACE={workspace}"));
-    }
-    command.args.extend([
-        "CTX_RUN_ENVIRONMENT=native".to_owned(),
-        cortexfs::support::command::CTXTERM.to_owned(),
-        "--listen".to_owned(),
-        socket.display().to_string(),
-        "--no-stdio".to_owned(),
-        "--".to_owned(),
-        cortexfs::support::command::BASH.to_owned(),
-    ]);
-    command
+    terminal_command(
+        &AgentLaunchRequest {
+            agent: args.name.clone(),
+            session: args.session.clone(),
+            source: root.to_path_buf(),
+            cwd: agent_start_sandbox_cwd(args, cli_mounts),
+            mounts: cli_mounts
+                .iter()
+                .map(|mount| AgentLaunchMount {
+                    source: mount.source.clone(),
+                    target: mount.target.clone(),
+                    mode: mount.mode.clone(),
+                })
+                .collect(),
+            default_workspace: args.default_workspace,
+        },
+        view,
+        socket,
+        unit,
+    )
 }
 
 #[cfg(test)]
@@ -65,7 +39,7 @@ pub(crate) fn agent_chat_socket_systemd_command(
 ) -> AgentLaunchCommand {
     let source = agent_source_root(root);
     cortexfs::chat_socket_command(
-        &cortexfs::AgentLaunchRequest {
+        &AgentLaunchRequest {
             agent: name.to_owned(),
             session: String::new(),
             source,
@@ -114,154 +88,6 @@ pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'sta
     }
 }
 
-pub(crate) fn agent_bwrap_args(
-    root: &Path,
-    args: &AgentStartArgs,
-    cli_mounts: &[AgentMount],
-    view: &AgentRuntimeView,
-    socket: &Path,
-    _home: &Path,
-) -> Vec<String> {
-    let agent_home = view.home();
-    let mut bwrap = vec!["--clearenv".to_owned()];
-    for (key, value) in cortexfs::agent::launch::terminal_env(view) {
-        bwrap.extend(["--setenv".to_owned(), key, value]);
-    }
-    if let Some(workspace) = agent_start_workspace_source(cli_mounts) {
-        bwrap.extend(["--setenv".to_owned(), "CTX_WORKSPACE".to_owned(), workspace]);
-    }
-    bwrap.extend([
-        "--die-with-parent".to_owned(),
-        "--unshare-pid".to_owned(),
-        "--unshare-net".to_owned(),
-    ]);
-    bwrap.extend(cortexfs::support::process::bwrap_process_setup_args());
-    bwrap.extend(cortexfs::support::process::bwrap_system_layout_args());
-    if let Some(runtime_dir) = socket_runtime_dir(socket) {
-        bwrap.extend([
-            "--bind".to_owned(),
-            runtime_dir.display().to_string(),
-            runtime_dir.display().to_string(),
-        ]);
-    }
-    let has_policy_git_mount = has_policy_git_mount(view);
-    for mount in view.mount_table().entries() {
-        if args.default_workspace && mount.target() == "/workspace/.git" {
-            continue;
-        }
-        bwrap.push(match mount.mode() {
-            cortexfs::MountMode::ReadOnly => "--ro-bind".to_owned(),
-            cortexfs::MountMode::ReadWrite => "--bind".to_owned(),
-        });
-        bwrap.push(agent_host_mount_source(root, mount.source()));
-        let target = if mount.target() == agent_home {
-            AGENT_SANDBOX_HOME.to_owned()
-        } else {
-            mount.target().to_owned()
-        };
-        bwrap.push(target);
-    }
-    let git_mask = agent_git_mask(args, cli_mounts, view);
-    let mut git_masked = false;
-    for mount in cli_mounts {
-        bwrap.extend(cortexfs::support::bwrap::dir_args_for_parent(&mount.target));
-        bwrap.push(match mount.mode.as_str() {
-            "ro" => "--ro-bind".to_owned(),
-            _ => "--bind".to_owned(),
-        });
-        bwrap.push(mount.source.clone());
-        bwrap.push(mount.target.clone());
-        if !git_masked && args.default_workspace && mount.target == "/workspace" {
-            if has_policy_git_mount {
-                for mount in view
-                    .mount_table()
-                    .entries()
-                    .iter()
-                    .filter(|mount| mount.target() == "/workspace/.git")
-                {
-                    bwrap.push(match mount.mode() {
-                        cortexfs::MountMode::ReadOnly => "--ro-bind".to_owned(),
-                        cortexfs::MountMode::ReadWrite => "--bind".to_owned(),
-                    });
-                    bwrap.push(agent_host_mount_source(root, mount.source()));
-                    bwrap.push(mount.target().to_owned());
-                }
-            } else if let Some(mask) = git_mask {
-                bwrap.extend(agent_git_mask_args(mask));
-            }
-            git_masked = true;
-        }
-    }
-    if let Some(startup_stub) = shell_startup_stub_path(socket) {
-        bwrap.extend([
-            "--ro-bind".to_owned(),
-            startup_stub.display().to_string(),
-            "/etc/profile".to_owned(),
-            "--ro-bind".to_owned(),
-            startup_stub.display().to_string(),
-            "/etc/bash.bashrc".to_owned(),
-        ]);
-    }
-    let sandbox_cwd = agent_start_sandbox_cwd(args, cli_mounts);
-    bwrap.extend([
-        "--chdir".to_owned(),
-        sandbox_cwd,
-        cortexfs::support::command::CTXTERM.to_owned(),
-        "--listen".to_owned(),
-        socket.display().to_string(),
-        "--no-stdio".to_owned(),
-        "--".to_owned(),
-        cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
-            .join("tsh")
-            .display()
-            .to_string(),
-    ]);
-    bwrap
-}
-
-pub(crate) fn agent_host_mount_source(root: &Path, source: &str) -> String {
-    let source = Path::new(source);
-    let ctx_root = cortexfs_paths::ctx_root();
-    if source == ctx_root {
-        return root.display().to_string();
-    }
-    if let Ok(relative) = source.strip_prefix(&ctx_root) {
-        return root.join(relative).display().to_string();
-    }
-    source.display().to_string()
-}
-
-pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    let cwd = Path::new(&args.cwd);
-    for mount in mounts {
-        let source = Path::new(&mount.source);
-        let Ok(relative) = cwd.strip_prefix(source) else {
-            continue;
-        };
-        let mut target = PathBuf::from(&mount.target);
-        if !relative.as_os_str().is_empty() {
-            target.push(relative);
-        }
-        return target.display().to_string();
-    }
-    args.cwd.clone()
-}
-fn agent_systemd_command(unit: &str, cwd: Option<&str>) -> AgentLaunchCommand {
-    let mut args = vec![
-        "--user".to_owned(),
-        format!("--unit={unit}"),
-        "--property=Restart=always".to_owned(),
-        "--property=RestartSec=250ms".to_owned(),
-    ];
-    if let Some(cwd) = cwd {
-        args.push(format!("--property=WorkingDirectory={cwd}"));
-    }
-    AgentLaunchCommand {
-        program: SYSTEMD_RUN_PROGRAM.to_owned(),
-        args,
-    }
-}
-
 pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
@@ -276,6 +102,27 @@ pub(crate) fn agent_start_mounts_with_default_source(
     }
     mounts.extend(args.mounts.iter().cloned());
     mounts
+}
+
+pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
+    let cwd = Path::new(&args.cwd);
+    for mount in mounts {
+        if let Ok(relative) = cwd.strip_prefix(&mount.source) {
+            return Path::new(&mount.target)
+                .join(relative)
+                .display()
+                .to_string();
+        }
+    }
+    args.cwd.clone()
+}
+
+pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
+    mounts
+        .iter()
+        .rev()
+        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
+        .map(|mount| mount.source.clone())
 }
 
 pub(crate) fn validate_agent_start_mounts(
@@ -294,56 +141,6 @@ pub(crate) fn validate_agent_start_mounts(
     Ok(())
 }
 
-const SYSTEMD_RUN_PROGRAM: &str = cortexfs::support::command::SYSTEMD_RUN;
-
-#[derive(Clone, Copy)]
-enum AgentGitMask {
-    Directory,
-    File,
-}
-
-fn has_policy_git_mount(view: &AgentRuntimeView) -> bool {
-    view.mount_table()
-        .entries()
-        .iter()
-        .any(|mount| mount.target() == "/workspace/.git")
-}
-
-fn agent_git_mask(
-    args: &AgentStartArgs,
-    mounts: &[AgentMount],
-    view: &AgentRuntimeView,
-) -> Option<AgentGitMask> {
-    if !args.default_workspace
-        || mounts.iter().any(|mount| mount.target == "/workspace/.git")
-        || has_policy_git_mount(view)
-    {
-        return None;
-    }
-    let workspace = mounts
-        .iter()
-        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")?;
-    let metadata = fs::symlink_metadata(Path::new(&workspace.source).join(".git")).ok()?;
-    if metadata.is_dir() {
-        Some(AgentGitMask::Directory)
-    } else if metadata.is_file() {
-        Some(AgentGitMask::File)
-    } else {
-        None
-    }
-}
-
-fn agent_git_mask_args(mask: AgentGitMask) -> Vec<String> {
-    match mask {
-        AgentGitMask::Directory => vec!["--tmpfs".to_owned(), "/workspace/.git".to_owned()],
-        AgentGitMask::File => vec![
-            "--ro-bind".to_owned(),
-            "/dev/null".to_owned(),
-            "/workspace/.git".to_owned(),
-        ],
-    }
-}
-
 pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
     if !path.is_absolute() {
         return None;
@@ -360,14 +157,6 @@ pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(normalized)
-}
-
-pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
-    mounts
-        .iter()
-        .rev()
-        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
-        .map(|mount| mount.source.clone())
 }
 
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
@@ -417,34 +206,6 @@ pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
         ));
     }
     Ok(())
-}
-
-pub(crate) fn ensure_agent_terminal_socket(
-    visible_socket: &Path,
-    runtime_socket: &Path,
-) -> Result<bool, CliError> {
-    if let Some(parent) = runtime_socket.parent() {
-        create_agent_terminal_runtime_dir(parent).map_err(|error| {
-            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
-        })?;
-        write_empty_shell_startup_stub(parent).map_err(|error| {
-            CliError::unavailable(format!(
-                "cannot create {}: {error}",
-                parent.join(".empty-shell-startup").display()
-            ))
-        })?;
-    }
-    match remove_stale_socket(runtime_socket) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(CliError::unavailable(format!(
-                "cannot remove stale {}: {error}",
-                runtime_socket.display()
-            )));
-        }
-    }
-    ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)
 }
 
 #[cfg(test)]

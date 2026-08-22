@@ -128,23 +128,17 @@ home/<uid>/agent/<name>/...             文档化的代理 home 骨架
 
 ## 运行时套接字别名
 
-Agent start 将实时套接字绑定到 `/run/user/<uid>/cortexfs/` 以下并保持
-仅限 FUSE 支撑树中这些所有者授权的别名：
+Agent start 在 FUSE 支撑树中保存所有者授权的别名。Agent 控制 socket 仍按用户隔离；终端流统一使用 root broker：
 
 ```text
 agent/<name>.sock
   -> /run/user/<uid>/cortexfs/agent/.../<name>.sock
 
 home/<uid>/agent/<name>/session/<session>/terminal/main.sock
-  -> /run/user/<uid>/cortexfs/terminal/<name>/<session>/main.sock
+  -> /run/cortexfs/terminal/broker.sock
 ```
 
-目标必须是绝对的，保持在匹配的 uid 运行时前缀以下，并且
-匹配可见的代理/会话名称。别名父项必须在不跟随符号链接时打开。
-创建、替换、取消链接需要代理所有者 UID。该流程
-停止的宿主创建的代理可能保留真实套接字占位符；启动会替换
-它与运行时别名一起。当任一情况发生时，在记录 `ready` 之前启动必须失败
-无法使用 `readlink` 创建和验证可见别名。
+目标必须是绝对路径。Agent 控制目标仍须位于匹配 UID 的运行时前缀下并匹配可见 Agent 名；终端目标必须严格等于固定 broker 路径。别名父项必须在不跟随符号链接时打开。创建、替换和取消链接需要 Agent 所有者 UID。任一可见别名无法通过 `readlink` 创建并验证时，启动必须在记录 `ready` 前失败。
 
 一些部署也保持始终开启
 系统代理套接字作为直接套接字

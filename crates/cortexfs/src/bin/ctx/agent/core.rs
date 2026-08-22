@@ -7,10 +7,7 @@ pub(crate) enum AgentArgs {
         name: String,
         from: String,
     },
-    Start {
-        args: AgentStartArgs,
-        native: bool,
-    },
+    Start(AgentStartArgs),
     Stop {
         name: String,
     },
@@ -155,8 +152,6 @@ pub(crate) struct AgentMount {
     pub(crate) mode: String,
 }
 
-pub(crate) const AGENT_SANDBOX_HOME: &str = "/home/agent";
-
 pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     match *args {
         AgentArgs::New(ref args) => agent_new(root, args),
@@ -164,7 +159,7 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             require_cli_name("agent name", name)?;
             agent_apply(root, name, Path::new(from))
         }
-        AgentArgs::Start { ref args, native } => agent_start(root, args, native),
+        AgentArgs::Start(ref args) => agent_start(root, args),
         AgentArgs::Stop { ref name } => {
             require_cli_name("agent name", name)?;
             agent_stop(root, name)

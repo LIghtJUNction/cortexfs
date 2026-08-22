@@ -2,102 +2,54 @@ use crate::*;
 
 pub(crate) fn parse_args(args: Vec<OsString>) -> Result<CtxtermCommand, CtxtermError> {
     let mut values = args.into_iter();
-    let mut listen = None;
-    let mut log = None;
-    let mut stdio = true;
-    let Some(mut first) = values.next() else {
-        return Ok(CtxtermCommand::Run {
-            listen: None,
-            log: None,
-            stdio: true,
-            program: OsString::from(DEFAULT_SHELL),
-            args: Vec::new(),
-        });
+    let Some(first) = values.next() else {
+        return Err(CtxtermError::usage(
+            "--broker AGENT SESSION UNIT is required",
+        ));
     };
-    if first == "watch" || first == "attach" {
-        let write = first == "attach";
-        let Some(socket) = values.next() else {
-            return Err(CtxtermError::usage("watch/attach requires a socket path"));
-        };
-        if let Some(extra) = values.next() {
-            return Err(CtxtermError::usage(format!(
-                "unexpected argument: {}",
-                extra.to_string_lossy()
-            )));
-        }
-        return Ok(CtxtermCommand::Client {
-            socket: PathBuf::from(socket),
-            write,
-        });
-    }
     if first == "--help" || first == "-h" {
         return Ok(CtxtermCommand::Help);
     }
-    while first == "--listen" || first == "--log" || first == "--no-stdio" {
-        match first.to_str() {
-            Some("--listen") => {
-                let Some(path) = values.next() else {
-                    return Err(CtxtermError::usage("--listen requires a socket path"));
-                };
-                listen = Some(PathBuf::from(path));
-            }
-            Some("--log") => {
-                let Some(path) = values.next() else {
-                    return Err(CtxtermError::usage("--log requires a path"));
-                };
-                log = Some(PathBuf::from(path));
-            }
-            Some("--no-stdio") => {
-                stdio = false;
-            }
-            _ => {}
-        }
-        let Some(next) = values.next() else {
-            return Ok(CtxtermCommand::Run {
-                listen,
-                log,
-                stdio,
-                program: OsString::from(DEFAULT_SHELL),
-                args: Vec::new(),
-            });
-        };
-        first = next;
+    if first != "--broker" {
+        return Err(CtxtermError::usage(
+            "--broker AGENT SESSION UNIT is required",
+        ));
     }
-    if first == "--" {
-        let Some(program) = values.next() else {
-            return Err(CtxtermError::usage("-- requires a command"));
-        };
-        return Ok(CtxtermCommand::Run {
-            listen,
-            log,
-            stdio,
-            program,
-            args: values.collect(),
-        });
-    }
+    let broker = BrokerConfig {
+        agent: next_text(&mut values)?,
+        session: next_text(&mut values)?,
+        unit: next_text(&mut values)?,
+    };
+    let next = values.next();
+    let program = match next.as_deref() {
+        None => OsString::from(DEFAULT_SHELL),
+        Some(value) if value == "--" => values
+            .next()
+            .ok_or_else(|| CtxtermError::usage("-- requires a command"))?,
+        Some(_value) => next.ok_or_else(|| CtxtermError::usage("missing command"))?,
+    };
     Ok(CtxtermCommand::Run {
-        listen,
-        log,
-        stdio,
-        program: first,
+        broker,
+        program,
         args: values.collect(),
     })
+}
+
+fn next_text(values: &mut impl Iterator<Item = OsString>) -> Result<String, CtxtermError> {
+    values
+        .next()
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CtxtermError::usage("--broker requires AGENT SESSION UNIT"))
 }
 
 pub(crate) fn print_help() -> Result<(), CtxtermError> {
     write_stdout(
         "\
-ctxterm - CortexFS agent terminal emulator
+ctxterm - CortexFS agent terminal supervisor
 
 usage:
-  ctxterm
-  ctxterm --listen SOCKET [--log PATH] [--no-stdio] [-- COMMAND [ARG...]]
-  ctxterm -- COMMAND [ARG...]
-  ctxterm watch SOCKET
-  ctxterm attach SOCKET
-
-default:
-  ctxterm starts /usr/bin/tsh
+  ctxterm --broker AGENT SESSION UNIT [-- COMMAND [ARG...]]
 ",
     )
 }

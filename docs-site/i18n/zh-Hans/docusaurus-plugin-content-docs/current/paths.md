@@ -26,7 +26,7 @@ cortexfs-paths = "0.1.7"
 | 私有 systemd listener | `system_agent_runtime_socket` | /run/cortexfs/agent/coder.sock |
 | 持久回写树 | `agent_backing_socket` | /var/lib/cortexfs/storage/current/agent/coder.sock |
 | 用户终端 ABI | `session_terminal_path` | /ctx/home/1000/agent/coder/session/default/terminal/main.sock |
-| 用户终端运行时 | `terminal_runtime_socket` | /run/user/1000/cortexfs/terminal/coder/default/main.sock |
+| 终端 Broker 端点 | `BROKER_SOCKET` | /run/cortexfs/terminal/broker.sock |
 
 IM 适配器通常从 `agent_client_socket` 或显式配置的 runtime contract 读取其
 `agent_socket`。它不应推断第二个 socket 路径。Discord 的 host 配置文件本身即

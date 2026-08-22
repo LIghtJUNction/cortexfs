@@ -12,10 +12,8 @@ use std::time::Duration;
 use crate::agent::create::AgentRollbackConflict;
 use crate::{AgentUnixIdentity, ChildContextRecordError};
 
-mod directory;
 mod meta;
 
-pub(crate) use directory::ensure_terminal_runtime_dir;
 pub use meta::persist_agent_launch_meta;
 
 /// Validated target user-manager endpoint, independent of caller environment.
@@ -177,54 +175,14 @@ mod user_manager_tests {
     use super::{
         SystemAgentSocketReceipt, UserManagerCaller, claim_socket_entry_from,
         cleanup_exact_socket_alias, compensate_unreceipted_system_start_with,
-        dispose_claimed_alias, ensure_terminal_runtime_dir, exact_alias_receipt,
-        open_owned_alias_parent, parse_unit_state, prepare_exact_socket_alias,
-        remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
-        wait_system_agent_visible_socket,
+        dispose_claimed_alias, exact_alias_receipt, open_owned_alias_parent, parse_unit_state,
+        prepare_exact_socket_alias, remove_exact_socket_alias, select_user_manager_caller,
+        stop_system_agent_socket, wait_system_agent_visible_socket,
     };
-    use crate::AgentUnixIdentity;
     use std::fs;
     use std::io;
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
-
-    fn runtime_fixture(name: &str) -> io::Result<tempfile::TempDir> {
-        let path = tempfile::Builder::new()
-            .prefix(&format!("cfs-{name}-"))
-            .tempdir()?;
-        fs::set_permissions(path.path(), fs::Permissions::from_mode(0o700))?;
-        Ok(path)
-    }
-
-    #[test]
-    fn terminal_runtime_chain_is_target_owned_and_reusable() -> io::Result<()> {
-        let root = runtime_fixture("terminal-runtime-owner")?;
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-        let identity = AgentUnixIdentity::new(uid, gid, []);
-        let first = ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity);
-        assert!(first.is_ok());
-        let metadata = first.and_then(|file| file.metadata());
-        assert!(
-            matches!(metadata, Ok(ref metadata) if metadata.uid() == uid && metadata.gid() == gid && metadata.permissions().mode() & 0o7777 == 0o700)
-        );
-        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_ok());
-        Ok(())
-    }
-
-    #[test]
-    fn terminal_runtime_chain_rejects_symlink_component() -> io::Result<()> {
-        let root = runtime_fixture("terminal-runtime-symlink")?;
-        let outside = runtime_fixture("terminal-runtime-outside")?;
-        std::os::unix::fs::symlink(outside.path(), root.path().join("cortexfs"))?;
-        let identity = AgentUnixIdentity::new(
-            nix::unistd::geteuid().as_raw(),
-            nix::unistd::getegid().as_raw(),
-            [],
-        );
-        assert!(ensure_terminal_runtime_dir(root.path(), "worker", "default", &identity).is_err());
-        Ok(())
-    }
 
     #[test]
     fn exact_self_identity_uses_direct_environment() {
@@ -537,7 +495,21 @@ pub fn user_manager_command(
     UserManagerIdentity::fresh(identity)?.command(program, args)
 }
 
-/// Fully constructed supervisor command, independent of CLI parsing or output.
+#[must_use]
+pub fn agent_terminal_unit(name: &str, session: &str) -> String {
+    let session = session
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("cortexfs-agent-{name}-{session}-terminal")
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct AgentLaunchCommand {
     /// Absolute supervisor program.
@@ -1551,143 +1523,218 @@ pub struct AgentLaunchMount {
     pub mode: String,
 }
 
-/// Constructs the terminal supervisor command shared by host and lifecycle launches.
 #[must_use]
-#[expect(
-    clippy::too_many_lines,
-    reason = "ordered supervisor argv is one auditable ABI command"
-)]
 pub fn terminal_command(
     request: &AgentLaunchRequest,
     view: &crate::AgentRuntimeView,
-    socket: &Path,
+    _socket: &Path,
     unit: &str,
 ) -> AgentLaunchCommand {
     let mut command = AgentLaunchCommand {
         program: crate::support::command::SYSTEMD_RUN.to_owned(),
         args: vec![
-            "--user".to_owned(),
-            "--unit".to_owned(),
-            unit.to_owned(),
-            "--property".to_owned(),
-            "Restart=always".to_owned(),
-            "--property".to_owned(),
-            "RestartSec=250ms".to_owned(),
-            crate::support::command::ENV.to_owned(),
-            "-i".to_owned(),
+            "--user".into(),
+            format!("--unit={unit}"),
+            "--property=Restart=always".into(),
+            "--property=RestartSec=250ms".into(),
+            crate::support::command::ENV.into(),
+            "-i".into(),
             format!("PATH={}", crate::support::command::TRUSTED_PATH),
-            crate::support::command::BWRAP.to_owned(),
-            "--clearenv".to_owned(),
+            crate::support::command::BWRAP.into(),
         ],
     };
+    command
+        .args
+        .extend(terminal_bwrap_args(request, view, unit));
+    command
+}
+
+fn terminal_bwrap_args(
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+    unit: &str,
+) -> Vec<String> {
+    let mut args = vec!["--clearenv".into()];
     for (key, value) in terminal_env(view) {
-        command.args.extend(["--setenv".to_owned(), key, value]);
+        args.extend(["--setenv".into(), key, value]);
     }
-    if let Some(workspace) = request
-        .mounts
-        .iter()
-        .rev()
-        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
-    {
-        command.args.extend([
-            "--setenv".to_owned(),
-            "CTX_WORKSPACE".to_owned(),
-            workspace.source.clone(),
-        ]);
+    if let Some(workspace) = launch_workspace_source(&request.mounts) {
+        args.extend(["--setenv".into(), "CTX_WORKSPACE".into(), workspace]);
     }
-    command.args.extend([
-        "--die-with-parent".to_owned(),
-        "--unshare-pid".to_owned(),
-        "--unshare-net".to_owned(),
+    args.extend([
+        "--die-with-parent".into(),
+        "--unshare-pid".into(),
+        "--unshare-net".into(),
     ]);
-    command
-        .args
-        .extend(crate::support::process::bwrap_process_setup_args());
-    command
-        .args
-        .extend(crate::support::process::bwrap_system_layout_args());
-    if let Some(runtime_dir) = socket.parent() {
-        command.args.extend([
-            "--bind".to_owned(),
-            runtime_dir.display().to_string(),
-            runtime_dir.display().to_string(),
+    args.extend(crate::support::process::bwrap_process_setup_args());
+    args.extend(crate::support::process::bwrap_system_layout_args());
+    args.extend([
+        "--ro-bind".into(),
+        request.source.display().to_string(),
+        cortexfs_paths::ctx_root().display().to_string(),
+        "--dir".into(),
+        "/workspace".into(),
+    ]);
+    if Path::new(crate::runtime::terminal::broker::BROKER_SOCKET).exists() {
+        args.extend([
+            "--dir".into(),
+            "/run/cortexfs".into(),
+            "--dir".into(),
+            "/run/cortexfs/terminal".into(),
+            "--ro-bind".into(),
+            crate::runtime::terminal::broker::BROKER_SOCKET.into(),
+            crate::runtime::terminal::broker::BROKER_SOCKET.into(),
         ]);
     }
+    let policy_git = has_policy_git_mount(view);
     for mount in view.mount_table().entries() {
         if request.default_workspace && mount.target() == "/workspace/.git" {
             continue;
         }
-        if mount.target() == view.home() || mount.target() == "/home/agent" {
-            continue;
-        }
-        command.args.push(
+        args.push(
             if mount.mode() == crate::MountMode::ReadOnly {
                 "--ro-bind"
             } else {
                 "--bind"
             }
-            .to_owned(),
+            .into(),
         );
-        command
-            .args
-            .push(host_mount_source(&request.source, mount.source()));
-        command.args.push(mount.target().to_owned());
+        args.push(agent_host_mount_source(&request.source, mount.source()));
+        args.push(if mount.target() == view.home() {
+            "/home/agent".into()
+        } else {
+            mount.target().into()
+        });
     }
+    let git_mask = agent_git_mask(request, view);
+    let mut masked = false;
     for mount in &request.mounts {
-        if mount.target == "/home/agent" {
-            continue;
-        }
-        command.args.push(
+        args.extend(crate::support::bwrap::dir_args_for_parent(&mount.target));
+        args.extend([
             if mount.mode == "ro" {
                 "--ro-bind"
             } else {
                 "--bind"
             }
-            .to_owned(),
-        );
-        command.args.push(mount.source.clone());
-        command.args.push(mount.target.clone());
+            .into(),
+            mount.source.clone(),
+            mount.target.clone(),
+        ]);
+        if !masked && request.default_workspace && mount.target == "/workspace" {
+            if policy_git {
+                append_policy_git_mounts(&mut args, request, view);
+            } else if let Some(mask) = git_mask {
+                args.extend(agent_git_mask_args(mask));
+            }
+            masked = true;
+        }
     }
-    command.args.extend([
-        "--bind".to_owned(),
-        view.home().display().to_string(),
-        "/home/agent".to_owned(),
+    args.extend([
+        "--ro-bind".into(),
+        "/dev/null".into(),
+        "/etc/profile".into(),
+        "--ro-bind".into(),
+        "/dev/null".into(),
+        "/etc/bash.bashrc".into(),
+        "--chdir".into(),
+        request.cwd.clone(),
     ]);
-    let startup = socket
-        .parent()
-        .map(|parent| parent.join(".empty-shell-startup"));
-    if let Some(startup) = startup {
-        command.args.extend([
-            "--ro-bind".to_owned(),
-            startup.display().to_string(),
-            "/etc/profile".to_owned(),
-            "--ro-bind".to_owned(),
-            startup.display().to_string(),
-            "/etc/bash.bashrc".to_owned(),
-        ]);
-    }
-    command
-        .args
-        .extend(["--chdir".to_owned(), request.cwd.clone()]);
     if let Some(events) = terminal_events_path(request, view) {
-        command.args.extend([
-            "--setenv".to_owned(),
-            "CTX_TERMINAL_EVENTS".to_owned(),
-            events,
-        ]);
+        args.extend(["--setenv".into(), "CTX_TERMINAL_EVENTS".into(), events]);
     }
-    command.args.extend([
-        crate::support::command::CTXTERM.to_owned(),
-        "--listen".to_owned(),
-        socket.display().to_string(),
-        "--no-stdio".to_owned(),
-        "--".to_owned(),
+    args.extend([
+        crate::support::command::CTXTERM.into(),
+        "--broker".into(),
+        request.agent.clone(),
+        request.session.clone(),
+        unit.into(),
+        "--".into(),
         cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
             .join("tsh")
             .display()
             .to_string(),
     ]);
-    command
+    args
+}
+
+#[derive(Clone, Copy)]
+enum AgentGitMask {
+    Directory,
+    File,
+}
+
+fn has_policy_git_mount(view: &crate::AgentRuntimeView) -> bool {
+    view.mount_table()
+        .entries()
+        .iter()
+        .any(|mount| mount.target() == "/workspace/.git")
+}
+
+fn agent_git_mask(
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+) -> Option<AgentGitMask> {
+    if !request.default_workspace
+        || request
+            .mounts
+            .iter()
+            .any(|mount| mount.target == "/workspace/.git")
+        || has_policy_git_mount(view)
+    {
+        return None;
+    }
+    let workspace = request
+        .mounts
+        .iter()
+        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")?;
+    let metadata = fs::symlink_metadata(Path::new(&workspace.source).join(".git")).ok()?;
+    metadata
+        .is_dir()
+        .then_some(AgentGitMask::Directory)
+        .or_else(|| metadata.is_file().then_some(AgentGitMask::File))
+}
+
+fn agent_git_mask_args(mask: AgentGitMask) -> Vec<String> {
+    match mask {
+        AgentGitMask::Directory => vec!["--tmpfs".into(), "/workspace/.git".into()],
+        AgentGitMask::File => vec![
+            "--ro-bind".into(),
+            "/dev/null".into(),
+            "/workspace/.git".into(),
+        ],
+    }
+}
+
+fn append_policy_git_mounts(
+    args: &mut Vec<String>,
+    request: &AgentLaunchRequest,
+    view: &crate::AgentRuntimeView,
+) {
+    for mount in view
+        .mount_table()
+        .entries()
+        .iter()
+        .filter(|mount| mount.target() == "/workspace/.git")
+    {
+        args.extend([
+            if mount.mode() == crate::MountMode::ReadOnly {
+                "--ro-bind"
+            } else {
+                "--bind"
+            }
+            .into(),
+            agent_host_mount_source(&request.source, mount.source()),
+            mount.target().into(),
+        ]);
+    }
+}
+
+fn launch_workspace_source(mounts: &[AgentLaunchMount]) -> Option<String> {
+    mounts
+        .iter()
+        .rev()
+        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
+        .map(|mount| mount.source.clone())
 }
 
 fn terminal_events_path(
@@ -1797,9 +1844,13 @@ pub fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
     env
 }
 
-fn host_mount_source(root: &Path, source: &str) -> String {
+#[must_use]
+pub fn agent_host_mount_source(root: &Path, source: &str) -> String {
     let source = Path::new(source);
     let ctx_root = cortexfs_paths::ctx_root();
+    if source == ctx_root {
+        return root.display().to_string();
+    }
     source.strip_prefix(&ctx_root).map_or_else(
         |_| source.display().to_string(),
         |relative| root.join(relative).display().to_string(),

@@ -136,23 +136,23 @@ file's ordinary mode remains an implementation detail.
 
 ## Runtime Socket Aliases
 
-Agent start binds live sockets below `/run/user/<uid>/cortexfs/` and persists
-only these owner-authorized aliases in the FUSE backing tree:
+Agent start persists owner-authorized aliases in the FUSE backing tree. Agent
+control sockets remain per-user; terminal streams use the root broker:
 
 ```text
 agent/<name>.sock
   -> /run/user/<uid>/cortexfs/agent/.../<name>.sock
 
 home/<uid>/agent/<name>/session/<session>/terminal/main.sock
-  -> /run/user/<uid>/cortexfs/terminal/<name>/<session>/main.sock
+  -> /run/cortexfs/terminal/broker.sock
 ```
 
-Targets must be absolute, remain below the matching uid runtime prefix, and
-match visible agent/session name. Alias parents opened without following
-symlinks. Creation, replacement, unlink require agent owner uid. A
-stopped host-created agent may retain real socket placeholder; start replaces
-it with the runtime alias. Start must fail before recording `ready` when either
-visible alias cannot be created and verified with `readlink`.
+Targets must be absolute. Agent control targets remain below the matching UID
+runtime prefix and match the visible agent name. The terminal target MUST equal
+the fixed broker path. Alias parents are opened without following symlinks;
+creation, replacement, and unlink require the agent owner UID. Start must fail
+before recording `ready` when either visible alias cannot be created and
+verified with `readlink`.
 
 Some deployments also keep an always-on system agent socket as a direct socket
 node at `/ctx/agent/<name>.sock`, rather than a symlink to `/run/user/...`.

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::authority::helpers::atomic_replace_text_with_mode;
 use crate::support::plain::{CreatePlainDirMessages, create_plain_dir_with};
 
+pub mod broker;
 pub mod event;
 
 pub use event::{TerminalEvent, append_event, mark_state, next_sequence};

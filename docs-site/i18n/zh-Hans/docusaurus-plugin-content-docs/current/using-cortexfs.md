@@ -204,9 +204,7 @@ ctx agent attach coder --session default
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-FUSE 可见路径可能是到
-`/run/user/<uid>/cortexfs/terminal/.../main.sock` 的符号链接；旧版本也可能指向
-`/run/cortexfs/terminal/.../main.sock`。`watch` 是只读的；`attach` 会将你的标准输入连接到终端。
+FUSE 可见路径统一指向 root 所有的 `/run/cortexfs/terminal/broker.sock`。`ctx` 会认证 broker，并请求指定的 Agent/会话；不会回退到旧用户级终端 socket。`watch` 是只读的；`attach` 会将你的标准输入连接到终端。
 
 在需要时显式控制沙箱：
 

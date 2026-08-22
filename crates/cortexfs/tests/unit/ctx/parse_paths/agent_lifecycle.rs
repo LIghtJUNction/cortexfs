@@ -47,13 +47,17 @@ fn parses_agent_lifecycle_commands() {
     );
     assert!(matches!(
         start,
-        Ok(Command::Agent(AgentArgs::Start { ref args, native: false }))
+        Ok(Command::Agent(AgentArgs::Start(ref args)))
             if args.name == "reviewer"
                 && args.session == "test"
                 && args.cwd == "/workspace"
                 && args.default_workspace
                 && args.mounts.len() == 1
     ));
+
+    assert!(
+        cmd!("agent", "start", "reviewer", "--environment", "native").is_err()
+    );
 
     let stop = cmd!("agent", "stop", "reviewer");
     assert!(matches!(

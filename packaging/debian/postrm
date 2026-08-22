@@ -6,6 +6,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 if [ "$1" = purge ] && command -v deb-systemd-helper >/dev/null 2>&1; then
     deb-systemd-helper purge cortexfs.service >/dev/null || true
+    deb-systemd-helper purge cortexfs-terminal-broker.socket >/dev/null || true
 fi
 
 exit 0

@@ -2,18 +2,16 @@ use crate::*;
 
 use cortexfs::runtime::terminal::{TerminalEvent, append_event, mark_state, next_sequence};
 
-pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
-    let pty_system = native_pty_system();
-    let pair = pty_system
+pub(crate) fn run_pty(config: &RunConfig) -> Result<ExitCode, CtxtermError> {
+    let (mut control, generation) = cortexfs::runtime::terminal::broker::register_supervisor(
+        &config.broker.agent,
+        &config.broker.session,
+        &config.broker.unit,
+    )
+    .map_err(broker_error)?;
+    let pair = native_pty_system()
         .openpty(pty_size())
         .map_err(|error| CtxtermError::unavailable(format!("cannot open pty: {error}")))?;
-    let command = pty_command(&config)?;
-    let mut child = pair
-        .slave
-        .spawn_command(command)
-        .map_err(|error| CtxtermError::unavailable(format!("cannot run command: {error}")))?;
-    drop(pair.slave);
-
     let mut reader = pair
         .master
         .try_clone_reader()
@@ -24,90 +22,71 @@ pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
         .map_err(|error| CtxtermError::unavailable(format!("cannot open pty writer: {error}")))?;
     let writer = Arc::new(Mutex::new(writer));
     let clients = Arc::new(Mutex::new(Vec::new()));
-    let socket_path = config.listen.as_deref().map(Path::to_path_buf);
-    if let Some(socket) = socket_path.as_deref() {
-        start_listener(socket, Arc::clone(&writer), Arc::clone(&clients))?;
-    }
-    let log = match config.log {
-        Some(path) => Some(open_log(&path)?),
-        None => None,
-    };
-    let events = env::var_os("CTX_TERMINAL_EVENTS").map(PathBuf::from);
+    cortexfs::runtime::terminal::broker::activate_supervisor(&mut control, &generation)
+        .map_err(broker_error)?;
+    let mut child = pair
+        .slave
+        .spawn_command(pty_command(config)?)
+        .map_err(|error| CtxtermError::unavailable(format!("cannot run command: {error}")))?;
+    drop(pair.slave);
+    let control_writer = Arc::clone(&writer);
+    let output_clients = Arc::clone(&clients);
+    let mut killer = child.clone_killer();
+    thread::spawn(move || {
+        if run_broker_control(control, &control_writer, &clients).is_err() {
+            let _result = killer.kill();
+        }
+    });
+    let events = env::var_os("CTX_TERMINAL_EVENTS").map(std::path::PathBuf::from);
     let output_events = events.clone();
-    let initial_sequence = events
+    let mut sequence = events
         .as_deref()
         .map(next_sequence)
         .transpose()
-        .map_err(|error| {
-            CtxtermError::unavailable(format!("cannot read terminal event history: {error}"))
-        })?
+        .map_err(event_error)?
         .unwrap_or(1);
-
-    let output_clients = Arc::clone(&clients);
-    let output = thread::spawn(move || {
-        let mut stdout = io::stdout().lock();
-        let mut log = log;
-        let mut sequence = initial_sequence;
+    let output = thread::spawn(move || -> io::Result<u64> {
         let mut buffer = [0; 8192];
         loop {
             let read = reader.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            let Some(chunk) = buffer.get(..read) else {
-                return Err(io::Error::other("pty read exceeded buffer"));
+            let Some(chunk) = buffer.get(..read).filter(|chunk| !chunk.is_empty()) else {
+                return Ok(sequence);
             };
-            if config.stdio {
-                stdout.write_all(chunk)?;
-                stdout.flush()?;
-            }
-            if let Some(file) = log.as_mut() {
-                file.write_all(chunk)?;
-                file.flush()?;
-            }
             if let Some(path) = output_events.as_deref() {
                 append_event(
                     path,
                     &TerminalEvent::output(sequence, cortexfs::current_time_unix(), chunk),
                 )
-                .map_err(|error| {
-                    io::Error::other(format!("cannot append terminal event: {error}"))
-                })?;
+                .map_err(|error| io::Error::other(error.to_string()))?;
                 sequence = sequence.saturating_add(1);
             }
             broadcast(&output_clients, chunk);
         }
-        Ok(sequence)
     });
-    if config.stdio {
-        let input_writer = Arc::clone(&writer);
-        let _input = thread::spawn(move || copy_stdin_to_pty(&input_writer));
-    }
-
     let status = child
         .wait()
         .map_err(|error| CtxtermError::unavailable(format!("cannot wait for command: {error}")))?;
-    let sequence = match output.join() {
-        Ok(Ok(sequence)) => sequence,
-        Ok(Err(error)) => return Err(write_error_to_ctxterm(&error)),
-        Err(_error) => return Err(CtxtermError::unavailable("pty output thread failed")),
-    };
+    sequence = output
+        .join()
+        .map_err(|_error| CtxtermError::unavailable("pty output thread failed"))?
+        .map_err(|error| write_error_to_ctxterm(&error))?;
     if let Some(path) = events {
         append_event(
             &path,
             &TerminalEvent::exit(sequence, cortexfs::current_time_unix(), status.exit_code()),
         )
-        .map_err(|error| {
-            CtxtermError::unavailable(format!("cannot append terminal event: {error}"))
-        })?;
-        mark_state(&path, "exited").map_err(|error| {
-            CtxtermError::unavailable(format!("cannot update terminal state: {error}"))
-        })?;
-    }
-    if let Some(socket) = socket_path.as_deref() {
-        let _ignored = remove_stale_socket(socket);
+        .map_err(event_error)?;
+        mark_state(&path, "exited").map_err(event_error)?;
     }
     Ok(exit_code(&status))
+}
+
+fn broker_error(error: impl std::fmt::Display) -> CtxtermError {
+    CtxtermError::unavailable(format!("terminal broker failed: {error}"))
+}
+
+fn event_error(error: impl std::fmt::Display) -> CtxtermError {
+    CtxtermError::unavailable(format!("terminal event failed: {error}"))
 }
 
 pub(crate) fn pty_command(config: &RunConfig) -> Result<CommandBuilder, CtxtermError> {

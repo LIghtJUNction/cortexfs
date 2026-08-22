@@ -9,6 +9,7 @@ pub mod manuals;
 pub mod message;
 pub mod path;
 pub mod plain;
+pub mod proc;
 pub mod process;
 pub mod queue;
 pub mod receipt;

@@ -33,6 +33,7 @@ nix = { version = "0.31.3", features = ["fs", "signal", "socket", "term", "user"
 parquet = { version = "59.1.0", default-features = false, features = ["arrow"] }
 portable-pty = "0.9.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "form", "multipart", "query", "rustls"] }
+rustix = { version = "1.1.3", features = ["net"] }
 rustls = { version = "0.23.42", default-features = false, features = ["ring"] }
 rustyline = "18.0.1"
 semver = "1.0.28"
@@ -81,6 +82,10 @@ path = "src/bin/runner/main.rs"
 [[bin]]
 name = "cortexfs-agent-runtime"
 path = "src/bin/runtime/main.rs"
+
+[[bin]]
+name = "cortexfs-terminal-broker"
+path = "src/bin/cortexfs-terminal-broker.rs"
 
 [[bin]]
 name = "cortexfs-auth-runner"

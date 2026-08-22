@@ -5,7 +5,9 @@ fn terminal_connect_error_classifies_socket_failures() {
         socket,
         "coder",
         "test",
-        &std::io::Error::from(std::io::ErrorKind::NotFound),
+        &cortexfs::runtime::terminal::broker::BrokerProtocolError::Io(std::io::Error::from(
+            std::io::ErrorKind::NotFound,
+        )),
     );
     assert!(missing.message.contains("terminal is not running"));
     assert!(
@@ -18,7 +20,9 @@ fn terminal_connect_error_classifies_socket_failures() {
         socket,
         "coder",
         "test",
-        &std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
+        &cortexfs::runtime::terminal::broker::BrokerProtocolError::Io(std::io::Error::from(
+            std::io::ErrorKind::ConnectionRefused,
+        )),
     );
     assert!(
         refused

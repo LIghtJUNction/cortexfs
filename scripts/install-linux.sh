@@ -386,7 +386,9 @@ validate_source() {
     [[ $source == /* ]] ||
         die "--source must be an absolute path." "--source 必须是绝对路径。"
     for required in Cargo.toml README.md packaging/systemd/cortexfs.service \
-        packaging/systemd/cortexfs-agent@.service packaging/systemd/cortexfs-agent@.socket; do
+        packaging/systemd/cortexfs-agent@.service packaging/systemd/cortexfs-agent@.socket \
+        packaging/systemd/cortexfs-terminal-broker.service \
+        packaging/systemd/cortexfs-terminal-broker.socket; do
         [[ -f $source/$required ]] ||
             die "Source snapshot is missing $required." "源码快照缺少 $required。"
     done
@@ -415,13 +417,14 @@ build_cortexfs() {
 
 expected_binaries() {
     printf '%s\n' ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-        cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
+        cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 }
 
 expected_units() {
     printf '%s\n' cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
+        cortexfs-terminal-broker.service cortexfs-terminal-broker.socket \
         cortexfs-channel@.service cortexfs-channel-bluesky.service \
         cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
         cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
@@ -502,8 +505,8 @@ ensure_mountpoint() {
 deploy() {
     local source=$1 snapshots=$2 binary unit stage
     card "$( [[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment' )"
-    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
-        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
+    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
+        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
     say "Units: /usr/lib/systemd/system/cortexfs*.{service,socket}" \
         "单元：/usr/lib/systemd/system/cortexfs*.{service,socket}"
     say "Preserved: /var/lib/cortexfs/{storage,secrets}, /etc/cortexfs/providers.d, existing *.env, and /ctx user state." \
@@ -531,6 +534,8 @@ deploy() {
     atomic_install "$stage/README.md" /usr/share/doc/cortexfs/README.md 0644
     info "Reloading systemd and enabling the CortexFS mount..." "正在重载 systemd 并启用 CortexFS 挂载..."
     sudo systemctl daemon-reload
+    sudo systemctl enable --now cortexfs-terminal-broker.socket
+    sudo systemctl try-restart cortexfs-terminal-broker.service
     sudo systemctl enable cortexfs.service
     if systemctl is-active --quiet cortexfs.service; then
         sudo systemctl restart cortexfs.service
@@ -541,6 +546,8 @@ deploy() {
         [[ -e $unit ]] || continue
         sudo systemctl start "${unit##*/}"
     done
+    systemctl is-active --quiet cortexfs-terminal-broker.socket ||
+        die "terminal broker socket did not become active" "终端 Broker socket 未进入 active"
     systemctl is-active --quiet cortexfs.service ||
         die "cortexfs.service did not become active. Run: sudo systemctl status cortexfs.service" \
             "cortexfs.service 未进入 active。请运行：sudo systemctl status cortexfs.service"

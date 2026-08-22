@@ -29,7 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
@@ -45,21 +45,21 @@ pub(crate) use cortexfs::authority::helpers::{
     atomic_replace_text_preserving_metadata_if_matches,
 };
 pub(crate) use cortexfs::{
-    AbiPathKind, AgentControlIssue, AgentLaunchCommand, AgentPromptContext, AgentRuntimeView,
-    AgentScheduleIssue, AgentScheduleNode, AgentScheduleRecordError, AgentUnixIdentity,
-    BootstrapAction, CHANNEL_CONTROL_FILES, CTX_ROOT, ChildContextLease, ChildContextRecordError,
-    ChildContextStatus, ChildHandoffReceipt, ContextJsonlIssue, ContextPackIssue, ControlLineIssue,
-    DEFAULT_AGENT_PROMPT_TEMPLATE, EventStreamIssue, MANUAL_INDEX, MANUAL_INDEX_FILE,
-    MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES, MessageStreamIssue,
-    ModelCapabilityIssue, ModelDriverRouteError, ModelEffort, MountTable, ObjectClass,
-    ObjectLayoutIssue, PathLayoutIssue, PolicyEvaluator, PolicyV0, REFERENCE_TREE_VERSION,
-    ROOT_ENTRIES, SessionControlIssue, SessionIndexGuard, SessionIndexIssue, SessionIndexKind,
-    SessionLayoutIssue, SharedQueueLayoutIssue, SocketSessionScope, ToolPath, ToolSchemaIssue,
-    TrajectoryIssue, TrajectoryMapError, acquire_child_context_lease,
-    advance_agent_schedule_from_parent_context, agent_schedule_nodes,
-    bootstrap_state_matches_target, child_context_lease_status, child_handoff_receipt,
-    claim_child_handoff_active_with_lease, classify_abi_path, collect_agent_rules,
-    collect_skill_metadata, columnar, compare_and_update_session_index,
+    AbiPathKind, AgentControlIssue, AgentLaunchCommand, AgentLaunchMount, AgentLaunchRequest,
+    AgentPromptContext, AgentRuntimeView, AgentScheduleIssue, AgentScheduleNode,
+    AgentScheduleRecordError, AgentUnixIdentity, BootstrapAction, CHANNEL_CONTROL_FILES, CTX_ROOT,
+    ChildContextLease, ChildContextRecordError, ChildContextStatus, ChildHandoffReceipt,
+    ContextJsonlIssue, ContextPackIssue, ControlLineIssue, DEFAULT_AGENT_PROMPT_TEMPLATE,
+    EventStreamIssue, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR,
+    MAX_SOCKET_FRAME_BYTES, MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError,
+    ModelEffort, MountTable, ObjectClass, ObjectLayoutIssue, PathLayoutIssue, PolicyEvaluator,
+    PolicyV0, REFERENCE_TREE_VERSION, ROOT_ENTRIES, SessionControlIssue, SessionIndexGuard,
+    SessionIndexIssue, SessionIndexKind, SessionLayoutIssue, SharedQueueLayoutIssue,
+    SocketSessionScope, ToolPath, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError,
+    acquire_child_context_lease, advance_agent_schedule_from_parent_context, agent_schedule_nodes,
+    agent_terminal_unit, bootstrap_state_matches_target, child_context_lease_status,
+    child_handoff_receipt, claim_child_handoff_active_with_lease, classify_abi_path,
+    collect_agent_rules, collect_skill_metadata, columnar, compare_and_update_session_index,
     completed_agent_schedule_nodes_from_parent_context, cortexfs_manual, current_time_unix,
     default_agent_model_for_name, default_agent_tool_context, derive_agent_runtime_view,
     ensure_durable_session_layout, ensure_reference_tree, ensure_runtime_models,
@@ -74,9 +74,9 @@ pub(crate) use cortexfs::{
     pin_storage_source, plan_reference_tree_upgrade, policy_subject_from_label,
     read_bootstrap_state, ready_agent_schedule_nodes, record_child_result_to_parent_context,
     render_agent_system_prompt, reset_unit_for, run_core_tool_cli_with_root,
-    set_user_systemd_client_env, skill_metadata_budget_from_env, trajectory_from_session_dir,
-    unit_main_pid_for, update_storage_generation_with_prune, validate_child_context_lease,
-    validate_trajectory,
+    set_user_systemd_client_env, skill_metadata_budget_from_env, terminal_command,
+    trajectory_from_session_dir, unit_main_pid_for, update_storage_generation_with_prune,
+    validate_child_context_lease, validate_trajectory,
 };
 use serde::Deserialize;
 
@@ -89,6 +89,8 @@ pub(crate) use cortexfs::cli::stderr;
 pub(crate) use cortexfs::cli::terminal::*;
 pub(crate) use cortexfs::cli::uid;
 pub(crate) use cortexfs::support::plain::open_plain_directory;
+#[cfg(test)]
+pub(crate) use cortexfs::{agent_host_mount_source, cli::stale::*};
 pub(crate) use create::*;
 pub(crate) use default::*;
 pub(crate) use doctor::*;
@@ -100,7 +102,6 @@ pub(crate) use parse::*;
 pub(crate) use procfd::*;
 pub(crate) use provider::*;
 pub(crate) use schedule::*;
-pub(crate) use stale::*;
 pub(crate) use stderr::*;
 pub(crate) use storage::*;
 pub(crate) use terminal::*;
@@ -132,7 +133,6 @@ pub mod default;
 pub mod output;
 
 pub(crate) use cortexfs::cli::create;
-pub(crate) use cortexfs::cli::stale;
 pub(crate) use cortexfs::cli::text;
 pub(crate) use text::read_small_plain_text_file;
 

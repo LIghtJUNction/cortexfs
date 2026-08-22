@@ -4,13 +4,13 @@ use crate::{
     PeerCredentials, peer_credentials,
     support::{
         plain::open_plain_directory,
+        proc::{ProcessStat, read_process_stat},
         receipt::{SocketReceipt, random_hex},
     },
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
-use std::fs;
 use std::io::{BufRead, BufReader, Read, Write as _};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::MetadataExt;
@@ -43,12 +43,6 @@ pub struct RunCapability {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct LaunchRoot {
     pid: u32,
-    start_time: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ProcessStat {
-    parent: u32,
     start_time: u64,
 }
 
@@ -689,28 +683,6 @@ fn process_descends_from(
     false
 }
 
-fn read_process_stat(pid: u32) -> Option<ProcessStat> {
-    if pid == 0 {
-        return None;
-    }
-    parse_process_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
-}
-
-fn parse_process_stat(stat: &str) -> Option<ProcessStat> {
-    let closing = stat.rfind(')')?;
-    let fields = stat
-        .get(closing.checked_add(1)?..)?
-        .split_ascii_whitespace();
-    let fields = fields.collect::<Vec<_>>();
-    let state = *fields.first()?;
-    if matches!(state, "Z" | "X") {
-        return None;
-    }
-    let parent = fields.get(1)?.parse().ok()?;
-    let start_time = fields.get(19)?.parse().ok()?;
-    Some(ProcessStat { parent, start_time })
-}
-
 fn control_timeout() -> Duration {
     if cfg!(test) {
         Duration::from_millis(100)
@@ -1150,19 +1122,6 @@ mod tests {
             }),
             _ => None,
         }));
-    }
-
-    #[test]
-    fn proc_stat_parser_uses_final_command_delimiter() {
-        let stat = "42 (worker ) with spaces) S 7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1234 0";
-        assert_eq!(
-            parse_process_stat(stat),
-            Some(ProcessStat {
-                parent: 7,
-                start_time: 1234,
-            })
-        );
-        assert_eq!(parse_process_stat("42 (worker) Z 7 0"), None);
     }
 
     #[test]
