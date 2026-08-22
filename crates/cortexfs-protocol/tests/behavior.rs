@@ -256,6 +256,30 @@ mod tests {
     }
 
     #[test]
+    fn output_text_fallback_preserves_provider_event_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let chat = decode_response_events(
+        WireProtocol::OpenAiChat,
+        br#"{"id":"r","model":"m","choices":[{"message":{"content":"primary"},"finish_reason":"stop"}],"output_text":"fallback","usage":{"prompt_tokens":3,"completion_tokens":4}}"#,
+    )?;
+        assert!(matches!(
+            chat.as_slice(),
+            [ModelEvent::Start { .. }, ModelEvent::TextDelta { text, .. }, ModelEvent::Done { .. }, ModelEvent::Usage { usage, .. }]
+                if text == "primary" && usage.input_tokens == 3 && usage.output_tokens == 4
+        ));
+        let responses = decode_response_events(
+        WireProtocol::OpenAiResponses,
+        br#"{"id":"r","model":"m","output":[],"output_text":"fallback","usage":{"input_tokens":5,"output_tokens":6}}"#,
+    )?;
+        assert!(matches!(
+            responses.as_slice(),
+            [ModelEvent::Start { .. }, ModelEvent::TextDelta { text, .. }, ModelEvent::Usage { usage, .. }, ModelEvent::Done { .. }]
+                if text == "fallback" && usage.input_tokens == 5 && usage.output_tokens == 6
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn malformed_native_json_returns_protocol_error() {
         let result = decode_model_request(WireProtocol::OpenAiChat, b"not-json");
         assert!(matches!(

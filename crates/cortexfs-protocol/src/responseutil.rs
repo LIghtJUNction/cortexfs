@@ -88,6 +88,29 @@ pub(super) fn usage(map: Option<&Map<String, Value>>) -> Option<Usage> {
     })
 }
 
+pub(super) fn append_output_text_and_usage(
+    events: &mut Vec<ModelEvent>,
+    run: &str,
+    map: &Map<String, Value>,
+) {
+    if !events
+        .iter()
+        .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
+        && let Some(text) = text(map.get("output_text"))
+    {
+        events.push(ModelEvent::TextDelta {
+            run: run.to_owned(),
+            text,
+        });
+    }
+    if let Some(usage) = usage(object(map.get("usage"))) {
+        events.push(ModelEvent::Usage {
+            run: run.to_owned(),
+            usage,
+        });
+    }
+}
+
 pub(super) fn finish(status: EventStatus) -> &'static str {
     match status {
         EventStatus::Ok => "stop",

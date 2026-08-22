@@ -15,22 +15,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             output_item(&mut events, &run, item)?;
         }
     }
-    if !events
-        .iter()
-        .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
-        && let Some(text) = crate::responseutil::text(map.get("output_text"))
-    {
-        events.push(ModelEvent::TextDelta {
-            run: run.clone(),
-            text,
-        });
-    }
-    if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {
-        events.push(ModelEvent::Usage {
-            run: run.clone(),
-            usage,
-        });
-    }
+    crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
     events.push(ModelEvent::Done {
         run,
         status: EventStatus::Ok,
