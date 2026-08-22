@@ -190,7 +190,7 @@ fn bridge_returns_safe_progress_error_without_provider_details()
         return Err(std::io::Error::other("progress error was not delivered").into());
     };
     assert!(!message.contains("sk-secret-provider-detail"));
-    assert!(message.contains("模型服务") || message.contains("model service"));
+    assert!(message.contains("model/tool loop"));
     assert!(probe.deltas.is_empty());
     Ok(())
 }
