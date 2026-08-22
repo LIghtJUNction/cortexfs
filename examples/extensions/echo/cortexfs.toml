@@ -1,0 +1,19 @@
+schema = "cortexfs.package/v1"
+name = "echo-extension"
+version = "0.1.0"
+
+[[tools]]
+name = "example.echo"
+run = "target/release/cortexfs-echo-tool"
+description = "Echo text through the CortexFS Tool SDK."
+schema = { type = "object", properties = { text = { type = "string" } }, required = ["text"] }
+cap = "text"
+
+[[agents]]
+name = "example-echo"
+run = "target/release/cortexfs-echo-agent"
+model = "main"
+description = "Hosted SDK echo agent."
+instructions = "Echo the requested input without adding authority."
+tools = ["example.echo"]
+parent = "agent:architect"

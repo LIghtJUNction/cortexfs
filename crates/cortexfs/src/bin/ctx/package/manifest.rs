@@ -4,16 +4,12 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub(crate) const PACKAGE_SCHEMA: &str = "cortexfs.package/v1";
-const PACKAGE_FILES: &[&str] = &["cortexfs.toml"];
-const MAX_PACKAGE_BYTES: u64 = 1024 * 1024;
+const MAX_PACKAGE_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PackageDocument {
-    #[serde(default)]
     pub(crate) schema: Option<String>,
-    #[serde(default)]
     pub(crate) version: Option<String>,
-    #[serde(default)]
     pub(crate) name: Option<String>,
     #[serde(default)]
     pub(crate) tools: Vec<PackageTool>,
@@ -26,13 +22,9 @@ pub(crate) struct PackageTool {
     pub(crate) name: String,
     #[serde(alias = "executable")]
     pub(crate) run: PathBuf,
-    #[serde(default)]
     pub(crate) description: Option<String>,
-    #[serde(default)]
     pub(crate) schema: Option<serde_json::Value>,
-    #[serde(default)]
     pub(crate) cap: Option<String>,
-    #[serde(default)]
     pub(crate) policy: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -41,15 +33,11 @@ pub(crate) struct PackageAgent {
     pub(crate) name: String,
     #[serde(alias = "executable")]
     pub(crate) run: PathBuf,
-    #[serde(default)]
     pub(crate) model: Option<String>,
-    #[serde(default)]
     pub(crate) instructions: Option<String>,
-    #[serde(default)]
     pub(crate) description: Option<String>,
     #[serde(default)]
     pub(crate) tools: Vec<String>,
-    #[serde(default)]
     pub(crate) parent: Option<String>,
 }
 pub(crate) struct Package {
@@ -75,13 +63,11 @@ pub(crate) fn load_package(spec: &Path) -> Result<Package, CliError> {
             manifest.display()
         ))
     })?;
-    if !metadata.is_file() || metadata.len() > MAX_PACKAGE_BYTES {
-        return Err(CliError::usage(
-            "package manifest must be a regular file no larger than 1 MiB",
-        ));
+    if !metadata.is_file() {
+        return Err(CliError::usage("package manifest must be a regular file"));
     }
     let mut bytes = Vec::new();
-    file.take(MAX_PACKAGE_BYTES.saturating_add(1))
+    file.take(u64::try_from(MAX_PACKAGE_BYTES.saturating_add(1)).unwrap_or(u64::MAX))
         .read_to_end(&mut bytes)
         .map_err(|error| {
             CliError::usage(format!(
@@ -89,9 +75,7 @@ pub(crate) fn load_package(spec: &Path) -> Result<Package, CliError> {
                 manifest.display()
             ))
         })?;
-    let byte_count = u64::try_from(bytes.len())
-        .map_err(|error| CliError::usage(format!("package manifest size is invalid: {error}")))?;
-    if byte_count > MAX_PACKAGE_BYTES {
+    if bytes.len() > MAX_PACKAGE_BYTES {
         return Err(CliError::usage(
             "package manifest must be a regular file no larger than 1 MiB",
         ));
@@ -109,12 +93,7 @@ pub(crate) fn load_package(spec: &Path) -> Result<Package, CliError> {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .canonicalize()
-        .map_err(|error| {
-            CliError::usage(format!(
-                "cannot resolve package directory {}: {error}",
-                manifest.display()
-            ))
-        })?;
+        .map_err(|error| CliError::usage(format!("cannot resolve package directory: {error}")))?;
     Ok(Package { root, document })
 }
 
@@ -123,16 +102,13 @@ fn resolve_package_manifest(spec: &Path) -> Result<PathBuf, CliError> {
         return Ok(spec.to_path_buf());
     }
     if spec.is_dir() {
-        for file in PACKAGE_FILES {
-            let candidate = spec.join(file);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-        return Err(CliError::usage(format!(
-            "no cortexfs.toml in package directory {}",
-            spec.display()
-        )));
+        let candidate = spec.join("cortexfs.toml");
+        return candidate.is_file().then_some(candidate).ok_or_else(|| {
+            CliError::usage(format!(
+                "no cortexfs.toml in package directory {}",
+                spec.display()
+            ))
+        });
     }
     Err(CliError::usage(format!(
         "cannot read package {}: No such file or directory",

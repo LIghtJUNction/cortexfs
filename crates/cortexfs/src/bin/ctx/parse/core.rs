@@ -113,6 +113,7 @@ pub(crate) enum Command {
         package: PathBuf,
         source: Option<PathBuf>,
         tier: InstallTier,
+        check: bool,
     },
     ObjectResidueAudit {
         source: PathBuf,
@@ -290,10 +291,12 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             package,
             source,
             tier,
+            check,
         } => success(package::run_package_install(
             &package,
             source.as_deref(),
             tier,
+            check,
         )),
         Command::ObjectResidueAudit { source } => {
             success(residue::run_object_residue_audit(&source))

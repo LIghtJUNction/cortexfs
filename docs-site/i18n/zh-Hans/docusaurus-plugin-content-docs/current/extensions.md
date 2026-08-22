@@ -36,30 +36,20 @@ instructions = "Review changes, use the tool when useful, and cite evidence."
 parent = "agent:architect"
 ```
 
-只需一条命令安装：
+先在不写入 backing tree 的情况下校验整包，再安装：
 
 ```bash
+ctx install --check ./review-kit
 ctx install ./review-kit
 ```
 
-`ctx install` 会发现 `cortexfs.toml`、哈希每个可执行文件、校验整包清单，并通过现有原子对象安装器发布每个对象。若挂载树有固定来源代际，请加 `--source PATH`，若对象只对当前用户可见请加 `--tier user`：
+`ctx install --check` 会发现 `cortexfs.toml`、哈希每个可执行文件、渲染并检查所有严格对象 manifest，然后在选择或写入 backing tree 前退出。普通 `ctx install` 会重复这些检查，再通过现有原子对象安装器发布每个对象。若挂载树有固定来源代际，请加 `--source PATH`，若工具只对当前用户可见请加 `--tier user`：
 
 ```bash
 ctx install ./review-kit --source /var/lib/cortexfs/storage/current
 ```
 
-当有特权安装器面向其他用户时，请在包内显式声明运行身份，不要继承安装者的 root 凭据：
-
-```toml
-[[agents]]
-name = "kit_reviewer"
-run = "bin/review-agent"
-
-[agents.identity]
-uid = 1000
-gid = 1000
-groups = [1000]
-```
+Agent Unix 身份由宿主授权决定，不属于包 metadata。安装器根据有效用户和补充组推导身份；包作者不能选择 uid、gid 或特权组。
 
 `run` 项就是扩展入口。工具实现 Tool SDK，代理实现 Agent SDK；两者都只是普通可执行文件，因此 Rust、Shell 或其他主机语言都能实现。SDK agent 从标准输入读取一个运行时 Envelope，向外输出 JSONL 事件；它可能产出一次工具调用，由宿主执行权限校验并将观察结果回写给下一步。这就是自定义执行循环，不依赖常驻插件守护进程。
 

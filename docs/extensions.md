@@ -37,15 +37,17 @@ instructions = "Review changes, use the tool when useful, and cite evidence."
 parent = "agent:architect"
 ```
 
-Install it with one command:
+Validate the complete package without writing a backing tree, then install it:
 
 ```bash
+ctx install --check ./review-kit
 ctx install ./review-kit
 ```
 
-`ctx install` finds `cortexfs.toml`, hashes every executable, validates the
-whole package, then publishes each object through the existing atomic object
-installer. Use `--source PATH` when the mounted tree is backed by a specific
+`ctx install --check` finds `cortexfs.toml`, hashes every executable, renders
+and checks every strict object manifest, then exits before choosing or writing
+a backing tree. Normal `ctx install` repeats those checks before publishing
+each object through the existing atomic object installer. Use `--source PATH` when the mounted tree is backed by a specific
 generation, and use `--tier user` for tools that should only be visible to the
 current user. Agent objects are system-tier because their runtime socket is
 host-owned:

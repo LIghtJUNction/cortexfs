@@ -8,7 +8,7 @@ sidebar_label: 扩展 CortexFS
 
 先给一个规则：CortexFS 的扩展点是当前规范里的对象、套接字、控制文件和工具提交语义。它们不是新的根目录或新的工作流入口。
 
-常规场景下，请先走 [One-file Extensions](extensions.md) 的路径：将工具与可执行代理放在一个包目录里，用一个 `cortexfs.toml` 描述它们，再运行 `ctx install ./package`。该包只是编写便利层，安装依然使用同一套“按哈希绑定、原子发布”的对象机制，以及同一套 `agent/<name>.d/*` / `tool/<name>.d/*` ABI。
+常规场景下，请先走 [One-file Extensions](extensions.md) 的路径：将工具与可执行代理放在一个包目录里，用一个 `cortexfs.toml` 描述它们，先运行 `ctx install --check ./package`，再用 `ctx install ./package` 安装。该包只是编写便利层，安装依然使用同一套“按哈希绑定、原子发布”的对象机制，以及同一套 `agent/<name>.d/*` / `tool/<name>.d/*` ABI。
 
 ## 先读边界
 

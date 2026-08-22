@@ -36,7 +36,9 @@ provider special case, watcher, queue, or alternate orchestration path.
 7. Validate source and manifest changes without installing first. Run
    `ctx object check MANIFEST` for each rendered manifest; it requires no
    source tree and performs no backing-tree writes. A v2 manifest incompatible
-   with the compiled CortexFS version is invalid and exits 2. Follow
+   with the compiled CortexFS version is invalid and exits 2. For a
+   `cortexfs.package/v1` bundle, run `ctx install --check PACKAGE`; it renders
+   and checks every object without writing a backing tree. Follow
    `references/testing.md` for the staged test ladder.
 8. Perform installation only after an explicit mutation request. Invoke
    `ctx object install --source PATH MANIFEST --tier user|system`, where PATH
