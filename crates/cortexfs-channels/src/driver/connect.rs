@@ -14,6 +14,24 @@ pub(super) fn open(
     Ok(stream)
 }
 
+pub(super) fn retry<T>(
+    mut connect: impl FnMut() -> Result<T, ChannelDriverError>,
+) -> Result<T, ChannelDriverError> {
+    let mut last = None;
+    for attempt in 0..3 {
+        match connect() {
+            Ok(connection) => return Ok(connection),
+            Err(error @ ChannelDriverError::Io(_)) if attempt < 2 => {
+                last = Some(error);
+                thread::sleep(Duration::from_millis(100 * (attempt + 1)));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last
+        .unwrap_or_else(|| ChannelDriverError::Protocol("channel driver unavailable".to_owned())))
+}
+
 impl ChannelDriverClient {
     /// Connects with bounded retries for a driver that is still starting.
     pub fn connect_retry(
@@ -24,27 +42,16 @@ impl ChannelDriverClient {
         request_prefix: &str,
         timeout: Duration,
     ) -> Result<Self, ChannelDriverError> {
-        let mut last = None;
-        for attempt in 0..3 {
-            match Self::connect(
+        retry(|| {
+            Self::connect(
                 path,
                 channel,
                 capabilities,
                 actions,
                 request_prefix,
                 timeout,
-            ) {
-                Ok(client) => return Ok(client),
-                Err(error @ ChannelDriverError::Io(_)) if attempt < 2 => {
-                    last = Some(error);
-                    thread::sleep(Duration::from_millis(100 * (attempt + 1)));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(last.unwrap_or_else(|| {
-            ChannelDriverError::Protocol("channel driver unavailable".to_owned())
-        }))
+            )
+        })
     }
 
     fn connect(

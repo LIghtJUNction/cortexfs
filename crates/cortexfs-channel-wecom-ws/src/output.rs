@@ -6,6 +6,10 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::Message;
+
+use crate::error::{Error, Result};
 
 const MAX_FRAME_BYTES: usize = 8_000;
 static NEXT_STREAM: AtomicU64 = AtomicU64::new(1);
@@ -61,6 +65,13 @@ fn chunks(text: &str) -> Vec<String> {
         result.push(current);
     }
     result
+}
+
+pub(crate) async fn send(output_tx: &mpsc::Sender<Message>, text: String) -> Result<()> {
+    output_tx
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_error| Error::Protocol("WeCom output queue closed".to_owned()))
 }
 
 pub(crate) fn reconnect(frame: &Value) -> bool {

@@ -566,7 +566,7 @@ fn persistent_session_keeps_unsolicited_frames_available()
 }
 
 #[test]
-fn command_result_maps_values_and_errors() {
+fn command_result_maps_values_and_errors() -> Result<(), Box<dyn std::error::Error>> {
     let payload = serde_json::json!({"ok": true});
     assert_eq!(
         ChannelCommandResult::from_value_result(Result::<_, &str>::Ok(payload.clone())),
@@ -578,6 +578,48 @@ fn command_result_maps_values_and_errors() {
             reason: "failed".to_owned()
         }
     );
+    let target = target()?;
+    let receipt = DeliveryReceipt::new(target.clone(), "message".to_owned());
+    assert_eq!(receipt.channel, target.channel);
+    assert_eq!(receipt.message_id, "message");
+    assert_eq!(receipt.target, target);
+    assert_eq!(receipt.timestamp_ms, None);
+    Ok(())
+}
+
+#[test]
+fn connect_retry_retries_only_io_and_preserves_last_error() {
+    let mut attempts = 0;
+    let value = super::connect::retry(|| {
+        attempts += 1;
+        if attempts < 3 {
+            Err(std::io::Error::other(format!("io-{attempts}")).into())
+        } else {
+            Ok(7)
+        }
+    });
+    assert!(matches!(value, Ok(7)));
+    assert_eq!(attempts, 3);
+
+    let mut attempts = 0;
+    let error = super::connect::retry::<()>(|| {
+        attempts += 1;
+        Err(super::ChannelDriverError::Protocol("stop".to_owned()))
+    });
+    assert!(
+        matches!(error, Err(super::ChannelDriverError::Protocol(ref value)) if value == "stop")
+    );
+    assert_eq!(attempts, 1);
+
+    let mut attempts = 0;
+    let error = super::connect::retry::<()>(|| {
+        attempts += 1;
+        Err(std::io::Error::other(format!("last-{attempts}")).into())
+    });
+    assert!(
+        matches!(error, Err(super::ChannelDriverError::Io(ref value)) if value.to_string() == "last-3")
+    );
+    assert_eq!(attempts, 3);
 }
 
 fn target() -> Result<MessageTarget, crate::ChannelError> {

@@ -77,7 +77,7 @@ async fn reply(
     message: &OutboundMessage,
 ) -> Result<()> {
     for frame in output::reply_frames(request_id, &message.body.text) {
-        send(output_tx, frame).await?;
+        output::send(output_tx, frame).await?;
     }
     Ok(())
 }
@@ -98,11 +98,4 @@ async fn proactive(
     reply(output_tx, &platform_request_id, &message).await?;
     let message_id = format!("wecom-{}", target.conversation);
     Ok(session.send_receipt(runtime_request_id, DeliveryReceipt::new(target, message_id))?)
-}
-
-async fn send(output_tx: &mpsc::Sender<Message>, text: String) -> Result<()> {
-    output_tx
-        .send(Message::Text(text.into()))
-        .await
-        .map_err(|_error| Error::Protocol("WeCom output queue closed".to_owned()))
 }

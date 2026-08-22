@@ -1,4 +1,4 @@
-use std::{path::Path, sync::mpsc, thread, time::Duration};
+use std::{path::Path, sync::mpsc, time::Duration};
 
 use crate::{ChannelActions, ChannelCapabilities, ChannelFrameBody, ChannelId};
 
@@ -14,27 +14,16 @@ impl ChannelDriverSession {
         request_prefix: &str,
         timeout: Duration,
     ) -> Result<Self, ChannelDriverError> {
-        let mut last = None;
-        for attempt in 0..3 {
-            match Self::connect(
+        super::super::connect::retry(|| {
+            Self::connect(
                 path,
                 channel,
                 capabilities,
                 actions,
                 request_prefix,
                 timeout,
-            ) {
-                Ok(session) => return Ok(session),
-                Err(error @ ChannelDriverError::Io(_)) if attempt < 2 => {
-                    last = Some(error);
-                    thread::sleep(Duration::from_millis(100 * (attempt + 1)));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(last.unwrap_or_else(|| {
-            ChannelDriverError::Protocol("channel driver unavailable".to_owned())
-        }))
+            )
+        })
     }
 
     fn connect(

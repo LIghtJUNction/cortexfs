@@ -31,7 +31,7 @@ pub(super) async fn receive(
             } else if is_enter_chat(&frame)
                 && let Some(request_id) = message::request_id(&frame)
             {
-                send(output_tx, output::welcome(request_id)).await?;
+                output::send(output_tx, output::welcome(request_id)).await?;
             }
         }
         Message::Ping(value) => output_tx
@@ -52,11 +52,4 @@ fn is_enter_chat(frame: &Value) -> bool {
             .and_then(|event| event.get("eventtype"))
             .and_then(Value::as_str)
             == Some("enter_chat")
-}
-
-async fn send(output_tx: &mpsc::Sender<Message>, text: String) -> Result<()> {
-    output_tx
-        .send(Message::Text(text.into()))
-        .await
-        .map_err(|_error| Error::Protocol("WeCom output queue closed".to_owned()))
 }
