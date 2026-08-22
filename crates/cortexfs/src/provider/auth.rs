@@ -16,6 +16,7 @@ mod registry;
 mod transport;
 mod wire;
 
+use crate::provider::has_ascii_control;
 pub use adapter::{
     AuthProvider, AuthProviderError, AuthRequest, AuthResponse, AuthTransport, DeviceChallenge,
     default_device_login, device_request, http_transport, refresh_oauth_result,

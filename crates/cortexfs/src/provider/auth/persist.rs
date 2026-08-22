@@ -34,7 +34,7 @@ fn store_key(
     key: &str,
     requested_slot: Option<&str>,
 ) -> Result<(), AuthProviderError> {
-    if key.trim().is_empty() || key.bytes().any(|byte| byte.is_ascii_control()) {
+    if key.trim().is_empty() || super::has_ascii_control(key) {
         return Err(AuthProviderError::InvalidCredential);
     }
     let slot = requested_slot

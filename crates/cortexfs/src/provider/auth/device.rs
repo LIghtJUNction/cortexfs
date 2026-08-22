@@ -55,7 +55,7 @@ pub fn login(
             &device.verification_uri,
         ]
         .into_iter()
-        .any(|value| value.is_empty() || value.bytes().any(|byte| byte.is_ascii_control()))
+        .any(|value| value.is_empty() || super::has_ascii_control(value))
     {
         return Err(AuthProviderError::InvalidConfig);
     }

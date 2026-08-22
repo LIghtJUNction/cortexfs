@@ -12,18 +12,8 @@ pub(crate) fn provider_oauth_login(
         .oauth
         .clone()
         .ok_or_else(|| CliError::usage("provider has no oauth config"))?;
-    let registry = cortexfs::configured_registry(
-        provider,
-        &provider_config.base_url,
-        provider_config.auth_methods(),
-        provider_config.oauth.clone(),
-    )
-    .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
-    let adapter = registry
-        .get(provider)
-        .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    let _registry = oauth_registry(provider, &provider_config)?;
     if device {
-        let _ = adapter;
         return auth::socket::oauth_device_login(
             provider,
             profile,
@@ -103,13 +93,7 @@ pub(crate) fn provider_oauth_refresh(provider: &str, profile: &str) -> Result<()
         .oauth
         .clone()
         .ok_or_else(|| CliError::usage("provider has no oauth config"))?;
-    let registry = cortexfs::configured_registry(
-        provider,
-        &provider_config.base_url,
-        provider_config.auth_methods(),
-        provider_config.oauth.clone(),
-    )
-    .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    let registry = oauth_registry(provider, &provider_config)?;
     let adapter = registry
         .get(provider)
         .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
@@ -131,6 +115,23 @@ pub(crate) fn provider_auth_logout(provider: &str, profile: &str) -> Result<(), 
             .map_err(|_error| CliError::unavailable("OAuth credential store unavailable"))?;
     }
     print_line("provider authentication removed")
+}
+
+fn oauth_registry(
+    provider: &str,
+    config: &CtxProviderConfig,
+) -> Result<cortexfs::ProviderRegistry, CliError> {
+    let registry = cortexfs::configured_registry(
+        provider,
+        &config.base_url,
+        config.auth_methods(),
+        config.oauth.clone(),
+    )
+    .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    registry
+        .get(provider)
+        .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    Ok(registry)
 }
 
 fn provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {

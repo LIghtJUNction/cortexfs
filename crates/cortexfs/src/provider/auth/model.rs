@@ -52,7 +52,7 @@ impl AdapterCore {
 }
 
 fn invalid_header_value(value: &str) -> bool {
-    value.trim().is_empty() || value.bytes().any(|byte| byte.is_ascii_control())
+    value.trim().is_empty() || super::has_ascii_control(value)
 }
 
 pub fn model_url(base_url: &str) -> String {

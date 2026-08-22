@@ -1,7 +1,5 @@
 use super::adapter::AuthProviderError;
 use super::common::{AdapterCore, CoreAuthProvider};
-use super::device::DeviceConfig;
-use super::model::model_url;
 use super::{Credential, ProviderAuthConfig};
 use crate::provider::oauth::OAuthProviderConfig;
 /// Anthropic/Claude adapter with provider-specific API-key headers.
@@ -28,25 +26,8 @@ impl AnthropicAdapter {
         methods: Vec<ProviderAuthConfig>,
         oauth: Option<OAuthProviderConfig>,
     ) -> Self {
-        let id = id.into();
-        let aliases = match id.as_str() {
-            "anthropic" => vec!["claude".to_owned()],
-            "claude" => vec!["anthropic".to_owned()],
-            _ => Vec::new(),
-        };
-        let device = oauth
-            .as_ref()
-            .and_then(|config| config.device.clone())
-            .map(DeviceConfig::from);
         Self {
-            core: AdapterCore {
-                aliases,
-                model_url: model_url(base_url),
-                id,
-                methods,
-                oauth,
-                device,
-            },
+            core: AdapterCore::configured(id, base_url, methods, oauth, ["anthropic", "claude"]),
         }
     }
 }

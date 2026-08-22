@@ -1,3 +1,4 @@
+use super::has_ascii_control;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,7 +40,7 @@ impl OAuthDeviceConfig {
     pub fn is_valid(&self) -> bool {
         [&self.request_url, &self.token_url, &self.verification_uri]
             .into_iter()
-            .all(|value| !value.trim().is_empty() && !controls(value))
+            .all(|value| !value.trim().is_empty() && !has_ascii_control(value))
     }
 }
 
@@ -202,7 +203,7 @@ pub fn oauth_authorization_url(
     state: &str,
     pkce: &OAuthPkce,
 ) -> Result<String, OAuthError> {
-    if !valid_config(config) || state.is_empty() || controls(state) {
+    if !valid_config(config) || state.is_empty() || has_ascii_control(state) {
         return Err(OAuthError::InvalidConfig);
     }
     let mut url =
@@ -236,7 +237,7 @@ pub fn oauth_authorization_code_form(
     code: &str,
     pkce: &OAuthPkce,
 ) -> Result<String, OAuthError> {
-    if !valid_config(config) || code.is_empty() || controls(code) {
+    if !valid_config(config) || code.is_empty() || has_ascii_control(code) {
         return Err(OAuthError::InvalidConfig);
     }
     Ok(form(&[
@@ -252,7 +253,7 @@ pub fn oauth_refresh_token_form(
     config: &OAuthProviderConfig,
     refresh: &str,
 ) -> Result<String, OAuthError> {
-    if !valid_config(config) || refresh.trim().is_empty() || controls(refresh) {
+    if !valid_config(config) || refresh.trim().is_empty() || has_ascii_control(refresh) {
         return Err(OAuthError::InvalidConfig);
     }
     Ok(form(&[
@@ -266,8 +267,11 @@ pub fn parse_oauth_token_response(body: &[u8]) -> Result<OAuthTokenResponse, OAu
     let token: OAuthTokenResponse =
         serde_json::from_slice(body).map_err(|_error| OAuthError::InvalidToken)?;
     if token.access_token.trim().is_empty()
-        || controls(&token.access_token)
-        || token.refresh_token.as_deref().is_some_and(controls)
+        || has_ascii_control(&token.access_token)
+        || token
+            .refresh_token
+            .as_deref()
+            .is_some_and(has_ascii_control)
         || token
             .token_type
             .as_deref()
@@ -284,7 +288,7 @@ pub fn oauth_post(
     body: &str,
     timeout_secs: u64,
 ) -> Result<(u16, Vec<u8>), OAuthError> {
-    if url.is_empty() || controls(url) || controls(content_type) {
+    if url.is_empty() || has_ascii_control(url) || has_ascii_control(content_type) {
         return Err(OAuthError::InvalidConfig);
     }
     let response = reqwest::blocking::Client::new()
@@ -339,7 +343,7 @@ pub fn request_device_code_with(
         serde_json::from_slice(&body).map_err(|_error| OAuthError::InvalidToken)?;
     if [&device.id, &device.code]
         .into_iter()
-        .any(|value| value.is_empty() || controls(value))
+        .any(|value| value.is_empty() || has_ascii_control(value))
     {
         Err(OAuthError::InvalidToken)
     } else {
@@ -529,7 +533,7 @@ pub fn store_oauth_credential(
     now: u64,
 ) -> Result<(), OAuthError> {
     if material.access_token.trim().is_empty()
-        || controls(material.access_token)
+        || has_ascii_control(material.access_token)
         || provider.trim().is_empty()
     {
         return Err(OAuthError::InvalidToken);
@@ -619,13 +623,13 @@ fn resolve_generic_oauth_with(
     config: &OAuthProviderConfig,
     refresh: impl FnOnce(&OAuthRefreshRequest) -> Result<OAuthRefreshResult, OAuthError>,
 ) -> Result<Option<OAuthCredential>, OAuthError> {
-    if provider.is_empty() || controls(provider) || !valid_config(config) {
+    if provider.is_empty() || has_ascii_control(provider) || !valid_config(config) {
         return Err(OAuthError::InvalidConfig);
     }
     let access = crate::provider_oauth_access_token_env_name(provider);
     match env::var(&access) {
         Ok(value) if !value.trim().is_empty() => {
-            if controls(&value) {
+            if has_ascii_control(&value) {
                 return Err(OAuthError::InvalidToken);
             }
             return Ok(Some((value, String::new())));
@@ -635,7 +639,7 @@ fn resolve_generic_oauth_with(
     }
     let service = crate::provider::name::provider_keychain_service(provider);
     let access = oauth_keychain_secret(&service, config.access_account())?;
-    if access.as_deref().is_some_and(controls) {
+    if access.as_deref().is_some_and(has_ascii_control) {
         return Err(OAuthError::InvalidToken);
     }
     let Some(refresh_value) = refresh_token(provider, config, &service)? else {
@@ -658,8 +662,11 @@ fn resolve_generic_oauth_with(
     };
     let result = refresh(&request)?;
     if result.access_token.trim().is_empty()
-        || controls(&result.access_token)
-        || result.refresh_token.as_deref().is_some_and(controls)
+        || has_ascii_control(&result.access_token)
+        || result
+            .refresh_token
+            .as_deref()
+            .is_some_and(has_ascii_control)
     {
         return Err(OAuthError::InvalidToken);
     }
@@ -689,14 +696,14 @@ fn refresh_token(
     let name = crate::provider_oauth_refresh_token_env_name(provider);
     match env::var(name) {
         Ok(value) if !value.trim().is_empty() => {
-            if controls(&value) {
+            if has_ascii_control(&value) {
                 return Err(OAuthError::InvalidToken);
             }
             Ok(Some(value))
         }
         Ok(_) | Err(env::VarError::NotPresent) => {
             oauth_keychain_secret(service, config.refresh_account()).and_then(|value| {
-                if value.as_deref().is_some_and(controls) {
+                if value.as_deref().is_some_and(has_ascii_control) {
                     Err(OAuthError::InvalidToken)
                 } else {
                     Ok(value.filter(|value| !value.trim().is_empty()))
@@ -782,13 +789,13 @@ pub fn resolve_oauth_access_token_with(
     env_lookup: impl Fn(&str) -> Result<String, env::VarError>,
     keychain_lookup: impl FnOnce(&str, &str) -> Result<Option<String>, OAuthError>,
 ) -> Result<Option<String>, OAuthError> {
-    if provider.is_empty() || controls(provider) || !valid_config(config) {
+    if provider.is_empty() || has_ascii_control(provider) || !valid_config(config) {
         return Err(OAuthError::InvalidConfig);
     }
     let name = crate::provider_oauth_access_token_env_name(provider);
     match env_lookup(&name) {
         Ok(value) if !value.trim().is_empty() => {
-            if controls(&value) {
+            if has_ascii_control(&value) {
                 Err(OAuthError::InvalidToken)
             } else {
                 Ok(Some(value))
@@ -799,7 +806,7 @@ pub fn resolve_oauth_access_token_with(
             config.access_account(),
         )
         .and_then(|value| {
-            if value.as_deref().is_some_and(controls) {
+            if value.as_deref().is_some_and(has_ascii_control) {
                 Err(OAuthError::InvalidToken)
             } else {
                 Ok(value)
@@ -856,11 +863,11 @@ fn valid_config(config: &OAuthProviderConfig) -> bool {
         &config.redirect_uri,
     ]
     .into_iter()
-    .all(|value| !value.trim().is_empty() && !controls(value))
+    .all(|value| !value.trim().is_empty() && !has_ascii_control(value))
         && !config
             .scopes
             .iter()
-            .any(|scope| scope.trim().is_empty() || controls(scope))
+            .any(|scope| scope.trim().is_empty() || has_ascii_control(scope))
         && config
             .device
             .as_ref()
@@ -871,11 +878,7 @@ fn valid_config(config: &OAuthProviderConfig) -> bool {
         ]
         .into_iter()
         .flatten()
-        .all(|value| !value.trim().is_empty() && !controls(value))
-}
-
-fn controls(value: &str) -> bool {
-    value.bytes().any(|byte| byte.is_ascii_control())
+        .all(|value| !value.trim().is_empty() && !has_ascii_control(value))
 }
 
 fn jwt(token: &str) -> Option<serde_json::Value> {

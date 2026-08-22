@@ -18,6 +18,35 @@ pub struct AdapterCore {
     pub(crate) device: Option<DeviceConfig>,
 }
 impl AdapterCore {
+    pub(crate) fn configured(
+        id: impl Into<String>,
+        base_url: &str,
+        methods: Vec<ProviderAuthConfig>,
+        oauth: Option<OAuthProviderConfig>,
+        alias_pair: [&str; 2],
+    ) -> Self {
+        let id = id.into();
+        let aliases = if id == alias_pair[0] {
+            vec![alias_pair[1].to_owned()]
+        } else if id == alias_pair[1] {
+            vec![alias_pair[0].to_owned()]
+        } else {
+            Vec::new()
+        };
+        let device = oauth
+            .as_ref()
+            .and_then(|config| config.device.clone())
+            .map(DeviceConfig::from);
+        Self {
+            aliases,
+            model_url: super::model::model_url(base_url),
+            id,
+            methods,
+            oauth,
+            device,
+        }
+    }
+
     pub(crate) fn authorization(
         &self,
         state: &str,
@@ -135,7 +164,7 @@ impl AdapterCore {
             .methods
             .iter()
             .any(|method| method.method == super::AuthMethod::ApiKey && method.slot == slot);
-        if !valid || key.trim().is_empty() || key.bytes().any(|byte| byte.is_ascii_control()) {
+        if !valid || key.trim().is_empty() || super::has_ascii_control(&key) {
             return Err(AuthProviderError::InvalidCredential);
         }
         Ok(Credential::ApiKey {

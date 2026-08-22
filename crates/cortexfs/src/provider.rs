@@ -37,6 +37,10 @@ pub(crate) fn openai_response_item_requires_continuation(value: &Value) -> bool 
     })
 }
 
+pub(crate) fn has_ascii_control(value: &str) -> bool {
+    value.bytes().any(|byte| byte.is_ascii_control())
+}
+
 pub(crate) fn effective_base_url(base_url: &str) -> String {
     let base = base_url.trim().trim_end_matches('/');
     if base.rsplit('/').next() == Some("v1") {

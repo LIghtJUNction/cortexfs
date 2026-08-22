@@ -1,8 +1,7 @@
 use super::adapter::{AuthProviderError, AuthTransport};
 use super::codexdevice;
 use super::common::{AdapterCore, CoreAuthProvider};
-use super::device::{DeviceChallenge, DeviceConfig};
-use super::model::model_url;
+use super::device::DeviceChallenge;
 use super::{Credential, ProviderAuthConfig};
 use crate::provider::oauth::{OAuthProviderConfig, codex_oauth_config};
 /// OpenAI-compatible adapter, including the Codex subscription OAuth profile.
@@ -34,25 +33,8 @@ impl OpenAiAdapter {
         methods: Vec<ProviderAuthConfig>,
         oauth: Option<OAuthProviderConfig>,
     ) -> Self {
-        let id = id.into();
-        let aliases = match id.as_str() {
-            "codex" => vec!["openai".to_owned()],
-            "openai" => vec!["codex".to_owned()],
-            _ => Vec::new(),
-        };
-        let device = oauth
-            .as_ref()
-            .and_then(|config| config.device.clone())
-            .map(DeviceConfig::from);
         Self {
-            core: AdapterCore {
-                aliases,
-                model_url: model_url(base_url),
-                id,
-                methods,
-                oauth,
-                device,
-            },
+            core: AdapterCore::configured(id, base_url, methods, oauth, ["codex", "openai"]),
         }
     }
 }

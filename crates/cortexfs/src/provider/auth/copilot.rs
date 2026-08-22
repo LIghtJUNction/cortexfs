@@ -44,34 +44,24 @@ impl GitHubCopilotAdapter {
         methods: Vec<ProviderAuthConfig>,
         oauth: OAuthProviderConfig,
     ) -> Self {
-        let id = id.into();
-        let aliases = match id.as_str() {
-            "github-copilot" => vec!["copilot".to_owned()],
-            "copilot" => vec!["github-copilot".to_owned()],
-            _ => Vec::new(),
-        };
-        let device = oauth.device.clone().map_or_else(
-            || DeviceConfig {
+        let mut core = AdapterCore::configured(
+            id,
+            base_url,
+            methods,
+            Some(oauth),
+            ["github-copilot", "copilot"],
+        );
+        if core.methods.is_empty() {
+            core.methods = default_methods();
+        }
+        if core.device.is_none() {
+            core.device = Some(DeviceConfig {
                 request_url: "https://github.com/login/device/code".to_owned(),
                 token_url: "https://github.com/login/oauth/access_token".to_owned(),
                 verification_uri: "https://github.com/login/device".to_owned(),
-            },
-            DeviceConfig::from,
-        );
-        Self {
-            core: AdapterCore {
-                id,
-                aliases,
-                model_url: format!("{}/models", base_url.trim_end_matches('/')),
-                methods: if methods.is_empty() {
-                    default_methods()
-                } else {
-                    methods
-                },
-                oauth: Some(oauth),
-                device: Some(device),
-            },
+            });
         }
+        Self { core }
     }
 }
 
