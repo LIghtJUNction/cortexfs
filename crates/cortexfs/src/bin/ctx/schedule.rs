@@ -138,23 +138,7 @@ struct OpenedSchedulePlan {
 }
 
 fn open_schedule_plan(path: &Path) -> Result<OpenedSchedulePlan, CliError> {
-    let mut file = open_plain_read_file(path)?;
-    let metadata = file.metadata().map_err(|error| {
-        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
-    })?;
-    if !metadata.is_file() || metadata.len() > MAX_CTX_FILE_CHECK_BYTES {
-        return Err(CliError::unavailable(format!(
-            "cannot read {}: not a small regular file",
-            path.display()
-        )));
-    }
-    let len = usize::try_from(metadata.len()).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
-    })?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
-    })?;
+    let (file, metadata, content) = read_small_plain_file(path)?;
     let after = file.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
     })?;

@@ -20,6 +20,14 @@ pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn read_file_to_string(path: &Path) -> Result<String, CliError> {
+    let (_file, _metadata, content) = read_small_plain_file(path)?;
+    String::from_utf8(content)
+        .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))
+}
+
+pub(crate) fn read_small_plain_file(
+    path: &Path,
+) -> Result<(fs::File, fs::Metadata, Vec<u8>), CliError> {
     let mut file = open_plain_read_file(path)?;
     let metadata = file.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
@@ -37,8 +45,7 @@ pub(crate) fn read_file_to_string(path: &Path) -> Result<String, CliError> {
     file.read_exact(&mut content).map_err(|error| {
         CliError::unavailable(format!("cannot read {}: {error}", path.display()))
     })?;
-    String::from_utf8(content)
-        .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))
+    Ok((file, metadata, content))
 }
 
 pub(crate) fn open_plain_read_file(path: &Path) -> Result<fs::File, CliError> {
