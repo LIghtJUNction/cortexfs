@@ -627,6 +627,7 @@ case "$CTX_AGENT_STEP" in
     printf '{"type":"tool_call","run":"%s","id":"call-2","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID" ;;
   2)
     printf '%s' "$envelope" | jq -e '.step == 2 and (.observation | keys == ["content","name","status","tool_call_id","truncated"]) and .observation.tool_call_id == "call-2" and .observation.name == "example.echo" and .observation.status == "ok" and .observation.truncated == false' >/dev/null || exit 3
+    printf '%s' "$envelope" | jq -e '.tool_context | (contains("Previous authoritative tool observation:") and contains("\"tool_call_id\":\"call-1\"") and contains("\"status\":\"ok\"") and contains("\"content\":"))' >/dev/null || exit 3
     printf '%s' "$envelope" | jq -j '.observation.content' > "$CTX_SOURCE/obs-2"
     printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"complete"}]}\n' "$CTX_RUN_ID" ;;
   *) exit 2 ;;

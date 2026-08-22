@@ -130,12 +130,14 @@ fn responses_stream_function_calls_remain_direct_or_fail_closed() -> Result<(), 
     }
     assert_eq!(
         parse_openai_response_content(
-            br#"{"output_text":"explanation","output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}"#,
+            br#"{"output_text":"explanation","output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}","caller":{"type":"direct"}}]}"#,
         ),
         Ok(r#"{"arguments":{"args":["tools"]},"id":"call_123","name":"tsh","type":"tool_call"}"#.to_owned())
     );
+    let direct = r#"{"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"","caller":{"type":"direct"}}}"#;
+    assert!(openai_stream_event(&format!("data: {direct}")).is_ok());
     let OpenAiStreamEvent::ToolCall(frame) = openai_stream_event(
-        r#"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}"#,
+        r#"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}","caller":{"type":"direct"}}}"#,
     )?.event else { return Err("expected tool call event".to_owned()) };
     assert_eq!(
         frame,
@@ -145,7 +147,8 @@ fn responses_stream_function_calls_remain_direct_or_fail_closed() -> Result<(), 
         for item in [
             serde_json::json!({"type":"program"}),
             serde_json::json!({"type":"program_output"}),
-            serde_json::json!({"type":"function_call","caller":"prog_123"}),
+            serde_json::json!({"type":"function_call","caller":{"type":"program","caller_id":"prog_123"}}),
+            serde_json::json!({"type":"function_call","caller":{"type":"unknown"}}),
         ] {
             let line =
                 serde_json::json!({"type":format!("response.output_item.{event}"),"item":item});

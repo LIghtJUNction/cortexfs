@@ -375,7 +375,10 @@ Schema. It does not grant permission and is not a claim about result shape.
 Programmatic tool calling is **not enabled** in the current ABI. CortexFS must
 not advertise an OpenAI `programmatic_tool_calling` tool, set
 `allowed_callers`, or treat `schema` as an `output_schema`. The existing
-single-call host loop remains the only executable-agent tool protocol.
+single-call host loop remains the only executable-agent tool protocol. An
+OpenAI function call with an absent, null, or `{ "type": "direct" }` caller is
+an ordinary native call; `program` and unknown caller types fail closed as
+unsupported host-owned continuation.
 
 Before enablement, a tool needs an explicit, default-deny programmatic
 declaration. The optional `tool/<name>.d/program` control is the tool author's

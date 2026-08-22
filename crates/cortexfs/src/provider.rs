@@ -29,8 +29,12 @@ pub(crate) fn openai_response_item_requires_continuation(value: &Value) -> bool 
     matches!(
         value.get("type").and_then(Value::as_str),
         Some("program" | "program_output")
-    ) || value.get("type").and_then(Value::as_str) == Some("function_call")
-        && value.get("caller").is_some_and(|caller| !caller.is_null())
+    ) || matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("function_call" | "function_call_output")
+    ) && value.get("caller").is_some_and(|caller| {
+        !caller.is_null() && caller.get("type").and_then(Value::as_str) != Some("direct")
+    })
 }
 
 pub(crate) fn effective_base_url(base_url: &str) -> String {

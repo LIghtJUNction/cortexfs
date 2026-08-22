@@ -1086,11 +1086,15 @@ fn run_agent_envelope_loop_with_control(
         }
         delivery::deliver_host_frame(stream, &result)?;
         frames.push(result);
+        if !observation.is_null() {
+            tool_context.push_str("\nPrevious authoritative tool observation:\n");
+            tool_context.push_str(&observation.to_string());
+        }
         observation = serde_json::json!({
             "tool_call_id": call.id, "name": call.name,
             "status": status, "content": content, "truncated": truncated
         });
-        tool_context = continuation_tool_context(request.tool_context, &call, status);
+        tool_context = continuation_tool_context(&tool_context, &call, status);
     }
     Err(SocketRuntimeError::InvalidAgentOutput)
 }
@@ -1114,7 +1118,7 @@ fn continuation_tool_context(
     context.push('\n');
     if status == "ok" {
         context.push_str(
-            "The host completed this exact call. Use the authoritative result below and answer the original user; do not repeat this call.",
+            "Use the result, then make a different necessary call or answer. Do not blindly repeat this call.",
         );
     } else {
         context.push_str(

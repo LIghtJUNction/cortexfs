@@ -159,14 +159,17 @@ fn responses_parser_rejects_programmatic_tool_calling_only() {
         r#"{"tools":[{"function":{"allowed_callers":[]}}]}"#,
         r#"{"input":[{"type":"program"}]}"#,
         r#"{"input":[{"type":"program_output"}]}"#,
-        r#"{"input":[{"type":"function_call","caller":"p"}]}"#,
-        r#"{"input":[{"type":"function_call_output","caller":"p"}]}"#,
+        r#"{"input":[{"type":"function_call","caller":{"type":"program","caller_id":"p"}}]}"#,
+        r#"{"input":[{"type":"function_call_output","caller":{"type":"program","caller_id":"p"}}]}"#,
+        r#"{"input":[{"type":"function_call","caller":{"type":"unknown"}}]}"#,
     ] {
         assert!(!parse_body("responses", body), "{body}");
     }
     for body in [
         r#"{"tools":[{"type":"function","function":{"name":"tsh"}}]}"#,
         r#"{"input":[{"type":"function_call","caller":null}]}"#,
+        r#"{"input":[{"type":"function_call","caller":{"type":"direct"}}]}"#,
+        r#"{"input":[{"type":"function_call_output","caller":{"type":"direct"}}]}"#,
         r#"{"input":[{"type":"message","content":"program allowed_callers caller"}]}"#,
         r#"{"input":"invalid JSON"#,
     ] {

@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use super::invalid;
+use crate::provider::openai_response_item_requires_continuation;
 
 pub(super) fn reject_programmatic_tools(endpoint: &str, body: &[u8]) -> std::io::Result<()> {
     if endpoint != "responses" {
@@ -16,7 +17,7 @@ pub(super) fn reject_programmatic_tools(endpoint: &str, body: &[u8]) -> std::io:
     let input = value
         .get("input")
         .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(is_programmatic_input));
+        .is_some_and(|items| items.iter().any(openai_response_item_requires_continuation));
     if tools || input {
         Err(invalid("programmatic tool calling is unsupported"))
     } else {
@@ -30,11 +31,4 @@ fn is_programmatic_tool(tool: &Value) -> bool {
         || tool
             .get("function")
             .is_some_and(|function| function.get("allowed_callers").is_some())
-}
-
-fn is_programmatic_input(item: &Value) -> bool {
-    let item_type = item.get("type").and_then(Value::as_str);
-    matches!(item_type, Some("program" | "program_output"))
-        || matches!(item_type, Some("function_call" | "function_call_output"))
-            && item.get("caller").is_some_and(|caller| !caller.is_null())
 }

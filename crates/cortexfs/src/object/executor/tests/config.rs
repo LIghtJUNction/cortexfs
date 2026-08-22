@@ -537,7 +537,7 @@ fn provider_targets_share_effective_v1_base_normalization() {
 
 #[test]
 fn responses_function_call_becomes_canonical_tool_call() {
-    let output = br#"{"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}"#;
+    let output = br#"{"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}","caller":{"type":"direct"}}]}"#;
     assert_eq!(
         parse_openai_response_content(output),
         Ok(
@@ -552,7 +552,8 @@ fn provider_tool_call_parser_rejects_undeclarable_function_names_or_program_item
     for item in [
         r#"{"type":"program"}"#,
         r#"{"type":"program_output"}"#,
-        r#"{"type":"function_call","caller":"prog_123"}"#,
+        r#"{"type":"function_call","caller":{"type":"program","caller_id":"prog_123"}}"#,
+        r#"{"type":"function_call","caller":{"type":"unknown"}}"#,
     ] {
         assert_eq!(
             parse_openai_response_content(

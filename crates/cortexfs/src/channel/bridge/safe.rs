@@ -11,6 +11,8 @@ pub(super) fn message(error: &ChannelBridgeError) -> &'static str {
         ChannelBridgeError::EmptyReply => {
             "The model returned no displayable reply; please try again."
         }
-        ChannelBridgeError::Agent(_) => "模型服务拒绝请求；请检查账户额度、模型配置和上游可用性。",
+        ChannelBridgeError::Agent(_) => {
+            "The agent model/tool loop failed; inspect run diagnostics before retrying."
+        }
     }
 }
