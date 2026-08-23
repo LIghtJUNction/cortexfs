@@ -7,6 +7,11 @@ how errors and binaries should look, and how to migrate the current monolith
 without breaking the stable root ABI. The explicit `channel` root is the
 communication subsystem exception; no other orchestration roots are allowed.
 
+The elegance target is the same bar as Pi’s monorepo: each package has one
+job, lower layers never learn upper concerns, the agent loop stays small, and
+frontends/adapters compose around events and sockets. CortexFS adds FUSE
+projection and Linux authority; it does not add a second framework.
+
 Normative ABI: [spec/](spec/). Naming: [naming-guide.md](naming-guide.md).
 Contributor rules live in the repository-root `AGENTS.md`.
 
@@ -26,9 +31,34 @@ Today almost all production logic lives in one crate (`cortexfs`) with:
 
 Product architecture (files, policy, sessions) is already clear. **Internal**
 architecture is the missing layer: process roles, crate roles, module layers,
-and error policy.
+and error policy—expressed with Pi-level clarity so a reader can say where
+protocol, loop, and UX each stop.
 
 ---
+
+## 1.1 Elegance bar (Pi-aligned)
+
+Accept a design only when all of the following hold:
+
+| Principle | CortexFS meaning |
+| --- | --- |
+| Layered abstraction | Protocol ≠ loop ≠ session UX ≠ FUSE projection |
+| Minimal core | One tool/model feedback loop; no baked plan/workflow engine |
+| Event facts | Interaction/channel/session events are correlatable facts |
+| Composability | `protocol`, SDKs, and `runtime-client` usable without FUSE |
+| Extension at edges | Modules, tools, channels, skills—never new root classes |
+| Omission | Prefer leaving a product surface out until a versioned ABI needs it |
+
+Anti-patterns (reject in review):
+
+```text
+provider wire types leaking into agent/ or fuse/
+UI or channel crate importing object::executor
+new root directories for hook/job/workflow/memory
+in-process loading of every platform SDK
+Result<_, String> growing in library code
+thin rename-only wrappers or #[path] escapes
+```
 
 ## 2. Process architecture (runtime shape)
 
@@ -70,41 +100,79 @@ background watchers, polling loops, or hot-reload subcommands.
 
 ## 3. Target crate architecture
 
-Move from “one lib does everything” to **thin crates with one job**. Prefer
-**feature flags first**, physical split second (same module tree, lower risk).
+Move from “one lib does everything” to **thin crates with one job**, matching
+Pi’s enforced layered monorepo. Prefer **feature flags first**, physical split
+second (same module tree, lower risk).
 
 ### 3.1 Target graph
 
 ```text
-cortexfs-abi          pure types, path grammar, request frames, policy enums
+Foundation
+  cortexfs-paths / abi types     pure path grammar and stable enums
+  cortexfs-support               plain fs, jsonl, layout (no FUSE, no HTTP)
+  cortexfs-module                static module API + socket module contract
+
+Protocol / AI
+  cortexfs-protocol              provider-neutral IR (pi-ai analogue)
+  cortexfs-metadatas             catalog facts only
+  provider registry (in tree)    host config → neutral model projections
+
+Agent core
+  cortexfs-runtime               sockets, session record, egress, handshakes
+  cortexfs-object                install / replace / one-shot executor
+  cortexfs-runtime-client        interaction frames (shared by all UIs)
+  cortexfs-tool-sdk / agent-sdk  capability process contracts
+
+Projection / application
+  cortexfs-fuse                  fuser projection only
+  cortexfs (facade)              re-exports + features; bins depend here
+  bins + channel-*               UX and platform adapters (pi-coding-agent / mom)
+```
+
+Dependency direction is strictly upward in this diagram: application may
+depend on agent core and protocol; protocol must not depend on agent core or
+FUSE. Channel crates depend on channel-sdk / runtime-client, not on fuse or
+object executor.
+Equivalent compact form:
+
+```text
+cortexfs-abi / paths      pure types, path grammar, request frames, policy enums
         ▲
-cortexfs-support      plain fs, jsonl, layout, path checks (no FUSE, no HTTP)
+cortexfs-support          plain fs, jsonl, layout, path checks (no FUSE, no HTTP)
         ▲
-cortexfs-runtime      socket, session record, egress, control handshakes
+cortexfs-protocol         provider IR only (optional peer of support)
         ▲
-cortexfs-object       install / replace / executor / runner helpers
+cortexfs-runtime          socket, session record, egress, control handshakes
         ▲
-cortexfs-fuse         fuser projection only
+cortexfs-object           install / replace / executor / runner helpers
         ▲
-cortexfs (facade)     re-exports + optional features; bins depend on facade
+cortexfs-fuse             fuser projection only
         ▲
-bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp
-sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client   (depend only on narrow crates)
+cortexfs (facade)         re-exports + optional features; bins depend on facade
+        ▲
+bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel adapters
+sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 ```
 
 ### 3.2 Crate rules
 
 | Crate | Allowed deps | Forbidden |
 | --- | --- | --- |
-| `cortexfs-abi` | `serde`, small pure crates | `fuser`, `nix` process, HTTP, parquet |
+| `cortexfs-abi` / paths | `serde`, small pure crates | `fuser`, `nix` process, HTTP, parquet |
 | `cortexfs-support` | `abi`, `nix` fs bits, serde_json | FUSE, provider HTTP, agent launch |
+| `cortexfs-protocol` | pure parse/IR crates | agent loop, FUSE, secrets, filesystem ABI |
 | `cortexfs-runtime` | `abi`, `support` | FUSE mount loop, object install stages |
 | `cortexfs-object` | `abi`, `support`, runtime-client, tool-sdk | FUSE server |
 | `cortexfs-fuse` | `abi`, `support`, `fuser` | object executor, provider HTTP |
 | SDKs | `runtime-client` (+ minimal abi types) | full `cortexfs` monolith when avoidable |
+| `channel-*` | channel-sdk, runtime-client | fuse, object executor, provider registry |
 
 **MCP stays an adapter binary** (`cortexfs-mcp` / `ctxmcp`). It may call
 support helpers; it must not force a root ABI class.
+
+**Independent usefulness (Pi composability):** a consumer must be able to
+depend on `cortexfs-protocol` or `cortexfs-runtime-client` alone without
+linking `fuser`, parquet, or channel platform SDKs.
 
 ### 3.3 Near-term (no directory move): Cargo features
 
@@ -131,6 +199,21 @@ cli-support = []
 Acceptance: `cortexfs-runtime-client` and SDKs can depend on
 `default-features = false` plus only what they need, without linking `fuser`
 or parquet when unused.
+
+### 3.4 Loop ownership
+
+Inside agent core, keep Pi’s split between **mechanics** and **environment**:
+
+| Concern | Owner | Notes |
+| --- | --- | --- |
+| Turn + tool scheduling | `object/executor` (+ runtime socket) | smallest correct loop |
+| Durable session append | `runtime/record` | JSONL facts; not prompt text |
+| Context projection | context/prompt modules | disposable; rebuildable |
+| Authority gate | `authority` + `policy` | mechanism then evaluator |
+| Frontend modes | bins / channel adapters | subscribe to events only |
+
+Do not grow the loop with product modes (plan boards, memory roots, hook
+DAGs). Add a tool, module, skill, or versioned ABI surface instead.
 
 ---
 
@@ -420,12 +503,18 @@ Reviewers ask:
 
 1. **ABI:** Any new root path or orchestration entry? Only the explicitly
    versioned `channel` root and its generic state/tool children are allowed.
-2. **Layer:** Does this module only call same/lower layers?
-3. **Error:** New `Result<_, String>`? Missing `Display`/`Error` on public errors?
-4. **Size:** New expects for `too_many_lines` / `too_many_arguments` without split?
-5. **Deps:** New heavy dependency justified, and feature-gated if optional?
-6. **Process:** Any new background watcher/poller/hot reload? (Must be no.)
-7. **Reuse:** Existing `support::plain` / `path` / `process` / layout helpers checked first?
+2. **Layer:** Does this module only call same/lower layers? Does it match the
+   Pi-aligned package map (protocol / core / UX / projection)?
+3. **Loop:** Does this enlarge the agent loop with a product mode that should
+   be a tool, module, skill, or adapter instead?
+4. **Events:** Are new facts correlatable on existing interaction/session
+   streams rather than a parallel control plane?
+5. **Error:** New `Result<_, String>`? Missing `Display`/`Error` on public errors?
+6. **Size:** New expects for `too_many_lines` / `too_many_arguments` without split?
+7. **Deps:** New heavy dependency justified, and feature-gated if optional?
+   Can protocol/SDK consumers still avoid `fuser` and platform SDKs?
+8. **Process:** Any new background watcher/poller/hot reload? (Must be no.)
+9. **Reuse:** Existing `support::plain` / `path` / `process` / layout helpers checked first?
 
 ---
 
@@ -433,11 +522,13 @@ Reviewers ask:
 
 ```text
 Product ABI        unchanged, still boring files + sockets
-Internal graph     layered crates/features; SDKs stay thin
+Elegance           Pi-level layers: protocol ⊥ loop ⊥ UX ⊥ FUSE
+Internal graph     layered crates/features; SDKs stay thin and composable
 Errors             typed; strings only as success payloads or final stderr
 Modules            one job; god files split on natural edit boundaries
 Bins               process roles match §2; no logic-only-in-bin duplication
 MCP                adapter only; tools remain ordinary objects
+Omissions          no workflow/hook/job/memory roots; no mega in-process harness
 ```
 
 This document is the north star for refactors such as `ExecError`, crate
