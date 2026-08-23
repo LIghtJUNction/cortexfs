@@ -3,7 +3,7 @@ pub(crate) mod channelcaps;
 pub(crate) mod channelenv;
 pub mod compactabi;
 mod compactexec;
-pub(crate) use compactexec::run_custom_compact;
+pub(super) use compactexec::run_custom_compact;
 pub mod control;
 pub mod egress;
 pub mod hookabi;
