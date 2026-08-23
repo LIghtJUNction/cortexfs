@@ -116,6 +116,29 @@ build disposable context from durable session facts
   → repeat until final answer or cancel
 ```
 
+That host loop is fixed and authoritative (`sdk-envelope-v1` steps, policy,
+sandbox, cancellation). Behavior customization stays outside the host:
+
+```text
+agent/<name>.d/loop              → CTX_AGENT_LOOP hint (chat/react/coding/planner/research/custom)
+agent/<name>.d/loop.d/<name>     → optional custom loop driver executable (Agent SDK ABI)
+agent/<name>.d/compact.strategy  → truncate | summarize | <object-name>
+agent/<name>.d/compact.d/<name>  → optional custom compaction executable (`cortexfs.compact/v1`)
+tool/<name>.d/invoke.strategy     → default | cli | sdk | <object-name>
+tool/<name>.d/invoke.d/<name>     → optional custom invoke executable (Tool SDK ABI)
+channel/<name>.d/adapter          → catalog family | <object-name> (optional; defaults to family)
+channel/<name>.d/adapter.d/<name> → optional custom socket driver (`cortexfs.channel.socket/v1`)
+Agent SDK executable             → custom step logic; yield one tool_call or complete
+Tool SDK executable              → CLI or JSONL invoke; host sets CTX_TOOL_MODE
+Channel SDK executable           → process-isolated adapter; DriverLaunchConfig from env
+hooks pre.d/post.d               → metadata-only gates around model actions
+```
+
+`loop` never grants capability. A custom name selects `loop.d/<name>` when present;
+otherwise the hint is passed to the default agent executable through
+`CTX_AGENT_LOOP`. Compaction rebuilds prompt context only; durable
+`messages.jsonl` stays untouched.
+
 Everything else is layered outside that loop:
 
 ```text
@@ -236,7 +259,9 @@ Heavy or OS-specific transports remain external processes on that boundary.
 For example, `cortexfs-channel-nostr` owns relay WebSockets and NIP-04/NIP-17
 cryptography while the core runtime only sees provider-neutral channel frames.
 This keeps a small host from loading every platform SDK into one process and
-makes per-channel restart and memory limits explicit.
+makes per-channel restart and memory limits explicit. Agent terminals and
+socket-activated runtimes likewise carry hard cgroup ceilings (`MemoryMax`,
+`CPUQuota`, `TasksMax`) so one sandboxed agent cannot exhaust the host.
 
 A terminal is a durable resource below a session. Its resource directory owns
 metadata and replayable events; a runtime PTY and socket are replaceable

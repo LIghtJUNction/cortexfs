@@ -135,7 +135,10 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
 pub(crate) const DEFAULT_AGENT_STEPS: u8 = 64;
 
 /// Default private `/tmp` capacity for one sandboxed execution.
-pub const DEFAULT_SANDBOX_TMPFS_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+///
+/// Kept at or below the agent terminal `MemoryMax` headroom so tmpfs pages
+/// cannot outrun the cgroup ceiling advertised by `support::quota`.
+pub const DEFAULT_SANDBOX_TMPFS_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Canonical agent control-file set materialized by bootstrap.
 pub const AGENT_CONTROL_FILES: &[&str] = &[
@@ -171,6 +174,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
 /// Entries may overlap [`AGENT_CONTROL_FILES`] to preserve canonical bootstrap materialization.
 pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &[
     "approval",
+    "compact.strategy",
     "loop",
     "tools",
     "system.md",

@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use cortexfs_context::{ContextBudget, History, Message, Summarizer, compact_history};
+    use cortexfs_context::{
+        ContextBudget, DefaultSummarizer, History, Message, Summarizer, compact_history,
+    };
 
     struct FixedSummary;
 
@@ -22,6 +24,21 @@ mod tests {
         let rendered = history.render(25);
         assert_eq!(rendered.omitted(), 2);
         assert!(rendered.text().contains("third"));
+    }
+
+    #[test]
+    fn default_summarizer_joins_omitted_messages() {
+        let history = History::from_messages([
+            Message::new("user", "first message with enough detail"),
+            Message::new("assistant", "second message with enough detail"),
+            Message::new("user", "third message with enough detail"),
+        ]);
+        let compacted = match compact_history(&history, 80, Some(&DefaultSummarizer)) {
+            Ok(value) => value,
+            Err(error) => match error {},
+        };
+        assert!(compacted.summarized());
+        assert!(compacted.omitted() > 0);
     }
 
     #[test]

@@ -54,7 +54,8 @@ const MAX_AGENT_TOOL_ARGC: usize = 64;
 const MAX_AGENT_TOOL_ARG_BYTES: usize = 8 * 1024;
 const MAX_AGENT_MODEL_FRAME_BYTES: usize = 256 * 1024;
 const MAX_AGENT_MODEL_FRAMES: usize = 1024;
-const MAX_AGENT_MODEL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+/// Cap captured model stdout so one runaway completion cannot pin multi-MiB RSS.
+const MAX_AGENT_MODEL_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_AGENT_MODEL_QUEUE_FRAMES: usize = 16;
 const MAX_RUNNER_STDIN_INPUT_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_RUNNER_CONTROL_BYTES: u64 = 64 * 1024;

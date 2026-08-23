@@ -75,6 +75,22 @@ Agent Unix 身份由宿主授权决定，不属于包 metadata。安装器根据
 
 `run` 项就是扩展入口。工具实现 Tool SDK，代理实现 Agent SDK；两者都只是普通可执行文件，因此 Rust、Shell 或其他主机语言都能实现。SDK agent 从标准输入读取一个运行时 Envelope，向外输出 JSONL 事件；它可能产出一次工具调用，由宿主执行权限校验并将观察结果回写给下一步。这就是自定义执行循环，不依赖常驻插件守护进程。
 
+官方默认实现仍可覆盖，控制文件与 SDK helper 如下：
+
+```text
+loop=chat|react|coding|planner|research   内置行为提示（默认 chat）
+loop=<name> + loop.d/<name>               自定义 loop 驱动可执行文件
+compact.strategy=truncate|summarize|<name>  历史重建策略（默认 truncate）
+compact.d/<name>                          自定义压缩可执行文件
+invoke.strategy=default|cli|sdk|<name>    工具调用面（默认 default）
+invoke.d/<name>                           自定义工具 invoke 可执行文件
+adapter=<family>|<name>                   channel 适配器族或自定义名
+adapter.d/<name>                          自定义 channel socket 驱动
+Agent SDK BuiltinLoop                     在自定义二进制内解释 CTX_AGENT_LOOP
+Tool SDK InvokeMode                       读取 CTX_TOOL_MODE / CTX_AUTHORIZED_OBJECT
+Channel SDK DriverLaunchConfig            读取 CORTEXFS_CHANNEL_* / CTX_CHANNEL_* 环境变量
+```
+
 拓扑关系仅由 `parent` 指定。每个代理通过 `agent:NAME` 声明父节点（`session:` 和 `run:` 仍可选）：
 
 ```toml

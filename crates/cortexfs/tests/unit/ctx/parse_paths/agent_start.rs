@@ -255,9 +255,15 @@ fn agent_start_builds_sandboxed_terminal_command() {
         "/workspace"
     ));
     assert!(bwrap.contains(&"--unshare-net".to_owned()));
+    assert!(bwrap.contains(&"--as-pid-1".to_owned()));
+    assert!(bwrap.contains(&"--new-session".to_owned()));
+    assert!(contains_arg_pair(&bwrap, "--cap-drop", "ALL"));
+    assert!(bwrap.contains(&"--unshare-uts".to_owned()));
+    assert!(contains_arg_pair(&bwrap, "--hostname", "cortexfs"));
     assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
     assert!(contains_empty_startup_bind(&bwrap, "/etc/profile"));
     assert!(contains_empty_startup_bind(&bwrap, "/etc/bash.bashrc"));
+    assert!(contains_empty_startup_bind(&bwrap, "/etc/environment"));
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/etc/profile.d"));
     assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
     assert!(contains_arg_pair(&bwrap, "--broker", "coder"));
@@ -925,6 +931,18 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
             && command
                 .args
                 .contains(&"--property=RestartSec=250ms".to_owned())
+            && command
+                .args
+                .contains(&"--property=MemoryMax=1G".to_owned())
+            && command
+                .args
+                .contains(&"--property=CPUQuota=200%".to_owned())
+            && command
+                .args
+                .contains(&"--property=TasksMax=256".to_owned())
+            && command
+                .args
+                .contains(&"--property=OOMPolicy=stop".to_owned())
             && command.args.contains(&"-i".to_owned())
             && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
             && command.args.contains(&"/usr/bin/bwrap".to_owned())
@@ -1158,6 +1176,10 @@ fn agent_start_chat_socket_command_uses_socket_activation() {
     assert!(command.args.contains(&"--user".to_owned()));
     assert!(contains_arg_pair(&command.args, "--unit", &unit));
     assert!(command.args.contains(&"--collect".to_owned()));
+    assert!(command.args.contains(&"--property=MemoryMax=512M".to_owned()));
+    assert!(command.args.contains(&"--property=CPUQuota=100%".to_owned()));
+    assert!(command.args.contains(&"--property=TasksMax=128".to_owned()));
+    assert!(command.args.contains(&"--property=OOMPolicy=stop".to_owned()));
     assert!(contains_arg_pair(
         &command.args,
         "--socket-property",

@@ -95,6 +95,22 @@ one hosted envelope on stdin and returns JSONL events. It may yield a tool call;
 the host performs the capability check and sends the observation back for the
 next step. This is the custom execution loop, without a resident plugin daemon.
 
+Official defaults stay convenient while remaining overrideable:
+
+```text
+loop=chat|react|coding|planner|research   built-in behavior hint (default chat)
+loop=<name> + loop.d/<name>               custom loop driver executable
+compact.strategy=truncate|summarize|<name> history rebuild strategy (default truncate)
+compact.d/<name>                          custom compaction executable
+invoke.strategy=default|cli|sdk|<name>    tool invoke surface (default default)
+invoke.d/<name>                           custom tool invoke executable
+adapter=<family>|<name>                   channel adapter family or custom name
+adapter.d/<name>                          custom channel socket driver executable
+Agent SDK BuiltinLoop helpers             interpret CTX_AGENT_LOOP inside your binary
+Tool SDK InvokeMode helpers               read CTX_TOOL_MODE / CTX_AUTHORIZED_OBJECT
+Channel SDK DriverLaunchConfig            read CORTEXFS_CHANNEL_* / CTX_CHANNEL_* env
+```
+
 Topology is just the `parent` edge. Every agent names its parent as
 `agent:NAME` (optional `session:` and `run:` qualifiers remain available), so a
 tree is visible in the same control files that enforce ownership:

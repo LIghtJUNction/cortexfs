@@ -145,6 +145,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
+        invoke_strategy: crate::tool::InvokeStrategy::default(),
     });
 
     assert!(contains_os_arg_triplet(
@@ -229,6 +230,7 @@ fn tool_bwrap_has_no_control_environment_without_host_control()
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
+        invoke_strategy: crate::tool::InvokeStrategy::default(),
     });
     assert!(
         !args
@@ -318,6 +320,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
+        invoke_strategy: crate::tool::InvokeStrategy::default(),
     });
     let mut command = std::process::Command::new(BWRAP_PROGRAM);
     command.args(args);
@@ -829,7 +832,7 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 use super::runtime::test_agent_run_config;
 use super::*;
 use crate::object::executor::exec::{
-    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout,
+    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout, tool_spawn_error,
 };
 use std::process::Command;
 
@@ -867,6 +870,24 @@ fn authorized_tool_target_maps_backing_source_tiers_under_ctx() {
     assert_eq!(
         authorized_tool_target(source, &user),
         PathBuf::from("/ctx/home/42/tool/user")
+    );
+}
+
+#[test]
+fn tool_spawn_error_names_missing_sandbox_helper() {
+    let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "No such file");
+    let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+    assert_eq!(
+        tool_spawn_error(OsStr::new(BWRAP_PROGRAM), &missing).message(),
+        format!("sandbox helper missing: {BWRAP_PROGRAM}")
+    );
+    assert_eq!(
+        tool_spawn_error(OsStr::new("/bin/echo"), &missing).message(),
+        missing.to_string()
+    );
+    assert_eq!(
+        tool_spawn_error(OsStr::new(BWRAP_PROGRAM), &other).message(),
+        other.to_string()
     );
 }
 

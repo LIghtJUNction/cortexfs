@@ -1,6 +1,8 @@
 pub mod channel;
 pub(crate) mod channelcaps;
 pub(crate) mod channelenv;
+pub mod compactabi;
+pub(crate) mod compactexec;
 pub mod control;
 pub mod egress;
 pub mod hookabi;

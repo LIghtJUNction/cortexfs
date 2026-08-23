@@ -1,5 +1,21 @@
 use crate::{History, HistorySelection, Message};
 
+/// Built-in summarizer that joins omitted messages as bullet lines.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DefaultSummarizer;
+
+impl Summarizer for DefaultSummarizer {
+    type Error = std::convert::Infallible;
+
+    fn summarize(&self, messages: &[Message]) -> Result<String, Self::Error> {
+        Ok(messages
+            .iter()
+            .map(|message| format!("- {}: {}", message.role(), message.content().trim()))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
 /// Provider-independent summary callback for older context.
 pub trait Summarizer {
     /// Error returned by the selected summary implementation.
