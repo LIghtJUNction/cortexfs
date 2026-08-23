@@ -73,18 +73,20 @@ ctx agent wait coder work-123 --session default
 Provider 的密钥不会写入模型文件或 `.d/` 控制目录。提供者适配器会优先从提供者环境变量候选项解析 API Key（若设置），其次读取 CortexFS 系统密钥存储
 `/var/lib/cortexfs/secrets/provider/<provider>/<slot>`。若缺少所需凭据，模型状态为 `unconfigured`。
 
-先为常见提供者安装文件化预设：
+先为常见提供者安装文件化预设。`list` 会打印预设名、认证方式和目标文件：
 
 ```bash
 ctx provider preset list
 ctx provider preset show google
-ctx provider preset install codex
+ctx provider preset install openrouter
+ctx provider preset install deepseek
+ctx provider preset install compatible --name local --base-url http://127.0.0.1:8317/v1 --model custom-model
 ctx provider preset install openai
 ctx provider preset install anthropic
 ctx provider preset install google
 ```
 
-规范提供者名为 `openai`、`anthropic` 与 `google`。`codex` 是 `openai` 预设的别名；`gemini` 是 `google` 预设的别名。安装 `codex` 后，模型仍通过规范路径 `/ctx/model/openai/<model>` 映射。CortexFS 不会新增 `/ctx/model/codex` 命名空间。
+规范提供者名仍是 `openai`、`anthropic` 与 `google`。`gemini` 是 `google` 的别名。聚合与地区 OpenAI 兼容预设会写入显式 `name`，使 `/ctx/model/<provider>` 保持稳定对象名。`compatible` 用于任意兼容端点，不是某个本地运行时的特殊分支。
 
 模型代理不属于任何 agent，也不会写入 provider JSON。唯一的全局路由表是：
 

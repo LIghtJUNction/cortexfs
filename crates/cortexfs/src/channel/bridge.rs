@@ -1,4 +1,6 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use cortexfs_channels::{
     ChannelError, ChannelId, ChannelIncoming, ChannelIncomingEvent, ChannelSessionRoute,
@@ -10,6 +12,8 @@ mod dispatch;
 mod event;
 mod handle;
 mod safe;
+mod session;
+mod slash;
 mod socket;
 
 /// Errors at the boundary between a channel adapter and an agent socket.
@@ -53,6 +57,7 @@ pub struct AgentChannelBridge {
     route: ChannelSessionRoute,
     cwd: Option<String>,
     channel: Option<ChannelId>,
+    generations: Arc<Mutex<BTreeMap<String, u32>>>,
 }
 
 impl AgentChannelBridge {
@@ -61,12 +66,7 @@ impl AgentChannelBridge {
         route: ChannelSessionRoute,
         cwd: Option<String>,
     ) -> Self {
-        Self {
-            socket: socket.into(),
-            route,
-            cwd,
-            channel: None,
-        }
+        Self::build(socket, route, cwd, None)
     }
 
     pub fn new_with_channel(
@@ -75,11 +75,21 @@ impl AgentChannelBridge {
         cwd: Option<String>,
         channel: ChannelId,
     ) -> Self {
+        Self::build(socket, route, cwd, Some(channel))
+    }
+
+    fn build(
+        socket: impl Into<PathBuf>,
+        route: ChannelSessionRoute,
+        cwd: Option<String>,
+        channel: Option<ChannelId>,
+    ) -> Self {
         Self {
             socket: socket.into(),
             route,
             cwd,
-            channel: Some(channel),
+            channel,
+            generations: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 

@@ -32,8 +32,9 @@ Every persistent mutation has an exact typed confirmation. Re-running is
 idempotent: program and unit files are updated while storage, secrets, provider
 configuration, existing environment files, and `/ctx` user state are
 preserved. A genuine first install chooses a language from the system locale
-and offers optional OpenAI, Codex, Anthropic, or Google onboarding through the
-existing provider commands.
+and offers optional OpenAI, Codex, Anthropic, Google, OpenRouter, DeepSeek,
+Groq, or OpenAI-compatible onboarding through the existing provider commands.
+It can also print an IM host template through `cortexfs-channel list|show|preset`.
 
 Arch users may alternatively install `cortexfs-git` from the AUR, enable
 `cortexfs.service`, and run `ctx doctor`.

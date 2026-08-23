@@ -619,22 +619,26 @@ onboard_ai() {
     (( FIRST_INSTALL )) || return
     card "$( [[ $LANGUAGE == zh ]] && printf '06 · AI 接入（可选）' || printf '06 · AI onboarding (optional)' )"
     say "Choose a vendor-neutral provider path:" "请选择 provider 接入方式："
-    say "  1 OpenAI API key    2 Codex OAuth device login" \
-        "  1 OpenAI API Key    2 Codex OAuth 设备登录"
-    say "  3 Anthropic API key 4 Google API key    5 Later [default]" \
-        "  3 Anthropic API Key 4 Google API Key    5 稍后配置 [默认]"
+    say "  1 OpenAI  2 Codex OAuth  3 Anthropic  4 Google" \
+        "  1 OpenAI  2 Codex OAuth  3 Anthropic  4 Google"
+    say "  5 OpenRouter  6 DeepSeek  7 Groq  8 Compatible URL  9 Later [default]" \
+        "  5 OpenRouter  6 DeepSeek  7 Groq  8 兼容端点  9 稍后配置 [默认]"
     printf '%s›%s ' "$C_SIGNAL" "$C_RESET" >"$TTY_PATH"
     IFS= read -r choice <"$TTY_PATH" || choice=
-    case "${choice:-5}" in
+    case "${choice:-9}" in
         1) configure_api_provider openai "OpenAI API key" ;;
         2) configure_codex ;;
         3) configure_api_provider anthropic "Anthropic API key" ;;
         4) configure_api_provider google "Google API key" ;;
-        5) info "AI onboarding skipped. Run ctx provider preset list later." \
+        5) configure_api_provider openrouter "OpenRouter API key" ;;
+        6) configure_api_provider deepseek "DeepSeek API key" ;;
+        7) configure_api_provider groq "Groq API key" ;;
+        8) configure_compatible_provider ;;
+        9) info "AI onboarding skipped. Run ctx provider preset list later." \
             "已跳过 AI 接入；稍后可运行 ctx provider preset list。" ;;
         *) die "Invalid onboarding choice." "AI 接入选项无效。" ;;
     esac
-    if [[ ${choice:-5} != 5 ]]; then
+    if [[ ${choice:-9} != 9 ]]; then
         sudo systemctl restart cortexfs.service
         systemctl is-active --quiet cortexfs.service ||
             die "The service failed after provider configuration." \
@@ -642,8 +646,58 @@ onboard_ai() {
     fi
 }
 
+configure_compatible_provider() {
+    local name base model
+    say "Plan: sudo ctx provider preset install compatible --name NAME --base-url URL" \
+        "计划：sudo ctx provider preset install compatible --name NAME --base-url URL"
+    confirm "CONFIGURE AI" \
+        "Type CONFIGURE AI to install an OpenAI-compatible endpoint." \
+        "输入 CONFIGURE AI，安装 OpenAI 兼容端点。"
+    sudo -v <"$TTY_PATH"
+    printf 'name: ' >"$TTY_PATH"
+    IFS= read -r name <"$TTY_PATH" || name=
+    printf 'base URL: ' >"$TTY_PATH"
+    IFS= read -r base <"$TTY_PATH" || base=
+    printf 'model (optional): ' >"$TTY_PATH"
+    IFS= read -r model <"$TTY_PATH" || model=
+    [[ -n $name && -n $base ]] || die "Compatible name and base URL are required." "兼容端点需要 name 与 base URL。"
+    if [[ -n $model ]]; then
+        sudo ctx provider preset install compatible --name "$name" --base-url "$base" --model "$model"
+    else
+        sudo ctx provider preset install compatible --name "$name" --base-url "$base"
+    fi
+    read_secret "API key: " || die "No API key was entered." "未输入 API Key。"
+    store_api_secret "$name" "$SECRET_VALUE"
+    SECRET_VALUE=''
+}
+
+onboard_im() {
+    local choice family
+    (( FIRST_INSTALL )) || return
+    card "$( [[ $LANGUAGE == zh ]] && printf '07 · IM 接入（可选）' || printf '07 · IM onboarding (optional)' )"
+    say "Discover hosts with cortexfs-channel list; templates stay outside /ctx." \
+        "用 cortexfs-channel list 查看目录；模板不写入 /ctx。"
+    say "  1 Telegram  2 Discord  3 Slack  4 Later [default]" \
+        "  1 Telegram  2 Discord  3 Slack  4 稍后配置 [默认]"
+    printf '%s›%s ' "$C_SIGNAL" "$C_RESET" >"$TTY_PATH"
+    IFS= read -r choice <"$TTY_PATH" || choice=
+    case "${choice:-4}" in
+        1) family=telegram ;;
+        2) family=discord ;;
+        3) family=slack ;;
+        4) info "IM onboarding skipped. Run cortexfs-channel list later." \
+            "已跳过 IM 接入；稍后可运行 cortexfs-channel list。"
+            return ;;
+        *) die "Invalid IM onboarding choice." "IM 接入选项无效。" ;;
+    esac
+    info "Next: cortexfs-channel show $family" "下一步：cortexfs-channel show $family"
+    info "Then: cortexfs-channel preset $family" "然后：cortexfs-channel preset $family"
+    info "Fill the owner-only env file and start the matching cortexfs-channel host." \
+        "填写仅所有者可读的环境文件，再启动对应的 cortexfs-channel 宿主。"
+}
+
 verify_installation() {
-    card "$( [[ $LANGUAGE == zh ]] && printf '07 · 验证' || printf '07 · Verification' )"
+    card "$( [[ $LANGUAGE == zh ]] && printf '08 · 验证' || printf '08 · Verification' )"
     systemctl is-active --quiet cortexfs.service ||
         die "cortexfs.service is inactive." "cortexfs.service 未运行。"
     findmnt -n /ctx >/dev/null ||
@@ -697,6 +751,7 @@ main() {
     snapshots=$(snapshot_artifacts "$source")
     deploy "$source" "$snapshots"
     onboard_ai
+    onboard_im
     verify_installation
     finish
 }

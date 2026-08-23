@@ -17,9 +17,21 @@ impl AgentChannelBridge {
         let inbound = self.bind_message(inbound);
         inbound.body.validate()?;
         sink.begin(&inbound);
+        if let Some(reply) = super::slash::reply(self, &inbound) {
+            return match reply {
+                Ok(outbound) => {
+                    sink.complete(&outbound.body.text);
+                    Ok(outbound)
+                }
+                Err(error) => {
+                    sink.error(super::safe::message(&error));
+                    Err(error)
+                }
+            };
+        }
         let interaction = interaction::InteractionRequest::Input {
             request_id: self.route.request_id_for(&inbound),
-            session: self.route.session_for_message(&inbound),
+            session: self.session_for_inbound(&inbound),
             scope: "private".to_owned(),
             input: inbound.body.text.clone(),
             event: attachment_event(&inbound),

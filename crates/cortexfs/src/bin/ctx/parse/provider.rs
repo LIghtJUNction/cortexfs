@@ -41,6 +41,9 @@ pub(crate) enum ProviderArgs {
     },
     PresetInstall {
         preset: String,
+        name: Option<String>,
+        base_url: Option<String>,
+        model: Option<String>,
     },
 }
 
@@ -294,15 +297,49 @@ pub(crate) fn parse_provider_preset_command(
             no_extra_args(values)?;
             Ok(Command::Provider(ProviderArgs::PresetShow { preset }))
         }
-        "install" => {
-            let preset = required_arg(&mut values, "provider preset install requires a preset")?;
-            no_extra_args(values)?;
-            Ok(Command::Provider(ProviderArgs::PresetInstall { preset }))
-        }
+        "install" => parse_provider_preset_install(values),
         _ => Err(CliError::usage(
             "provider preset expects list, show, or install",
         )),
     }
+}
+
+fn parse_provider_preset_install(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let preset = required_arg(&mut values, "provider preset install requires a preset")?;
+    let mut name = None;
+    let mut base_url = None;
+    let mut model = None;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--name" => {
+                name = Some(required_arg(
+                    &mut values,
+                    "compatible --name requires a value",
+                )?);
+            }
+            "--base-url" => {
+                base_url = Some(required_arg(
+                    &mut values,
+                    "compatible --base-url requires a value",
+                )?);
+            }
+            "--model" => {
+                model = Some(required_arg(
+                    &mut values,
+                    "compatible --model requires a value",
+                )?);
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(Command::Provider(ProviderArgs::PresetInstall {
+        preset,
+        name,
+        base_url,
+        model,
+    }))
 }
 
 pub(crate) fn parse_provider_secret_command(
