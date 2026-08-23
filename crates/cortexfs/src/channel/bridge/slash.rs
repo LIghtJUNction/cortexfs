@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 use crate::is_model_name;
 use cortexfs_channels::{InboundMessage, MessageBody, OutboundMessage};
 use cortexfs_runtime_client::status;
+use cortexfs_runtime_client::RuntimeClientError;
 
 use super::AgentChannelBridge;
 
-const HELP: &str = "/help — commands\n/models — list projected models\n/model — current session model\n/model PROVIDER/MODEL — host-side switch hint\n/new — start a fresh session for this conversation";
+const HELP: &str = "/help — commands\n/models — list projected models\n/model — current session model\n/model PROVIDER/MODEL — host-side switch hint (ctx set agent/<name>.d/model …)\n/new — start a fresh session for this conversation";
 
 pub(super) fn reply(
     bridge: &AgentChannelBridge,
@@ -24,6 +25,15 @@ pub(super) fn reply(
         _ => None,
     }?;
     Some(outbound(inbound, body))
+}
+
+fn list_models_from(root: &Path) -> String {
+    let mut names = projected_models(root);
+    if names.is_empty() {
+        return "no projected models under /ctx/model".to_owned();
+    }
+    names.sort();
+    names.join("\n")
 }
 
 fn outbound(
@@ -46,7 +56,10 @@ fn current_model(bridge: &AgentChannelBridge, inbound: &InboundMessage) -> Strin
             "session {session}\nmodel {}",
             state.model.as_deref().unwrap_or("unknown")
         ),
-        Err(_error) => format!("session {session}\nmodel unknown"),
+        Err(RuntimeClientError::CannotConnect) => format!(
+            "session {session}\nmodel unknown (agent socket unavailable; start the agent unit first)"
+        ),
+        Err(error) => format!("session {session}\nmodel unknown ({error})"),
     }
 }
 
@@ -61,12 +74,7 @@ fn switch_hint(model: &str) -> String {
 
 fn list_models() -> String {
     let root = std::env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from("/ctx"), PathBuf::from);
-    let mut names = projected_models(&root);
-    if names.is_empty() {
-        return "no projected models under /ctx/model".to_owned();
-    }
-    names.sort();
-    names.join("\n")
+    list_models_from(&root)
 }
 
 #[expect(
@@ -108,12 +116,20 @@ fn projected_models(root: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HELP, switch_hint};
+    use super::{HELP, list_models_from, switch_hint};
 
     #[test]
     fn model_switch_hint_validates_names() {
         assert!(switch_hint("not-a-model").contains("invalid"));
         assert!(switch_hint("openrouter/gpt-5.6").contains("ctx set"));
         assert!(HELP.contains("/new"));
+    }
+
+    #[test]
+    fn list_models_scans_projected_models() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(root.path().join("model/openai/gpt-5.6")).expect("mkdir");
+        let text = list_models_from(root.path());
+        assert!(text.contains("openai/gpt-5.6"), "{text}");
     }
 }

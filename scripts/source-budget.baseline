@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=176334
-prod=122231
+all=176378
+prod=122248
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 981 crates/cortexfs-agent-sdk/src/lib.rs
@@ -299,8 +299,8 @@ prod=122231
 125 crates/cortexfs/src/bin/auth/browser.rs
 61 crates/cortexfs/src/bin/auth/device.rs
 95 crates/cortexfs/src/bin/auth/main.rs
-115 crates/cortexfs/src/bin/channel/catalog.rs
-59 crates/cortexfs/src/bin/channel/catalog/setup.rs
+142 crates/cortexfs/src/bin/channel/catalog.rs
+64 crates/cortexfs/src/bin/channel/catalog/setup.rs
 17 crates/cortexfs/src/bin/channel/commands/bluesky.rs
 17 crates/cortexfs/src/bin/channel/commands/common.rs
 16 crates/cortexfs/src/bin/channel/commands/dingtalk.rs
@@ -324,13 +324,13 @@ prod=122231
 21 crates/cortexfs/src/bin/channel/commands/web.rs
 105 crates/cortexfs/src/bin/channel/config/disk.rs
 63 crates/cortexfs/src/bin/channel/config/disk/value.rs
-588 crates/cortexfs/src/bin/channel/config.rs
+587 crates/cortexfs/src/bin/channel/config.rs
 141 crates/cortexfs/src/bin/channel/gmail/api.rs
 25 crates/cortexfs/src/bin/channel/gmail/config.rs
 119 crates/cortexfs/src/bin/channel/gmail/control/ops.rs
 72 crates/cortexfs/src/bin/channel/gmail/control.rs
 125 crates/cortexfs/src/bin/channel/gmail.rs
-41 crates/cortexfs/src/bin/channel/main.rs
+43 crates/cortexfs/src/bin/channel/main.rs
 31 crates/cortexfs/src/bin/channel/webhook/challenge.rs
 104 crates/cortexfs/src/bin/channel/webhook/control/native.rs
 59 crates/cortexfs/src/bin/channel/webhook/control/ops.rs
@@ -456,8 +456,8 @@ prod=122231
 67 crates/cortexfs/src/channel/bridge/handle.rs
 155 crates/cortexfs/src/channel/bridge.rs
 18 crates/cortexfs/src/channel/bridge/safe.rs
-66 crates/cortexfs/src/channel/bridge/session.rs
-115 crates/cortexfs/src/channel/bridge/slash.rs
+30 crates/cortexfs/src/channel/bridge/session.rs
+135 crates/cortexfs/src/channel/bridge/slash.rs
 15 crates/cortexfs/src/channel/bridge/socket.rs
 105 crates/cortexfs/src/channel/control/codec.rs
 44 crates/cortexfs/src/channel/control/config.rs

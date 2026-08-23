@@ -429,7 +429,8 @@ expected_units() {
         cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
         cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
         cortexfs-channel-wechat.service cortexfs-channel-voice.service \
-        cortexfs-channel-slack.service cortexfs-channel-mqtt.service \
+        cortexfs-channel-slack.service cortexfs-channel-telegram.service \
+        cortexfs-channel-mqtt.service \
         cortexfs-channel-clawdtalk.service cortexfs-channel-dingtalk.service \
         cortexfs-channel-email.service cortexfs-channel-gmail.service \
         cortexfs-channel-irc.service cortexfs-channel-matrix.service \
@@ -592,11 +593,103 @@ configure_api_provider() {
         die "No API key was entered." "未输入 API Key。"
     store_api_secret "$provider" "$SECRET_VALUE"
     SECRET_VALUE=''
+    bind_default_agent_model "$provider"
 }
 
 store_api_secret() {
     local provider=$1 secret=$2
     printf '%s\n' "$secret" | sudo ctx provider secret set "$provider"
+}
+
+default_model_for_provider() {
+    case $1 in
+        openai | codex) printf '%s\n' gpt-5.6 ;;
+        deepseek) printf '%s\n' deepseek-chat ;;
+        *) return 1 ;;
+    esac
+}
+
+bind_default_agent_model() {
+    local provider=$1 model=${2:-}
+    if [[ -z $model ]]; then
+        model=$(default_model_for_provider "$provider") || return 0
+    fi
+    sudo ctx agent start coder --session default >/dev/null 2>&1 || true
+    sudo ctx set "agent/coder.d/model" "$provider/$model"
+    info "Bound agent/coder.d/model to $provider/$model." \
+        "已将 agent/coder.d/model 绑定到 $provider/$model。"
+}
+
+install_channel_env() {
+    local path=$1
+    shift
+    sudo install -d -m 0700 /etc/cortexfs/channels
+    printf '%s\n' "$@" | sudo tee "$path" >/dev/null
+    sudo chmod 600 "$path"
+}
+
+enable_im_services() {
+    local unit
+    sudo ctx agent start coder --session default >/dev/null 2>&1 || true
+    for unit in "$@"; do
+        sudo systemctl enable --now "$unit"
+        systemctl is-active --quiet "$unit" ||
+            warn "Channel unit $unit is not active yet; inspect its journal." \
+                "频道 unit $unit 尚未 active；请检查其 journal。"
+    done
+}
+
+configure_im_telegram() {
+    read_secret "Telegram bot token: " ||
+        die "No Telegram token was entered." "未输入 Telegram token。"
+    install_channel_env /etc/cortexfs/channels/telegram.env \
+        "CORTEXFS_AGENT=coder" \
+        "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock" \
+        "CORTEXFS_CHANNEL_ID=telegram.primary" \
+        "CORTEXFS_TELEGRAM_TOKEN=$SECRET_VALUE"
+    SECRET_VALUE=''
+    enable_im_services cortexfs-channel-telegram.service
+}
+
+configure_im_discord() {
+    local app_id
+    printf 'Discord application id: ' >"$TTY_PATH"
+    IFS= read -r app_id <"$TTY_PATH" || app_id=
+    read_secret "Discord bot token: " ||
+        die "No Discord bot token was entered." "未输入 Discord bot token。"
+    [[ -n $app_id && -n $SECRET_VALUE ]] ||
+        die "Discord application id and bot token are required." \
+            "Discord 需要 application id 与 bot token。"
+    sudo install -d -m 0700 /etc/cortexfs/channels
+    sudo tee /etc/cortexfs/channels/discord.toml >/dev/null <<EOF
+application_id = "$app_id"
+bot_token = "$SECRET_VALUE"
+agent_socket = "/ctx/agent/coder.sock"
+agent = "coder"
+session_prefix = "discord"
+EOF
+    sudo chmod 600 /etc/cortexfs/channels/discord.toml
+    SECRET_VALUE=''
+    enable_im_services cortexfs-channel@discord.service
+}
+
+configure_im_slack() {
+    local app bot
+    read_secret "Slack app token (xapp-...): " ||
+        die "No Slack app token was entered." "未输入 Slack app token。"
+    app=$SECRET_VALUE
+    read_secret "Slack bot token (xoxb-...): " ||
+        die "No Slack bot token was entered." "未输入 Slack bot token。"
+    bot=$SECRET_VALUE
+    SECRET_VALUE=''
+    install_channel_env /etc/cortexfs/channels/slack-driver.env \
+        "CORTEXFS_AGENT=coder" \
+        "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock" \
+        "CORTEXFS_CHANNEL_ID=slack.primary"
+    install_channel_env /etc/cortexfs/channels/slack.env \
+        "CORTEXFS_SLACK_APP_TOKEN=$app" \
+        "CORTEXFS_SLACK_BOT_TOKEN=$bot"
+    enable_im_services cortexfs-channel-driver@slack.service cortexfs-channel-slack.service
 }
 
 configure_codex() {
@@ -612,6 +705,7 @@ configure_codex() {
     sudo -v <"$TTY_PATH"
     sudo ctx provider preset install codex
     sudo ctx provider oauth login codex --device
+    bind_default_agent_model codex
 }
 
 onboard_ai() {
@@ -670,31 +764,48 @@ configure_compatible_provider() {
     read_secret "API key: " || die "No API key was entered." "未输入 API Key。"
     store_api_secret "$name" "$SECRET_VALUE"
     SECRET_VALUE=''
+    [[ -n $model ]] && bind_default_agent_model "$name" "$model"
 }
 
 onboard_im() {
-    local choice family
+    local choice
     (( FIRST_INSTALL )) || return
     card "$( [[ $LANGUAGE == zh ]] && printf '07 · IM 接入（可选）' || printf '07 · IM onboarding (optional)' )"
-    say "Discover hosts with cortexfs-channel list; templates stay outside /ctx." \
-        "用 cortexfs-channel list 查看目录；模板不写入 /ctx。"
+    say "Choose a channel family; secrets stay in /etc/cortexfs/channels." \
+        "选择频道 family；密钥写入 /etc/cortexfs/channels。"
     say "  1 Telegram  2 Discord  3 Slack  4 Later [default]" \
         "  1 Telegram  2 Discord  3 Slack  4 稍后配置 [默认]"
     printf '%s›%s ' "$C_SIGNAL" "$C_RESET" >"$TTY_PATH"
     IFS= read -r choice <"$TTY_PATH" || choice=
     case "${choice:-4}" in
-        1) family=telegram ;;
-        2) family=discord ;;
-        3) family=slack ;;
+        1)
+            confirm "CONFIGURE IM" \
+                "Type CONFIGURE IM to store Telegram credentials and start its unit." \
+                "输入 CONFIGURE IM，保存 Telegram 凭据并启动对应 unit。"
+            # shellcheck disable=SC2024
+            sudo -v <"$TTY_PATH"
+            configure_im_telegram
+            ;;
+        2)
+            confirm "CONFIGURE IM" \
+                "Type CONFIGURE IM to store Discord credentials and start its unit." \
+                "输入 CONFIGURE IM，保存 Discord 凭据并启动对应 unit。"
+            # shellcheck disable=SC2024
+            sudo -v <"$TTY_PATH"
+            configure_im_discord
+            ;;
+        3)
+            confirm "CONFIGURE IM" \
+                "Type CONFIGURE IM to store Slack credentials and start its units." \
+                "输入 CONFIGURE IM，保存 Slack 凭据并启动对应 unit。"
+            # shellcheck disable=SC2024
+            sudo -v <"$TTY_PATH"
+            configure_im_slack
+            ;;
         4) info "IM onboarding skipped. Run cortexfs-channel list later." \
-            "已跳过 IM 接入；稍后可运行 cortexfs-channel list。"
-            return ;;
+            "已跳过 IM 接入；稍后可运行 cortexfs-channel list。" ;;
         *) die "Invalid IM onboarding choice." "IM 接入选项无效。" ;;
     esac
-    info "Next: cortexfs-channel show $family" "下一步：cortexfs-channel show $family"
-    info "Then: cortexfs-channel preset $family" "然后：cortexfs-channel preset $family"
-    info "Fill the owner-only env file and start the matching cortexfs-channel host." \
-        "填写仅所有者可读的环境文件，再启动对应的 cortexfs-channel 宿主。"
 }
 
 verify_installation() {
@@ -721,6 +832,10 @@ finish() {
         "可尝试：ctx status · ctx ls · ctx doctor · ctx --help"
     say "Re-running the installer is safe: binaries and units update; data and provider state stay in place." \
         "可安全重复运行：二进制和 unit 会更新，数据与 provider 状态保持不变。"
+    if (( FIRST_INSTALL )); then
+        say "Next: ctx doctor · ctx set agent/coder.d/model PROVIDER/MODEL · cortexfs-channel list" \
+            "下一步：ctx doctor · ctx set agent/coder.d/model PROVIDER/MODEL · cortexfs-channel list"
+    fi
 }
 
 main() {
