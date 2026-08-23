@@ -1,9 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use crate::channel::{
-    AdapterStrategy, read_adapter_strategy, resolve_channel_adapter_executable,
-};
+use crate::channel::{AdapterStrategy, read_adapter_strategy, resolve_channel_adapter_executable};
 
 fn write_hook(path: &std::path::Path, body: &str, mode: u32) -> std::io::Result<()> {
     fs::write(path, format!("#!/bin/sh\n{body}\n"))?;
@@ -11,10 +9,11 @@ fn write_hook(path: &std::path::Path, body: &str, mode: u32) -> std::io::Result<
 }
 
 #[test]
-fn adapter_strategy_defaults_to_catalog_family() {
-    let root = tempfile::tempdir().unwrap();
+fn adapter_strategy_defaults_to_catalog_family() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
     let strategy = read_adapter_strategy(root.path(), "telegram.primary");
     assert_eq!(strategy, AdapterStrategy::Catalog("telegram".to_owned()));
+    Ok(())
 }
 
 #[test]

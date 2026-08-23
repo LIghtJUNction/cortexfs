@@ -34,7 +34,7 @@ pub fn resolve_tool_invoke_executable(control_dir: &Path, default: &Path) -> Pat
 /// Returns the `CTX_TOOL_MODE` value implied by one invoke strategy.
 #[must_use]
 pub fn invoke_tool_mode(strategy: &InvokeStrategy) -> Option<&'static str> {
-    match strategy {
+    match *strategy {
         InvokeStrategy::Cli => Some("cli"),
         InvokeStrategy::Sdk => Some("native"),
         InvokeStrategy::Default | InvokeStrategy::Custom(_) => None,

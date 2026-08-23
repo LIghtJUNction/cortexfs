@@ -12,13 +12,17 @@ use crate::runtime::compactabi::{
     COMPACT_ABI, CompactError, CompactInvocation, MAX_COMPACT_INPUT_BYTES,
     MAX_COMPACT_OUTPUT_BYTES, compact_frame,
 };
-use cortexfs_context::Message;
 use crate::runtime::socket::command_for_agent_identity;
 use crate::support::command::TRUSTED_PATH;
 use crate::support::process::{CappedOutputError, CappedOutputWait, wait_capped_child_output};
+use cortexfs_context::Message;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "compactexec stays crate-local while agent prompt code calls it through runtime"
+)]
 pub(crate) fn run_custom_compact(
     path: &Path,
     invocation: &CompactInvocation<'_>,
@@ -83,9 +87,8 @@ pub(crate) fn run_custom_compact(
     );
     match result {
         Ok(output) if output.status.success() => {
-            let summary = String::from_utf8(output.stdout).map_err(|_error| {
-                CompactError::new("EINVAL", name)
-            })?;
+            let summary = String::from_utf8(output.stdout)
+                .map_err(|_error| CompactError::new("EINVAL", name))?;
             if summary.contains('\0') {
                 return Err(CompactError::new("EINVAL", name));
             }

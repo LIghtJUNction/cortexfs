@@ -27,10 +27,10 @@ impl CompactStrategy {
     /// Returns the stable control value.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        match self {
+        match *self {
             Self::Truncate => "truncate",
             Self::Summarize => "summarize",
-            Self::Custom(value) => value,
+            Self::Custom(ref value) => value,
         }
     }
 }

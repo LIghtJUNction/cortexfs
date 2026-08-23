@@ -226,6 +226,10 @@ fn update_socket_prompt(
         .map_err(|_error| runtime::control::RunCapabilityError::CannotWrite)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "send path keeps session prep, compaction, recorder, and streaming egress in one frame handler"
+)]
 pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,

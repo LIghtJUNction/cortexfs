@@ -22,6 +22,10 @@ pub fn read_compact_strategy(control_dir: &Path) -> CompactStrategy {
 
 /// Rebuilds bounded prompt history using the selected compaction strategy.
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "history compaction keeps strategy, control dir, and session identity explicit"
+)]
 pub fn format_history_with_strategy(
     messages: &str,
     max_chars: usize,

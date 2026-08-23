@@ -128,8 +128,5 @@ fn tool_invoke_strategy(name: &str) -> crate::tool::InvokeStrategy {
     let Ok(root) = env::var("CTX_ROOT") else {
         return crate::tool::InvokeStrategy::default();
     };
-    crate::tool::read_invoke_strategy(&cortexfs_paths::tool_control_path(
-        Path::new(&root),
-        name,
-    ))
+    crate::tool::read_invoke_strategy(&cortexfs_paths::tool_control_path(Path::new(&root), name))
 }

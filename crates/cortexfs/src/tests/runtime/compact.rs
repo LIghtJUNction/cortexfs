@@ -75,8 +75,7 @@ fn custom_compact_executable_receives_bounded_history_frame()
 }
 
 #[test]
-fn loop_resolve_uses_loop_d_executable_for_custom_loop() -> Result<(), Box<dyn std::error::Error>>
-{
+fn loop_resolve_uses_loop_d_executable_for_custom_loop() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("loop"), "myloop\n")?;
     let phase = root.path().join("loop.d");
@@ -84,8 +83,7 @@ fn loop_resolve_uses_loop_d_executable_for_custom_loop() -> Result<(), Box<dyn s
     write_hook(&phase.join("myloop"), "exit 0", 0o700)?;
     let default = root.path().join("agent");
     fs::write(&default, b"\0")?;
-    let resolved =
-        crate::agent::loopresolve::resolve_agent_loop_executable(root.path(), &default);
+    let resolved = crate::agent::loopresolve::resolve_agent_loop_executable(root.path(), &default);
     assert_eq!(resolved, phase.join("myloop"));
     Ok(())
 }
