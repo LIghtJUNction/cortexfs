@@ -264,6 +264,12 @@ default bind address is loopback; a non-loopback bind requires
 
 `cortexfs-channel` is an explicit foreground process. It is not a `ctx`
 subcommand, does not create a new root namespace, and does not watch files.
+`cortexfs-channel list`, `show FAMILY`, and `preset FAMILY` are host-side
+discovery helpers: they print the catalog, required secrets, and an env
+template to stdout. They do not start a transport or write `/ctx`.
+Inbound `/help`, `/models`, `/model`, and `/new` are answered by the existing
+channel bridge before the agent socket; `/new` only rotates the in-memory
+session generation for that host process.
 The CLI frontend is intentionally `ctx agent chat` / `ctxchat`; it shares the
 interaction ABI and does not introduce a second CLI channel protocol.
 Use `cortexfs-channel web` for a browser/API frontend and `webhook` for a

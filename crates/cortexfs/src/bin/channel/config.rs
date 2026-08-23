@@ -8,7 +8,7 @@ pub use disk::DiscordConfigError;
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error(
-        "usage: cortexfs-channel <discord [--config PATH]|telegram|bluesky|dingtalk|matrix|mattermost|qq|reddit|gmail|email|irc|twitch|twitter|mochat|notion|signal|webhook|web|driver>"
+        "usage: cortexfs-channel <list|show FAMILY|preset FAMILY|discord [--config PATH]|telegram|bluesky|dingtalk|matrix|mattermost|qq|reddit|gmail|email|irc|twitch|twitter|mochat|notion|signal|webhook|web|driver>"
     )]
     Usage,
     #[error("missing environment variable {0}")]
@@ -28,7 +28,15 @@ pub struct CommonConfig {
     pub progress: ChannelProgressPolicy,
 }
 #[derive(Debug)]
+pub enum CatalogAction {
+    List,
+    Show { family: String },
+    Preset { family: String },
+}
+
+#[derive(Debug)]
 pub enum CommandConfig {
+    Catalog(CatalogAction),
     Discord {
         config: DiscordConfig,
     },
@@ -151,6 +159,9 @@ pub enum Platform {
 pub fn load() -> Result<CommandConfig, ConfigError> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or(ConfigError::Usage)?;
+    if matches!(command.as_str(), "list" | "show" | "preset") {
+        return super::catalog::load_action(&command, args);
+    }
     if command == "discord" {
         return disk::load_command(args);
     }

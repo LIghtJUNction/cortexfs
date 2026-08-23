@@ -26,6 +26,7 @@ mod webhook;
 
 pub(crate) fn run(config: CommandConfig) -> Result<(), Box<dyn Error>> {
     match config {
+        CommandConfig::Catalog(action) => super::catalog::run(action),
         CommandConfig::Discord { config } => discord::run(&config),
         CommandConfig::Telegram {
             common,

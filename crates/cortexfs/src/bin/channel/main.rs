@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod catalog;
 pub mod commands;
 pub mod config;
 pub mod gmail;

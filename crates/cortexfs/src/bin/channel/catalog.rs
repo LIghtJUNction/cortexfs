@@ -1,0 +1,115 @@
+use cortexfs_channels::platform::catalog::find;
+use cortexfs_channels::{CHANNEL_CATALOG, ChannelTransport};
+use std::error::Error;
+use std::io::{self, Write};
+
+use super::config::{CatalogAction, CommandConfig, ConfigError};
+
+mod setup;
+use setup::lookup;
+
+pub(crate) fn load_action(
+    action: &str,
+    mut args: impl Iterator<Item = String>,
+) -> Result<CommandConfig, ConfigError> {
+    match action {
+        "list" if args.next().is_none() => Ok(CommandConfig::Catalog(CatalogAction::List)),
+        "show" => {
+            let family = args.next().ok_or(ConfigError::Usage)?;
+            args.next()
+                .is_none()
+                .then_some(CommandConfig::Catalog(CatalogAction::Show { family }))
+                .ok_or(ConfigError::Usage)
+        }
+        "preset" => {
+            let family = args.next().ok_or(ConfigError::Usage)?;
+            args.next()
+                .is_none()
+                .then_some(CommandConfig::Catalog(CatalogAction::Preset { family }))
+                .ok_or(ConfigError::Usage)
+        }
+        _ => Err(ConfigError::Usage),
+    }
+}
+
+pub(crate) fn run(action: CatalogAction) -> Result<(), Box<dyn Error>> {
+    match action {
+        CatalogAction::List => list(),
+        CatalogAction::Show { family } => show(&family, false),
+        CatalogAction::Preset { family } => show(&family, true),
+    }
+}
+
+fn list() -> Result<(), Box<dyn Error>> {
+    let mut out = io::stdout().lock();
+    for spec in CHANNEL_CATALOG {
+        let host = lookup(spec.id).map_or("cortexfs-channel driver", |setup| setup.command);
+        let kind = if spec.native { "native" } else { "driver" };
+        writeln!(
+            out,
+            "{}\t{}\t{kind}\t{host}",
+            spec.id,
+            transport(spec.transport)
+        )?;
+    }
+    Ok(())
+}
+
+fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
+    let spec = find(family).ok_or_else(|| format!("unknown channel family: {family}"))?;
+    let setup = lookup(spec.id);
+    let mut out = io::stdout().lock();
+    if preset {
+        writeln!(out, "# /etc/cortexfs/channels/{family}.env")?;
+        writeln!(out, "CORTEXFS_AGENT=coder")?;
+        writeln!(out, "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock")?;
+        writeln!(out, "CORTEXFS_CHANNEL_ID={family}.primary")?;
+        if let Some(setup) = setup {
+            for secret in setup.secrets {
+                if secret.contains('=') {
+                    writeln!(out, "{secret}")?;
+                } else {
+                    writeln!(out, "{secret}=")?;
+                }
+            }
+        }
+        return Ok(());
+    }
+    writeln!(out, "family\t{}", spec.id)?;
+    writeln!(out, "transport\t{}", transport(spec.transport))?;
+    writeln!(
+        out,
+        "host\t{}",
+        if spec.native { "native" } else { "driver" }
+    )?;
+    if let Some(setup) = setup {
+        writeln!(out, "command\t{}", setup.command)?;
+        writeln!(out, "unit\t{}", setup.unit)?;
+        writeln!(out, "secrets\t{}", setup.secrets.join(","))?;
+    }
+    Ok(())
+}
+
+fn transport(value: ChannelTransport) -> &'static str {
+    match value {
+        ChannelTransport::Polling => "polling",
+        ChannelTransport::Webhook => "webhook",
+        ChannelTransport::WebSocket => "websocket",
+        ChannelTransport::Stdio => "stdio",
+        ChannelTransport::LocalApi => "local",
+        ChannelTransport::External => "external",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::setup::{SETUPS, lookup};
+
+    #[test]
+    fn native_im_families_have_setup_rows() {
+        for id in ["telegram", "discord", "slack", "feishu", "matrix"] {
+            assert!(lookup(id).is_some(), "{id}");
+        }
+        assert!(SETUPS.iter().any(|setup| setup.id == "telegram"));
+    }
+}

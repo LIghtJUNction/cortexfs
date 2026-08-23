@@ -593,3 +593,29 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
         .map_err(|error| std::io::Error::other(format!("adapter driver panicked: {error:?}")))??;
     Ok(())
 }
+
+#[test]
+fn bridge_answers_slash_help_without_an_agent_socket() -> Result<(), Box<dyn std::error::Error>> {
+    let bridge = AgentChannelBridge::new(
+        "/tmp/missing-agent.sock",
+        ChannelSessionRoute::new("coder", "im")?,
+        None,
+    );
+    let reply = bridge.handle(InboundMessage {
+        id: "help-1".to_owned(),
+        target: MessageTarget {
+            channel: ChannelId::new("telegram")?,
+            conversation: ConversationId::new("dm-1")?,
+            thread: None,
+            reply_to: None,
+        },
+        sender: Participant::default(),
+        body: MessageBody::text("/help")?,
+        timestamp_ms: None,
+        metadata: std::collections::BTreeMap::new(),
+    })?;
+    assert!(reply.body.text.contains("/models"));
+    assert!(reply.body.text.contains("/new"));
+    assert_eq!(reply.target.reply_to.as_deref(), Some("help-1"));
+    Ok(())
+}

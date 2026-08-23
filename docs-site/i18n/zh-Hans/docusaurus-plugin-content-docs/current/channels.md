@@ -11,6 +11,23 @@ CortexFS 将 IM 视为现有 agent 会话之上的传输层，而不是新增文
 
 ## 安装与启动
 
+先用宿主目录命令查看家族、传输和模板，无需启动传输：
+
+```bash
+cortexfs-channel list
+cortexfs-channel show telegram
+cortexfs-channel preset telegram
+```
+
+`list` 输出 `家族<TAB>传输<TAB>native|driver<TAB>命令`。`show` 打印所需密钥与
+systemd unit。`preset` 把仅所有者可读的环境模板打到 stdout，再重定向到
+`/etc/cortexfs/channels/<family>.env` 填入密钥。这是宿主助手，不是 `ctx`
+子命令，也不是第二套提交入口。
+
+Telegram、Discord、Slack 会话还接受 `/help`、`/models`、`/model`、
+`/model PROVIDER/MODEL` 与 `/new`；由 channel bridge 直接回答，不引入平台
+专有 ABI。
+
 安装正常的 CortexFS 包后，启动一个 agent 并将 Discord 适配器配置写入一个仅
 所有者可读写的文件：
 

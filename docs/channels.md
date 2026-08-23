@@ -12,6 +12,25 @@ and its API is browsable on [docs.rs](https://docs.rs/cortexfs-channels).
 
 ## Install and start
 
+Discover every catalog family and the matching host command without starting a
+transport:
+
+```bash
+cortexfs-channel list
+cortexfs-channel show telegram
+cortexfs-channel preset telegram
+```
+
+`list` prints `family<TAB>transport<TAB>native|driver<TAB>command`. `show`
+prints the required secrets and systemd unit. `preset` writes an owner-only
+env template to stdout; redirect it to `/etc/cortexfs/channels/<family>.env`
+and fill secrets there. This is a host helper, not a `ctx` subcommand and not
+a second submission entrance.
+
+Telegram, Discord, and Slack conversations also accept the sender-scoped
+commands `/help`, `/models`, `/model`, `/model PROVIDER/MODEL`, and `/new`.
+They answer from the channel bridge and do not add a platform-specific ABI.
+
 After installing the normal CortexFS package, start an agent and write the
 Discord adapter configuration to one owner-only file:
 

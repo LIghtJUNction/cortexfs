@@ -106,12 +106,15 @@ candidates first (if set), then the CortexFS system secret store
 (`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`). If a required
 credential is absent, the model is considered `unconfigured`.
 
-Install file-based presets for common providers first:
+Install file-based presets for common providers first. `list` prints the
+preset name, auth method, and destination file:
 
 ```bash
 ctx provider preset list
 ctx provider preset show google
-ctx provider preset install codex
+ctx provider preset install openrouter
+ctx provider preset install deepseek
+ctx provider preset install compatible --name local --base-url http://127.0.0.1:8317/v1 --model custom-model
 ctx provider preset install openai
 ctx provider preset install anthropic
 ctx provider preset install google
@@ -139,13 +142,10 @@ Host-configured providers can declare an OAuth `device` block with request,
 token, and verification endpoints; this keeps device-code flow provider-neutral
 without adding another `/ctx` namespace.
 
-Canonical provider names are `openai`, `anthropic`, and `google`. `codex` is
-an alias for the `openai` preset; `gemini` is an alias for the `google` preset.
-The host-configured GitHub Copilot endpoint uses `github-copilot` as its
-canonical provider name and accepts `copilot` as an adapter alias.
-After installing `codex`, models are still projected under the canonical
-`/ctx/model/openai/<model>` path. CortexFS does not add a
-`/ctx/model/codex` namespace.
+Canonical short names remain `openai`, `anthropic`, and `google`. `gemini`
+aliases `google`. Additional OpenAI-compatible presets install under their
+explicit `name`. The host-configured GitHub Copilot endpoint uses
+`github-copilot` and accepts `copilot` as an adapter alias.
 
 Model proxying is not an agent and is not written into provider JSON. The
 single global route table is:

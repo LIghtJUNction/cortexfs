@@ -25,9 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts
 幂等：程序和单元文件被更新，同时存储、密钥、提供者
 配置、现有的环境文件，以及 `/ctx` 用户状态是
 已保留。真正的首次安装会从系统区域设置中选择一种语言
-并提供可选的 OpenAI、Codex、Anthropic 或 Google 入职培训
-通过
-现有提供者命令。
+并可通过现有 provider 命令可选接入 OpenAI、Codex、Anthropic、
+Google、OpenRouter、DeepSeek、Groq 或任意 OpenAI 兼容端点。
+也可用 `cortexfs-channel list|show|preset` 打印 IM 宿主模板。
 
 Arch 用户也可以从 AUR 安装 `cortexfs-git`，启用
 `cortexfs.service`，并运行`ctx doctor`。

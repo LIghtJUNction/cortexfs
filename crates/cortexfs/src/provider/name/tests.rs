@@ -37,6 +37,14 @@ mod provider_secret_file_tests {
             provider_name_from_config("https://api.githubcopilot.com", None),
             Ok("github-copilot".to_owned())
         );
+        assert_eq!(
+            provider_name_from_config("https://api.groq.com/openai/v1", None),
+            Ok("groq".to_owned())
+        );
+        assert_eq!(
+            provider_name_from_config("https://openrouter.ai/api/v1", None),
+            Ok("openrouter".to_owned())
+        );
         assert_eq!(provider_host_from_base_url("api.openai.com/v1"), None);
         assert_eq!(provider_host_from_base_url("https:///v1"), None);
         assert_eq!(

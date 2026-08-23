@@ -1,86 +1,72 @@
+use super::catalog::{PROVIDER_PRESETS, PresetTemplate, render_chat};
 use crate::*;
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ProviderPreset {
     pub(crate) name: &'static str,
     pub(crate) aliases: &'static [&'static str],
     pub(crate) file: &'static str,
-    pub(crate) config: &'static str,
+    pub(crate) auth: &'static str,
+    pub(crate) template: PresetTemplate,
 }
 
-const PROVIDER_PRESETS: &[ProviderPreset] = &[
-    ProviderPreset {
-        name: "openai",
-        aliases: &[],
-        file: "api.openai.com.json",
-        config: r#"{
-            "base_url": "https://api.openai.com/v1",
-            "default_model": "gpt-5.6",
-            "models": ["gpt-5.6"],
-            "enabled": true,
-            "formats": ["openai.chat", "openai.responses"]
-        } "#,
-    },
-    ProviderPreset {
-        name: "codex",
-        aliases: &["ccodex"],
-        file: "chatgpt.com.json",
-        config: r#"{
-            "name": "codex",
-            "base_url": "https://chatgpt.com/backend-api/codex",
-            "default_model": "gpt-5.6",
-            "models": ["gpt-5.6"],
-            "enabled": true,
-            "formats": ["openai.responses"],
-            "auth": [{"type": "oauth", "flow": "authorization_code", "slot": "subscription"}],
-            "oauth": {
-                "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-                "auth_url": "https://auth.openai.com/oauth/authorize",
-                "token_url": "https://auth.openai.com/oauth/token",
-                "redirect_uri": "http://localhost:1455/auth/callback",
-                "scopes": ["openid", "profile", "email", "offline_access", "api.connectors.read", "api.connectors.invoke"]
+impl ProviderPreset {
+    pub(crate) fn config(self) -> Cow<'static, str> {
+        match self.template {
+            PresetTemplate::Literal(config) => Cow::Borrowed(config),
+            PresetTemplate::Chat { name, base, model } => {
+                Cow::Owned(render_chat(name, base, model))
             }
-        } "#,
-    },
-    ProviderPreset {
-        name: "anthropic",
-        aliases: &["claude"],
-        file: "api.anthropic.com.json",
-        config: r#"{
-            "base_url": "https://api.anthropic.com/v1",
-            "enabled": true,
-            "formats": ["anthropic.messages"]
-        } "#,
-    },
-    ProviderPreset {
-        name: "google",
-        aliases: &["gemini"],
-        file: "generativelanguage.googleapis.com.json",
-        config: r#"{
-            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-            "enabled": true,
-            "formats": ["openai.chat"]
-        } "#,
-    },
-];
+        }
+    }
+}
 
 pub(crate) fn provider_preset_list() -> Result<(), CliError> {
     for preset in PROVIDER_PRESETS {
-        print_line(preset.name)?;
+        print_line(&format!(
+            "{}\t{}\t{}",
+            preset.name, preset.auth, preset.file
+        ))?;
     }
     Ok(())
 }
 
 pub(crate) fn provider_preset_show(preset: &str) -> Result<(), CliError> {
     let preset = provider_preset(preset)?;
-    print_line(preset.config.trim_end())
+    print_line(preset.config().trim_end())
 }
 
 pub(crate) fn provider_preset_install(preset: &str) -> Result<(), CliError> {
     let preset = provider_preset(preset)?;
+    write_preset_file(preset.file, &preset.config())
+}
+
+pub(crate) fn provider_preset_install_compatible(
+    name: Option<&str>,
+    base_url: Option<&str>,
+    model: Option<&str>,
+) -> Result<(), CliError> {
+    let name = name.ok_or_else(|| CliError::usage("compatible requires --name"))?;
+    let base_url = base_url.ok_or_else(|| CliError::usage("compatible requires --base-url"))?;
+    if !is_provider_name(name) || is_model_alias(name) || matches!(name, "debug" | "route") {
+        return Err(CliError::usage("invalid compatible provider name"));
+    }
+    if cortexfs::provider_host_from_base_url(base_url).is_none() {
+        return Err(CliError::usage("invalid compatible --base-url"));
+    }
+    if let Some(model) = model {
+        if !is_object_name(model) {
+            return Err(CliError::usage("invalid compatible --model"));
+        }
+    }
+    write_preset_file(&format!("{name}.json"), &render_chat(name, base_url, model))
+}
+
+fn write_preset_file(file: &str, config: &str) -> Result<(), CliError> {
     create_provider_config_dir(Path::new(PROVIDER_CONFIG_DIR))?;
-    let path = PathBuf::from(PROVIDER_CONFIG_DIR).join(preset.file);
-    atomic_write_provider_config(&path, preset.config)?;
+    let path = PathBuf::from(PROVIDER_CONFIG_DIR).join(file);
+    atomic_write_provider_config(&path, config)?;
     print_line(&format!("installed {}", path.display()))
 }
 

@@ -381,20 +381,51 @@ fn parses_provider_preset_commands() {
     ));
     assert!(matches!(
         cmd!("provider", "preset", "install", "anthropic"),
-        Ok(Command::Provider(ProviderArgs::PresetInstall { ref preset }))
-            if preset == "anthropic"
+        Ok(Command::Provider(ProviderArgs::PresetInstall {
+            ref preset,
+            name: None,
+            base_url: None,
+            model: None
+        })) if preset == "anthropic"
+    ));
+    assert!(matches!(
+        cmd!(
+            "provider",
+            "preset",
+            "install",
+            "compatible",
+            "--name",
+            "local",
+            "--base-url",
+            "http://127.0.0.1:11434/v1",
+            "--model",
+            "llama3"
+        ),
+        Ok(Command::Provider(ProviderArgs::PresetInstall {
+            ref preset,
+            ref name,
+            ref base_url,
+            ref model
+        })) if preset == "compatible"
+            && name.as_deref() == Some("local")
+            && base_url.as_deref() == Some("http://127.0.0.1:11434/v1")
+            && model.as_deref() == Some("llama3")
     ));
 }
 
 #[test]
 fn codex_preset_is_separate_and_responses_only() {
-    let codex = provider_preset("codex").map(|preset| preset.config);
-    let openai = provider_preset("openai").map(|preset| preset.config);
+    let codex = provider_preset("codex").map(|preset| preset.config());
+    let openai = provider_preset("openai").map(|preset| preset.config());
+    let groq = provider_preset("groq").map(|preset| preset.config());
     assert!(
         matches!(codex, Ok(config) if config.contains("chatgpt.com/backend-api/codex") && config.contains(r#""formats": ["openai.responses"]"#))
     );
     assert!(
         matches!(openai, Ok(config) if config.contains("api.openai.com/v1") && !config.contains("oauth"))
+    );
+    assert!(
+        matches!(groq, Ok(config) if config.contains("api.groq.com/openai/v1") && config.contains(r#""name": "groq""#))
     );
 }
 

@@ -505,23 +505,25 @@ Provider presets are host-side JSON file templates. They install under
 
 ```text
 ctx provider preset list
-ctx provider preset show openai|codex|anthropic|google
-ctx provider preset install openai|codex|anthropic|google
+ctx provider preset show PRESET
+ctx provider preset install PRESET
+ctx provider preset install compatible --name NAME --base-url URL [--model MODEL]
 ```
 
-Canonical provider names:
+`list` prints `name<TAB>auth<TAB>file`. Built-in presets:
 
 ```text
-openai     OpenAI API with `/v1/responses` for agent calls and
-           `/v1/chat/completions` fallback; `codex` is an alias
-anthropic  Claude Messages API
-google     Gemini through Google's OpenAI-compatible endpoint; `gemini` is an alias
+openai, codex, anthropic, google
+openrouter, groq, deepseek, mistral, together, fireworks, xai
+moonshot, minimax, zhipu, qwen, siliconflow, volcengine
 ```
 
-The `codex` alias installs the OpenAI preset and projects Codex-recommended
-OpenAI models under the canonical provider path, for example
-`/ctx/model/openai/gpt-5.6`. It does not create `/ctx/model/codex` or a second
-provider namespace.
+Canonical names for the first four remain `openai`, `anthropic`, and `google`.
+`codex` is the ChatGPT subscription preset; `gemini` aliases `google`.
+Aggregator and regional OpenAI-compatible presets set an explicit `name` so
+`/ctx/model/<provider>` stays a stable object, not a transport host.
+`compatible` writes the same shape for any OpenAI-compatible base URL,
+including a local runtime; it is not an Ollama-specific path.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
 preset uses `anthropic.messages`, so the runner sends `POST /v1/messages` with

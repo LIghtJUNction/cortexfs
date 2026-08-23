@@ -273,19 +273,16 @@ Provider 预设是宿主侧 JSON 模板文件，安装于 `/etc/cortexfs/provide
 
 ```text
 ctx provider preset list
-ctx provider preset show openai|codex|anthropic|google
-ctx provider preset install openai|codex|anthropic|google
+ctx provider preset show PRESET
+ctx provider preset install PRESET
+ctx provider preset install compatible --name NAME --base-url URL [--model MODEL]
 ```
 
-标准 provider 名称：
-
-```text
-openai     Agent 调用使用 `/v1/responses`，备用 `/v1/chat/completions`；`codex` 为别名
-anthropic  Claude Messages API
-google     通过 Google 的 OpenAI 兼容端点访问 Gemini；`gemini` 为别名
-```
-
-`codex` 别名安装 OpenAI 预设并在规范提供商路径下投影 Codex 推荐的模型，例如 `/ctx/model/openai/gpt-5.6`。它不创建 `/ctx/model/codex` 或第二个提供商命名空间。
+`list` 输出 `name<TAB>auth<TAB>file`。内置预设包括 `openai`、`codex`、
+`anthropic`、`google`，以及 OpenAI 兼容聚合/地区端点
+（`openrouter`、`groq`、`deepseek`、`mistral`、`together`、`fireworks`、`xai`、
+`moonshot`、`minimax`、`zhipu`、`qwen`、`siliconflow`、`volcengine`）。
+`compatible` 为自定义 base URL 写入同一 JSON 形状，不是某个本地运行时的特殊分支。
 
 Google 预设使用 Gemini 的 OpenAI 兼容端点。Anthropic 预设使用 `anthropic.messages`，因此运行器发送 `POST /v1/messages` 并携带必需的 Anthropic 版本 header。
 

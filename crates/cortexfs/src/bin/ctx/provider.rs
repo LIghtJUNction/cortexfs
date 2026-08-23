@@ -9,6 +9,7 @@ pub(crate) use secrets::*;
 
 pub mod auth;
 pub mod callback;
+pub mod catalog;
 pub mod config;
 pub mod oauth;
 pub mod presets;
@@ -53,8 +54,24 @@ pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError
         ProviderArgs::PresetShow { ref preset } => {
             provider_preset_show(preset).map(|()| ExitCode::SUCCESS)
         }
-        ProviderArgs::PresetInstall { ref preset } => {
-            provider_preset_install(preset).map(|()| ExitCode::SUCCESS)
+        ProviderArgs::PresetInstall {
+            ref preset,
+            ref name,
+            ref base_url,
+            ref model,
+        } => if preset == "compatible" {
+            provider_preset_install_compatible(
+                name.as_deref(),
+                base_url.as_deref(),
+                model.as_deref(),
+            )
+        } else if name.is_some() || base_url.is_some() || model.is_some() {
+            Err(CliError::usage(
+                "compatible flags are only valid for the compatible preset",
+            ))
+        } else {
+            provider_preset_install(preset)
         }
+        .map(|()| ExitCode::SUCCESS),
     }
 }
