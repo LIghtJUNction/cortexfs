@@ -220,15 +220,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Attach { ref selector } => channel_attach(&cli.root, selector.as_deref()),
         Command::Man { topic } => success(print_man(&cli.root, topic.as_deref())),
         Command::Status => success(print_status(&cli.root)),
-        Command::Update(ref args) => {
-            let error = ProcessCommand::new("/usr/lib/cortexfs/update-linux")
-                .args(args)
-                .env_clear()
-                .exec();
-            Err(CliError::unavailable(format!(
-                "cannot run updater: {error}"
-            )))
-        }
+        Command::Update(ref args) => exec_updater(args),
         Command::Bootstrap {
             source,
             dry_run,
@@ -336,6 +328,15 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Schedule(args) => success(schedule_command(&cli.root, &args)),
         Command::ValidateName(name) => success(validate_name(&name)),
     }
+}
+
+fn exec_updater(args: &[String]) -> Result<ExitCode, CliError> {
+    let error = ProcessCommand::new("/usr/lib/cortexfs/update-linux")
+        .args(args)
+        .env_clear()
+        .exec();
+    let message = format!("cannot run updater: {error}");
+    Err(CliError::unavailable(message))
 }
 
 /// Converts a unit-successful command result into `ExitCode::SUCCESS`.
