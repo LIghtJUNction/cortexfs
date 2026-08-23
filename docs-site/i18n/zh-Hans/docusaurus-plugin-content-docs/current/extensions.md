@@ -6,6 +6,11 @@ sidebar_label: 单文件扩展
 
 # 单文件扩展
 
+CortexFS 遵循与 Pi 相同的反框架扩展规则：在稳定边缘（包、可执行文件、skills、
+modules、channel 适配器）增加行为，而不引入第二套根 ABI 或常驻插件守护进程。
+这些边缘在产品中的位置见 [architecture.md](architecture.md)（「扩展点」）。
+本页是最短编写路径。
+
 添加新能力最短的方式是一个包目录。把程序逻辑放在普通可执行文件里，把装配逻辑放在一个 `cortexfs.toml` 文件里：
 
 ```text

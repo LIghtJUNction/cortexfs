@@ -9,7 +9,10 @@ vtable、`String`、allocator、panic 或 async future 布局在编译器版本�
 
 ## 范围
 
-module ABI 为 Agent、Tool、Channel、Model、Context 扩展提供统一的身份、能力与生命周期：
+module ABI 为 Agent、Tool、Channel、Model、Context 扩展提供统一的身份、能力与生命周期。
+它是对标 Pi 的架构图中 agent-core 扩展边缘
+（[architecture.md](../architecture.md)）：modules 接入生命周期与能力声明；
+它们不发明根类，也不拥有前端。
 
 ```text
 CortexFS Runtime

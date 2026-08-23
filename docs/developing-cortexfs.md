@@ -8,7 +8,8 @@ sidebar_label: Extending CortexFS
 
 Start with one rule: CortexFS extension points are the current spec's objects,
 sockets, control files, and tool commit semantics. They are not new root
-directories or new workflow entrances.
+directories or new workflow entrances. That anti-framework placement matches
+the Pi elegance bar in [architecture.md](architecture.md).
 
 For the common case, start with the short path in [One-file Extensions](extensions.md):
 put tools and executable agents in one package directory, describe them in one
@@ -22,13 +23,17 @@ Suggested order:
 
 ```text
 DESIGN.md
+architecture.md          # Pi-aligned elegance bar and extension points
+internal-architecture.md # crate/module layer rules
 spec/README.md
 spec/root-abi.md
 spec/object-abi.md
 spec/model-abi.md
+spec/module-abi.md
 spec/session-abi.md
 spec/tool-policy-abi.md
 spec/ctx-coreutils.md
+extensions.md
 aimock-testing.md
 ```
 

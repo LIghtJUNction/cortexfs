@@ -2,7 +2,12 @@
 
 本文件是 [architecture.md](architecture.md) 的**工程结构**配套文档。产品/ABI 规则
 仍在前者定义，本文件规定 **Rust 代码如何分层**、哪些边界可依赖、错误与可执行文件应如何组织，
-以及如何在不破坏冻结根 ABI 的前提下重构当前单体。
+以及如何在不破坏冻结根 ABI 的前提下重构当前单体。显式 `channel` 根是通信子系统例外；
+不允许其他编排根。
+
+优雅度目标与 Pi 单体仓库同一标准：每个包一个职责、下层永不学习上层关切、
+agent 循环保持精小、前端/适配器围绕事件与 socket 组合。CortexFS 增加 FUSE
+投影与 Linux 权限；它不增加第二套框架。
 
 规范 ABI：`[spec/](spec/)`。命名见 [naming-guide.md](naming-guide.md)。
 贡献者规则见仓库根目录 `AGENTS.md`。
@@ -22,9 +27,34 @@
 | God module（`object/`、`agent/`、`runtime/`、`bin/ctx`） | 认知负担高，评审困难 |
 
 产品架构（文件、policy、session）已清楚。**内部架构**是缺失层：进程角色、
-crate 角色、模块层级与错误策略。
+crate 角色、模块层级与错误策略——并以 Pi 级清晰度表达，使读者能立刻指出
+协议、循环与 UX 各自止于何处。
 
 ---
+
+## 1.1 优雅度标准（对标 Pi）
+
+仅当下列全部成立时才接受设计：
+
+| 原则 | CortexFS 含义 |
+| --- | --- |
+| 分层抽象 | 协议 ≠ 循环 ≠ 会话 UX ≠ FUSE 投影 |
+| 最小内核 | 一条 tool/model 反馈循环；无烘焙的 plan/workflow 引擎 |
+| 事件事实 | Interaction/channel/session 事件可关联 |
+| 可组合 | `protocol`、SDK、`runtime-client` 可不依赖 FUSE 使用 |
+| 在边缘扩展 | Modules、tools、channels、skills——永不新增根类；见 architecture.md「扩展点」 |
+| 省略 | 在版本化 ABI 需要之前，宁可省略产品表面 |
+
+评审应拒绝的反模式：
+
+```text
+provider 线类型泄漏进 agent/ 或 fuse/
+UI 或 channel crate 导入 object::executor
+为 hook/job/workflow/memory 新增根目录
+在进程内加载每个平台 SDK
+库代码继续扩张 Result<_, String>
+仅改名的薄包装或 #[path] 绕行
+```
 
 ## 2. 进程架构（运行时形态）
 
@@ -66,41 +96,77 @@ poller 或 hot-reload 子命令。
 
 ## 3. 目标 crate 架构
 
-从“单库万能”转向**薄而单职责 crate**。优先采用**feature flags**，物理拆分次之；
-保持同一模块树可降低风险。
+从“单库万能”转向**薄而单职责 crate**，对标 Pi 强制分层的 monorepo。优先采用
+**feature flags**，物理拆分次之；保持同一模块树可降低风险。
 
 ### 3.1 目标依赖图
 
 ```text
-cortexfs-abi          pure types, path grammar, request frames, policy enums
+Foundation
+  cortexfs-paths / abi types     纯路径语法与稳定枚举
+  cortexfs-support               plain fs、jsonl、layout（无 FUSE、无 HTTP）
+  cortexfs-module                静态 module API + socket module 契约
+
+Protocol / AI
+  cortexfs-protocol              provider 中立 IR（pi-ai 类比）
+  cortexfs-metadatas             仅目录事实
+  provider registry（树内）      主机配置 → 中立 model 投影
+
+Agent core
+  cortexfs-runtime               sockets、会话记录、egress、握手
+  cortexfs-object                install / replace / 一次性 executor
+  cortexfs-runtime-client        interaction 帧（所有 UI 共用）
+  cortexfs-tool-sdk / agent-sdk  能力进程契约
+
+Projection / application
+  cortexfs-fuse                  仅 fuser 投影
+  cortexfs（facade）             re-exports + features；bins 依赖此处
+  bins + channel-*               UX 与平台适配器（pi-coding-agent / mom）
+```
+
+依赖方向在此图中严格向上：application 可依赖 agent core 与 protocol；
+protocol 不得依赖 agent core 或 FUSE。Channel crates 依赖 channel-sdk /
+runtime-client，不依赖 fuse 或 object executor。
+
+等价紧凑形式：
+
+```text
+cortexfs-abi / paths      pure types, path grammar, request frames, policy enums
         ▲
-cortexfs-support      plain fs, jsonl, layout, path checks (no FUSE, no HTTP)
+cortexfs-support          plain fs, jsonl, layout, path checks (no FUSE, no HTTP)
         ▲
-cortexfs-runtime      socket, session record, egress, control handshakes
+cortexfs-protocol         provider IR only (optional peer of support)
         ▲
-cortexfs-object       install / replace / executor / runner helpers
+cortexfs-runtime          socket, session record, egress, control handshakes
         ▲
-cortexfs-fuse         fuser projection only
+cortexfs-object           install / replace / executor / runner helpers
         ▲
-cortexfs (facade)     re-exports + optional features; bins depend on facade
+cortexfs-fuse             fuser projection only
         ▲
-bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp
-sdks: tool-sdk, agent-sdk, runtime-client (depend only on narrow crates)
+cortexfs (facade)         re-exports + optional features; bins depend on facade
+        ▲
+bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel adapters
+sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 ```
 
 ### 3.2 Crate 规则
 
 | Crate | 允许依赖 | 禁止 |
 | --- | --- | --- |
-| `cortexfs-abi` | `serde`、小型纯库 | `fuser`、`nix` 进程、HTTP、parquet |
+| `cortexfs-abi` / paths | `serde`、小型纯库 | `fuser`、`nix` 进程、HTTP、parquet |
 | `cortexfs-support` | `abi`、`nix` 文件系统工具、`serde_json` | FUSE、provider HTTP、agent launch |
+| `cortexfs-protocol` | 纯解析/IR crates | agent 循环、FUSE、密钥、文件系统 ABI |
 | `cortexfs-runtime` | `abi`、`support` | FUSE mount loop、object install 阶段 |
 | `cortexfs-object` | `abi`、`support`、runtime-client、tool-sdk | FUSE server |
 | `cortexfs-fuse` | `abi`, `support`, `fuser` | object executor、provider HTTP |
 | SDKs | `runtime-client`（+ 最小 abi 类型） | 可避免时不允许直接依赖完整 `cortexfs` |
+| `channel-*` | channel-sdk、runtime-client | fuse、object executor、provider registry |
 
 **MCP 保持适配器二进制**（`cortexfs-mcp` / `ctxmcp`）。它可以调用 support helper，
 但不能强制形成新的根 ABI 类。
+
+**独立可用性（Pi 可组合性）：** 消费者必须能单独依赖 `cortexfs-protocol` 或
+`cortexfs-runtime-client`，而无需链接 `fuser`、parquet 或 channel 平台 SDK。
 
 ### 3.3 近期（不动目录）: Cargo features
 
@@ -126,6 +192,21 @@ cli-support = []
 
 验收要求：`cortexfs-runtime-client` 与 SDK 可在 `default-features = false` 下，仅
 依赖必要项，无需链接 `fuser` 或 parquet（当未启用时）。
+
+### 3.4 循环所有权
+
+在 agent 内核内保持 Pi 对**机制**与**环境**的拆分：
+
+| 关切 | Owner | 说明 |
+| --- | --- | --- |
+| Turn + 工具调度 | `object/executor`（+ runtime socket） | 最小正确循环 |
+| 持久会话追加 | `runtime/record` | JSONL 事实；不是 prompt 文本 |
+| Context 投影 | context/prompt 模块 | 可丢弃、可重建 |
+| 权限门 | `authority` + `policy` | 先机制后解释器 |
+| 前端模式 | bins / channel 适配器 | 只订阅事件 |
+
+不要用产品模式（plan 板、memory 根、hook DAG）膨胀循环。改为增加 tool、
+module、skill 或版本化 ABI 表面。
 
 ---
 
@@ -395,13 +476,18 @@ Socket/JSONL framing、agent 输出、context 渲染、FUSE 元数据、provider
 
 评审者应检查：
 
-1. **ABI：** 是否新增根路径或编排入口？（必须是“没有”。）
-2. **层：** 模块是否只调用同层或更低层？
-3. **错误：** 是否出现新的 `Result<_, String>`？公共错误缺 `Display`/`Error`？
-4. **规模：** 是否新增了 `too_many_lines`/`too_many_arguments` 的 expect 而无拆分？
-5. **依赖：** 新增重型依赖是否合理，可选依赖是否做了 feature gate？
-6. **过程：** 是否引入 watcher / poller / hot reload？（必须为 No。）
-7. **复用：** 是否先查了 `support::plain` / `path` / `process` / layout helper？
+1. **ABI：** 是否新增根路径或编排入口？仅显式版本化的 `channel` 根及其通用
+   state/tool 子项被允许。
+2. **层：** 模块是否只调用同层或更低层？是否匹配对标 Pi 的包图
+   （protocol / core / UX / projection）？
+3. **循环：** 是否用本应是 tool/module/skill/adapter 的产品模式膨胀了 agent 循环？
+4. **事件：** 新事实是否挂在现有 interaction/session 流上，而非平行控制平面？
+5. **错误：** 是否出现新的 `Result<_, String>`？公共错误缺 `Display`/`Error`？
+6. **规模：** 是否新增了 `too_many_lines`/`too_many_arguments` 的 expect 而无拆分？
+7. **依赖：** 新增重型依赖是否合理，可选依赖是否做了 feature gate？
+   protocol/SDK 消费者是否仍可避开 `fuser` 与平台 SDK？
+8. **过程：** 是否引入 watcher / poller / hot reload？（必须为 No。）
+9. **复用：** 是否先查了 `support::plain` / `path` / `process` / layout helper？
 
 ---
 
@@ -409,11 +495,13 @@ Socket/JSONL framing、agent 输出、context 渲染、FUSE 元数据、provider
 
 ```text
 Product ABI        不变，仍是 files + sockets 的组合
-Internal graph     分层 crate/feature；SDK 保持轻量
+Elegance           Pi 级分层：protocol ⊥ loop ⊥ UX ⊥ FUSE
+Internal graph     分层 crate/feature；SDK 保持轻量且可组合
 Errors             类型化；字符串仅用于成功载荷或最终 stderr
 Modules            一模块一职责；god file 按自然边界切分
 Bins               进程角色与 §2 一致；无仅在 bin 中实现领域逻辑
 MCP                仅适配器；tools 保持普通对象
+Omissions          无 workflow/hook/job/memory 根；无巨型进程内 harness
 ```
 
 该文档是 `ExecError`、crate feature、模块拆分等重构的北极星。优先做只完成

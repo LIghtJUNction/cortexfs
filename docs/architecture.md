@@ -55,6 +55,143 @@ Mechanism enforces principal, path, mount, and Linux constraints; an injected
 policy evaluator may only further restrict that authority.
 ```
 
+## Architectural elegance
+
+CortexFS keeps a Unix filesystem ABI and Linux authority model that coding
+agent toolkits do not. Its **internal elegance bar** still matches the Pi
+toolkit ([badlogic/pi-mono](https://github.com/badlogic/pi-mono)): strict
+layers, a minimal tool loop, event facts instead of UI decisions, packages
+usable alone, and extension without a second framework. What you leave out
+matters as much as what you ship.
+
+### Two mental models
+
+| Mental model | Owns | Must not own |
+| --- | --- | --- |
+| Agent core | model turn, tool calls/results, cancellation, run events, context projection | TUI layout, channel SDK, FUSE projection, provider wire dialects |
+| Interactive / host surfaces | `ctx` / `tsh` / `ctxchat` / `ctxterm`, channel adapters, web hosts | a second agent loop or parallel root ABI |
+
+The same core must remain embeddable behind terminal, print, JSON/RPC-style
+socket clients, and channel bridges. A new frontend adapts the existing
+interaction contract; it does not fork the loop.
+
+### Layered package map
+
+Pi’s stack is `ai → agent-core → coding-agent (+ tui)`. CortexFS maps the same
+gravity onto Rust crates and processes:
+
+```text
+Application / UX     ctx, tsh, ctxchat, ctxterm, channel adapters, web hosts
+        ▲
+Agent core           agent runtime + object runner (loop, tools, policy gate)
+        ▲
+Protocol / AI        cortexfs-protocol, provider registry, model projections
+        ▲
+Foundation           abi types, support fs/jsonl/layout, module contract, paths
+```
+
+| CortexFS gravity | Pi analogue | One job |
+| --- | --- | --- |
+| `cortexfs-protocol` | `pi-ai` | provider-neutral request/event IR; no HTTP, secrets, or loop |
+| `cortexfs-module` + runner loop | `pi-agent-core` | lifecycle, capabilities, turn/tool mechanics |
+| `cortexfs-runtime-client` | agent event/API surface | `cortexfs.interaction/v1` for every frontend |
+| `ctx` / terminals / channels | `pi-coding-agent` / `pi-mom` | sessions, UX modes, platform adapters |
+| FUSE `/ctx` projection | *(CortexFS-specific)* | inspectable object classes; not an AI DB mirror |
+
+Lower layers never import upper ones. Protocol code must not know agents.
+Agent-core code must not know TUI widgets or Discord payloads. Channel
+adapters translate platform frames and stop at the interaction/channel
+socket boundary.
+
+### Minimal loop, durable facts
+
+The executable core stays the same small feedback loop:
+
+```text
+build disposable context from durable session facts
+  → stream model turn
+  → collect tool calls
+  → authorize + execute tools
+  → append observations
+  → repeat until final answer or cancel
+```
+
+Everything else is layered outside that loop:
+
+```text
+skills / rules / templates     → context inputs, never authority
+extensions / modules / MCP     → tools or adapters, never root classes
+approvals / sandbox / policy   → gates around the same tool path
+compaction / summaries         → rebuild prompt; never rewrite raw history
+frontends                      → subscribe to events; never own the loop
+```
+
+Session files answer “what happened?” Prompt context answers “what does the
+model need next?” Those objects stay separate, as in Pi’s session tree versus
+`convertToLlm` projection.
+
+### Events are facts
+
+Every layer emits typed, correlatable facts (`run`, `request_id`, tool id,
+status). Terminals render them, JSON clients serialize them, session recorders
+append them, tests assert order. Presentation never feeds back into authority
+or history schema. Interaction and channel sockets already follow this rule;
+new surfaces must reuse those event families instead of inventing parallel
+control planes.
+
+### Composability and omission
+
+Packages must stay independently useful:
+
+```text
+cortexfs-protocol alone     → transcode provider formats
+runtime-client alone        → speak interaction frames
+tool-sdk / agent-sdk alone  → implement one capability process
+channel-sdk alone           → isolate one platform transport
+```
+
+Deliberate omissions (the anti-framework):
+
+```text
+no workflow / hook / job / memory root
+no plan-mode product surface baked into the loop
+no provider dialect in /ctx paths or agent branches
+no in-process mega-harness that loads every channel SDK
+no background watchers or hot-reload control plane
+```
+
+Specialization belongs in objects, modules, skills, and adapters. The host
+keeps stable primitives: files, sockets, policy, atomic rename, and process
+restart.
+
+### Extension points (anti-framework)
+
+Pi extends at the AI, agent, and application layers without growing a plugin
+root. CortexFS uses the same idea with Unix boundaries:
+
+| Layer | Extend with | Must not become |
+| --- | --- | --- |
+| Protocol / AI | provider adapters, `cortexfs-protocol` routes, model `driver` / `cap` projections | `/ctx` provider dialect paths or agent `match` on vendor names |
+| Agent core | `cortexfs-module` lifecycle, Tool/Agent SDKs, policy evaluators, context transformers | in-loop plan boards, hook DAGs, or a second orchestration ABI |
+| Application | one-file packages ([extensions.md](extensions.md)), skills/rules files, channel adapters, terminal/web/IM clients | `/ctx/skill`, `/ctx/mcp`, `/ctx/workflow`, or resident plugin daemons |
+
+Concrete surfaces already in the tree:
+
+```text
+cortexfs.module.socket/v1     process-isolated module lifecycle
+Tool SDK / Agent SDK          one executable capability or agent step
+cortexfs.package/v1           authoring input → ordinary agent/tool objects
+cortexfs.interaction/v1       every frontend speaks the same request/event facts
+cortexfs.channel.socket/v1    platform adapters stay outside the agent loop
+skills / AGENTS.md / rules    disposable context inputs, never authority
+MCP via ctxmcp                ordinary tools; never a root class
+```
+
+The structure ends at stable primitives and lifecycle edges. New behavior is a
+new object, module, skill, or adapter—not a new root directory and not a
+hot-loaded in-process extension host. See [module-abi.md](spec/module-abi.md)
+and [extensions.md](extensions.md).
+
 ## Identity, lifetime, and transport
 
 CortexFS uses four different identities. They must not be collapsed into an
@@ -243,9 +380,11 @@ Ordinary session files, not authority. Full skill bodies stay at listed
 
 ## Engineering taste
 
+Derived from the elegance bar above:
+
 ```text
 short names over long phrases
-one clear job per module
+one clear job per module and per crate
 reuse before inventing helpers
 no parallel enums for Empty/Missing/Invalid
 no second root ABI for orchestration; channel state/tools use the explicit root
@@ -253,6 +392,9 @@ no background watchers, polling, or hot-reload subcommands
 Git commit (or process restart) is the development refresh boundary
 atomic rename for control-plane writes
 ordinary files for history and snapshots
+lower layers never import upper layers
+events are facts; UIs only subscribe
+leave complexity out of the loop until a stable boundary requires it
 ```
 
 Module naming: [naming-guide.md](naming-guide.md). Prefer single-token stems
@@ -272,6 +414,8 @@ adding root ABI classes, workflow engines, or background watchers.
 ## Read the specs in order
 
 ```text
+architecture.md              # elegance bar, extension points
+internal-architecture.md     # crate/module layers
 spec/README.md
 spec/root-abi.md
 spec/fuse.md
@@ -284,6 +428,7 @@ spec/module-abi.md
 spec/tool-policy-abi.md
 spec/ctx-coreutils.md
 spec/rolling-upgrades.md
+extensions.md
 ```
 
 ## Stable ABI red line
@@ -291,4 +436,5 @@ spec/rolling-upgrades.md
 ```text
 Do not let /ctx become a directory mirror of an AI platform database.
 It should stay small, hard, boring, and scriptable.
+Match Pi’s elegance internally without importing Pi’s product surface as root ABI.
 ```

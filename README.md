@@ -82,7 +82,7 @@ embed/file/thread/component operations, and redacted errors.
 See [channels.md](docs/channels.md) and the
 [Channel ABI](docs/spec/channel-abi.md).
 
-## Eve-compatible direction
+## Eve-compatible direction and Pi-level elegance
 
 CortexFS targets functional compatibility with platforms such as
 [Vercel Eve](https://vercel.com/eve), while retaining Rust and the filesystem
@@ -90,6 +90,14 @@ ABI: durable sessions, tools, skills, sandboxed execution, channels, dynamic
 capabilities, subagents, approval pauses, and observable events map onto
 existing agent/session/tool/channel boundaries. It does not introduce parallel
 `workflow`, `hook`, `plugin`, or `memory` roots.
+
+Internally, elegance tracks the Pi toolkit
+([badlogic/pi-mono](https://github.com/badlogic/pi-mono)): `cortexfs-protocol`
+stays the provider-neutral IR (no HTTP, secrets, or agent loop);
+agent runtime + object runner own the minimal tool loop and event facts;
+`ctx`, terminals, and channel adapters are replaceable surfaces around the
+same core. See [architecture.md](docs/architecture.md) and
+[internal-architecture.md](docs/internal-architecture.md).
 
 `cortexfs-protocol` stays deliberately narrow: a pure request/event IR and
 converter for OpenAI Chat/Responses, Anthropic Messages, and Gemini. It has no
