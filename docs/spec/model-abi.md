@@ -340,6 +340,11 @@ request path; it authenticates an API key with `x-goog-api-key` and an OAuth
 access token with `Authorization: Bearer`. An adapter name outside this set
 fails with a stable error before any request is sent.
 
+Only `openai-chat` and `openai-responses` replay a tool result into the next
+request, so only those two advertise agent tools. `anthropic-messages` and
+`google-generative` serve text completion; an agent that needs a tool loop must
+route its `agent` use case to an OpenAI adapter.
+
 Secrets are never stored in model files or `.d/` control files. Provider
 credentials use this priority:
 

@@ -23,7 +23,7 @@ pub(crate) fn call_provider(
 ) -> Result<ProviderTextCompletion, String> {
     let (target, headers) =
         provider_request_target(transport, request.credential, protocol, request.model, run)?;
-    let agent_tools = protocol != WireProtocol::Anthropic && env::var_os("CTX_AGENT").is_some();
+    let agent_tools = replays_tool_result(protocol) && env::var_os("CTX_AGENT").is_some();
     let body = provider_request_body(
         protocol,
         request.model,
@@ -50,12 +50,7 @@ pub(crate) fn provider_request_body(
     if stream && protocol == WireProtocol::OpenAiChat {
         request.option("stream_options", json!({ "include_usage": true }));
     }
-    if !request.tools.is_empty()
-        && matches!(
-            protocol,
-            WireProtocol::OpenAiChat | WireProtocol::OpenAiResponses
-        )
-    {
+    if !request.tools.is_empty() && replays_tool_result(protocol) {
         request.option("parallel_tool_calls", json!(false));
     }
     let bytes = encode_model_request(protocol, &request).map_err(|error| error.to_string())?;
@@ -67,10 +62,17 @@ pub(crate) fn provider_request_body(
     Ok(body)
 }
 
-/// Drops the path-bound `model` field from an encoded Gemini request body.
-///
-/// The neutral request keeps `model` so bodies round trip between dialects, but
-/// Gemini binds the model to the request URL and rejects it in the body.
+/// Returns whether a dialect replays a recorded tool result into the next request.
+/// A dialect that cannot replay must not advertise tools it can never follow up on.
+fn replays_tool_result(protocol: WireProtocol) -> bool {
+    matches!(
+        protocol,
+        WireProtocol::OpenAiChat | WireProtocol::OpenAiResponses
+    )
+}
+
+/// Drops the path-bound `model` field from an encoded Gemini request body: the neutral
+/// request keeps it so bodies round trip, but Gemini binds it to the request URL.
 fn gemini_body_without_model(body: &str) -> Result<String, String> {
     let mut value = serde_json::from_str::<Value>(body)
         .map_err(|_error| "protocol encoder returned invalid JSON".to_owned())?;
@@ -98,10 +100,8 @@ fn model_request(
         model,
         cortexfs::agent_prompt_messages(input, agent.as_deref(), &agent_system, &prompt_context),
     );
-    if matches!(
-        protocol,
-        WireProtocol::OpenAiChat | WireProtocol::OpenAiResponses
-    ) && let Some(continuation) = agent_continuation_messages(&prompt_context.tool_injection)
+    if replays_tool_result(protocol)
+        && let Some(continuation) = agent_continuation_messages(&prompt_context.tool_injection)
     {
         request.messages.extend(continuation);
     }

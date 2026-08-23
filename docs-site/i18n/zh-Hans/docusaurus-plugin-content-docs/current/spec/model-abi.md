@@ -232,6 +232,8 @@ google-generative   google.generative   POST <base>/models/<model>:generateConte
 
 OpenAI 与 Anthropic 适配器会把 provider base URL 归一化为 `/v1` 后缀。`google-generative` 则原样使用 base URL，因为 Gemini 把 API 版本写在其中（`.../v1beta`），并把模型绑定到请求路径；它用 `x-goog-api-key` 携带 API key，用 `Authorization: Bearer` 携带 OAuth access token。不在此集合内的适配器名会在发出任何请求之前返回稳定错误。
 
+只有 `openai-chat` 与 `openai-responses` 会把工具结果回放进下一次请求，因此也只有这两个会声明 agent 工具。`anthropic-messages` 与 `google-generative` 面向纯文本补全；需要工具循环的 agent 必须把 `agent` 用途路由到某个 OpenAI 适配器。
+
 机密信息绝不存于模型文件或 `.d/` 控制文件。Provider 凭据按以下优先级读取：
 
 ```text
