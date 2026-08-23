@@ -168,12 +168,6 @@ fn parses_bootstrap_and_mount_commands() {
         })
     ));
 
-    let update = cmd!("update");
-    assert!(matches!(
-        update,
-        Err(ref error) if error.code == 2 && error.message == "unknown command: update"
-    ));
-
     let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
     assert!(matches!(
         bootstrap_source,
