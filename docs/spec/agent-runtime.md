@@ -333,8 +333,35 @@ Shell state such as `.config`, `.cache`, and `.bash_history` must land in the
 agent home, not in the project workspace.
 
 Unless an explicit mount replaces it, `/tmp` is a private sandbox tmpfs capped
-at 2 GiB. It is never the host `/tmp`; exceeding the limit fails the write
+at 512 MiB. It is never the host `/tmp`; exceeding the limit fails the write
 inside the sandbox rather than consuming unbounded host storage.
+
+Every sandbox also applies host isolation flags before process mounts:
+
+```text
+--as-pid-1
+--new-session
+--cap-drop ALL
+--unshare-uts
+--hostname cortexfs
+```
+
+Interactive terminals launched by `ctx agent start` are transient user systemd
+units with hard cgroup ceilings (see `support::quota`):
+
+```text
+MemoryMax=1G
+MemoryHigh=768M
+CPUQuota=200%
+TasksMax=256
+LimitNOFILE=1024
+OOMPolicy=stop
+```
+
+The host refuses to start another terminal when eight agent terminal units are
+already running for that user. Socket-activated agent runtimes use a stricter
+`MemoryMax=512M` / `CPUQuota=100%` / `TasksMax=128` profile, matching the
+packaged `cortexfs-agent@.service` unit.
 
 The terminal process starts from an empty environment. CortexFS injects only a
 small allowlist through the sandbox launcher:

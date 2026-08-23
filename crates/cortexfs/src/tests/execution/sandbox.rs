@@ -29,6 +29,11 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
     assert_eq!(args.first().map(String::as_str), Some("--clearenv"));
     assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
+    assert!(args.contains(&"--as-pid-1".to_owned()));
+    assert!(args.contains(&"--new-session".to_owned()));
+    assert!(contains_arg_pair(args, "--cap-drop", "ALL"));
+    assert!(args.contains(&"--unshare-uts".to_owned()));
+    assert!(contains_arg_pair(args, "--hostname", "cortexfs"));
     assert!(contains_arg_pair(
         args,
         "--size",

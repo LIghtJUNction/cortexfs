@@ -175,9 +175,10 @@ mod user_manager_tests {
     use super::{
         SystemAgentSocketReceipt, UserManagerCaller, claim_socket_entry_from,
         cleanup_exact_socket_alias, compensate_unreceipted_system_start_with,
-        dispose_claimed_alias, exact_alias_receipt, open_owned_alias_parent, parse_unit_state,
-        prepare_exact_socket_alias, remove_exact_socket_alias, select_user_manager_caller,
-        stop_system_agent_socket, wait_system_agent_visible_socket,
+        dispose_claimed_alias, exact_alias_receipt, open_owned_alias_parent,
+        parse_running_agent_terminal_count, parse_unit_state, prepare_exact_socket_alias,
+        remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
+        wait_system_agent_visible_socket,
     };
     use std::fs;
     use std::io;
@@ -219,6 +220,17 @@ mod user_manager_tests {
                     && state.invocation == "0123456789abcdef"
                     && state.active == "active"
         ));
+    }
+
+    #[test]
+    fn counts_only_agent_terminal_unit_names() {
+        let listing = "\
+cortexfs-agent-coder-default-terminal.service loaded active running CortexFS agent terminal\n\
+cortexfs-agent-coder.socket loaded active listening CortexFS agent socket\n\
+cortexfs-agent-reviewer-work-terminal.service loaded active running CortexFS agent terminal\n\
+other.service loaded active running unrelated\n";
+        assert_eq!(parse_running_agent_terminal_count(listing), 2);
+        assert_eq!(parse_running_agent_terminal_count(""), 0);
     }
 
     #[test]
@@ -1537,12 +1549,17 @@ pub fn terminal_command(
             format!("--unit={unit}"),
             "--property=Restart=always".into(),
             "--property=RestartSec=250ms".into(),
-            crate::support::command::ENV.into(),
-            "-i".into(),
-            format!("PATH={}", crate::support::command::TRUSTED_PATH),
-            crate::support::command::BWRAP.into(),
         ],
     };
+    command
+        .args
+        .extend(crate::support::quota::agent_terminal_properties());
+    command.args.extend([
+        crate::support::command::ENV.into(),
+        "-i".into(),
+        format!("PATH={}", crate::support::command::TRUSTED_PATH),
+        crate::support::command::BWRAP.into(),
+    ]);
     command
         .args
         .extend(terminal_bwrap_args(request, view, unit));
@@ -1636,6 +1653,9 @@ fn terminal_bwrap_args(
         "--ro-bind".into(),
         "/dev/null".into(),
         "/etc/bash.bashrc".into(),
+        "--ro-bind".into(),
+        "/dev/null".into(),
+        "/etc/environment".into(),
         "--chdir".into(),
         request.cwd.clone(),
     ]);
@@ -1865,23 +1885,27 @@ pub fn chat_socket_command(
     unit: &str,
     runtime_program: &Path,
 ) -> AgentLaunchCommand {
+    let mut args = vec![
+        "--user".to_owned(),
+        "--unit".to_owned(),
+        unit.to_owned(),
+        "--collect".to_owned(),
+    ];
+    args.extend(crate::support::quota::agent_runtime_properties());
+    args.extend([
+        "--socket-property".to_owned(),
+        format!("ListenStream={}", socket.display()),
+        "--socket-property".to_owned(),
+        "SocketMode=0666".to_owned(),
+        runtime_program.display().to_string(),
+        "--source".to_owned(),
+        request.source.display().to_string(),
+        "--agent".to_owned(),
+        request.agent.clone(),
+    ]);
     AgentLaunchCommand {
         program: crate::support::command::SYSTEMD_RUN.to_owned(),
-        args: vec![
-            "--user".to_owned(),
-            "--unit".to_owned(),
-            unit.to_owned(),
-            "--collect".to_owned(),
-            "--socket-property".to_owned(),
-            format!("ListenStream={}", socket.display()),
-            "--socket-property".to_owned(),
-            "SocketMode=0666".to_owned(),
-            runtime_program.display().to_string(),
-            "--source".to_owned(),
-            request.source.display().to_string(),
-            "--agent".to_owned(),
-            request.agent.clone(),
-        ],
+        args,
     }
 }
 
@@ -1952,6 +1976,48 @@ pub fn reset_unit_for(identity: &AgentUnixIdentity, unit: &str) {
         };
         let _ignored = command.stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
+}
+
+/// Counts running user agent terminal units for the operator.
+///
+/// Matches transient units named `cortexfs-agent-*-terminal.service`. Returns
+/// `None` when the user systemd manager cannot be queried.
+#[must_use]
+pub fn count_running_agent_terminals(identity: &AgentUnixIdentity) -> Option<u32> {
+    let output = systemctl_user(
+        identity,
+        &[
+            "list-units",
+            "--type=service",
+            "--state=running",
+            "--no-legend",
+            "--no-pager",
+            "cortexfs-agent-*-terminal.service",
+        ],
+    )
+    .ok()?
+    .output()
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(parse_running_agent_terminal_count(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Parses `systemctl list-units` lines for cortexfs agent terminal services.
+#[must_use]
+pub fn parse_running_agent_terminal_count(output: &str) -> u32 {
+    output
+        .lines()
+        .filter(|line| {
+            let name = line.split_whitespace().next().unwrap_or("");
+            name.starts_with("cortexfs-agent-") && name.ends_with("-terminal.service")
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX)
 }
 
 /// Stops and clears both units created by a socket-activated transient service.

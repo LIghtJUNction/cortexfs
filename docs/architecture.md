@@ -236,7 +236,9 @@ Heavy or OS-specific transports remain external processes on that boundary.
 For example, `cortexfs-channel-nostr` owns relay WebSockets and NIP-04/NIP-17
 cryptography while the core runtime only sees provider-neutral channel frames.
 This keeps a small host from loading every platform SDK into one process and
-makes per-channel restart and memory limits explicit.
+makes per-channel restart and memory limits explicit. Agent terminals and
+socket-activated runtimes likewise carry hard cgroup ceilings (`MemoryMax`,
+`CPUQuota`, `TasksMax`) so one sandboxed agent cannot exhaust the host.
 
 A terminal is a durable resource below a session. Its resource directory owns
 metadata and replayable events; a runtime PTY and socket are replaceable
