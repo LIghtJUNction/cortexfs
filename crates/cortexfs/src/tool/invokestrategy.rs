@@ -30,11 +30,11 @@ impl InvokeStrategy {
     /// Returns the stable control value.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        match self {
-            &Self::Default => "default",
-            &Self::Cli => "cli",
-            &Self::Sdk => "sdk",
-            &Self::Custom(ref value) => value,
+        match *self {
+            Self::Default => "default",
+            Self::Cli => "cli",
+            Self::Sdk => "sdk",
+            Self::Custom(ref value) => value,
         }
     }
 }

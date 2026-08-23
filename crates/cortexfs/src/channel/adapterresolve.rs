@@ -28,7 +28,7 @@ pub fn resolve_channel_adapter_executable(
     control_dir: &Path,
     strategy: &AdapterStrategy,
 ) -> Option<PathBuf> {
-    let &AdapterStrategy::Custom(ref name) = strategy else {
+    let AdapterStrategy::Custom(name) = strategy else {
         return None;
     };
     let custom = control_dir.join("adapter.d").join(name);

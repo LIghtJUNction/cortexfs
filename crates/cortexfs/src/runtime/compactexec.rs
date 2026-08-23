@@ -19,6 +19,8 @@ use cortexfs_context::Message;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+// This visibility is required by the crate-visible re-export in `runtime`.
+#[allow(clippy::redundant_pub_crate)]
 pub(crate) fn run_custom_compact(
     path: &Path,
     invocation: &CompactInvocation<'_>,
