@@ -152,6 +152,33 @@ frontends                      → 订阅事件；永不拥有循环
 特化属于对象、模块、skills 与适配器。主机只保留稳定原语：文件、socket、
 策略、原子 rename 与进程重启。
 
+### 扩展点（反框架）
+
+Pi 在 AI、agent、application 三层扩展，而不增长插件根。CortexFS 用 Unix 边界
+表达同一想法：
+
+| 层 | 用什么扩展 | 不得变成 |
+| --- | --- | --- |
+| Protocol / AI | provider 适配器、`cortexfs-protocol` 路由、model `driver` / `cap` 投影 | `/ctx` 上的 provider 方言路径，或 agent 按供应商名分支 |
+| Agent core | `cortexfs-module` 生命周期、Tool/Agent SDK、策略解释器、context 变换 | 循环内 plan 板、hook DAG，或第二套编排 ABI |
+| Application | 单文件包（[extensions.md](extensions.md)）、skills/rules 文件、channel 适配器、terminal/web/IM 客户端 | `/ctx/skill`、`/ctx/mcp`、`/ctx/workflow`，或常驻插件守护进程 |
+
+树内已有的具体表面：
+
+```text
+cortexfs.module.socket/v1     进程隔离的 module 生命周期
+Tool SDK / Agent SDK          一个可执行能力或 agent 步骤
+cortexfs.package/v1           编写输入 → 普通 agent/tool 对象
+cortexfs.interaction/v1       所有前端说同一套 request/event 事实
+cortexfs.channel.socket/v1    平台适配器留在 agent 循环之外
+skills / AGENTS.md / rules    可丢弃 context 输入，永不授予权限
+MCP via ctxmcp                普通工具；永不成为根类
+```
+
+结构止于稳定原语与生命周期边界。新行为是新对象、module、skill 或适配器——
+不是新的根目录，也不是热加载的进程内扩展宿主。见
+[module-abi.md](spec/module-abi.md) 与 [extensions.md](extensions.md)。
+
 ## 身份、生命周期与传输
 
 CortexFS 使用四种身份，不应折叠到“agent daemon”或第二条生命周期树中：
@@ -286,6 +313,8 @@ Git 提交或进程重启是开发刷新边界
 ## 按顺序阅读规格
 
 ```text
+architecture.md              # 优雅度标准、扩展点
+internal-architecture.md     # crate/模块分层
 spec/README.md
 spec/root-abi.md
 spec/fuse.md
@@ -294,9 +323,11 @@ spec/model-abi.md
 spec/session-abi.md
 spec/agent-tool-security.md
 spec/agent-runtime.md
+spec/module-abi.md
 spec/tool-policy-abi.md
 spec/ctx-coreutils.md
 spec/rolling-upgrades.md
+extensions.md
 ```
 
 ## 稳定 ABI 红线

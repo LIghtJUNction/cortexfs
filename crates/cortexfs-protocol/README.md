@@ -16,7 +16,9 @@ cortexfs-protocol = "0.1.7"
 
 ## Design
 
-This crate deliberately has multiple protocol-specific borrowed wire IRs plus
+This crate is the protocol/AI layer in CortexFS’s Pi-aligned package map
+([architecture.md](../../docs/architecture.md)): provider-neutral IR only.
+It deliberately has multiple protocol-specific borrowed wire IRs plus
 an owned semantic IR. It is not a JSON-only “one universal struct”:
 
 | Layer | IR | Purpose |

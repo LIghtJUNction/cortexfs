@@ -6,6 +6,12 @@ sidebar_label: One-file Extensions
 
 # One-file Extensions
 
+CortexFS follows the same anti-framework extension rule as Pi: add behavior at
+stable edges (packages, executables, skills, modules, channel adapters) without
+a second root ABI or a resident plugin daemon. Product placement of those edges
+is in [architecture.md](architecture.md) (*Extension points*). This page is the
+shortest authoring path.
+
 The shortest way to add behavior is one package directory. Keep the program
 logic in normal executables; keep the wiring in one `cortexfs.toml`:
 

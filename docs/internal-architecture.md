@@ -46,7 +46,7 @@ Accept a design only when all of the following hold:
 | Minimal core | One tool/model feedback loop; no baked plan/workflow engine |
 | Event facts | Interaction/channel/session events are correlatable facts |
 | Composability | `protocol`, SDKs, and `runtime-client` usable without FUSE |
-| Extension at edges | Modules, tools, channels, skills—never new root classes |
+| Extension at edges | Modules, tools, channels, skills—never new root classes; see architecture.md *Extension points* |
 | Omission | Prefer leaving a product surface out until a versioned ABI needs it |
 
 Anti-patterns (reject in review):

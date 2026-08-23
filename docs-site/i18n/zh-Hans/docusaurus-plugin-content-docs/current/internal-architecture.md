@@ -42,7 +42,7 @@ crate 角色、模块层级与错误策略——并以 Pi 级清晰度表达，�
 | 最小内核 | 一条 tool/model 反馈循环；无烘焙的 plan/workflow 引擎 |
 | 事件事实 | Interaction/channel/session 事件可关联 |
 | 可组合 | `protocol`、SDK、`runtime-client` 可不依赖 FUSE 使用 |
-| 在边缘扩展 | Modules、tools、channels、skills——永不新增根类 |
+| 在边缘扩展 | Modules、tools、channels、skills——永不新增根类；见 architecture.md「扩展点」 |
 | 省略 | 在版本化 ABI 需要之前，宁可省略产品表面 |
 
 评审应拒绝的反模式：

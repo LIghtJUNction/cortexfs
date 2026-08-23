@@ -6,7 +6,7 @@ sidebar_label: 扩展 CortexFS
 
 # 扩展 CortexFS
 
-先给一个规则：CortexFS 的扩展点是当前规范里的对象、套接字、控制文件和工具提交语义。它们不是新的根目录或新的工作流入口。
+先给一个规则：CortexFS 的扩展点是当前规范里的对象、套接字、控制文件和工具提交语义。它们不是新的根目录或新的工作流入口。该反框架落点与 [architecture.md](architecture.md) 中的 Pi 优雅度标准一致。
 
 常规场景下，请先走 [One-file Extensions](extensions.md) 的路径：将工具与可执行代理放在一个包目录里，用一个 `cortexfs.toml` 描述它们，先运行 `ctx install --check ./package`，再用 `ctx install ./package` 安装。该包只是编写便利层，安装依然使用同一套“按哈希绑定、原子发布”的对象机制，以及同一套 `agent/<name>.d/*` / `tool/<name>.d/*` ABI。
 
@@ -16,13 +16,17 @@ sidebar_label: 扩展 CortexFS
 
 ```text
 DESIGN.md
+architecture.md          # 对标 Pi 的优雅度标准与扩展点
+internal-architecture.md # crate/模块分层规则
 spec/README.md
 spec/root-abi.md
 spec/object-abi.md
 spec/model-abi.md
+spec/module-abi.md
 spec/session-abi.md
 spec/tool-policy-abi.md
 spec/ctx-coreutils.md
+extensions.md
 aimock-testing.md
 ```
 

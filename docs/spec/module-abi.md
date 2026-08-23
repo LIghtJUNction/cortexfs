@@ -12,7 +12,10 @@ stable external boundary is the versioned JSONL wire contract described below.
 ## Scope
 
 The module ABI gives Agent, Tool, Channel, Model, and Context extensions one
-common identity, capability, and lifecycle surface:
+common identity, capability, and lifecycle surface. It is the agent-core
+extension edge in the Pi-aligned architecture map
+([architecture.md](../architecture.md)): modules plug into lifecycle and
+capabilities; they do not invent root classes or own the frontend.
 
 ```text
 CortexFS Runtime

@@ -164,6 +164,34 @@ Specialization belongs in objects, modules, skills, and adapters. The host
 keeps stable primitives: files, sockets, policy, atomic rename, and process
 restart.
 
+### Extension points (anti-framework)
+
+Pi extends at the AI, agent, and application layers without growing a plugin
+root. CortexFS uses the same idea with Unix boundaries:
+
+| Layer | Extend with | Must not become |
+| --- | --- | --- |
+| Protocol / AI | provider adapters, `cortexfs-protocol` routes, model `driver` / `cap` projections | `/ctx` provider dialect paths or agent `match` on vendor names |
+| Agent core | `cortexfs-module` lifecycle, Tool/Agent SDKs, policy evaluators, context transformers | in-loop plan boards, hook DAGs, or a second orchestration ABI |
+| Application | one-file packages ([extensions.md](extensions.md)), skills/rules files, channel adapters, terminal/web/IM clients | `/ctx/skill`, `/ctx/mcp`, `/ctx/workflow`, or resident plugin daemons |
+
+Concrete surfaces already in the tree:
+
+```text
+cortexfs.module.socket/v1     process-isolated module lifecycle
+Tool SDK / Agent SDK          one executable capability or agent step
+cortexfs.package/v1           authoring input → ordinary agent/tool objects
+cortexfs.interaction/v1       every frontend speaks the same request/event facts
+cortexfs.channel.socket/v1    platform adapters stay outside the agent loop
+skills / AGENTS.md / rules    disposable context inputs, never authority
+MCP via ctxmcp                ordinary tools; never a root class
+```
+
+The structure ends at stable primitives and lifecycle edges. New behavior is a
+new object, module, skill, or adapter—not a new root directory and not a
+hot-loaded in-process extension host. See [module-abi.md](spec/module-abi.md)
+and [extensions.md](extensions.md).
+
 ## Identity, lifetime, and transport
 
 CortexFS uses four different identities. They must not be collapsed into an
@@ -386,6 +414,8 @@ adding root ABI classes, workflow engines, or background watchers.
 ## Read the specs in order
 
 ```text
+architecture.md              # elegance bar, extension points
+internal-architecture.md     # crate/module layers
 spec/README.md
 spec/root-abi.md
 spec/fuse.md
@@ -398,6 +428,7 @@ spec/module-abi.md
 spec/tool-policy-abi.md
 spec/ctx-coreutils.md
 spec/rolling-upgrades.md
+extensions.md
 ```
 
 ## Stable ABI red line
