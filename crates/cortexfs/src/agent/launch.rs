@@ -2001,9 +2001,9 @@ pub fn count_running_agent_terminals(identity: &AgentUnixIdentity) -> Option<u32
     if !output.status.success() {
         return None;
     }
-    Some(parse_running_agent_terminal_count(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    Some(parse_running_agent_terminal_count(
+        &String::from_utf8_lossy(&output.stdout),
+    ))
 }
 
 /// Parses `systemctl list-units` lines for cortexfs agent terminal services.

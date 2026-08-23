@@ -29,7 +29,9 @@ impl AdapterStrategy {
     /// Derives a catalog family from a channel id such as `telegram.primary`.
     #[must_use]
     pub fn family_from_channel_id(channel: &str) -> Option<String> {
-        let family = channel.split_once('.').map_or(channel, |(family, _)| family);
+        let family = channel
+            .split_once('.')
+            .map_or(channel, |(family, _)| family);
         cortexfs_channels::platform::catalog::find(family)
             .map(|spec| spec.id.to_owned())
             .or_else(|| is_object_name(family).then(|| family.to_owned()))

@@ -44,6 +44,20 @@ alias, and agent runtime state are available. `ctx --help` lists the
 subcommands supported by the current build. The default live test does not
 depend on an external cloud API.
 
+## Update The Host
+
+Plan against a branch, tag, or commit before applying the same pinned revision:
+
+```bash
+ctx update --ref main
+ctx update --ref main --yes
+```
+
+The updater builds a native package, preserves configuration and data, restarts
+only previously active CortexFS units, and restores the exact prior package if
+health verification fails. After the first successful ref update, plain
+`ctx update` reuses the recorded tracking ref.
+
 ## Start A Session
 
 The short interactive commands use the current folder as the workspace:

@@ -53,7 +53,8 @@ session_prefix = "discord"
 # Optional complete instance id; omit for the base `discord` id.
 # channel = "discord.primary"
 
-# Optional progress presentation. Omit a value to disable that effect.
+# Progress presentation is enabled by default. Set a value here only to override it;
+# use an empty string (or `typing = false`) to disable one effect.
 [progress]
 reaction = "👀"
 error_reaction = "❌"
@@ -64,10 +65,11 @@ edit_interval_ms = 700
 edit_chunk_bytes = 512
 ```
 
-The progress values are configuration, not Discord ABI constants. The same
-policy can use any reaction or text, or disable the preview entirely by
-omitting the corresponding values. Without `progress.placeholder`, CortexFS
-sends the final reply normally and does not create a temporary message.
+The progress values are configuration, not Discord ABI constants. A missing
+`[progress]` section uses the defaults shown above. The same policy can use any
+reaction or text, or disable an individual effect with an empty value. Without
+`progress.placeholder`, CortexFS sends the final reply normally and does not
+create a temporary message.
 
 Start the low-memory synchronous Gateway adapter after enabling the Discord
 `MESSAGE_CONTENT` privileged intent in the Discord Developer Portal:

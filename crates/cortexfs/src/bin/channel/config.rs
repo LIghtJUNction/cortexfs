@@ -487,16 +487,29 @@ fn common() -> Result<CommonConfig, ConfigError> {
 }
 
 fn progress() -> Result<ChannelProgressPolicy, ConfigError> {
-    let edit_chunk_bytes = optional_usize("CORTEXFS_CHANNEL_PROGRESS_EDIT_CHUNK_BYTES")?;
-    Ok(ChannelProgressPolicy {
-        reaction: configured("CORTEXFS_CHANNEL_PROGRESS_REACTION"),
-        error_reaction: configured("CORTEXFS_CHANNEL_PROGRESS_ERROR_REACTION"),
-        placeholder: configured("CORTEXFS_CHANNEL_PROGRESS_PLACEHOLDER"),
-        error_prefix: configured("CORTEXFS_CHANNEL_PROGRESS_ERROR_PREFIX"),
-        typing: optional_bool("CORTEXFS_CHANNEL_PROGRESS_TYPING")?,
-        edit_interval_ms: optional_number("CORTEXFS_CHANNEL_PROGRESS_EDIT_INTERVAL_MS")?,
-        edit_chunk_bytes,
-    })
+    let mut policy = ChannelProgressPolicy::default();
+    if let Ok(value) = env::var("CORTEXFS_CHANNEL_PROGRESS_REACTION") {
+        policy.reaction = Some(value);
+    }
+    if let Ok(value) = env::var("CORTEXFS_CHANNEL_PROGRESS_ERROR_REACTION") {
+        policy.error_reaction = Some(value);
+    }
+    if let Ok(value) = env::var("CORTEXFS_CHANNEL_PROGRESS_PLACEHOLDER") {
+        policy.placeholder = Some(value);
+    }
+    if let Ok(value) = env::var("CORTEXFS_CHANNEL_PROGRESS_ERROR_PREFIX") {
+        policy.error_prefix = Some(value);
+    }
+    if let Some(value) = optional_bool("CORTEXFS_CHANNEL_PROGRESS_TYPING")? {
+        policy.typing = value;
+    }
+    if let Some(value) = optional_number("CORTEXFS_CHANNEL_PROGRESS_EDIT_INTERVAL_MS")? {
+        policy.edit_interval_ms = Some(value);
+    }
+    if let Some(value) = optional_usize("CORTEXFS_CHANNEL_PROGRESS_EDIT_CHUNK_BYTES")? {
+        policy.edit_chunk_bytes = Some(value);
+    }
+    Ok(policy)
 }
 
 fn required(name: &'static str) -> Result<String, ConfigError> {
@@ -537,7 +550,7 @@ fn optional_usize(name: &'static str) -> Result<Option<usize>, ConfigError> {
         .transpose()
 }
 
-fn optional_bool(name: &'static str) -> Result<bool, ConfigError> {
+fn optional_bool(name: &'static str) -> Result<Option<bool>, ConfigError> {
     configured(name)
         .map(|value| {
             value
@@ -545,7 +558,6 @@ fn optional_bool(name: &'static str) -> Result<bool, ConfigError> {
                 .map_err(|error| ConfigError::Invalid(name, error.to_string()))
         })
         .transpose()
-        .map(|value| value.unwrap_or(false))
 }
 
 fn boolean(name: &'static str, default: bool) -> Result<bool, ConfigError> {

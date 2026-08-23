@@ -43,4 +43,8 @@ for line in s.makefile():
 and `@history:N` references, clipboard adapters, and an interactive raw mode.
 Enter `/raw` to toggle JSONL event output, or use `/raw on` and `/raw off` to
 select it explicitly; the same mode is available at startup with `--raw`.
-References are prompt context only and never grant filesystem or tool authority.
+`/login [provider]` and `/logout [provider]` delegate to the sibling `ctx auth`
+client; without a provider they resolve the provider selected by the agent model.
+Credentials remain in the host credential store and are never written below
+`/ctx`. References are prompt context only and never grant filesystem or tool
+authority.

@@ -38,6 +38,8 @@ jobs:
             scripts/install.sh \
             scripts/install-linux.sh \
             scripts/install-test.sh \
+            scripts/update-linux.sh \
+            scripts/update-test.sh \
             packaging/build.sh \
             packaging/debian/postinst \
             packaging/debian/prerm \
@@ -48,8 +50,11 @@ jobs:
             packaging/debian/prerm \
             packaging/debian/postrm \
             packaging/arch/PKGBUILD \
-            packaging/arch/cortexfs.install
+            packaging/arch/cortexfs.install \
+            scripts/update-linux.sh \
+            scripts/update-test.sh
           bash scripts/install-test.sh
+          bash scripts/update-test.sh
 
   rust:
     name: rust

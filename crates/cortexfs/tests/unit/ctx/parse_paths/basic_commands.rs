@@ -51,6 +51,18 @@ fn zero_arg_commands_reject_extra_arguments() {
 }
 
 #[test]
+fn parses_update_arguments_for_the_host_updater() {
+    assert!(matches!(
+        cmd!("update", "--ref", "main", "--yes"),
+        Ok(Command::Update(ref args))
+            if args
+                .iter()
+                .map(String::as_str)
+                .eq(["--ref", "main", "--yes"])
+    ));
+}
+
+#[test]
 fn parses_spec_which_command() {
     let command = cmd!("which", "tool", "fs.read");
     assert!(matches!(

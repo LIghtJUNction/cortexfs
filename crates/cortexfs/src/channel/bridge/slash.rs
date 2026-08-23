@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::is_model_name;
 use cortexfs_channels::{InboundMessage, MessageBody, OutboundMessage};
-use cortexfs_runtime_client::status;
 use cortexfs_runtime_client::RuntimeClientError;
+use cortexfs_runtime_client::status;
 
 use super::AgentChannelBridge;
 

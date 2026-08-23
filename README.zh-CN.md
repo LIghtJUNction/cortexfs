@@ -23,6 +23,8 @@ FUSE、bubblewrap 0.10+ 与 Rust。每个持久化变更都会展示计划，只
 或现有环境文件。首次成功安装会默认跟随系统语言，并提供可跳过的 AI 接入引导。
 
 安装完成后可运行 `ctx status`、`ctx ls`、`ctx doctor` 和 `ctx --help`。
+后续先用 `ctx update --ref main` 查看固定提交的更新计划，再用
+`ctx update --ref main --yes` 通过原生包应用；健康检查失败时会恢复旧包和原有活动 unit。
 
 如需原生安装包，请参阅[多发行版打包与安装指南](docs/packaging.md)，可生成
 `.deb`、`.rpm`、Arch Linux 安装包和通用 tar.gz 压缩包。
@@ -60,6 +62,7 @@ socket 与持久化 session，因此支持真正的多轮对话。
 ## 外部参考
 
 ### 同类项目
+
 - [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)
 - [j0hanz/filesystem-mcp](https://github.com/j0hanz/filesystem-mcp)
 - [modelcontextprotocol/filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
@@ -93,6 +96,7 @@ socket 与持久化 session，因此支持真正的多轮对话。
   - `crates/cortexfs-tool-sdk/src/lib.rs`
 
 ### 参考文档
+
 - [Model Context Protocol 规范（2025-06-18）](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
 - [Model Context Protocol 规范（2025-03-26）](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
 - [Linux FUSE 文档](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)

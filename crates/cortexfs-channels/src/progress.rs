@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// User-selected presentation for a channel's in-progress response.
+/// Default presentation for a channel's in-progress response.
 ///
-/// `None` values disable that effect. The ABI intentionally does not choose
-/// emoji, text, or timing defaults; each host may load this policy from its
-/// own configuration format.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+/// Hosts may override these values or use `None` to disable an effect.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ChannelProgressPolicy {
     pub reaction: Option<String>,
@@ -17,12 +15,26 @@ pub struct ChannelProgressPolicy {
     pub edit_chunk_bytes: Option<usize>,
 }
 
+impl Default for ChannelProgressPolicy {
+    fn default() -> Self {
+        Self {
+            reaction: Some("👀".to_owned()),
+            error_reaction: Some("❌".to_owned()),
+            placeholder: Some("⏳ 思考中…".to_owned()),
+            error_prefix: Some("⚠️ ".to_owned()),
+            typing: true,
+            edit_interval_ms: Some(700),
+            edit_chunk_bytes: Some(512),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ChannelProgressPolicy;
 
     #[test]
-    fn progress_policy_does_not_invent_presentation_defaults() -> Result<(), serde_json::Error> {
+    fn progress_policy_defaults_to_enabled_presentation() -> Result<(), serde_json::Error> {
         let policy = serde_json::from_str::<ChannelProgressPolicy>("{}")?;
         assert_eq!(policy, ChannelProgressPolicy::default());
         Ok(())

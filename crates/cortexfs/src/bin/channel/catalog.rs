@@ -69,7 +69,10 @@ fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
         writeln!(out, "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock")?;
         writeln!(out, "CORTEXFS_CHANNEL_ID={family}.primary")?;
         if spec.id == "slack" {
-            writeln!(out, "# also /etc/cortexfs/channels/{family}-driver.env with CORTEXFS_AGENT and CORTEXFS_AGENT_SOCKET")?;
+            writeln!(
+                out,
+                "# also /etc/cortexfs/channels/{family}-driver.env with CORTEXFS_AGENT and CORTEXFS_AGENT_SOCKET"
+            )?;
         }
         if let Some(setup) = setup {
             for secret in setup.secrets {
@@ -94,7 +97,10 @@ fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
         writeln!(out, "unit\t{}", setup.unit)?;
         writeln!(out, "secrets\t{}", setup.secrets.join(","))?;
         if spec.id == "slack" {
-            writeln!(out, "driver_env\t/etc/cortexfs/channels/{family}-driver.env")?;
+            writeln!(
+                out,
+                "driver_env\t/etc/cortexfs/channels/{family}-driver.env"
+            )?;
         }
     }
     Ok(())

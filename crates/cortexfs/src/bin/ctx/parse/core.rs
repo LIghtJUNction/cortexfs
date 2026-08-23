@@ -50,6 +50,7 @@ pub(crate) enum Command {
         topic: Option<String>,
     },
     Status,
+    Update(Vec<String>),
     Bootstrap {
         source: Option<PathBuf>,
         dry_run: bool,
@@ -219,6 +220,15 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Attach { ref selector } => channel_attach(&cli.root, selector.as_deref()),
         Command::Man { topic } => success(print_man(&cli.root, topic.as_deref())),
         Command::Status => success(print_status(&cli.root)),
+        Command::Update(ref args) => {
+            let error = ProcessCommand::new("/usr/lib/cortexfs/update-linux")
+                .args(args)
+                .env_clear()
+                .exec();
+            Err(CliError::unavailable(format!(
+                "cannot run updater: {error}"
+            )))
+        }
         Command::Bootstrap {
             source,
             dry_run,
@@ -465,22 +475,10 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             no_extra_args(values)?;
             topic.map_or(Ok(Command::Help), |topic| Ok(Command::HelpTopic(topic)))
         }
-        "--help" | "-h" => {
-            no_extra_args(values)?;
-            Ok(Command::Help)
-        }
-        "abi" => {
-            no_extra_args(values)?;
-            Ok(Command::Abi)
-        }
-        "env" => {
-            no_extra_args(values)?;
-            Ok(Command::Env)
-        }
-        "root" => {
-            no_extra_args(values)?;
-            Ok(Command::Root)
-        }
+        "--help" | "-h" => no_extra_args(values).map(|()| Command::Help),
+        "abi" => no_extra_args(values).map(|()| Command::Abi),
+        "env" => no_extra_args(values).map(|()| Command::Env),
+        "root" => no_extra_args(values).map(|()| Command::Root),
         "attach" => {
             let selector = values.next();
             no_extra_args(values)?;
@@ -491,10 +489,8 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             no_extra_args(values)?;
             Ok(Command::Man { topic })
         }
-        "status" => {
-            no_extra_args(values)?;
-            Ok(Command::Status)
-        }
+        "status" => no_extra_args(values).map(|()| Command::Status),
+        "update" => Ok(Command::Update(values.collect())),
         "bootstrap" => parse_bootstrap_command(values),
         "storage" => parse_storage_command(values),
         "mount" => parse_mount_command(values),
@@ -568,10 +564,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             no_extra_args(values)?;
             Ok(Command::Cancel { path, run })
         }
-        "doctor" => {
-            no_extra_args(values)?;
-            Ok(Command::Doctor)
-        }
+        "doctor" => no_extra_args(values).map(|()| Command::Doctor),
         "exec" => {
             let path = required_arg(&mut values, "exec requires an ABI object path")?;
             Ok(Command::Exec {
@@ -627,38 +620,12 @@ pub(crate) fn is_help_args(args: &[String]) -> bool {
 
 /// Returns true when a command name supports `help <command>` usage.
 pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
-    matches!(
-        command,
-        "status"
-            | "abi"
-            | "env"
-            | "root"
-            | "attach"
-            | "man"
-            | "bootstrap"
-            | "storage"
-            | "mount"
-            | "ls"
-            | "which"
-            | "which-tool"
-            | "path"
-            | "history"
-            | "resume"
-            | "send"
-            | "inspect"
-            | "agent"
-            | "terminal"
-            | "object"
-            | "install"
-            | "provider"
-            | "auth"
-            | "ping"
-            | "cancel"
-            | "doctor"
-            | "exec"
-            | "tool"
-            | "file"
-            | "schedule"
-            | "validate-name"
-    )
+    const TOPICS: &str = concat!(
+        "status abi env root attach man bootstrap storage mount ls which which-tool path ",
+        "history resume send inspect agent terminal object install provider auth ping cancel ",
+        "doctor exec tool file schedule validate-name",
+    );
+    TOPICS
+        .split_ascii_whitespace()
+        .any(|topic| topic == command)
 }

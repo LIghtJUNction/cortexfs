@@ -32,9 +32,7 @@ impl DriverLaunchConfig {
         let socket = env::var("CORTEXFS_CHANNEL_SOCKET")
             .or_else(|_error| env::var("CTX_CHANNEL_SOCKET"))
             .map(PathBuf::from)
-            .unwrap_or_else(|_error| {
-                cortexfs_paths::channel_driver_socket(channel_id.as_str())
-            });
+            .unwrap_or_else(|_error| cortexfs_paths::channel_driver_socket(channel_id.as_str()));
         let request_prefix = env::var("CORTEXFS_CHANNEL_REQUEST_PREFIX")
             .unwrap_or_else(|_error| format!("{}-", channel_id.as_str()));
         let reply_timeout = env::var("CORTEXFS_CHANNEL_REPLY_TIMEOUT_SECONDS")

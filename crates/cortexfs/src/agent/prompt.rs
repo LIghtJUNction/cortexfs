@@ -15,10 +15,9 @@ pub mod rules;
 pub mod skills;
 pub mod snapshot;
 
-pub use history::*;
 pub(crate) use history::collect_history_messages_for_agent;
+pub use history::*;
 pub use model::*;
-pub(crate) use compact::format_history_with_strategy;
 pub(crate) use read::*;
 pub use render::*;
 pub use rules::*;

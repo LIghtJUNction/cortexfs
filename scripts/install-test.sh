@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2031,SC2329 # Dynamic sources, subshell globals, and test doubles are intentional.
 set -Eeuo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 export CORTEXFS_INSTALL_LIB=1
-# shellcheck source=scripts/install-linux.sh
+# shellcheck source=install-linux.sh
 source "$ROOT/scripts/install-linux.sh"
 setup_style
 TEST_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/cortexfs-install-test.XXXXXX")
@@ -94,6 +95,12 @@ rejected_confirmation() (
 assert_false "library-only confirmation override rejects a mismatch" \
     rejected_confirmation
 unset CORTEXFS_INSTALL_TEST_MODE CORTEXFS_TEST_INPUT
+export CORTEXFS_ASSUME_YES=1
+TTY_PATH="$TEST_TEMP/missing-tty"
+assert_true "explicit updater approval bypasses nested installer prompts" \
+    confirm 'NEVER READ' test test
+unset CORTEXFS_ASSUME_YES
+TTY_PATH=/dev/tty
 
 assert_true "Linux systemd host is accepted" platform_supported Linux systemd yes
 assert_false "non-Linux host is rejected" platform_supported Darwin launchd no
@@ -131,6 +138,7 @@ sudo() {
     "$@"
 }
 ROOT_TEMP_FILES=()
+: "${ROOT_TEMP_FILES[@]}"
 atomic_install "$source_file" "$destination" 0755
 assert_eq release-v1 "$(<"$destination")" "atomic install publishes the release"
 atomic_install "$source_file" "$destination" 0755
@@ -148,9 +156,12 @@ reject_changed_artifact() (
     stage_artifacts "$artifact_source" "$TEST_TEMP/rejected-stage" "$snapshots"
 )
 assert_false "changed artifact is rejected before deployment" reject_changed_artifact
+assert_true "source deployment includes the host updater" \
+    grep -Fxq scripts/update-linux.sh < <(artifact_paths)
 
 STATE_FILE="$TEST_TEMP/state"
 TEMP_DIR="$TEST_TEMP"
+test -d "$TEMP_DIR"
 LANGUAGE=zh
 write_state
 assert_eq zh "$(read_state_language "$STATE_FILE")" "state writer publishes safe persisted language"
@@ -178,8 +189,18 @@ assert_true "Codex OAuth login uses the root system store" \
 unset CORTEXFS_INSTALL_TEST_MODE CORTEXFS_TEST_INPUT
 unset -f sudo
 
+package_payload_lists_match() (
+    export CORTEXFS_PACKAGE_LIB=1
+    # shellcheck disable=SC1090,SC1091 # The package script is sourced only in this subshell.
+    source "$ROOT/packaging/build.sh"
+    diff -u <(printf '%s\n' "${BINARIES[@]}" | sort) <(expected_binaries | sort)
+    diff -u <(printf '%s\n' "${UNITS[@]}" | sort) <(expected_units | sort)
+)
+assert_true "source and native package payload lists agree" package_payload_lists_match
+
 assert_true "POSIX entrypoint syntax" sh -n "$ROOT/scripts/install.sh"
 assert_true "Bash installer syntax" bash -n "$ROOT/scripts/install-linux.sh"
+assert_true "Bash updater syntax" bash -n "$ROOT/scripts/update-linux.sh"
 assert_true "Bash test syntax" bash -n "$ROOT/scripts/install-test.sh"
 
 printf '1..%d\n' "$PASSED"

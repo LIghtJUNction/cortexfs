@@ -9,19 +9,17 @@ const MAX_ADAPTER_BYTES: u64 = 256;
 /// Reads `channel/<name>.d/adapter`, falling back to the channel id family.
 #[must_use]
 pub fn read_adapter_strategy(control_dir: &Path, channel: &str) -> AdapterStrategy {
-    match read_small_text_file(&control_dir.join("adapter"), MAX_ADAPTER_BYTES) {
-        Ok(content) => AdapterStrategy::parse(&content).unwrap_or_else(|| {
-            AdapterStrategy::family_from_channel_id(channel)
-                .map(AdapterStrategy::Catalog)
-                .unwrap_or_else(|| AdapterStrategy::Custom(channel.to_owned()))
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            AdapterStrategy::family_from_channel_id(channel)
-                .map(AdapterStrategy::Catalog)
-                .unwrap_or_else(|| AdapterStrategy::Custom(channel.to_owned()))
-        }
-        Err(_error) => AdapterStrategy::Custom(channel.to_owned()),
-    }
+    let strategy = match read_small_text_file(&control_dir.join("adapter"), MAX_ADAPTER_BYTES) {
+        Ok(content) => AdapterStrategy::parse(&content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_error) => return AdapterStrategy::Custom(channel.to_owned()),
+    };
+    strategy.unwrap_or_else(|| {
+        AdapterStrategy::family_from_channel_id(channel).map_or_else(
+            || AdapterStrategy::Custom(channel.to_owned()),
+            AdapterStrategy::Catalog,
+        )
+    })
 }
 
 /// Returns a custom adapter executable when `adapter.d/<name>` is present.

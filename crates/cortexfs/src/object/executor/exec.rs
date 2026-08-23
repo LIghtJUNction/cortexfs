@@ -653,9 +653,7 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         request.config.source.as_os_str().to_owned(),
         OsString::from("--setenv"),
         OsString::from("CTX_TOOL_MODE"),
-        OsString::from(
-            crate::tool::invoke_tool_mode(&request.invoke_strategy).unwrap_or("cli"),
-        ),
+        OsString::from(crate::tool::invoke_tool_mode(&request.invoke_strategy).unwrap_or("cli")),
         OsString::from("--setenv"),
         OsString::from("CTX_AUTHORIZED_OBJECT"),
         request.authorized_object.as_os_str().to_owned(),

@@ -65,6 +65,19 @@ instances. Terminal sessions use the root-owned socket-activated broker, and
 package upgrades restart an already active mount service only after the new
 files have been installed.
 
+After the first installation, host updates use the same native package backend:
+
+```bash
+ctx update --ref main          # resolve and inspect the immutable plan
+ctx update --ref main --yes    # build, install, verify, or roll back
+```
+
+A successful ref update records its tracking ref, so later plans may use
+`ctx update` without repeating `--ref`. Use `--source /clean/git/checkout` for
+a pinned local commit. The updater preserves configuration, storage, secrets,
+and inactive unit state; a package-owned install applies only when its exact
+current package is available for rollback.
+
 For a source-only deployment with no native package builder, the existing
 installer remains available:
 

@@ -480,6 +480,54 @@ child-channel `agent`, `session`, backing `model`, and backing `life` fields as
 `ctx agent children`, then prints `result.md`. This is a synchronous reap, not
 a background poller.
 
+## Host Updates
+
+`ctx update` updates the installed CortexFS software on a Linux systemd host. It
+is separate from `ctx storage update`, extension installation, and provider or
+channel configuration.
+
+```text
+ctx update [--ref REF | --source PATH] [--yes]
+```
+
+The command resolves exactly one Git commit. `--ref` fetches from the canonical
+CortexFS repository and pins the fetched commit before executing build logic.
+`--source` accepts only a clean Git checkout and pins its `HEAD`. The first
+update requires one of these selectors; after a successful `--ref` update, the
+same ref is recorded as the tracking ref for later invocations.
+
+Without `--yes`, the command is plan-only: it prints the current and target
+revisions, native package backend, and installed ownership without changing the
+host. `--yes` applies that exact plan. Update helpers reject unknown options,
+option-shaped refs, dirty checkouts, symlinked packaging entrypoints, and target
+commits with an unsupported `cortexfs.update` protocol.
+
+An applied update MUST:
+
+1. build as the invoking non-root user;
+2. produce and inspect the host's native Deb, RPM, or Pacman package;
+3. reject package payloads outside CortexFS-owned binary, unit, helper, and
+   documentation paths, and reject files under `/etc/cortexfs`, storage, or
+   secret directories;
+4. cache the exact installed package (or exact source-install payload) before
+   replacement;
+5. record the active CortexFS service and socket units plus the selected storage
+   generation;
+6. suppress package-script restarts, install the package, restore only the
+   previously active units, and verify those units, `/ctx`, and `ctx status`;
+7. reinstall the cached package and restore the prior storage generation if a
+   synchronous install, restart, or health check fails.
+
+If an exact package for the installed version cannot be found, a package-owned
+installation MUST refuse the apply step rather than claim rollback safety.
+Transactions and update state live below `/var/lib/cortexfs`; they are host
+implementation state, not filesystem ABI. No updater may add polling, a
+background watcher, or an implicit update trigger.
+
+The system service stages storage without `--prune`, so the previous generation
+survives the software health gate. Operators may explicitly run
+`ctx storage update --prune` after accepting the update.
+
 ## Installation Boundary
 
 Reserve `/ctx/bin` for CortexFS ABI-level helper programs needed by runtimes,

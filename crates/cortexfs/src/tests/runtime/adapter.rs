@@ -1,9 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use crate::channel::{
-    AdapterStrategy, read_adapter_strategy, resolve_channel_adapter_executable,
-};
+use crate::channel::{AdapterStrategy, read_adapter_strategy, resolve_channel_adapter_executable};
 
 fn write_hook(path: &std::path::Path, body: &str, mode: u32) -> std::io::Result<()> {
     fs::write(path, format!("#!/bin/sh\n{body}\n"))?;

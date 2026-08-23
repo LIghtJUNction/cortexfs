@@ -232,8 +232,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn eof_without_done_is_rejected() -> io::Result<()> {
+    fn request_with_reply(reply: Vec<u8>, body: &Value) -> io::Result<io::Result<Vec<Value>>> {
         let root = tempfile::tempdir()?;
         let socket = root.path().join("agent.sock");
         let listener = UnixListener::bind(&socket)?;
@@ -241,30 +240,29 @@ mod tests {
             let (mut stream, _) = listener.accept()?;
             let mut line = String::new();
             BufReader::new(stream.try_clone()?).read_line(&mut line)?;
-            stream.write_all(b"{\"type\":\"delta\",\"text\":\"partial\"}\n")
+            stream.write_all(&reply)
         });
-        let error = request(&socket, &json!({"op":"ping"}), &[])
-            .err()
-            .ok_or_else(|| io::Error::other("missing EOF error"))?;
-        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        let result = request(&socket, body, &[]);
         server
             .join()
             .map_err(|_panic| io::Error::other("server panicked"))??;
+        Ok(result)
+    }
+
+    #[test]
+    fn eof_without_done_is_rejected() -> io::Result<()> {
+        let reply = b"{\"type\":\"delta\",\"text\":\"partial\"}\n".to_vec();
+        let error = request_with_reply(reply, &json!({"op":"ping"}))?
+            .err()
+            .ok_or_else(|| io::Error::other("missing EOF error"))?;
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
         Ok(())
     }
 
     #[test]
     fn eof_after_error_preserves_error_frames() -> io::Result<()> {
-        let root = tempfile::tempdir()?;
-        let socket = root.path().join("agent.sock");
-        let listener = UnixListener::bind(&socket)?;
-        let server = thread::spawn(move || -> io::Result<()> {
-            let (mut stream, _) = listener.accept()?;
-            let mut line = String::new();
-            BufReader::new(stream.try_clone()?).read_line(&mut line)?;
-            stream.write_all(b"{\"type\":\"error\",\"code\":\"EIO\"}\n")
-        });
-        let frames = request(&socket, &json!({"op":"send"}), &[])?;
+        let reply = b"{\"type\":\"error\",\"code\":\"EIO\"}\n".to_vec();
+        let frames = request_with_reply(reply, &json!({"op":"send"}))??;
         assert_eq!(frames.len(), 1);
         assert_eq!(
             frames
@@ -273,30 +271,16 @@ mod tests {
                 .and_then(Value::as_str),
             Some("error")
         );
-        server
-            .join()
-            .map_err(|_panic| io::Error::other("server panicked"))??;
         Ok(())
     }
 
     #[test]
     fn oversized_frame_without_newline_is_rejected_during_read() -> io::Result<()> {
-        let root = tempfile::tempdir()?;
-        let socket = root.path().join("agent.sock");
-        let listener = UnixListener::bind(&socket)?;
-        let server = thread::spawn(move || -> io::Result<()> {
-            let (mut stream, _) = listener.accept()?;
-            let mut line = String::new();
-            BufReader::new(stream.try_clone()?).read_line(&mut line)?;
-            stream.write_all(&vec![b'x'; MAX_FRAME_BYTES.saturating_add(1)])
-        });
-        let error = request(&socket, &json!({"op":"ping"}), &[])
+        let reply = vec![b'x'; MAX_FRAME_BYTES.saturating_add(1)];
+        let error = request_with_reply(reply, &json!({"op":"ping"}))?
             .err()
             .ok_or_else(|| io::Error::other("missing frame limit error"))?;
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        server
-            .join()
-            .map_err(|_panic| io::Error::other("server panicked"))??;
         Ok(())
     }
 }

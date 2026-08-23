@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use cortexfs::support::terminal::terminal_safe_text;
@@ -10,12 +11,20 @@ use rustyline::{Context, Helper};
 use crate::reference::{complete_paths, history_texts};
 
 const SLASH: &[&str] = &[
-    "/help", "/new", "/history", "/output", "/tools", "/status", "/clear", "/paste", "/copy",
-    "/exit",
+    "/help", "/raw", "/new", "/history", "/output", "/tools", "/status", "/paste", "/copy",
+    "/login", "/logout", "/clear", "/exit", "/quit",
 ];
 const COLON: &[&str] = &[
     ":load", ":pin", ":loads", ":unload", ":unpin", ":tools", ":help",
 ];
+
+pub(crate) fn help() -> io::Result<()> {
+    writeln!(
+        io::stdout().lock(),
+        "{}\n/login [provider]  /logout [provider]\n:COMMAND runs tsh; @path attaches context",
+        SLASH.join(" ")
+    )
+}
 
 pub(crate) struct ChatHelper {
     pub workspace: PathBuf,
@@ -41,7 +50,7 @@ impl Completer for ChatHelper {
         let start = head.rfind(char::is_whitespace).map_or(0, |index| index + 1);
         let word = head.get(start..).unwrap_or("");
         let values = if word.starts_with('/') {
-            SLASH.iter().map(|v| (*v).to_owned()).collect()
+            SLASH.iter().map(|entry| (*entry).to_owned()).collect()
         } else if word.starts_with(':') {
             COLON
                 .iter()
@@ -89,14 +98,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn control_character_filename_escapes_display_but_preserves_replacement() -> std::io::Result<()>
-    {
+    fn control_character_filename_escapes_display_but_preserves_replacement() -> io::Result<()> {
         let root = tempfile::tempdir()?;
         std::fs::write(root.path().join("owned\x1b[2J"), "data")?;
         let value = complete_paths(root.path(), "owned")
             .into_iter()
             .next()
-            .ok_or_else(|| std::io::Error::other("missing completion"))?;
+            .ok_or_else(|| io::Error::other("missing completion"))?;
         let pair = completion_pair(format!("@{value}"));
         assert_eq!(pair.display, "@owned\\u{1b}[2J");
         assert_eq!(pair.replacement, "@owned\x1b[2J");

@@ -21,6 +21,7 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx terminal ...   terminal resources",
         "  ctx provider ...   provider and secret configuration",
         "  ctx install ...    validate and install extension packages",
+        "  ctx update ...     plan or apply a transactional host update",
         "  ctx object ...     install and inspect individual objects",
         "  ctx man TOPIC      full built-in documentation",
         "",

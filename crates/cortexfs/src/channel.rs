@@ -27,9 +27,7 @@ pub mod telegram;
 pub mod twitch;
 pub mod twitter;
 
-pub use adapterresolve::{
-    read_adapter_strategy, resolve_channel_adapter_executable,
-};
+pub use adapterresolve::{read_adapter_strategy, resolve_channel_adapter_executable};
 pub use adapterstrategy::AdapterStrategy;
 
 #[cfg(test)]

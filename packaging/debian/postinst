@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+[ "${CORTEXFS_UPDATE_TRANSACTION:-0}" = 1 ] && exit 0
+
 if [ "$1" = configure ]; then
     /usr/bin/install -d -m 0755 \
         /etc/cortexfs/providers.d \

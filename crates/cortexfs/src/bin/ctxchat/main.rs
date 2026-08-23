@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod clipboard;
 pub mod complete;
 pub mod protocol;
@@ -57,9 +58,7 @@ fn run() -> io::Result<()> {
     )
     .map_err(io::Error::other)?;
     editor.set_helper(Some(helper(&options, &workspace)));
-    if io::stdin().is_terminal() {
-        banner(&options, &workspace);
-    }
+    banner(&options, &workspace);
     loop {
         let prompt = format!("ctxchat {}/{} ❯ ", options.agent, options.session);
         let line = match editor.readline(&prompt) {
@@ -73,31 +72,24 @@ fn run() -> io::Result<()> {
             continue;
         }
         let _ignored = editor.add_history_entry(line.as_str());
-        match line.as_str() {
+        let mut words = line.trim().splitn(2, char::is_whitespace);
+        let name = words.next().unwrap_or("");
+        let argument = words.next().unwrap_or("").trim_start();
+        match name {
             "/exit" | "/quit" => return Ok(()),
-            "/help" => {
-                banner(&options, &workspace);
-            }
-            command if command.split_whitespace().next() == Some("/raw") => {
-                options.raw = raw_mode(command, options.raw)?;
+            "/help" => complete::help()?,
+            "/raw" => {
+                options.raw = raw_mode(argument, options.raw)?;
                 writeln!(
                     io::stderr().lock(),
                     "ctxchat: raw={}",
                     if options.raw { "on" } else { "off" }
                 )?;
             }
-            "/clear" => {
-                render::clear()?;
-            }
-            "/history" => {
-                print_file(&messages(&options))?;
-            }
-            "/output" => {
-                print_file(&session_dir(&options).join("latest.md"))?;
-            }
-            "/status" => {
-                print_file(&session_dir(&options).join("state"))?;
-            }
+            "/clear" => render::clear()?,
+            "/history" => print_file(&messages(&options))?,
+            "/output" => print_file(&session_dir(&options).join("latest.md"))?,
+            "/status" => print_file(&session_dir(&options).join("state"))?,
             "/tools" => {
                 for tool in tool_names(&options.root) {
                     writeln!(
@@ -112,37 +104,42 @@ fn run() -> io::Result<()> {
                 &options,
                 &reference::expand(&clipboard::read()?, &workspace, &messages(&options))?,
             )?,
-            command if command.starts_with("/copy") => {
-                copy(&options, command)?;
-            }
-            command if command.starts_with("/new") => {
-                let next = command
-                    .split_whitespace()
-                    .nth(1)
-                    .map_or_else(request_id, str::to_owned);
+            "/copy" => copy(&options, argument)?,
+            "/new" => {
+                let next = if argument.is_empty() {
+                    request_id()
+                } else {
+                    argument.to_owned()
+                };
                 validate_name(&next)?;
                 options.session = next;
                 editor.set_helper(Some(helper(&options, &workspace)));
             }
-            command if command.starts_with(':') => {
-                let args = command
-                    .strip_prefix(':')
-                    .unwrap_or("")
+            "/login" | "/logout" => {
+                let action = name.trim_start_matches('/');
+                if let Err(error) = auth::run(action, argument, &options) {
+                    writeln!(io::stderr().lock(), "ctxchat: {error}")?;
+                }
+            }
+            colon if colon.starts_with(':') => {
+                let args = line
+                    .trim()
+                    .trim_start_matches(':')
                     .split_whitespace()
                     .map(str::to_owned)
                     .collect::<Vec<_>>();
-                if args.is_empty() {
-                    continue;
+                if !args.is_empty() {
+                    render::frames(
+                        &protocol::tsh(&socket, &request_id(), &options.session, &args)?,
+                        options.raw,
+                    )?;
                 }
-                render::frames(
-                    &protocol::tsh(&socket, &request_id(), &options.session, &args)?,
-                    options.raw,
-                )?;
             }
-            command if command.starts_with('/') => {
+            slash if slash.starts_with('/') => {
                 writeln!(
                     io::stderr().lock(),
-                    "ctxchat: unsupported command {command}"
+                    "ctxchat: unsupported command {}",
+                    line.trim()
                 )?;
             }
             _ => send_text(
@@ -167,11 +164,11 @@ fn send_text(socket: &Path, options: &Options, text: &str) -> io::Result<()> {
     )
 }
 
-fn copy(options: &Options, command: &str) -> io::Result<()> {
+fn copy(options: &Options, argument: &str) -> io::Result<()> {
     let history = reference::history_texts(&messages(options))?;
-    let index = command
+    let index = argument
         .split_whitespace()
-        .nth(1)
+        .next()
         .and_then(|value| value.parse::<usize>().ok());
     let text = index
         .and_then(|index| history.get(index))
@@ -238,16 +235,18 @@ fn request_id() -> String {
     )
 }
 fn validate_name(value: &str) -> io::Result<()> {
-    if !value.is_empty()
+    let valid = !value.is_empty()
         && value.len() <= 128
         && value
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-    {
-        Ok(())
-    } else {
-        Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid name"))
-    }
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'));
+    valid
+        .then_some(())
+        .ok_or_else(|| input_error("invalid name"))
+}
+
+fn input_error(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }
 
 fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
@@ -260,39 +259,31 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--root" => {
-                root = PathBuf::from(args.next().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "--root requires path")
-                })?);
+                root = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| input_error("--root requires path"))?,
+                );
             }
             "--session" => {
-                session = args.next().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "--session requires name")
-                })?;
+                session = args
+                    .next()
+                    .ok_or_else(|| input_error("--session requires name"))?;
             }
             "--raw" => raw = true,
             "--approval" => {
-                let approval = args.next().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "--approval requires tool name")
-                })?;
+                let approval = args
+                    .next()
+                    .ok_or_else(|| input_error("--approval requires tool name"))?;
                 if !cortexfs::is_object_name(&approval) {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "invalid approved tool name",
-                    ));
+                    return Err(input_error("invalid approved tool name"));
                 }
                 approvals.push(approval);
             }
             value if !value.starts_with('-') && agent.is_none() => agent = Some(value.to_owned()),
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("unknown argument {arg}"),
-                ));
-            }
+            _ => return Err(input_error(format!("unknown argument {arg}"))),
         }
     }
-    let agent =
-        agent.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "agent name required"))?;
+    let agent = agent.ok_or_else(|| input_error("agent name required"))?;
     validate_name(&agent)?;
     validate_name(&session)?;
     Ok(Options {
@@ -307,7 +298,7 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
 fn banner(options: &Options, workspace: &Path) {
     let _ignored = writeln!(
         io::stderr().lock(),
-        "ctxchat {}/{}  workspace={}  raw={}\n/help /raw [on|off] /new /history /output /tools /status /paste /copy /clear /exit | :load :pin :loads | @path @history:N",
+        "ctxchat {}/{}  workspace={}  raw={}  (/help for commands)",
         options.agent,
         options.session,
         workspace.display(),
@@ -315,29 +306,12 @@ fn banner(options: &Options, workspace: &Path) {
     );
 }
 
-fn raw_mode(command: &str, current: bool) -> io::Result<bool> {
-    let mut parts = command.split_whitespace();
-    if parts.next() != Some("/raw") {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid /raw command",
-        ));
-    }
-    let next = parts.next();
-    if parts.next().is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "usage: /raw [on|off]",
-        ));
-    }
-    match next {
-        None | Some("toggle") => Ok(!current),
-        Some("on") => Ok(true),
-        Some("off") => Ok(false),
-        Some(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "usage: /raw [on|off]",
-        )),
+fn raw_mode(argument: &str, current: bool) -> io::Result<bool> {
+    match argument {
+        "" | "toggle" => Ok(!current),
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(input_error("usage: /raw [on|off]")),
     }
 }
 
@@ -366,11 +340,11 @@ mod tests {
 
     #[test]
     fn raw_command_toggles_or_selects_mode() -> io::Result<()> {
-        assert!(raw_mode("/raw", false)?);
-        assert!(!raw_mode("/raw", true)?);
-        assert!(raw_mode("/raw on", false)?);
-        assert!(!raw_mode("/raw off", true)?);
-        assert!(raw_mode("/raw nope", false).is_err());
+        assert!(raw_mode("", false)?);
+        assert!(!raw_mode("", true)?);
+        assert!(raw_mode("on", false)?);
+        assert!(!raw_mode("off", true)?);
+        assert!(raw_mode("nope", false).is_err());
         Ok(())
     }
 }

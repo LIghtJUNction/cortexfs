@@ -32,7 +32,7 @@ Linux filesystem interface mounted at /ctx.
 
 %build
 cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
-    -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
+    -p cortexfs-channel-tools -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
     -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
     -p cortexfs-channel-voice -p cortexfs-channel-slack \
     -p cortexfs-channel-mqtt
@@ -42,6 +42,7 @@ install -d -m 0755 \
     %{buildroot}%{_bindir} \
     %{buildroot}%{_datadir}/doc/cortexfs \
     %{buildroot}%{_prefix}/lib/systemd/system \
+    %{buildroot}%{_prefix}/lib/cortexfs \
     %{buildroot}%{_datadir}/doc/cortexfs/docs/spec \
     %{buildroot}%{_datadir}/licenses/cortexfs \
     %{buildroot}%{_sysconfdir}/cortexfs/providers.d \
@@ -49,7 +50,8 @@ install -d -m 0755 \
     %{buildroot}%{_sharedstatedir}/cortexfs/storage/generations
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/cortexfs/secrets
 for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-    cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-channel cortexfs-channel-nostr \
+    cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner \
+    cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp; do
     install -m 0755 "target/release/$binary" "%{buildroot}%{_bindir}/$binary"
@@ -60,7 +62,8 @@ for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
     cortexfs-channel-driver@.service cortexfs-channel-nostr.service \
     cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service \
     cortexfs-channel-wechat.service cortexfs-channel-voice.service \
-    cortexfs-channel-slack.service cortexfs-channel-mqtt.service \
+    cortexfs-channel-slack.service cortexfs-channel-telegram.service \
+    cortexfs-channel-mqtt.service \
     cortexfs-channel-clawdtalk.service \
     cortexfs-channel-dingtalk.service \
     cortexfs-channel-email.service cortexfs-channel-gmail.service \
@@ -73,12 +76,16 @@ for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
     install -m 0644 "packaging/systemd/$unit" \
         "%{buildroot}%{_prefix}/lib/systemd/system/$unit"
 done
+install -m 0755 scripts/update-linux.sh %{buildroot}%{_prefix}/lib/cortexfs/update-linux
 install -m 0644 README.md %{buildroot}%{_datadir}/doc/cortexfs/README.md
 install -m 0644 docs/channels.md %{buildroot}%{_datadir}/doc/cortexfs/docs/channels.md
 install -m 0644 LICENSE %{buildroot}%{_datadir}/licenses/cortexfs/LICENSE
 install -m 0644 docs/spec/*.md %{buildroot}%{_datadir}/doc/cortexfs/docs/spec/
 
 %post
+if [ "${CORTEXFS_UPDATE_TRANSACTION:-0}" = 1 ]; then
+    exit 0
+fi
 if [ "$1" -eq 1 ]; then
     /usr/bin/systemctl daemon-reload >/dev/null 2>&1 || :
     /usr/bin/systemctl enable cortexfs.service cortexfs-terminal-broker.socket >/dev/null 2>&1 || :
@@ -118,7 +125,9 @@ fi
 %{_bindir}/cortexfs-object-runner
 %{_bindir}/cortexfs-terminal-broker
 %{_bindir}/cortexfs-agent-runtime
+%{_bindir}/cortexfs-auth-runner
 %{_bindir}/cortexfs-channel
+%{_bindir}/cortexfs-channel-tool
 %{_bindir}/cortexfs-channel-nostr
 %{_bindir}/cortexfs-channel-amqp
 %{_bindir}/cortexfs-channel-wecom-ws
@@ -127,6 +136,8 @@ fi
 %{_bindir}/cortexfs-channel-slack
 %{_bindir}/cortexfs-channel-mqtt
 %{_bindir}/ctxmcp
+%dir %{_prefix}/lib/cortexfs
+%{_prefix}/lib/cortexfs/update-linux
 %{_prefix}/lib/systemd/system/cortexfs.service
 %{_prefix}/lib/systemd/system/cortexfs-agent@.service
 %{_prefix}/lib/systemd/system/cortexfs-agent@.socket
@@ -141,6 +152,7 @@ fi
 %{_prefix}/lib/systemd/system/cortexfs-channel-wechat.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-voice.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-slack.service
+%{_prefix}/lib/systemd/system/cortexfs-channel-telegram.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-mqtt.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-clawdtalk.service
 %{_prefix}/lib/systemd/system/cortexfs-channel-dingtalk.service

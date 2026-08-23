@@ -56,6 +56,22 @@ Check and dry-run MUST NOT mutate the source tree.
 For a newer on-disk version they report an explicit downgrade rejection rather
 than a state write.
 
+## Software transaction boundary
+
+A host software update pins one Git commit before build and uses the native
+package backend. Package replacement and reference-tree migration are separate
+commit points: package scriptlets MUST NOT restart services while
+`CORTEXFS_UPDATE_TRANSACTION=1`, and the updater restores exactly the units
+that were active before the transaction.
+
+Before replacement, the updater records the selected `storage/current` target
+and requires an exact rollback package for package-owned installations. The
+service-side storage update MUST retain the prior generation through software
+health verification. A synchronous failure reinstalls the cached package,
+atomically restores the recorded generation link, reloads units, and starts the
+previous active set. Configuration, provider/channel secrets, and storage
+contents are outside the package payload.
+
 ## Storage generations
 
 `ctx storage update` stages a new generation by cloning the selected current

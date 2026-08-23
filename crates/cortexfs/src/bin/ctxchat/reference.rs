@@ -136,29 +136,11 @@ fn history_block(history: &[String], query: &str) -> io::Result<String> {
 }
 
 pub(crate) fn history_texts(path: &Path) -> io::Result<Vec<String>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "history path has no parent"))?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid history path"))?;
-    let directory = match cortexfs::support::plain::open_plain_directory(parent) {
-        Ok(directory) => directory,
+    let file = match cortexfs::support::plain::open_plain_file(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
-    let fd = match nix::fcntl::openat(
-        &directory,
-        name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    ) {
-        Ok(fd) => fd,
-        Err(nix::errno::Errno::ENOENT) => return Ok(Vec::new()),
-        Err(error) => return Err(io::Error::from(error)),
-    };
-    let file = fs::File::from(fd);
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(

@@ -111,6 +111,8 @@ multi-purpose client facade.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
 ctx status
+ctx update --ref main        # plan an immutable host update
+ctx update --ref main --yes  # apply with native-package rollback
 ```
 
 For a source checkout:

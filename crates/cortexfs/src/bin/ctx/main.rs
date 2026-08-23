@@ -31,6 +31,7 @@ use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -60,23 +61,24 @@ pub(crate) use cortexfs::{
     agent_terminal_unit, bootstrap_state_matches_target, child_context_lease_status,
     child_handoff_receipt, claim_child_handoff_active_with_lease, classify_abi_path,
     collect_agent_rules, collect_skill_metadata, columnar, compare_and_update_session_index,
-    completed_agent_schedule_nodes_from_parent_context, cortexfs_manual, count_running_agent_terminals,
-    current_time_unix, default_agent_model_for_name, default_agent_tool_context,
-    derive_agent_runtime_view, ensure_durable_session_layout, ensure_reference_tree,
-    ensure_runtime_models, finish_child_result_with_lease, format_bootstrap_plan_lines,
-    inspect_agent_control, inspect_agent_schedule_json, inspect_context_jsonl,
-    inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
-    inspect_model_capabilities, inspect_object_layout, inspect_session_control,
-    inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
-    inspect_tool_schema_json, invocation_id, is_dedicated_worker_agent_name, is_executable_file,
-    is_managed_reference_agent_wrapper, is_model_alias, is_model_name, is_object_name,
-    is_worker_agent_name, launch_process_for, list_present_retired_reference_agents,
-    parse_abi_path, parse_model_driver_routes, pin_storage_source, plan_reference_tree_upgrade,
-    policy_subject_from_label, read_bootstrap_state, ready_agent_schedule_nodes,
-    record_child_result_to_parent_context, render_agent_system_prompt, reset_unit_for,
-    run_core_tool_cli_with_root, set_user_systemd_client_env, skill_metadata_budget_from_env,
-    terminal_command, trajectory_from_session_dir, unit_main_pid_for,
-    update_storage_generation_with_prune, validate_child_context_lease, validate_trajectory,
+    completed_agent_schedule_nodes_from_parent_context, cortexfs_manual,
+    count_running_agent_terminals, current_time_unix, default_agent_model_for_name,
+    default_agent_tool_context, derive_agent_runtime_view, ensure_durable_session_layout,
+    ensure_reference_tree, ensure_runtime_models, finish_child_result_with_lease,
+    format_bootstrap_plan_lines, inspect_agent_control, inspect_agent_schedule_json,
+    inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl,
+    inspect_message_stream_jsonl, inspect_model_capabilities, inspect_object_layout,
+    inspect_session_control, inspect_session_index, inspect_session_layout,
+    inspect_shared_queue_layout, inspect_tool_schema_json, invocation_id,
+    is_dedicated_worker_agent_name, is_executable_file, is_managed_reference_agent_wrapper,
+    is_model_alias, is_model_name, is_object_name, is_worker_agent_name, launch_process_for,
+    list_present_retired_reference_agents, parse_abi_path, parse_model_driver_routes,
+    pin_storage_source, plan_reference_tree_upgrade, policy_subject_from_label,
+    read_bootstrap_state, ready_agent_schedule_nodes, record_child_result_to_parent_context,
+    render_agent_system_prompt, reset_unit_for, run_core_tool_cli_with_root,
+    set_user_systemd_client_env, skill_metadata_budget_from_env, terminal_command,
+    trajectory_from_session_dir, unit_main_pid_for, update_storage_generation_with_prune,
+    validate_child_context_lease, validate_trajectory,
 };
 use serde::Deserialize;
 

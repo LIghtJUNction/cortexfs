@@ -21,8 +21,8 @@ readonly UNITS=(
     cortexfs-channel-driver@.service cortexfs-channel-nostr.service
     cortexfs-channel-amqp.service cortexfs-channel-wecom-ws.service
     cortexfs-channel-wechat.service cortexfs-channel-voice.service
-    cortexfs-channel-slack.service cortexfs-channel-mqtt.service
-    cortexfs-channel-clawdtalk.service
+    cortexfs-channel-slack.service cortexfs-channel-telegram.service
+    cortexfs-channel-mqtt.service cortexfs-channel-clawdtalk.service
     cortexfs-channel-dingtalk.service
     cortexfs-channel-email.service cortexfs-channel-gmail.service
     cortexfs-channel-irc.service cortexfs-channel-matrix.service
@@ -76,7 +76,7 @@ release_dir() {
 build_release() {
     local target
     target=$(release_dir)
-    if (( SKIP_BUILD )); then
+    if ((SKIP_BUILD)); then
         [[ -d $target ]] || fail "--skip-build requires a release directory: $target"
         return
     fi
@@ -85,7 +85,7 @@ build_release() {
     (
         cd "$ROOT"
         CARGO_TARGET_DIR="$(dirname "$target")" \
-        cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+            cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
             -p cortexfs-channel-tools \
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
@@ -134,6 +134,7 @@ copy_payload() {
     install -d -m 0755 \
         "$destination/usr/bin" \
         "$destination/usr/lib/systemd/system" \
+        "$destination/usr/lib/cortexfs" \
         "$destination/usr/share/doc/cortexfs" \
         "$destination/usr/share/doc/cortexfs/docs/spec" \
         "$destination/usr/share/licenses/cortexfs" \
@@ -148,6 +149,7 @@ copy_payload() {
         install -m 0644 "$ROOT/packaging/systemd/$unit" \
             "$destination/usr/lib/systemd/system/$unit"
     done
+    install -m 0755 "$ROOT/scripts/update-linux.sh" "$destination/usr/lib/cortexfs/update-linux"
     install -m 0644 "$ROOT/README.md" "$destination/usr/share/doc/cortexfs/README.md"
     install -m 0644 "$ROOT/docs/channels.md" "$destination/usr/share/doc/cortexfs/docs/channels.md"
     install -m 0644 "$ROOT/LICENSE" "$destination/usr/share/licenses/cortexfs/LICENSE"
@@ -259,12 +261,30 @@ main() {
     local version
     while (($#)); do
         case "$1" in
-            --format) FORMAT=${2:?--format requires a value}; shift 2 ;;
-            --out) OUT_DIR=${2:?--out requires a value}; shift 2 ;;
-            --release-dir) RELEASE_DIR=${2:?--release-dir requires a value}; shift 2 ;;
-            --skip-build) SKIP_BUILD=1; shift ;;
-            -h|--help) usage; return 0 ;;
-            *) usage >&2; fail "unknown option: $1" ;;
+        --format)
+            FORMAT=${2:?--format requires a value}
+            shift 2
+            ;;
+        --out)
+            OUT_DIR=${2:?--out requires a value}
+            shift 2
+            ;;
+        --release-dir)
+            RELEASE_DIR=${2:?--release-dir requires a value}
+            shift 2
+            ;;
+        --skip-build)
+            SKIP_BUILD=1
+            shift
+            ;;
+        -h | --help)
+            usage
+            return 0
+            ;;
+        *)
+            usage >&2
+            fail "unknown option: $1"
+            ;;
         esac
     done
     [[ $FORMAT == deb || $FORMAT == rpm || $FORMAT == arch || $FORMAT == tar || $FORMAT == all ]] ||
@@ -282,16 +302,18 @@ main() {
     build_release
     verify_release
     case "$FORMAT" in
-        deb) build_deb "$version" ;;
-        arch) build_arch "$version" ;;
-        tar) build_tar "$version" ;;
-        all)
-            build_deb "$version"
-            build_rpm "$version"
-            build_arch "$version"
-            build_tar "$version"
-            ;;
+    deb) build_deb "$version" ;;
+    arch) build_arch "$version" ;;
+    tar) build_tar "$version" ;;
+    all)
+        build_deb "$version"
+        build_rpm "$version"
+        build_arch "$version"
+        build_tar "$version"
+        ;;
     esac
 }
 
-main "$@"
+if [[ ${CORTEXFS_PACKAGE_LIB:-0} != 1 ]]; then
+    main "$@"
+fi

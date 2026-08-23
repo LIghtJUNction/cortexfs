@@ -33,7 +33,7 @@ setup_style() {
 
 cleanup() {
     local directory file
-    if (( TTY_ECHO_OFF )); then
+    if ((TTY_ECHO_OFF)); then
         stty echo <"$TTY_PATH" 2>/dev/null || true
         TTY_ECHO_OFF=0
     fi
@@ -123,12 +123,23 @@ detect_distro() {
     id=$(os_value ID "$file")
     like=$(os_value ID_LIKE "$file")
     case " $id $like " in
-        *" arch "* | *" manjaro "*) family=arch; manager=pacman ;;
-        *" debian "* | *" ubuntu "*) family=debian; manager=apt-get ;;
-        *" fedora "* | *" rhel "* | *" centos "* | *" rocky "* | *" almalinux "*)
-            family=fedora; manager=dnf ;;
-        *" opensuse "* | *" suse "* | *" sles "*) family=suse; manager=zypper ;;
-        *) return 1 ;;
+    *" arch "* | *" manjaro "*)
+        family=arch
+        manager=pacman
+        ;;
+    *" debian "* | *" ubuntu "*)
+        family=debian
+        manager=apt-get
+        ;;
+    *" fedora "* | *" rhel "* | *" centos "* | *" rocky "* | *" almalinux "*)
+        family=fedora
+        manager=dnf
+        ;;
+    *" opensuse "* | *" suse "* | *" sles "*)
+        family=suse
+        manager=zypper
+        ;;
+    *) return 1 ;;
     esac
     [[ " $available " == *" $manager "* ]] || return 1
     printf '%s|%s|%s\n' "$family" "$manager" "${id:-unknown}"
@@ -145,10 +156,19 @@ read_state_language() {
     while IFS= read -r line || [[ -n $line ]]; do
         ((++count))
         case "$line" in
-            schema=1) [[ -z $schema ]] || return 1; schema=1 ;;
-            language=en) [[ -z $language ]] || return 1; language=en ;;
-            language=zh) [[ -z $language ]] || return 1; language=zh ;;
-            *) return 1 ;;
+        schema=1)
+            [[ -z $schema ]] || return 1
+            schema=1
+            ;;
+        language=en)
+            [[ -z $language ]] || return 1
+            language=en
+            ;;
+        language=zh)
+            [[ -z $language ]] || return 1
+            language=zh
+            ;;
+        *) return 1 ;;
         esac
     done <"$file"
     [[ $count -eq 2 && $schema == 1 && -n $language ]] || return 1
@@ -173,7 +193,9 @@ exact_match() {
 confirm() {
     local token=$1 en=$2 zh=$3 answer
     say "$en" "$zh"
-    if [[ ${CORTEXFS_INSTALL_LIB:-0} == 1 && ${CORTEXFS_INSTALL_TEST_MODE:-0} == 1 ]]; then
+    if [[ ${CORTEXFS_ASSUME_YES:-0} == 1 ]]; then
+        return
+    elif [[ ${CORTEXFS_INSTALL_LIB:-0} == 1 && ${CORTEXFS_INSTALL_TEST_MODE:-0} == 1 ]]; then
         answer=${CORTEXFS_TEST_INPUT:-}
     else
         printf '%s›%s ' "$C_SIGNAL" "$C_RESET" >"$TTY_PATH"
@@ -222,10 +244,10 @@ choose_language() {
         "$([[ $default == zh ]] && printf '2' || printf '1')" >"$TTY_PATH"
     IFS= read -r answer <"$TTY_PATH" || answer=
     case "$answer" in
-        1) LANGUAGE=en ;;
-        2) LANGUAGE=zh ;;
-        "") LANGUAGE=$default ;;
-        *) die "Invalid language choice." "语言选择无效。" ;;
+    1) LANGUAGE=en ;;
+    2) LANGUAGE=zh ;;
+    "") LANGUAGE=$default ;;
+    *) die "Invalid language choice." "语言选择无效。" ;;
     esac
 }
 
@@ -258,26 +280,26 @@ resolve_language_and_install_kind() {
 
 package_plan() {
     case "$1" in
-        arch)
-            PACKAGES=(base-devel curl git ca-certificates pkgconf fuse3 bubblewrap util-linux libsecret)
-            ;;
-        debian)
-            PACKAGES=(build-essential curl git ca-certificates pkg-config fuse3 libfuse3-dev bubblewrap util-linux libsecret-tools)
-            ;;
-        fedora)
-            PACKAGES=(gcc gcc-c++ make curl git ca-certificates pkgconf-pkg-config fuse3 fuse3-devel bubblewrap util-linux libsecret)
-            ;;
-        suse)
-            PACKAGES=(gcc gcc-c++ make curl git ca-certificates pkg-config fuse3 fuse3-devel bubblewrap util-linux libsecret-tools)
-            ;;
-        *) return 1 ;;
+    arch)
+        PACKAGES=(base-devel curl git ca-certificates pkgconf fuse3 bubblewrap util-linux libsecret)
+        ;;
+    debian)
+        PACKAGES=(build-essential curl git ca-certificates pkg-config fuse3 libfuse3-dev bubblewrap util-linux libsecret-tools)
+        ;;
+    fedora)
+        PACKAGES=(gcc gcc-c++ make curl git ca-certificates pkgconf-pkg-config fuse3 fuse3-devel bubblewrap util-linux libsecret rpm-build cpio)
+        ;;
+    suse)
+        PACKAGES=(gcc gcc-c++ make curl git ca-certificates pkg-config fuse3 fuse3-devel bubblewrap util-linux libsecret-tools rpm-build cpio)
+        ;;
+    *) return 1 ;;
     esac
 }
 
 install_dependencies() {
     local family=$1 manager=$2
     package_plan "$family"
-    card "$( [[ $LANGUAGE == zh ]] && printf '01 · 系统依赖' || printf '01 · System dependencies' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '01 · 系统依赖' || printf '01 · System dependencies')"
     say "Package manager: $manager" "包管理器：$manager"
     say "Packages: ${PACKAGES[*]}" "软件包：${PACKAGES[*]}"
     confirm "INSTALL DEPENDENCIES" \
@@ -287,13 +309,13 @@ install_dependencies() {
     # shellcheck disable=SC2024 # Force sudo's prompt onto the controlling terminal.
     sudo -v <"$TTY_PATH"
     case "$manager" in
-        pacman) sudo pacman -S --needed --noconfirm "${PACKAGES[@]}" ;;
-        apt-get)
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends "${PACKAGES[@]}"
-            ;;
-        dnf) sudo dnf install -y "${PACKAGES[@]}" ;;
-        zypper) sudo zypper --non-interactive install --no-recommends "${PACKAGES[@]}" ;;
+    pacman) sudo pacman -S --needed --noconfirm "${PACKAGES[@]}" ;;
+    apt-get)
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends "${PACKAGES[@]}"
+        ;;
+    dnf) sudo dnf install -y "${PACKAGES[@]}" ;;
+    zypper) sudo zypper --non-interactive install --no-recommends "${PACKAGES[@]}" ;;
     esac
 }
 
@@ -331,7 +353,7 @@ fuse_ready() {
 }
 
 audit_fuse() {
-    card "$( [[ $LANGUAGE == zh ]] && printf '02 · FUSE 审计' || printf '02 · FUSE audit' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '02 · FUSE 审计' || printf '02 · FUSE audit')"
     if ! grep -qw fuse /proc/filesystems 2>/dev/null && [[ ! -d /sys/module/fuse ]]; then
         command -v modprobe >/dev/null 2>&1 ||
             die "The FUSE kernel module is not active and modprobe is unavailable." \
@@ -354,7 +376,7 @@ rust_version() {
 
 ensure_rust() {
     local current installer="$TEMP_DIR/rustup-init.sh"
-    card "$( [[ $LANGUAGE == zh ]] && printf '03 · Rust 工具链' || printf '03 · Rust toolchain' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '03 · Rust 工具链' || printf '03 · Rust toolchain')"
     if command -v rustc >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1; then
         current=$(rust_version)
     fi
@@ -385,18 +407,19 @@ validate_source() {
     local source=$1 required
     [[ $source == /* ]] ||
         die "--source must be an absolute path." "--source 必须是绝对路径。"
-    for required in Cargo.toml README.md packaging/systemd/cortexfs.service \
-        packaging/systemd/cortexfs-agent@.service packaging/systemd/cortexfs-agent@.socket \
-        packaging/systemd/cortexfs-terminal-broker.service \
+    for required in Cargo.toml README.md packaging/update-protocol scripts/update-linux.sh \
+        packaging/systemd/cortexfs.service packaging/systemd/cortexfs-agent@.service \
+        packaging/systemd/cortexfs-agent@.socket packaging/systemd/cortexfs-terminal-broker.service \
         packaging/systemd/cortexfs-terminal-broker.socket; do
-        [[ -f $source/$required ]] ||
-            die "Source snapshot is missing $required." "源码快照缺少 $required。"
+        [[ -f $source/$required && ! -L $source/$required ]] ||
+            die "Source snapshot has a missing or unsafe $required." \
+                "源码快照中的 $required 缺失或不安全。"
     done
 }
 
 build_cortexfs() {
     local source=$1
-    card "$( [[ $LANGUAGE == zh ]] && printf '04 · Release 构建' || printf '04 · Release build' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '04 · Release 构建' || printf '04 · Release build')"
     say "Source: $source" "源码：$source"
     say "Command: cargo build --release --locked -p cortexfs --bins -p cortexfs-channel-tools -p cortexfs-mcp --bin ctxmcp ..." \
         "命令：cargo build --release --locked -p cortexfs --bins -p cortexfs-channel-tools -p cortexfs-mcp --bin ctxmcp …"
@@ -407,17 +430,17 @@ build_cortexfs() {
         cd "$source"
         CARGO_TARGET_DIR="$source/target" \
             cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
-                -p cortexfs-channel-tools \
-                -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
-                -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
-                -p cortexfs-channel-voice -p cortexfs-channel-slack \
-                -p cortexfs-channel-mqtt
+            -p cortexfs-channel-tools \
+            -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
+            -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
+            -p cortexfs-channel-voice -p cortexfs-channel-slack \
+            -p cortexfs-channel-mqtt
     )
 }
 
 expected_binaries() {
     printf '%s\n' ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
-        cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
+        cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
 }
@@ -448,7 +471,7 @@ artifact_paths() {
     while IFS= read -r unit; do
         printf 'packaging/systemd/%s\n' "$unit"
     done < <(expected_units)
-    printf 'README.md\n'
+    printf 'README.md\nscripts/update-linux.sh\n'
 }
 
 verify_build() {
@@ -505,7 +528,7 @@ ensure_mountpoint() {
 
 deploy() {
     local source=$1 snapshots=$2 binary unit stage
-    card "$( [[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment')"
     say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
         "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
     say "Units: /usr/lib/systemd/system/cortexfs*.{service,socket}" \
@@ -520,8 +543,8 @@ deploy() {
     confirm "DEPLOY CORTEXFS" \
         "Type DEPLOY CORTEXFS to atomically install the validated build and restart cortexfs.service." \
         "输入 DEPLOY CORTEXFS，原子安装已验证的构建并重启 cortexfs.service。"
-    sudo install -d -m 0755 /usr/lib/systemd/system /usr/share/doc/cortexfs \
-        /etc/cortexfs /etc/cortexfs/providers.d /var/lib/cortexfs \
+    sudo install -d -m 0755 /usr/lib/systemd/system /usr/lib/cortexfs \
+        /usr/share/doc/cortexfs /etc/cortexfs /etc/cortexfs/providers.d /var/lib/cortexfs \
         /var/lib/cortexfs/storage /var/lib/cortexfs/storage/generations
     sudo install -d -m 0700 /etc/cortexfs/channels
     sudo install -d -m 0700 /var/lib/cortexfs/secrets
@@ -532,6 +555,7 @@ deploy() {
     while IFS= read -r unit; do
         atomic_install "$stage/packaging/systemd/$unit" "/usr/lib/systemd/system/$unit" 0644
     done < <(expected_units)
+    atomic_install "$stage/scripts/update-linux.sh" /usr/lib/cortexfs/update-linux 0755
     atomic_install "$stage/README.md" /usr/share/doc/cortexfs/README.md 0644
     info "Reloading systemd and enabling the CortexFS mount..." "正在重载 systemd 并启用 CortexFS 挂载..."
     sudo systemctl daemon-reload
@@ -603,9 +627,9 @@ store_api_secret() {
 
 default_model_for_provider() {
     case $1 in
-        openai | codex) printf '%s\n' gpt-5.6 ;;
-        deepseek) printf '%s\n' deepseek-chat ;;
-        *) return 1 ;;
+    openai | codex) printf '%s\n' gpt-5.6 ;;
+    deepseek) printf '%s\n' deepseek-chat ;;
+    *) return 1 ;;
     esac
 }
 
@@ -710,8 +734,8 @@ configure_codex() {
 
 onboard_ai() {
     local choice
-    (( FIRST_INSTALL )) || return
-    card "$( [[ $LANGUAGE == zh ]] && printf '06 · AI 接入（可选）' || printf '06 · AI onboarding (optional)' )"
+    ((FIRST_INSTALL)) || return
+    card "$([[ $LANGUAGE == zh ]] && printf '06 · AI 接入（可选）' || printf '06 · AI onboarding (optional)')"
     say "Choose a vendor-neutral provider path:" "请选择 provider 接入方式："
     say "  1 OpenAI  2 Codex OAuth  3 Anthropic  4 Google" \
         "  1 OpenAI  2 Codex OAuth  3 Anthropic  4 Google"
@@ -720,17 +744,17 @@ onboard_ai() {
     printf '%s›%s ' "$C_SIGNAL" "$C_RESET" >"$TTY_PATH"
     IFS= read -r choice <"$TTY_PATH" || choice=
     case "${choice:-9}" in
-        1) configure_api_provider openai "OpenAI API key" ;;
-        2) configure_codex ;;
-        3) configure_api_provider anthropic "Anthropic API key" ;;
-        4) configure_api_provider google "Google API key" ;;
-        5) configure_api_provider openrouter "OpenRouter API key" ;;
-        6) configure_api_provider deepseek "DeepSeek API key" ;;
-        7) configure_api_provider groq "Groq API key" ;;
-        8) configure_compatible_provider ;;
-        9) info "AI onboarding skipped. Run ctx provider preset list later." \
-            "已跳过 AI 接入；稍后可运行 ctx provider preset list。" ;;
-        *) die "Invalid onboarding choice." "AI 接入选项无效。" ;;
+    1) configure_api_provider openai "OpenAI API key" ;;
+    2) configure_codex ;;
+    3) configure_api_provider anthropic "Anthropic API key" ;;
+    4) configure_api_provider google "Google API key" ;;
+    5) configure_api_provider openrouter "OpenRouter API key" ;;
+    6) configure_api_provider deepseek "DeepSeek API key" ;;
+    7) configure_api_provider groq "Groq API key" ;;
+    8) configure_compatible_provider ;;
+    9) info "AI onboarding skipped. Run ctx provider preset list later." \
+        "已跳过 AI 接入；稍后可运行 ctx provider preset list。" ;;
+    *) die "Invalid onboarding choice." "AI 接入选项无效。" ;;
     esac
     if [[ ${choice:-9} != 9 ]]; then
         sudo systemctl restart cortexfs.service
@@ -769,8 +793,8 @@ configure_compatible_provider() {
 
 onboard_im() {
     local choice
-    (( FIRST_INSTALL )) || return
-    card "$( [[ $LANGUAGE == zh ]] && printf '07 · IM 接入（可选）' || printf '07 · IM onboarding (optional)' )"
+    ((FIRST_INSTALL)) || return
+    card "$([[ $LANGUAGE == zh ]] && printf '07 · IM 接入（可选）' || printf '07 · IM onboarding (optional)')"
     say "Choose a channel family; secrets stay in /etc/cortexfs/channels." \
         "选择频道 family；密钥写入 /etc/cortexfs/channels。"
     say "  1 Telegram  2 Discord  3 Slack  4 Later [default]" \
@@ -778,38 +802,38 @@ onboard_im() {
     printf '%s›%s ' "$C_SIGNAL" "$C_RESET" >"$TTY_PATH"
     IFS= read -r choice <"$TTY_PATH" || choice=
     case "${choice:-4}" in
-        1)
-            confirm "CONFIGURE IM" \
-                "Type CONFIGURE IM to store Telegram credentials and start its unit." \
-                "输入 CONFIGURE IM，保存 Telegram 凭据并启动对应 unit。"
-            # shellcheck disable=SC2024
-            sudo -v <"$TTY_PATH"
-            configure_im_telegram
-            ;;
-        2)
-            confirm "CONFIGURE IM" \
-                "Type CONFIGURE IM to store Discord credentials and start its unit." \
-                "输入 CONFIGURE IM，保存 Discord 凭据并启动对应 unit。"
-            # shellcheck disable=SC2024
-            sudo -v <"$TTY_PATH"
-            configure_im_discord
-            ;;
-        3)
-            confirm "CONFIGURE IM" \
-                "Type CONFIGURE IM to store Slack credentials and start its units." \
-                "输入 CONFIGURE IM，保存 Slack 凭据并启动对应 unit。"
-            # shellcheck disable=SC2024
-            sudo -v <"$TTY_PATH"
-            configure_im_slack
-            ;;
-        4) info "IM onboarding skipped. Run cortexfs-channel list later." \
-            "已跳过 IM 接入；稍后可运行 cortexfs-channel list。" ;;
-        *) die "Invalid IM onboarding choice." "IM 接入选项无效。" ;;
+    1)
+        confirm "CONFIGURE IM" \
+            "Type CONFIGURE IM to store Telegram credentials and start its unit." \
+            "输入 CONFIGURE IM，保存 Telegram 凭据并启动对应 unit。"
+        # shellcheck disable=SC2024
+        sudo -v <"$TTY_PATH"
+        configure_im_telegram
+        ;;
+    2)
+        confirm "CONFIGURE IM" \
+            "Type CONFIGURE IM to store Discord credentials and start its unit." \
+            "输入 CONFIGURE IM，保存 Discord 凭据并启动对应 unit。"
+        # shellcheck disable=SC2024
+        sudo -v <"$TTY_PATH"
+        configure_im_discord
+        ;;
+    3)
+        confirm "CONFIGURE IM" \
+            "Type CONFIGURE IM to store Slack credentials and start its units." \
+            "输入 CONFIGURE IM，保存 Slack 凭据并启动对应 unit。"
+        # shellcheck disable=SC2024
+        sudo -v <"$TTY_PATH"
+        configure_im_slack
+        ;;
+    4) info "IM onboarding skipped. Run cortexfs-channel list later." \
+        "已跳过 IM 接入；稍后可运行 cortexfs-channel list。" ;;
+    *) die "Invalid IM onboarding choice." "IM 接入选项无效。" ;;
     esac
 }
 
 verify_installation() {
-    card "$( [[ $LANGUAGE == zh ]] && printf '08 · 验证' || printf '08 · Verification' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '08 · 验证' || printf '08 · Verification')"
     systemctl is-active --quiet cortexfs.service ||
         die "cortexfs.service is inactive." "cortexfs.service 未运行。"
     findmnt -n /ctx >/dev/null ||
@@ -825,14 +849,14 @@ verify_installation() {
 }
 
 finish() {
-    card "$( [[ $LANGUAGE == zh ]] && printf '完成' || printf 'Complete' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '完成' || printf 'Complete')"
     say "CortexFS turns agents, models, and tools into inspectable paths under /ctx." \
         "CortexFS 将 agent、模型与工具投射为 /ctx 下可检查的路径。"
     say "Try: ctx status · ctx ls · ctx doctor · ctx --help" \
         "可尝试：ctx status · ctx ls · ctx doctor · ctx --help"
-    say "Re-running the installer is safe: binaries and units update; data and provider state stay in place." \
-        "可安全重复运行：二进制和 unit 会更新，数据与 provider 状态保持不变。"
-    if (( FIRST_INSTALL )); then
+    say "Future host updates: ctx update --ref main, then ctx update --ref main --yes." \
+        "后续主机更新：先运行 ctx update --ref main，再运行 ctx update --ref main --yes。"
+    if ((FIRST_INSTALL)); then
         say "Next: ctx doctor · ctx set agent/coder.d/model PROVIDER/MODEL · cortexfs-channel list" \
             "下一步：ctx doctor · ctx set agent/coder.d/model PROVIDER/MODEL · cortexfs-channel list"
     fi
@@ -852,7 +876,7 @@ main() {
         die "Unsupported distribution or package manager. Supported families: Arch, Debian/Ubuntu, Fedora/RHEL, openSUSE/SLES." \
             "不支持当前发行版或包管理器。支持：Arch、Debian/Ubuntu、Fedora/RHEL、openSUSE/SLES 系。"
     IFS='|' read -r family manager id <<<"$distro"
-    card "$( [[ $LANGUAGE == zh ]] && printf '安装计划' || printf 'Install plan' )"
+    card "$([[ $LANGUAGE == zh ]] && printf '安装计划' || printf 'Install plan')"
     say "Detected: $id · $manager · systemd" "检测到：$id · $manager · systemd"
     say "Flow: dependencies → FUSE audit → Rust → release build → atomic deploy → verify" \
         "流程：依赖 → FUSE 审计 → Rust → release 构建 → 原子部署 → 验证"

@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+[ "${CORTEXFS_UPDATE_TRANSACTION:-0}" = 1 ] && exit 0
+
 if [ "$1" = remove ]; then
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop cortexfs.service cortexfs-terminal-broker.service \
