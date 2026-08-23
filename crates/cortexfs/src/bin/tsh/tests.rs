@@ -17,4 +17,5 @@ use std::process::ExitCode;
 
 pub(crate) mod argument;
 pub(crate) mod cache;
+pub(crate) mod control;
 pub(crate) mod execution;

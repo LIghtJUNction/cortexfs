@@ -115,7 +115,7 @@ pub(crate) fn prepare_agent_tool_call(
     let control = config
         .control
         .as_ref()
-        .filter(|_| matches!(name, "agent.create" | "tsh"));
+        .filter(|_| crate::runtime::control::consumes_run_control(name) || name == "tsh");
     let control_gate = control.map(AgentToolControl::launch_gate).transpose()?;
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,

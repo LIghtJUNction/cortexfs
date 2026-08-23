@@ -1,4 +1,5 @@
 use super::has_ascii_control;
+use crate::provider::auth::form;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -886,12 +887,4 @@ fn jwt(token: &str) -> Option<serde_json::Value> {
         .decode(token.split('.').nth(1)?)
         .ok()?;
     serde_json::from_slice(&bytes).ok()
-}
-
-fn form(pairs: &[(&str, &str)]) -> String {
-    let Ok(mut url) = reqwest::Url::parse("http://localhost") else {
-        return String::new();
-    };
-    url.query_pairs_mut().extend_pairs(pairs.iter().copied());
-    url.query().unwrap_or_default().replace('+', "%20")
 }

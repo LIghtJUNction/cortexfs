@@ -22,6 +22,7 @@ pub use adapter::{
     default_device_login, device_request, http_transport, refresh_oauth_result,
 };
 pub use credential::{Credential, CredentialKind};
+pub(crate) use deviceparse::form;
 pub use factory::{configured_adapter, configured_registry};
 pub use profile::{
     AuthProfile, AuthProfileError, delete_auth_profile, read_auth_profile, store_auth_profile,
