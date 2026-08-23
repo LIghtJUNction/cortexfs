@@ -42,6 +42,7 @@ fn write_coder_update_fixture(root: &Path) {
     assert!(fs::create_dir_all(&control).is_ok());
     assert!(fs::create_dir_all(&tool_control).is_ok());
     for (file, value) in [
+        ("abi", "sdk-envelope-v1\n"),
         ("owner", "1000\n"),
         ("uid", "1000\n"),
         ("gid", "1000\n"),
