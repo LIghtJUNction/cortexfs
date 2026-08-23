@@ -54,18 +54,21 @@ pub(crate) enum ProviderCredential {
     Bearer(String),
     Codex { token: String, account_id: String },
     AnthropicApiKey(String),
+    GoogleApiKey(String),
 }
 impl ProviderCredential {
     pub(crate) fn secret(&self) -> &str {
         match *self {
-            Self::Bearer(ref secret) | Self::AnthropicApiKey(ref secret) => secret,
+            Self::Bearer(ref secret)
+            | Self::AnthropicApiKey(ref secret)
+            | Self::GoogleApiKey(ref secret) => secret,
             Self::Codex { ref token, .. } => token,
         }
     }
     pub(crate) fn codex_account(&self) -> Option<&str> {
         match *self {
             Self::Codex { ref account_id, .. } => Some(account_id),
-            Self::Bearer(_) | Self::AnthropicApiKey(_) => None,
+            Self::Bearer(_) | Self::AnthropicApiKey(_) | Self::GoogleApiKey(_) => None,
         }
     }
 }

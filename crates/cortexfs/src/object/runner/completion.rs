@@ -16,6 +16,12 @@ pub(crate) fn provider_runtime_driver(
     } else if config
         .formats
         .iter()
+        .any(|format| format.trim() == "google.generative")
+    {
+        ProviderRuntimeDriver::Gemini
+    } else if config
+        .formats
+        .iter()
         .any(|format| format.trim() == "openai.responses")
         && (agent_call
             || !config
@@ -154,6 +160,7 @@ fn model_runtime_drivers(
             "openai-chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
             "openai-responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
             "anthropic-messages" => Ok(ProviderRuntimeDriver::Anthropic),
+            "google-generative" => Ok(ProviderRuntimeDriver::Gemini),
             _ => Err(format!("unsupported model driver adapter: {driver}")),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -211,7 +218,7 @@ fn call_provider_driver(
                 stdout,
             )
         }
-        ProviderRuntimeDriver::Anthropic => {
+        ProviderRuntimeDriver::Anthropic | ProviderRuntimeDriver::Gemini => {
             let credential = credential.ok_or_else(|| {
                 ProviderCompletionError::fallback(format!(
                     "missing provider credential: {provider}"
@@ -229,9 +236,6 @@ fn call_provider_driver(
                 ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
             })
         }
-        ProviderRuntimeDriver::Gemini => Err(ProviderCompletionError::fallback(
-            "Gemini runner adapter is not implemented".to_owned(),
-        )),
     }
 }
 
@@ -363,6 +367,39 @@ mod driver_route_tests {
             Err("unsupported model driver adapter: vendor-magic".to_owned())
         );
         Ok(())
+    }
+
+    #[test]
+    fn google_generative_selects_the_native_gemini_driver() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d");
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("driver"), "default=google-generative\n")?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", true),
+            Ok(Some(vec![ProviderRuntimeDriver::Gemini]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn declared_provider_formats_select_their_native_driver() {
+        for (format, expected) in [
+            ("google.generative", ProviderRuntimeDriver::Gemini),
+            ("anthropic.messages", ProviderRuntimeDriver::Anthropic),
+            ("openai.chat", ProviderRuntimeDriver::OpenAiChat),
+        ] {
+            let config = RunnerProviderConfig {
+                name: None,
+                base_url: "https://provider.invalid/v1".to_owned(),
+                auth: Vec::new(),
+                oauth: None,
+                formats: vec![format.to_owned()],
+            };
+            assert_eq!(provider_runtime_driver(&config, false), expected);
+        }
     }
 
     #[test]

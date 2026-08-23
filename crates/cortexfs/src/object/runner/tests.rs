@@ -1,4 +1,5 @@
 mod continuation;
+mod gemini;
 mod requests;
 mod tools;
 
