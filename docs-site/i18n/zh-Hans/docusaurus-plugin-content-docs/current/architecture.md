@@ -108,6 +108,17 @@ Discord 载荷。Channel 适配器翻译平台帧，并止于 interaction/channe
   → 直到最终答案或取消
 ```
 
+该主机循环固定且权威（`sdk-envelope-v1` 步骤、策略、沙箱、取消）。行为定制留在主机之外：
+
+```text
+agent/<name>.d/loop     → CTX_AGENT_LOOP 提示（chat/react/coding/planner/research/custom）
+Agent SDK 可执行文件    → 自定义步骤逻辑；yield 一次 tool_call 或完成
+hooks pre.d/post.d      → 围绕 model 动作的仅元数据门控
+```
+
+`loop` 永不授予能力。自定义名是给可执行 Agent 的已校验 object-name 提示；
+主机仍拥有工具权限与步骤预算。
+
 其余全部叠在循环之外：
 
 ```text

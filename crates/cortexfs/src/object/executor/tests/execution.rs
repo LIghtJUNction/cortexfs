@@ -829,7 +829,7 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 use super::runtime::test_agent_run_config;
 use super::*;
 use crate::object::executor::exec::{
-    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout,
+    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout, tool_spawn_error,
 };
 use std::process::Command;
 
@@ -867,6 +867,24 @@ fn authorized_tool_target_maps_backing_source_tiers_under_ctx() {
     assert_eq!(
         authorized_tool_target(source, &user),
         PathBuf::from("/ctx/home/42/tool/user")
+    );
+}
+
+#[test]
+fn tool_spawn_error_names_missing_sandbox_helper() {
+    let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "No such file");
+    let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+    assert_eq!(
+        tool_spawn_error(OsStr::new(BWRAP_PROGRAM), &missing).message(),
+        format!("sandbox helper missing: {BWRAP_PROGRAM}")
+    );
+    assert_eq!(
+        tool_spawn_error(OsStr::new("/bin/echo"), &missing).message(),
+        missing.to_string()
+    );
+    assert_eq!(
+        tool_spawn_error(OsStr::new(BWRAP_PROGRAM), &other).message(),
+        other.to_string()
     );
 }
 

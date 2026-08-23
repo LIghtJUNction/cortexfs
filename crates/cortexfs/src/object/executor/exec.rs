@@ -923,8 +923,9 @@ fn run_agent_tool_process_with_timeout_and_cancel(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child =
-        spawn_with_etxtbsy_retry(command).map_err(|error| ExecError::new(error.to_string()))?;
+    let mut child = spawn_with_etxtbsy_retry(command).map_err(|error| {
+        tool_spawn_error(command.get_program(), &error)
+    })?;
     if let Some(gate) = gate
         && gate.register_and_release(child.id()).is_err()
     {
@@ -957,4 +958,12 @@ fn run_agent_tool_process_with_timeout_and_cancel(
         )),
         CappedOutputError::Wait(error) => ExecError::new(error.to_string()),
     })
+}
+
+pub(crate) fn tool_spawn_error(program: &OsStr, error: &io::Error) -> ExecError {
+    if error.kind() == io::ErrorKind::NotFound && program == OsStr::new(BWRAP_PROGRAM) {
+        ExecError::new(format!("sandbox helper missing: {BWRAP_PROGRAM}"))
+    } else {
+        ExecError::new(error.to_string())
+    }
 }
