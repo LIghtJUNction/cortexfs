@@ -6,8 +6,11 @@ pub(super) fn unique_test_dir(name: &str) -> PathBuf {
         .map_or(0, |duration| duration.as_nanos());
     let mut hasher = DefaultHasher::new();
     name.hash(&mut hasher);
+    // The owner pid segment must stay decimal: `test_temp_owner_pid` parses it back to decide
+    // whether a directory still has a live owner, and a hex pid would resolve to a different
+    // process whose absence makes the cleanup delete the running test's own fixtures.
     std::env::temp_dir().join(format!(
-        "cortexfs-{:016x}-{:x}-{nanos:x}",
+        "cortexfs-{:016x}-{}-{nanos:x}",
         hasher.finish(),
         std::process::id()
     ))
@@ -87,6 +90,20 @@ pub(super) fn clean_test_dir(name: &str) -> TestDir {
     assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert_test_temp_budget();
     TestDir(root)
+}
+
+#[test]
+fn live_library_test_directory_is_kept_for_its_own_owner() {
+    let root = clean_test_dir("live-owner-directory-survives-cleanup");
+    assert!(fs::create_dir_all(root.join("child")).is_ok());
+    assert_eq!(
+        test_temp_owner_pid(root.as_path()),
+        Some(std::process::id())
+    );
+
+    remove_stale_test_dirs();
+
+    assert!(root.join("child").exists());
 }
 
 #[test]
