@@ -108,8 +108,17 @@ pub(crate) fn packaged_socket_unit_uses_receipted_alias_lifecycle_and_safe_order
         "BindsTo=cortexfs.service",
         "PartOf=cortexfs.service",
         "After=cortexfs.service",
+        "MemoryMax=512M",
+        "CPUQuota=100%",
+        "TasksMax=128",
+        "OOMPolicy=stop",
+        "NoNewPrivileges=yes",
+        "PrivateTmp=yes",
     ] {
-        assert!(service.lines().any(|line| line == expected));
+        assert!(
+            service.lines().any(|line| line == expected),
+            "missing {expected} in cortexfs-agent@.service"
+        );
     }
     let unit_section = service
         .strip_prefix("[Unit]\n")

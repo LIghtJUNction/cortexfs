@@ -6,10 +6,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Ordered bubblewrap process mounts appended after namespace flags.
+/// Ordered bubblewrap isolation and process mounts after namespace flags.
+///
+/// Isolation flags (`--as-pid-1`, `--new-session`, `--cap-drop ALL`, hostname)
+/// apply to every `CortexFS` sandbox so agents cannot inherit host session
+/// leadership or residual capabilities.
 #[must_use]
 pub fn bwrap_process_setup_args() -> Vec<String> {
     vec![
+        "--as-pid-1".to_owned(),
+        "--new-session".to_owned(),
+        "--cap-drop".to_owned(),
+        "ALL".to_owned(),
+        "--unshare-uts".to_owned(),
+        "--hostname".to_owned(),
+        "cortexfs".to_owned(),
         "--proc".to_owned(),
         "/proc".to_owned(),
         "--dev".to_owned(),

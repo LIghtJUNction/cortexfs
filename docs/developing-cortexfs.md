@@ -348,7 +348,7 @@ scripts/test.sh cargo test
 npm --prefix docs-site run build
 ```
 
-`scripts/test.sh` runs the test command with a private `/tmp` tmpfs (2 GiB
+`scripts/test.sh` runs the test command with a private `/tmp` tmpfs (512 MiB
 by default), so test fixtures cannot fill the host temporary filesystem. Set
 `CORTEXFS_TEST_TMPFS_BYTES` to a decimal byte limit when a larger bounded test
 scratch space is required.

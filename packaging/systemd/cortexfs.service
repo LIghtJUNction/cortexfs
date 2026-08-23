@@ -17,6 +17,16 @@ ExecStart=/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/current /ct
 ExecStop=/usr/bin/umount -l /ctx
 Restart=on-failure
 RestartSec=2s
+NoNewPrivileges=yes
+MemoryMax=512M
+MemoryHigh=384M
+CPUQuota=100%
+TasksMax=64
+LimitNOFILE=2048
+OOMPolicy=stop
+MemoryAccounting=yes
+CPUAccounting=yes
+TasksAccounting=yes
 
 [Install]
 WantedBy=multi-user.target

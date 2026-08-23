@@ -71,6 +71,14 @@ pub(crate) fn agent_start_host(
         ))
     })?;
     validate_agent_start_mounts(&view, &cli_mounts)?;
+    if let Some(running) = count_running_agent_terminals(view.identity())
+        && running >= cortexfs::support::quota::MAX_USER_AGENT_TERMINALS
+    {
+        return Err(CliError::unavailable(format!(
+            "too many running agent terminals ({running}/{})",
+            cortexfs::support::quota::MAX_USER_AGENT_TERMINALS
+        )));
+    }
     let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
     let session_workspace = agent_start_workspace_source(&cli_mounts);
     ensure_agent_start_session(
