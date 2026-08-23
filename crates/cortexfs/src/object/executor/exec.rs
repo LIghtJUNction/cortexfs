@@ -923,9 +923,8 @@ fn run_agent_tool_process_with_timeout_and_cancel(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = spawn_with_etxtbsy_retry(command).map_err(|error| {
-        tool_spawn_error(command.get_program(), &error)
-    })?;
+    let mut child = spawn_with_etxtbsy_retry(command)
+        .map_err(|error| tool_spawn_error(command.get_program(), &error))?;
     if let Some(gate) = gate
         && gate.register_and_release(child.id()).is_err()
     {

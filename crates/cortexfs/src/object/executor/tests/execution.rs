@@ -829,7 +829,8 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 use super::runtime::test_agent_run_config;
 use super::*;
 use crate::object::executor::exec::{
-    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout, tool_spawn_error,
+    ToolStdout, authorized_tool_target, finish_agent_tool_output, parse_tool_stdout,
+    tool_spawn_error,
 };
 use std::process::Command;
 
