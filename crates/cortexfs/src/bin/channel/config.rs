@@ -159,14 +159,11 @@ pub enum Platform {
 pub fn load() -> Result<CommandConfig, ConfigError> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or(ConfigError::Usage)?;
-    if matches!(command.as_str(), "list" | "show" | "preset") {
-        return super::catalog::load_action(&command, args);
-    }
-    if command == "discord" {
-        return disk::load_command(args);
-    }
-    if args.next().is_some() {
-        return Err(ConfigError::Usage);
+    match command.as_str() {
+        "list" | "show" | "preset" => return super::catalog::load_action(&command, args),
+        "discord" => return disk::load_command(args),
+        _ if args.next().is_some() => return Err(ConfigError::Usage),
+        _ => {}
     }
     let common = common()?;
     match command.as_str() {
@@ -231,33 +228,7 @@ pub fn load() -> Result<CommandConfig, ConfigError> {
             token: env::var("CORTEXFS_CHANNEL_TOKEN").ok(),
             verify_token: env::var("CORTEXFS_CHANNEL_VERIFY_TOKEN").ok(),
         }),
-        "web" => {
-            let bind = optional("CORTEXFS_WEB_BIND", "127.0.0.1:8766")
-                .parse::<SocketAddr>()
-                .map_err(|error| ConfigError::Invalid("CORTEXFS_WEB_BIND", error.to_string()))?;
-            let path = optional("CORTEXFS_WEB_PATH", "/v1/interaction");
-            if !path.starts_with('/') {
-                return Err(ConfigError::Invalid(
-                    "CORTEXFS_WEB_PATH",
-                    "path must start with /".to_owned(),
-                ));
-            }
-            let token = env::var("CORTEXFS_WEB_TOKEN")
-                .ok()
-                .filter(|value| !value.is_empty());
-            if !bind.ip().is_loopback() && token.is_none() {
-                return Err(ConfigError::Invalid(
-                    "CORTEXFS_WEB_TOKEN",
-                    "required when CORTEXFS_WEB_BIND is not loopback".to_owned(),
-                ));
-            }
-            Ok(CommandConfig::Web {
-                common,
-                bind,
-                path,
-                token,
-            })
-        }
+        "web" => web_config(common),
         "driver" => {
             let channel = ChannelId::new(required("CORTEXFS_CHANNEL_ID")?)
                 .map_err(|error| ConfigError::Invalid("CORTEXFS_CHANNEL_ID", error.to_string()))?;
@@ -280,6 +251,34 @@ pub fn load() -> Result<CommandConfig, ConfigError> {
         }
         _ => Err(ConfigError::Usage),
     }
+}
+
+fn web_config(common: CommonConfig) -> Result<CommandConfig, ConfigError> {
+    let bind = optional("CORTEXFS_WEB_BIND", "127.0.0.1:8766")
+        .parse::<SocketAddr>()
+        .map_err(|error| ConfigError::Invalid("CORTEXFS_WEB_BIND", error.to_string()))?;
+    let path = optional("CORTEXFS_WEB_PATH", "/v1/interaction");
+    if !path.starts_with('/') {
+        return Err(ConfigError::Invalid(
+            "CORTEXFS_WEB_PATH",
+            "path must start with /".to_owned(),
+        ));
+    }
+    let token = env::var("CORTEXFS_WEB_TOKEN")
+        .ok()
+        .filter(|value| !value.is_empty());
+    if !bind.ip().is_loopback() && token.is_none() {
+        return Err(ConfigError::Invalid(
+            "CORTEXFS_WEB_TOKEN",
+            "required when CORTEXFS_WEB_BIND is not loopback".to_owned(),
+        ));
+    }
+    Ok(CommandConfig::Web {
+        common,
+        bind,
+        path,
+        token,
+    })
 }
 
 fn mattermost_config(common: CommonConfig) -> Result<CommandConfig, ConfigError> {

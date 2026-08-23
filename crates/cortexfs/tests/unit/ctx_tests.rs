@@ -35,7 +35,7 @@ use super::{
     json_string, latest_run_id, list_names, load_agent_profile, load_schedule_context,
     object_execution_command, open_executable_no_follow, parse, parse_agent_profile_text,
     parse_command, parse_oauth_callback_params, plain_sibling_mount_bin, print_help_topic,
-    provider_preset, read_agent_processes, read_ctx_status, read_file_to_string,
+    ProviderPreset, provider_preset, read_agent_processes, read_ctx_status, read_file_to_string,
     read_oauth_callback_request_from_reader, read_optional_trimmed, read_provider_config_file,
     read_provider_config_from_dir, read_provider_secret_stdin_limited, read_status_agent_processes,
     record_agent_start_state, remove_stale_socket, remove_temp_agent_object,

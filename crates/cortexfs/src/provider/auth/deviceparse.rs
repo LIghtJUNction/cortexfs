@@ -55,7 +55,7 @@ pub(super) fn parse_error(response: &AuthResponse) -> Option<String> {
         .and_then(|value| value.error)
 }
 
-pub(crate) fn form(pairs: &[(&str, &str)]) -> String {
+pub fn form(pairs: &[(&str, &str)]) -> String {
     let Ok(mut url) = reqwest::Url::parse("http://localhost") else {
         return String::new();
     };
