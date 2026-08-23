@@ -276,8 +276,18 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     } else {
         None
     };
-    let history_messages =
-        collect_history_messages_from_session(&session_dir, MAX_HISTORY_MESSAGES_CHARS);
+    let control_dir = resolve_agent_runtime_control_dir(runtime.ctx_root, runtime.agent_name)
+        .unwrap_or_else(|_| {
+            cortexfs_paths::agent_control_path(runtime.source_root, runtime.agent_name)
+        });
+    let history_messages = agent::prompt::collect_history_messages_for_agent(
+        &session_dir,
+        MAX_HISTORY_MESSAGES_CHARS,
+        &control_dir,
+        runtime.agent_name,
+        session,
+        runtime.identity,
+    );
     let recorder_outcome = handle_socket_send(
         runtime.session_root,
         runtime.default_cwd,

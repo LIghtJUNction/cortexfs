@@ -101,7 +101,11 @@ pub(crate) fn prepare_agent_tool_call(
         ),
     )
     .map_err(|denial| ExecError::new(tool_denial_message(&tool_call.name, denial)))?;
-    let tool_executable = open_executable_no_follow(grant.hit().path())
+    let control_dir = grant.hit().control_dir();
+    let invoke_strategy = crate::tool::read_invoke_strategy(control_dir);
+    let executable_path =
+        crate::tool::resolve_tool_invoke_executable(control_dir, grant.hit().path());
+    let tool_executable = open_executable_no_follow(&executable_path)
         .map_err(|error| ExecError::new(format!("cannot run tool:{}: {error}", tool_call.name)))?;
     let sandbox = prepare_agent_tool_sandbox(&view, config.source)?;
     let ctx_home_target = cortexfs_paths::ctx_home_path(&cortexfs_paths::ctx_root(), &owner);
@@ -135,6 +139,7 @@ pub(crate) fn prepare_agent_tool_call(
         control_gate: control_gate
             .as_ref()
             .map(crate::runtime::control::LaunchGate::block_fd),
+        invoke_strategy,
     }));
     Ok(PreparedAgentToolCall {
         command,
@@ -428,6 +433,7 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) ctx_home_target: &'a Path,
     pub(crate) control: Option<&'a AgentToolControl>,
     pub(crate) control_gate: Option<RawFd>,
+    pub(crate) invoke_strategy: crate::tool::InvokeStrategy,
 }
 
 pub(crate) fn authorized_tool_target(source: &Path, hit: &cortexfs::ToolHit) -> PathBuf {
@@ -647,7 +653,9 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         request.config.source.as_os_str().to_owned(),
         OsString::from("--setenv"),
         OsString::from("CTX_TOOL_MODE"),
-        OsString::from("cli"),
+        OsString::from(
+            crate::tool::invoke_tool_mode(&request.invoke_strategy).unwrap_or("cli"),
+        ),
         OsString::from("--setenv"),
         OsString::from("CTX_AUTHORIZED_OBJECT"),
         request.authorized_object.as_os_str().to_owned(),

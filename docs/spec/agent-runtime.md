@@ -630,9 +630,31 @@ command prints explicit placeholder text.
 The optional `agent/<name>.d/loop` control selects the behavior contract passed
 to an executable Agent through `CTX_AGENT_LOOP`. Built-in values are `chat`,
 `react`, `coding`, `planner`, and `research`; a validated object name may name
-a custom loop. This is a behavior hint, not a capability grant: the executable
-still uses the unchanged `sdk-envelope-v1` stdin/stdout ABI, and tool authority
-continues to come only from the runtime policy intersection.
+a custom loop. When `loop` names `<name>` and `agent/<name>.d/loop.d/<name>` is
+an executable regular file, the host uses that file for hosted envelope steps
+instead of the default `agent/<name>` executable. The replacement still speaks
+the unchanged `sdk-envelope-v1` stdin/stdout ABI; tool authority continues to
+come only from the runtime policy intersection. The Agent SDK exposes
+`BuiltinLoop` helpers for interpreting the loop hint inside custom executables.
+
+Context compaction for prompt history uses `agent/<name>.d/compact.strategy`:
+
+```text
+truncate   keep the newest messages and drop older ones (default)
+summarize  summarize omitted messages with the built-in provider-neutral summarizer
+<name>     run agent/<name>.d/compact.d/<name> as an external summarizer
+```
+
+Custom compaction executables receive one bounded JSONL frame on stdin:
+
+```json
+{"abi":"cortexfs.compact/v1","agent":"coder","session":"default","max_chars":8000,"omitted":2,"messages":[{"role":"user","content":"..."}]}
+```
+
+Exit zero with bounded stdout text continues the run; the host inserts that text
+as `Summary of earlier context:` above the retained recent messages. Non-zero
+exit, timeout, or oversize output falls back to the truncate strategy for that
+run. Compaction never rewrites durable `messages.jsonl`.
 
 Agent-local hooks use the existing `agent/<name>.d/hooks/pre.d/` and
 `post.d/` directories. The runtime runs them in lexical order immediately
