@@ -239,6 +239,20 @@ dynamic-library ABI, but the current core does not load it; `load` and `pin`
 currently affect metadata context/cache and must not force terminal CLI
 commands to emit structured frames.
 
+Tool invoke customization uses `tool/<name>.d/invoke.strategy`:
+
+```text
+default   host selects CLI or SDK mode for the authorized call (default)
+cli       force terminal argv/stdin semantics (CTX_TOOL_MODE=cli)
+sdk       force structured Tool SDK JSONL semantics (CTX_TOOL_MODE=native)
+<name>    run tool/<name>.d/invoke.d/<name> when present
+```
+
+The host still evaluates policy, mounts, and `CTX_PATH` before any invoke.
+Custom invoke executables speak the same Tool SDK ABI as the default tool binary.
+The Tool SDK exposes `InvokeMode`, `invoke_mode_from_env()`, and related helpers
+for reading `CTX_TOOL_MODE`, `CTX_RUN_ID`, and `CTX_AUTHORIZED_OBJECT`.
+
 Executing a tool through `tsh` requires an agent terminal context so CortexFS
 can evaluate the agent identity, mounts, policy, and `CTX_PATH` together. A
 standalone human `tsh` process may discover tools and inspect metadata, but it

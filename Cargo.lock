@@ -1008,6 +1008,7 @@ name = "cortexfs-channel-sdk"
 version = "0.1.20"
 dependencies = [
  "cortexfs-channels",
+ "cortexfs-paths",
  "tempfile",
  "thiserror 2.0.20",
 ]

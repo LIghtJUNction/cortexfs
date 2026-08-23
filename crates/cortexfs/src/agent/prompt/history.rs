@@ -1,3 +1,4 @@
+use super::compact::{format_history_with_strategy, read_compact_strategy};
 use super::read::read_history_messages_tail;
 use crate::*;
 use serde_json::Value;
@@ -15,6 +16,29 @@ pub fn collect_history_messages_from_session(session_dir: &Path, max_chars: usiz
         return "(no historical messages injected)".to_owned();
     };
     format_history_messages_jsonl(&messages, max_chars)
+}
+
+pub(crate) fn collect_history_messages_for_agent(
+    session_dir: &Path,
+    max_chars: usize,
+    control_dir: &Path,
+    agent: &str,
+    session: &str,
+    identity: &AgentUnixIdentity,
+) -> String {
+    let Ok(messages) = read_history_messages_tail(session_dir) else {
+        return "(no historical messages injected)".to_owned();
+    };
+    let strategy = read_compact_strategy(control_dir);
+    format_history_with_strategy(
+        &messages,
+        max_chars,
+        strategy,
+        control_dir,
+        agent,
+        session,
+        identity,
+    )
 }
 
 /// Formats durable JSONL through the publishable context crate.

@@ -4,6 +4,9 @@
 //! implement [`Tool`]. The same value can then be exposed as a normal `CLI`
 //! binary with [`run_cli`] or called directly in-process through [`Registry`].
 
+mod builtin;
+pub use builtin::{InvokeMode, authorized_object_from_env, invoke_mode_from_env, run_id_from_env};
+
 use std::env;
 use std::ffi::OsString;
 use std::fmt;
