@@ -1,4 +1,4 @@
-//! Host-enforced cgroup quotas for CortexFS agent units.
+//! Host-enforced cgroup quotas for `CortexFS` agent units.
 //!
 //! Transient `systemd-run --user` terminals and packaged agent runtimes share
 //! these ceilings so one agent cannot exhaust host memory, CPU, or tasks.
