@@ -60,10 +60,17 @@ fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
     let setup = lookup(spec.id);
     let mut out = io::stdout().lock();
     if preset {
+        if spec.id == "discord" {
+            write_discord_preset(&mut out)?;
+            return Ok(());
+        }
         writeln!(out, "# /etc/cortexfs/channels/{family}.env")?;
         writeln!(out, "CORTEXFS_AGENT=coder")?;
         writeln!(out, "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock")?;
         writeln!(out, "CORTEXFS_CHANNEL_ID={family}.primary")?;
+        if spec.id == "slack" {
+            writeln!(out, "# also /etc/cortexfs/channels/{family}-driver.env with CORTEXFS_AGENT and CORTEXFS_AGENT_SOCKET")?;
+        }
         if let Some(setup) = setup {
             for secret in setup.secrets {
                 if secret.contains('=') {
@@ -86,7 +93,20 @@ fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
         writeln!(out, "command\t{}", setup.command)?;
         writeln!(out, "unit\t{}", setup.unit)?;
         writeln!(out, "secrets\t{}", setup.secrets.join(","))?;
+        if spec.id == "slack" {
+            writeln!(out, "driver_env\t/etc/cortexfs/channels/{family}-driver.env")?;
+        }
     }
+    Ok(())
+}
+
+fn write_discord_preset(out: &mut impl Write) -> Result<(), Box<dyn Error>> {
+    writeln!(out, "# /etc/cortexfs/channels/discord.toml")?;
+    writeln!(out, "application_id = \"DISCORD_APPLICATION_ID\"")?;
+    writeln!(out, "bot_token = \"DISCORD_BOT_TOKEN\"")?;
+    writeln!(out, "agent_socket = \"/ctx/agent/coder.sock\"")?;
+    writeln!(out, "agent = \"coder\"")?;
+    writeln!(out, "session_prefix = \"discord\"")?;
     Ok(())
 }
 
@@ -104,12 +124,19 @@ fn transport(value: ChannelTransport) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::setup::{SETUPS, lookup};
+    use super::write_discord_preset;
 
     #[test]
-    fn native_im_families_have_setup_rows() {
+    fn catalog_setup_and_presets() {
         for id in ["telegram", "discord", "slack", "feishu", "matrix"] {
             assert!(lookup(id).is_some(), "{id}");
         }
         assert!(SETUPS.iter().any(|setup| setup.id == "telegram"));
+        let slack = lookup("slack").expect("slack setup");
+        assert_eq!(slack.command, "cortexfs-channel-slack");
+        let mut buf = Vec::new();
+        write_discord_preset(&mut buf).expect("discord preset");
+        let text = String::from_utf8(buf).expect("utf8");
+        assert!(text.contains("bot_token"));
     }
 }

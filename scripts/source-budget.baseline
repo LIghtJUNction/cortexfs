@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=177554
-prod=123183
+all=177602
+prod=123231
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 44 crates/cortexfs-agent-sdk/src/builtin.rs
@@ -304,8 +304,8 @@ prod=123183
 125 crates/cortexfs/src/bin/auth/browser.rs
 61 crates/cortexfs/src/bin/auth/device.rs
 95 crates/cortexfs/src/bin/auth/main.rs
-115 crates/cortexfs/src/bin/channel/catalog.rs
-59 crates/cortexfs/src/bin/channel/catalog/setup.rs
+142 crates/cortexfs/src/bin/channel/catalog.rs
+64 crates/cortexfs/src/bin/channel/catalog/setup.rs
 17 crates/cortexfs/src/bin/channel/commands/bluesky.rs
 17 crates/cortexfs/src/bin/channel/commands/common.rs
 16 crates/cortexfs/src/bin/channel/commands/dingtalk.rs
@@ -464,7 +464,7 @@ prod=123183
 155 crates/cortexfs/src/channel/bridge.rs
 18 crates/cortexfs/src/channel/bridge/safe.rs
 30 crates/cortexfs/src/channel/bridge/session.rs
-119 crates/cortexfs/src/channel/bridge/slash.rs
+135 crates/cortexfs/src/channel/bridge/slash.rs
 15 crates/cortexfs/src/channel/bridge/socket.rs
 105 crates/cortexfs/src/channel/control/codec.rs
 44 crates/cortexfs/src/channel/control/config.rs

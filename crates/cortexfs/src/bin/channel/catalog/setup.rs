@@ -40,7 +40,12 @@ pub(super) const SETUPS: &[Setup] = &[
     setup("signal", "cortexfs-channel signal", "cortexfs-channel-signal.service", &["CORTEXFS_SIGNAL_ACCOUNT"]),
     setup("webhook", "cortexfs-channel webhook", "cortexfs-channel-webhook.service", &["CORTEXFS_CHANNEL_PLATFORM", "CORTEXFS_CHANNEL_OUTBOUND_URL"]),
     setup("web", "cortexfs-channel web", "cortexfs-channel-web.service", &[]),
-    setup("slack", "cortexfs-channel webhook", "cortexfs-channel-slack.service", &["CORTEXFS_CHANNEL_PLATFORM=slack", "CORTEXFS_CHANNEL_TOKEN", "CORTEXFS_CHANNEL_OUTBOUND_URL"]),
+    setup(
+        "slack",
+        "cortexfs-channel-slack",
+        "cortexfs-channel-slack.service",
+        &["CORTEXFS_SLACK_APP_TOKEN", "CORTEXFS_SLACK_BOT_TOKEN"],
+    ),
     setup("feishu", "cortexfs-channel webhook", "cortexfs-channel-feishu.service", &["CORTEXFS_CHANNEL_PLATFORM=feishu", "CORTEXFS_CHANNEL_TOKEN", "CORTEXFS_CHANNEL_OUTBOUND_URL"]),
     setup("lark", "cortexfs-channel webhook", "cortexfs-channel-lark.service", &["CORTEXFS_CHANNEL_PLATFORM=lark", "CORTEXFS_CHANNEL_TOKEN", "CORTEXFS_CHANNEL_OUTBOUND_URL"]),
     setup("line", "cortexfs-channel webhook", "cortexfs-channel-line.service", &["CORTEXFS_CHANNEL_PLATFORM=line", "CORTEXFS_CHANNEL_TOKEN", "CORTEXFS_CHANNEL_OUTBOUND_URL"]),
