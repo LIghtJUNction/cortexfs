@@ -116,6 +116,18 @@ build disposable context from durable session facts
   → repeat until final answer or cancel
 ```
 
+That host loop is fixed and authoritative (`sdk-envelope-v1` steps, policy,
+sandbox, cancellation). Behavior customization stays outside the host:
+
+```text
+agent/<name>.d/loop     → CTX_AGENT_LOOP hint (chat/react/coding/planner/research/custom)
+Agent SDK executable    → custom step logic; yield one tool_call or complete
+hooks pre.d/post.d      → metadata-only gates around model actions
+```
+
+`loop` never grants capability. A custom name is a validated object-name hint
+for the executable agent; the host still owns tool authority and step budget.
+
 Everything else is layered outside that loop:
 
 ```text

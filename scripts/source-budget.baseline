@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=176544
-prod=122378
+all=176571
+prod=122387
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 981 crates/cortexfs-agent-sdk/src/lib.rs
@@ -639,7 +639,7 @@ prod=122378
 93 crates/cortexfs/src/object/executor/args.rs
 113 crates/cortexfs/src/object/executor/call.rs
 31 crates/cortexfs/src/object/executor/error.rs
-960 crates/cortexfs/src/object/executor/exec.rs
+969 crates/cortexfs/src/object/executor/exec.rs
 44 crates/cortexfs/src/object/executor/frames.rs
 338 crates/cortexfs/src/object/executor/inference.rs
 276 crates/cortexfs/src/object/executor/model.rs
