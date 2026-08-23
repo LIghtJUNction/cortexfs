@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::AgentUnixIdentity;
 use crate::agent::compactstrategy::CompactStrategy;
-use crate::agent::prompt::format_history_with_strategy;
+use crate::agent::prompt::compact::format_history_with_strategy;
 use crate::runtime::compactabi::CompactInvocation;
 use crate::runtime::compactexec::run_custom_compact;
 use cortexfs_context::Message;

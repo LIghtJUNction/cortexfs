@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1091,SC2031,SC2329 # Dynamic sources, subshell globals, and test doubles are intentional.
+# shellcheck disable=SC1091,SC2031,SC2317,SC2329 # Dynamic sources, subshell globals, and test doubles are intentional.
 set -Eeuo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
