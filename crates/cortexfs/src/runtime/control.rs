@@ -150,6 +150,12 @@ pub use cortexfs_runtime_client::{
     CreateChildEnvironmentRequest, CreateChildResult, UpdatePromptEnvironmentRequest,
 };
 
+/// Tools that send frames on the receipt-bound run capability socket.
+#[must_use]
+pub fn consumes_run_control(name: &str) -> bool {
+    matches!(name, "agent.create" | "agent.update")
+}
+
 impl RunCapability {
     #[expect(
         clippy::too_many_arguments,

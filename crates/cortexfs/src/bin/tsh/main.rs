@@ -28,6 +28,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 
+use cortexfs::runtime::control::consumes_run_control;
 use cortexfs::{
     AgentRuntimeViewError, CTX_ROOT, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
     ToolPath, authorize_tool_execution, define_simple_cli_error, derive_agent_runtime_view,
@@ -488,7 +489,7 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(socket) = control.as_ref().filter(|_| name == "agent.create") {
+    if let Some(socket) = control.as_ref().filter(|_| consumes_run_control(name)) {
         command.env("CTX_CONTROL_SOCKET", socket);
     }
     if validated_tsh_runtime_context_from_env(root, &runtime.agent)? != runtime
