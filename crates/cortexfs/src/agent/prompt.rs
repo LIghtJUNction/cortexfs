@@ -6,6 +6,7 @@ pub(crate) const MAX_SKILL_FILE_BYTES: u64 = 16 * 1024;
 pub(crate) const MAX_SKILL_FILES: usize = 256;
 pub(crate) const MAX_HISTORY_MESSAGES_READ_BYTES: usize = 64 * 1024;
 
+pub mod compact;
 pub mod history;
 pub mod model;
 pub mod read;
@@ -15,7 +16,9 @@ pub mod skills;
 pub mod snapshot;
 
 pub use history::*;
+pub(crate) use history::collect_history_messages_for_agent;
 pub use model::*;
+pub(crate) use compact::format_history_with_strategy;
 pub(crate) use read::*;
 pub use render::*;
 pub use rules::*;

@@ -1,9 +1,11 @@
 pub mod child;
+pub mod compactstrategy;
 pub mod control;
 pub mod create;
 pub(crate) mod createop;
 pub mod launch;
 pub mod loopconfig;
+pub mod loopresolve;
 pub mod prompt;
 pub mod remove;
 pub mod runtime;
@@ -15,6 +17,7 @@ pub mod view;
 pub mod window;
 
 pub use loopconfig::AgentLoop;
+pub use loopresolve::resolve_agent_loop_executable_for_agent;
 pub(crate) const MAX_AGENT_RUNTIME_CONTROL_BYTES: u64 = 64 * 1024;
 pub(crate) const TOOL_CALL_CONTEXT_PREFIX: &str = "CORTEXFS_TOOL_CALL ";
 pub(crate) const TOOL_CONTINUATION_CONTEXT_PREFIX: &str = "CORTEXFS_TOOL_CONTINUATION ";

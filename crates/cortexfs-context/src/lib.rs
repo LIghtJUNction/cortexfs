@@ -8,7 +8,7 @@ mod history;
 mod message;
 
 pub use budget::ContextBudget;
-pub use compact::{CompactedHistory, Summarizer, compact_history};
+pub use compact::{CompactedHistory, DefaultSummarizer, Summarizer, compact_history};
 pub use history::{History, HistorySelection, RenderedHistory};
 pub use message::{Message, content_text, message_from_json_line};
 

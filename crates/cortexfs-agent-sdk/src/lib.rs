@@ -18,6 +18,9 @@ pub use cortexfs_runtime_client::agent::AgentToolObservation;
 use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI, read_agent_invocation};
 pub use cortexfs_runtime_client::interaction::InteractionOrigin;
 
+mod builtin;
+pub use builtin::{BuiltinLoop, parse_builtin_loop};
+
 /// Maximum number of arguments supported by a single tool call.
 ///
 /// Keeping this explicit avoids argv vector overrun in child processes.
@@ -777,6 +780,16 @@ mod tests {
                 .map_err(|error| AgentError::new("EIO", error.to_string()))?;
             Ok(AgentOutcome::Complete)
         }
+    }
+
+    #[test]
+    fn parse_builtin_loop_reads_host_hint() {
+        let mut invocation = AgentInvocation::new("run-1", "hello");
+        invocation.loop_kind = Some("coding".to_owned());
+        assert_eq!(parse_builtin_loop(&invocation), BuiltinLoop::Coding);
+        assert!(parse_builtin_loop(&invocation).allows_tool_continuation());
+        invocation.loop_kind = Some("chat".to_owned());
+        assert!(!parse_builtin_loop(&invocation).allows_tool_continuation());
     }
 
     #[test]

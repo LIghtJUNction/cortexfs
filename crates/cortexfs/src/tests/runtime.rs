@@ -1,6 +1,7 @@
 use super::*;
 mod apikey;
 mod channelenv;
+mod compact;
 mod control;
 mod hooks;
 mod oauth;

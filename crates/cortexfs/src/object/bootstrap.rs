@@ -171,6 +171,7 @@ pub(crate) fn validate_agent_bootstrap_control_content(
     let valid = match file {
         "abi" => is_agent_launch_abi(content),
         "loop" => AgentLoop::parse(content).is_some(),
+        "compact.strategy" => agent::compactstrategy::CompactStrategy::parse(content).is_some(),
         "tools" => inspect_agent_tools_control(content).is_ok(),
         "meta.json" => serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()),
         "system.md" | "prompt.template.md" => !content.contains('\0'),
@@ -248,6 +249,7 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
             )
         }
         "window" | "compact" => "auto".to_owned(),
+        "compact.strategy" => "truncate".to_owned(),
         "status" => "idle".to_owned(),
         "system.md" => format!("You are CortexFS agent `{object_name}`."),
         "prompt.template.md" => DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),
