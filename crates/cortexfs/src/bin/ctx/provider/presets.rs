@@ -55,10 +55,10 @@ pub(crate) fn provider_preset_install_compatible(
     if cortexfs::provider_host_from_base_url(base_url).is_none() {
         return Err(CliError::usage("invalid compatible --base-url"));
     }
-    if let Some(model) = model {
-        if !is_object_name(model) {
-            return Err(CliError::usage("invalid compatible --model"));
-        }
+    if let Some(model) = model
+        && !is_object_name(model)
+    {
+        return Err(CliError::usage("invalid compatible --model"));
     }
     write_preset_file(&format!("{name}.json"), &render_chat(name, base_url, model))
 }

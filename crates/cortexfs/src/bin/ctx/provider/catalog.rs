@@ -67,12 +67,12 @@ pub(crate) const PROVIDER_PRESETS: &[ProviderPreset] = &[
 ];
 
 pub(crate) fn render_chat(name: &str, base: &str, model: Option<&str>) -> String {
-    match model {
-        Some(model) => format!(
-            "{{\n            \"name\": \"{name}\",\n            \"base_url\": \"{base}\",\n            \"default_model\": \"{model}\",\n            \"models\": [\"{model}\"],\n            \"enabled\": true,\n            \"formats\": [\"openai.chat\"]\n        }} "
-        ),
-        None => format!(
-            "{{\n            \"name\": \"{name}\",\n            \"base_url\": \"{base}\",\n            \"enabled\": true,\n            \"formats\": [\"openai.chat\"]\n        }} "
-        ),
-    }
+    let extra = model.map_or(String::new(), |model| {
+        format!(
+            ",\n            \"default_model\": \"{model}\",\n            \"models\": [\"{model}\"]"
+        )
+    });
+    format!(
+        "{{\n            \"name\": \"{name}\",\n            \"base_url\": \"{base}\"{extra},\n            \"enabled\": true,\n            \"formats\": [\"openai.chat\"]\n        }} "
+    )
 }

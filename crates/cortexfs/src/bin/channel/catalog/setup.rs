@@ -1,9 +1,9 @@
 #[derive(Clone, Copy)]
 pub(super) struct Setup {
-    pub(super) id: &'static str,
-    pub(super) command: &'static str,
-    pub(super) unit: &'static str,
-    pub(super) secrets: &'static [&'static str],
+    pub id: &'static str,
+    pub command: &'static str,
+    pub unit: &'static str,
+    pub secrets: &'static [&'static str],
 }
 
 const fn setup(

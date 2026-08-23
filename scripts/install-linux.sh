@@ -653,6 +653,7 @@ configure_compatible_provider() {
     confirm "CONFIGURE AI" \
         "Type CONFIGURE AI to install an OpenAI-compatible endpoint." \
         "输入 CONFIGURE AI，安装 OpenAI 兼容端点。"
+    # shellcheck disable=SC2024 # Force sudo's prompt onto the controlling terminal.
     sudo -v <"$TTY_PATH"
     printf 'name: ' >"$TTY_PATH"
     IFS= read -r name <"$TTY_PATH" || name=
