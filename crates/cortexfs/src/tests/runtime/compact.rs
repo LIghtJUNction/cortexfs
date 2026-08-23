@@ -6,7 +6,7 @@ use crate::AgentUnixIdentity;
 use crate::agent::compactstrategy::CompactStrategy;
 use crate::agent::prompt::compact::format_history_with_strategy;
 use crate::runtime::compactabi::CompactInvocation;
-use crate::runtime::compactexec::run_custom_compact;
+use crate::runtime::run_custom_compact;
 use cortexfs_context::Message;
 
 fn write_hook(path: &Path, body: &str, mode: u32) -> std::io::Result<()> {
@@ -30,11 +30,13 @@ fn compact_strategy_summarize_inserts_builtin_summary() -> Result<(), Box<dyn st
     );
     let history = format_history_with_strategy(
         messages,
-        80,
         CompactStrategy::Summarize,
         root.path(),
-        "coder",
-        "default",
+        &CompactInvocation {
+            agent: "coder",
+            session: "default",
+            max_chars: 80,
+        },
         &identity,
     );
     assert!(history.contains("Summary of earlier context"));

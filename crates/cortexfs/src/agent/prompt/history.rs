@@ -1,5 +1,6 @@
 use super::compact::{format_history_with_strategy, read_compact_strategy};
 use super::read::read_history_messages_tail;
+use crate::runtime::compactabi::CompactInvocation;
 use crate::*;
 use serde_json::Value;
 
@@ -30,15 +31,12 @@ pub(crate) fn collect_history_messages_for_agent(
         return "(no historical messages injected)".to_owned();
     };
     let strategy = read_compact_strategy(control_dir);
-    format_history_with_strategy(
-        &messages,
-        max_chars,
-        strategy,
-        control_dir,
+    let invocation = CompactInvocation {
         agent,
         session,
-        identity,
-    )
+        max_chars,
+    };
+    format_history_with_strategy(&messages, strategy, control_dir, &invocation, identity)
 }
 
 /// Formats durable JSONL through the publishable context crate.

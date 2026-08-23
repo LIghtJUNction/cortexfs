@@ -5,7 +5,7 @@ use cortexfs_context::{DefaultSummarizer, History, compact_history};
 use crate::AgentUnixIdentity;
 use crate::agent::compactstrategy::CompactStrategy;
 use crate::runtime::compactabi::CompactInvocation;
-use crate::runtime::compactexec::run_custom_compact;
+use crate::runtime::run_custom_compact;
 use crate::support::plain::read_small_text_file;
 
 const MAX_STRATEGY_BYTES: u64 = 256;
@@ -24,20 +24,18 @@ pub fn read_compact_strategy(control_dir: &Path) -> CompactStrategy {
 #[must_use]
 pub fn format_history_with_strategy(
     messages: &str,
-    max_chars: usize,
     strategy: CompactStrategy,
     control_dir: &Path,
-    agent: &str,
-    session: &str,
+    invocation: &CompactInvocation<'_>,
     identity: &AgentUnixIdentity,
 ) -> String {
     let history = History::from_jsonl(messages);
     match strategy {
-        CompactStrategy::Truncate => history.render(max_chars).text().to_owned(),
-        CompactStrategy::Summarize => compact_with_builtin(&history, max_chars),
+        CompactStrategy::Truncate => history.render(invocation.max_chars).text().to_owned(),
+        CompactStrategy::Summarize => compact_with_builtin(&history, invocation.max_chars),
         CompactStrategy::Custom(name) => {
             let path = control_dir.join("compact.d").join(&name);
-            compact_with_custom(&history, max_chars, &path, agent, session, identity)
+            compact_with_custom(&history, &path, invocation, identity)
         }
     }
 }
@@ -51,28 +49,21 @@ fn compact_with_builtin(history: &History, max_chars: usize) -> String {
 
 fn compact_with_custom(
     history: &History,
-    max_chars: usize,
     path: &Path,
-    agent: &str,
-    session: &str,
+    invocation: &CompactInvocation<'_>,
     identity: &AgentUnixIdentity,
 ) -> String {
-    let selection = history.select(max_chars);
+    let selection = history.select(invocation.max_chars);
     if selection.omitted() == 0 {
-        return selection.render(max_chars).text().to_owned();
+        return selection.render(invocation.max_chars).text().to_owned();
     }
     let omitted = history
         .messages()
         .get(..selection.omitted())
         .unwrap_or_default();
-    let invocation = CompactInvocation {
-        agent,
-        session,
-        max_chars,
-    };
-    match run_custom_compact(path, &invocation, omitted, identity) {
-        Ok(summary) => render_with_summary(&selection, max_chars, Some(&summary)),
-        Err(_error) => history.render(max_chars).text().to_owned(),
+    match run_custom_compact(path, invocation, omitted, identity) {
+        Ok(summary) => render_with_summary(&selection, invocation.max_chars, Some(&summary)),
+        Err(_error) => history.render(invocation.max_chars).text().to_owned(),
     }
 }
 

@@ -226,6 +226,28 @@ fn update_socket_prompt(
         .map_err(|_error| runtime::control::RunCapabilityError::CannotWrite)
 }
 
+fn write_socket_run_start(
+    stream: &mut UnixStream,
+    response: &SocketRuntimeResponse,
+    debug: Option<SocketDebugTiming>,
+) -> Result<Option<SocketDebugTiming>, SocketRuntimeError> {
+    let mut connected = true;
+    write_while_connected(&mut connected, || {
+        write_optional_socket_debug_timing_frame(stream, debug, "socket_send_received")
+    })?;
+    let debug = debug.map(SocketDebugTiming::with_request_baseline);
+    write_while_connected(&mut connected, || {
+        write_optional_socket_debug_timing_frame(stream, debug, "history_collected")
+    })?;
+    write_while_connected(&mut connected, || {
+        write_socket_runtime_response(stream, response)
+    })?;
+    write_while_connected(&mut connected, || {
+        write_optional_socket_debug_timing_frame(stream, debug, "session_recorded")
+    })?;
+    Ok(debug)
+}
+
 pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,
@@ -314,20 +336,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         .to_owned();
     let tool_context = agent_tool_context_for_request(cwd.as_deref())?;
     let channel = channel_context_for_request(&runtime, origin.as_ref())?;
-    let mut client_connected = true;
-    write_while_connected(&mut client_connected, || {
-        write_optional_socket_debug_timing_frame(stream, debug, "socket_send_received")
-    })?;
-    let debug = debug.map(SocketDebugTiming::with_request_baseline);
-    write_while_connected(&mut client_connected, || {
-        write_optional_socket_debug_timing_frame(stream, debug, "history_collected")
-    })?;
-    write_while_connected(&mut client_connected, || {
-        write_socket_runtime_response(stream, &recorder_response)
-    })?;
-    write_while_connected(&mut client_connected, || {
-        write_optional_socket_debug_timing_frame(stream, debug, "session_recorded")
-    })?;
+    let debug = write_socket_run_start(stream, &recorder_response, debug)?;
 
     let run_request = AgentExecutableRunRequest {
         request_id: id,

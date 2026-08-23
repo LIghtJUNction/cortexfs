@@ -126,10 +126,11 @@ mod tests {
     }
 
     #[test]
-    fn list_models_scans_projected_models() {
-        let root = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(root.path().join("model/openai/gpt-5.6")).expect("mkdir");
+    fn list_models_scans_projected_models() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir_all(root.path().join("model/openai/gpt-5.6"))?;
         let text = list_models_from(root.path());
         assert!(text.contains("openai/gpt-5.6"), "{text}");
+        Ok(())
     }
 }

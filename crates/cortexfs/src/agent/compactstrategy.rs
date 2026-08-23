@@ -28,9 +28,9 @@ impl CompactStrategy {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Truncate => "truncate",
-            Self::Summarize => "summarize",
-            Self::Custom(value) => value,
+            &Self::Truncate => "truncate",
+            &Self::Summarize => "summarize",
+            &Self::Custom(ref value) => value,
         }
     }
 }

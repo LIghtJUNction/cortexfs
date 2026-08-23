@@ -35,8 +35,8 @@ pub fn resolve_tool_invoke_executable(control_dir: &Path, default: &Path) -> Pat
 #[must_use]
 pub fn invoke_tool_mode(strategy: &InvokeStrategy) -> Option<&'static str> {
     match strategy {
-        InvokeStrategy::Cli => Some("cli"),
-        InvokeStrategy::Sdk => Some("native"),
-        InvokeStrategy::Default | InvokeStrategy::Custom(_) => None,
+        &InvokeStrategy::Cli => Some("cli"),
+        &InvokeStrategy::Sdk => Some("native"),
+        &InvokeStrategy::Default | &InvokeStrategy::Custom(_) => None,
     }
 }

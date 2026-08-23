@@ -31,10 +31,10 @@ impl InvokeStrategy {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Default => "default",
-            Self::Cli => "cli",
-            Self::Sdk => "sdk",
-            Self::Custom(value) => value,
+            &Self::Default => "default",
+            &Self::Cli => "cli",
+            &Self::Sdk => "sdk",
+            &Self::Custom(ref value) => value,
         }
     }
 }
