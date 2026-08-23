@@ -19,7 +19,7 @@ use cortexfs_context::Message;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-pub(super) fn run_custom_compact(
+pub(crate) fn run_custom_compact(
     path: &Path,
     invocation: &CompactInvocation<'_>,
     omitted: &[Message],
