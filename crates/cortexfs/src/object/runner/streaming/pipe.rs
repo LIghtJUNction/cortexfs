@@ -33,7 +33,7 @@ impl OpenAiStreamApi {
     ) -> Result<(), StreamFailure> {
         let protocol = self.protocol();
         let (target, headers) =
-            provider_request_target(transport, request.credential, protocol, run)
+            provider_request_target(transport, request.credential, protocol, request.model, run)
                 .map_err(|message| stream_failure(message, false))?;
         let body = provider_request_body(
             protocol,

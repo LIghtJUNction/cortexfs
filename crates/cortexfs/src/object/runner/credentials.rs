@@ -145,10 +145,12 @@ fn profile_credential(
 }
 
 fn api_key_credential(token: &str, driver: ProviderRuntimeDriver) -> ProviderCredential {
-    if driver == ProviderRuntimeDriver::Anthropic {
-        ProviderCredential::AnthropicApiKey(token.to_owned())
-    } else {
-        ProviderCredential::Bearer(token.to_owned())
+    match driver {
+        ProviderRuntimeDriver::Anthropic => ProviderCredential::AnthropicApiKey(token.to_owned()),
+        ProviderRuntimeDriver::Gemini => ProviderCredential::GoogleApiKey(token.to_owned()),
+        ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+            ProviderCredential::Bearer(token.to_owned())
+        }
     }
 }
 

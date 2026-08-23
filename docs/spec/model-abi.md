@@ -324,6 +324,22 @@ use-case route first, then `default`. This lets direct model usage choose a
 classic chat driver while agents prefer a richer Responses-style driver with a
 chat fallback. Driver names are adapter names, not stable model names.
 
+Adapter names and the provider `formats` entry that selects each one by default:
+
+```text
+openai-chat         openai.chat         POST <base>/chat/completions
+openai-responses    openai.responses    POST <base>/responses
+anthropic-messages  anthropic.messages  POST <base>/messages
+google-generative   google.generative   POST <base>/models/<model>:generateContent
+```
+
+The OpenAI and Anthropic adapters normalize the provider base URL to a `/v1`
+suffix. `google-generative` uses the base URL verbatim instead, because Gemini
+carries its API version there (`.../v1beta`) and binds the model into the
+request path; it authenticates an API key with `x-goog-api-key` and an OAuth
+access token with `Authorization: Bearer`. An adapter name outside this set
+fails with a stable error before any request is sent.
+
 Secrets are never stored in model files or `.d/` control files. Provider
 credentials use this priority:
 

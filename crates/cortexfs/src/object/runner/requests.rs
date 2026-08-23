@@ -21,7 +21,8 @@ pub(crate) fn call_provider(
     request: &ProviderRequest<'_>,
     run: &str,
 ) -> Result<ProviderTextCompletion, String> {
-    let (target, headers) = provider_request_target(transport, request.credential, protocol, run)?;
+    let (target, headers) =
+        provider_request_target(transport, request.credential, protocol, request.model, run)?;
     let agent_tools = protocol != WireProtocol::Anthropic && env::var_os("CTX_AGENT").is_some();
     let body = provider_request_body(
         protocol,
@@ -49,11 +50,35 @@ pub(crate) fn provider_request_body(
     if stream && protocol == WireProtocol::OpenAiChat {
         request.option("stream_options", json!({ "include_usage": true }));
     }
-    if !request.tools.is_empty() {
+    if !request.tools.is_empty()
+        && matches!(
+            protocol,
+            WireProtocol::OpenAiChat | WireProtocol::OpenAiResponses
+        )
+    {
         request.option("parallel_tool_calls", json!(false));
     }
     let bytes = encode_model_request(protocol, &request).map_err(|error| error.to_string())?;
-    String::from_utf8(bytes).map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())
+    let body = String::from_utf8(bytes)
+        .map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())?;
+    if protocol == WireProtocol::Gemini {
+        return gemini_body_without_model(&body);
+    }
+    Ok(body)
+}
+
+/// Drops the path-bound `model` field from an encoded Gemini request body.
+///
+/// The neutral request keeps `model` so bodies round trip between dialects, but
+/// Gemini binds the model to the request URL and rejects it in the body.
+fn gemini_body_without_model(body: &str) -> Result<String, String> {
+    let mut value = serde_json::from_str::<Value>(body)
+        .map_err(|_error| "protocol encoder returned invalid JSON".to_owned())?;
+    let Some(root) = value.as_object_mut() else {
+        return Err("protocol encoder returned a non-object body".to_owned());
+    };
+    root.remove("model");
+    serde_json::to_string(&value).map_err(|_error| "cannot encode Gemini request".to_owned())
 }
 
 fn model_request(

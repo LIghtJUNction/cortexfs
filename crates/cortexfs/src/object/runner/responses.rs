@@ -71,6 +71,9 @@ fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(
     if protocol == WireProtocol::OpenAiChat {
         openai_chat_finish_reason(value)?;
     }
+    if protocol == WireProtocol::Gemini {
+        return gemini_response_status(value);
+    }
     if protocol != WireProtocol::OpenAiResponses {
         return Ok(());
     }
@@ -92,6 +95,34 @@ fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(
         return Err("provider response requires host-owned program continuation".to_owned());
     }
     Ok(())
+}
+
+/// Rejects a Gemini `generateContent` body that carries no usable candidate.
+///
+/// The Gemini decoder only maps `SAFETY` to an error status, so the runner
+/// mirrors the `openai.chat` path and refuses truncated or filtered answers
+/// before they reach the session recorder as ordinary text.
+fn gemini_response_status(value: &Value) -> Result<(), String> {
+    if let Some(message) = value
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .filter(|message| !message.trim().is_empty())
+    {
+        return Err(format!("provider response failed: {message}"));
+    }
+    if let Some(reason) = value
+        .pointer("/promptFeedback/blockReason")
+        .and_then(Value::as_str)
+    {
+        return Err(format!("provider response blocked with {reason}"));
+    }
+    match value
+        .pointer("/candidates/0/finishReason")
+        .and_then(Value::as_str)
+    {
+        Some("STOP") | None => Ok(()),
+        Some(reason) => Err(format!("provider response finished with {reason}")),
+    }
 }
 
 fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
@@ -175,31 +206,51 @@ pub(crate) fn parse_provider_usage(output: &[u8]) -> Result<Option<TokenUsage>, 
 pub(crate) fn token_usage_from_value(value: &Value) -> Option<TokenUsage> {
     [
         value.get("usage"),
+        value.get("usageMetadata"),
         value.pointer("/response/usage"),
+        value.pointer("/response/usageMetadata"),
         value.pointer("/message/usage"),
     ]
     .into_iter()
     .flatten()
     .find_map(|value| {
         Some(TokenUsage {
-            input_tokens: value
-                .get("input_tokens")
-                .or_else(|| value.get("prompt_tokens"))?
-                .as_u64()?,
-            output_tokens: value
-                .get("output_tokens")
-                .or_else(|| value.get("completion_tokens"))?
-                .as_u64()?,
-            cached_tokens: value
-                .pointer("/input_tokens_details/cached_tokens")
-                .or_else(|| value.pointer("/prompt_tokens_details/cached_tokens"))
-                .and_then(Value::as_u64),
-            cache_write_tokens: value
-                .pointer("/input_tokens_details/cache_write_tokens")
-                .or_else(|| value.pointer("/prompt_tokens_details/cache_write_tokens"))
-                .and_then(Value::as_u64),
+            input_tokens: usage_count(
+                value,
+                &["/input_tokens", "/prompt_tokens", "/promptTokenCount"],
+            )?,
+            output_tokens: usage_count(
+                value,
+                &[
+                    "/output_tokens",
+                    "/completion_tokens",
+                    "/candidatesTokenCount",
+                ],
+            )?,
+            cached_tokens: usage_count(
+                value,
+                &[
+                    "/input_tokens_details/cached_tokens",
+                    "/prompt_tokens_details/cached_tokens",
+                    "/cachedContentTokenCount",
+                ],
+            ),
+            cache_write_tokens: usage_count(
+                value,
+                &[
+                    "/input_tokens_details/cache_write_tokens",
+                    "/prompt_tokens_details/cache_write_tokens",
+                ],
+            ),
         })
     })
+}
+/// Reads the first present token count among provider-specific spellings.
+fn usage_count(value: &Value, pointers: &[&str]) -> Option<u64> {
+    pointers
+        .iter()
+        .filter_map(|pointer| value.pointer(pointer))
+        .find_map(Value::as_u64)
 }
 pub(crate) fn provider_target(transport: &ResolvedTransport, path: &str) -> CurlJsonTarget {
     let (base_url, unix_socket) = match *transport {
@@ -221,6 +272,7 @@ pub(crate) fn provider_request_target(
     transport: &ResolvedTransport,
     credential: Option<&ProviderCredential>,
     protocol: WireProtocol,
+    model: &str,
     run: &str,
 ) -> Result<(CurlJsonTarget, Vec<String>), String> {
     match protocol {
@@ -230,10 +282,57 @@ pub(crate) fn provider_request_target(
             let credential = credential.ok_or_else(|| "missing Anthropic credential".to_owned())?;
             Ok((
                 provider_target(transport, "messages"),
-                anthropic_headers(credential),
+                anthropic_headers(credential)?,
             ))
         }
-        WireProtocol::Gemini => Err("Gemini transport is not implemented by the runner".to_owned()),
+        WireProtocol::Gemini => {
+            let credential = credential.ok_or_else(|| "missing Gemini credential".to_owned())?;
+            Ok((
+                gemini_target(transport, model)?,
+                gemini_headers(credential)?,
+            ))
+        }
+    }
+}
+
+/// Builds the Gemini `models/<model>:generateContent` target.
+///
+/// Gemini binds the API version into the provider base URL and the model into
+/// the request path, so the shared `/v1` normalization must not apply here.
+fn gemini_target(transport: &ResolvedTransport, model: &str) -> Result<CurlJsonTarget, String> {
+    let model = model.strip_prefix("models/").unwrap_or(model);
+    if !is_object_name(model) {
+        return Err("invalid Gemini model name".to_owned());
+    }
+    let (base_url, unix_socket) = match *transport {
+        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
+            (base_url, None)
+        }
+        ResolvedTransport::Unix {
+            ref base_url,
+            ref socket_path,
+        } => (base_url, Some(socket_path.clone())),
+    };
+    Ok(CurlJsonTarget {
+        url: format!(
+            "{}/models/{model}:generateContent",
+            base_url.trim().trim_end_matches('/')
+        ),
+        unix_socket,
+    })
+}
+
+/// Selects the Gemini authentication header for one resolved credential.
+///
+/// Google splits authentication by credential kind: API keys travel in
+/// `x-goog-api-key` while OAuth access tokens use the bearer header.
+fn gemini_headers(credential: &ProviderCredential) -> Result<Vec<String>, String> {
+    match *credential {
+        ProviderCredential::GoogleApiKey(ref key) => Ok(vec![format!("x-goog-api-key: {key}")]),
+        ProviderCredential::Bearer(ref token) => Ok(vec![format!("Authorization: Bearer {token}")]),
+        ProviderCredential::AnthropicApiKey(_) | ProviderCredential::Codex { .. } => {
+            Err("invalid Gemini credential".to_owned())
+        }
     }
 }
 
@@ -300,12 +399,15 @@ fn openai_target(
     }
     Ok((target, headers))
 }
-pub(crate) fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
+pub(crate) fn anthropic_headers(credential: &ProviderCredential) -> Result<Vec<String>, String> {
     let auth = match *credential {
         ProviderCredential::Bearer(ref token) | ProviderCredential::Codex { ref token, .. } => {
             format!("Authorization: Bearer {token}")
         }
         ProviderCredential::AnthropicApiKey(ref key) => format!("x-api-key: {key}"),
+        ProviderCredential::GoogleApiKey(_) => {
+            return Err("invalid Anthropic credential".to_owned());
+        }
     };
-    vec![auth, "anthropic-version: 2023-06-01".to_owned()]
+    Ok(vec![auth, "anthropic-version: 2023-06-01".to_owned()])
 }
