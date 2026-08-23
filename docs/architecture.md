@@ -124,7 +124,13 @@ agent/<name>.d/loop              → CTX_AGENT_LOOP hint (chat/react/coding/plan
 agent/<name>.d/loop.d/<name>     → optional custom loop driver executable (Agent SDK ABI)
 agent/<name>.d/compact.strategy  → truncate | summarize | <object-name>
 agent/<name>.d/compact.d/<name>  → optional custom compaction executable (`cortexfs.compact/v1`)
+tool/<name>.d/invoke.strategy     → default | cli | sdk | <object-name>
+tool/<name>.d/invoke.d/<name>     → optional custom invoke executable (Tool SDK ABI)
+channel/<name>.d/adapter          → catalog family | <object-name> (optional; defaults to family)
+channel/<name>.d/adapter.d/<name> → optional custom socket driver (`cortexfs.channel.socket/v1`)
 Agent SDK executable             → custom step logic; yield one tool_call or complete
+Tool SDK executable              → CLI or JSONL invoke; host sets CTX_TOOL_MODE
+Channel SDK executable           → process-isolated adapter; DriverLaunchConfig from env
 hooks pre.d/post.d               → metadata-only gates around model actions
 ```
 

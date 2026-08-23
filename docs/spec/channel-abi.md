@@ -106,9 +106,19 @@ Each channel instance owns its generic tools and read-only global state:
 ```text
 /ctx/channel/<name>/tool/<tool>
 /ctx/channel/<name>.d/{id,driver,cap,status,health}
+/ctx/channel/<name>.d/adapter          optional; catalog family or custom object name
+/ctx/channel/<name>.d/adapter.d/<name> optional custom socket driver executable
 /ctx/home/<uid>/channel/<name>/tool/<tool>
 /ctx/home/<uid>/channel/<name>.d/*
 ```
+
+`driver` keeps the ABI string such as `cortexfs.channel.socket/v1`. The optional
+`adapter` control selects a catalog family (`telegram`, `discord`, …) or a custom
+object name. A custom name resolves `adapter.d/<name>` when that executable is
+present; otherwise the host keeps the built-in catalog driver for the family.
+The Channel SDK exposes `DriverLaunchConfig::from_env()` so custom adapters read
+`CORTEXFS_CHANNEL_ID`, socket path, request prefix, and reply timeout without
+re-parsing host conventions.
 
 There is intentionally no `/ctx/channel/tool`. Common operations keep generic
 names (`channel.send`, `channel.reply`, `channel.react`, `channel.choice`,

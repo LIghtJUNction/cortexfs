@@ -83,6 +83,21 @@ pub(crate) fn doctor_channels(root: &Path) -> Result<bool, CliError> {
                 print_line(&format!("missing channel/{name}.d/{file}"))?;
             }
         }
+        if doctor_is_file(&control.join("adapter")) {
+            let content = read_file_to_string(&control.join("adapter"))?;
+            if cortexfs::channel::AdapterStrategy::parse(&content).is_none() {
+                ok = false;
+                print_line(&format!("invalid channel/{name}.d/adapter"))?;
+            } else if let Some(path) = cortexfs::channel::resolve_channel_adapter_executable(
+                &control,
+                &cortexfs::channel::read_adapter_strategy(&control, &name),
+            ) {
+                print_line(&format!(
+                    "ok channel/{name}.d/adapter -> {}",
+                    path.display()
+                ))?;
+            }
+        }
         for tool in read_dir_names(&tools)? {
             if !is_object_name(&tool) || !is_executable_file(&tools.join(&tool)) {
                 continue;

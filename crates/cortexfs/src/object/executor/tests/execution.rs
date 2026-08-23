@@ -145,6 +145,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
+        invoke_strategy: crate::tool::InvokeStrategy::default(),
     });
 
     assert!(contains_os_arg_triplet(
@@ -229,6 +230,7 @@ fn tool_bwrap_has_no_control_environment_without_host_control()
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
+        invoke_strategy: crate::tool::InvokeStrategy::default(),
     });
     assert!(
         !args
@@ -318,6 +320,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
+        invoke_strategy: crate::tool::InvokeStrategy::default(),
     });
     let mut command = std::process::Command::new(BWRAP_PROGRAM);
     command.args(args);

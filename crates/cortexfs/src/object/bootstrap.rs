@@ -194,6 +194,8 @@ pub(crate) fn validate_tool_control_content(
 ) -> Result<(), ObjectBootstrapError> {
     match file {
         "schema" | "program" if inspect_tool_schema_json(content).is_ok() => Ok(()),
+        "invoke.strategy" if tool::InvokeStrategy::parse(content).is_some() => Ok(()),
+        "invoke.strategy" => Err(ObjectBootstrapError::InvalidControlValue),
         "mcp" if object::mcp::validate_locator(content) => Ok(()),
         "schema" | "program" | "mcp" => Err(ObjectBootstrapError::InvalidControlValue),
         _ if !content.contains('\0') => Ok(()),
@@ -262,6 +264,7 @@ pub(crate) fn default_tool_control_value(object_name: &str, file: &str) -> Strin
     match file {
         "name" => object_name.to_owned(),
         "schema" => "{\"type\":\"object\"}".to_owned(),
+        "invoke.strategy" => "default".to_owned(),
         "status" => "idle".to_owned(),
         _ => String::new(),
     }

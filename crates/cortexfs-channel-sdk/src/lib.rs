@@ -2,11 +2,13 @@
 
 //! SDK for process-isolated `CortexFS` channel adapters.
 
+mod builtin;
 mod error;
 mod runtime;
 mod sender;
 mod service;
 
+pub use builtin::DriverLaunchConfig;
 pub use cortexfs_channels::{
     Attachment, ChannelAction, ChannelActions, ChannelCapabilities, ChannelChoice, ChannelCommand,
     ChannelCommandResult, ChannelEffect, ChannelError, ChannelHealth, ChannelId, ChannelIncoming,

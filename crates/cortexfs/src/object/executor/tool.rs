@@ -4,7 +4,10 @@ pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<ExitCode, ExecEr
     if is_passthrough_tool(name) {
         return run_passthrough_tool(name, args).map(|()| ExitCode::SUCCESS);
     }
-    if env::var("CTX_TOOL_MODE").as_deref() == Ok("cli") {
+    let strategy = tool_invoke_strategy(name);
+    if matches!(strategy, crate::tool::InvokeStrategy::Cli)
+        || env::var("CTX_TOOL_MODE").as_deref() == Ok("cli")
+    {
         return run_cli_tool(name, args);
     }
     let input =
@@ -119,4 +122,14 @@ pub(crate) fn collect_input(args: &[OsString]) -> io::Result<String> {
         MAX_RUNNER_STDIN_INPUT_BYTES,
         "stdin exceeds runner input limit",
     )
+}
+
+fn tool_invoke_strategy(name: &str) -> crate::tool::InvokeStrategy {
+    let Ok(root) = env::var("CTX_ROOT") else {
+        return crate::tool::InvokeStrategy::default();
+    };
+    crate::tool::read_invoke_strategy(&cortexfs_paths::tool_control_path(
+        Path::new(&root),
+        name,
+    ))
 }

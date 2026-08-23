@@ -102,7 +102,13 @@ loop=chat|react|coding|planner|research   built-in behavior hint (default chat)
 loop=<name> + loop.d/<name>               custom loop driver executable
 compact.strategy=truncate|summarize|<name> history rebuild strategy (default truncate)
 compact.d/<name>                          custom compaction executable
+invoke.strategy=default|cli|sdk|<name>    tool invoke surface (default default)
+invoke.d/<name>                           custom tool invoke executable
+adapter=<family>|<name>                   channel adapter family or custom name
+adapter.d/<name>                          custom channel socket driver executable
 Agent SDK BuiltinLoop helpers             interpret CTX_AGENT_LOOP inside your binary
+Tool SDK InvokeMode helpers               read CTX_TOOL_MODE / CTX_AUTHORIZED_OBJECT
+Channel SDK DriverLaunchConfig            read CORTEXFS_CHANNEL_* / CTX_CHANNEL_* env
 ```
 
 Topology is just the `parent` edge. Every agent names its parent as
