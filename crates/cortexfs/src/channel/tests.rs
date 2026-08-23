@@ -619,3 +619,30 @@ fn bridge_answers_slash_help_without_an_agent_socket() -> Result<(), Box<dyn std
     assert_eq!(reply.target.reply_to.as_deref(), Some("help-1"));
     Ok(())
 }
+
+#[test]
+fn slash_new_rotates_the_derived_session() -> Result<(), Box<dyn std::error::Error>> {
+    let bridge = AgentChannelBridge::new(
+        "/tmp/missing-agent.sock",
+        ChannelSessionRoute::new("coder", "im")?,
+        None,
+    );
+    let inbound = InboundMessage {
+        id: "new-1".to_owned(),
+        target: MessageTarget {
+            channel: ChannelId::new("telegram")?,
+            conversation: ConversationId::new("dm")?,
+            thread: None,
+            reply_to: None,
+        },
+        sender: Participant::default(),
+        body: MessageBody::text("/new")?,
+        timestamp_ms: None,
+        metadata: std::collections::BTreeMap::new(),
+    };
+    let first = bridge.handle(inbound.clone())?;
+    assert!(first.body.text.contains("-1"));
+    let second = bridge.handle(inbound)?;
+    assert!(second.body.text.contains("-2"));
+    Ok(())
+}

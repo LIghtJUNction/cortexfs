@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+#![expect(clippy::allow_attributes, reason = "target-specific lint exceptions")]
+#![allow(unfulfilled_lint_expectations, reason = "target-specific lint results")]
 
 pub mod catalog;
 pub mod commands;

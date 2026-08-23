@@ -69,6 +69,10 @@ fn list_models() -> String {
     names.join("\n")
 }
 
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "ABI exact lowercase .d/.sock"
+)]
 fn projected_models(root: &Path) -> Vec<String> {
     let mut names = Vec::new();
     let Ok(providers) = fs::read_dir(root.join("model")) else {

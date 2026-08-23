@@ -415,9 +415,9 @@ fn parses_provider_preset_commands() {
 
 #[test]
 fn codex_preset_is_separate_and_responses_only() {
-    let codex = provider_preset("codex").map(|preset| preset.config());
-    let openai = provider_preset("openai").map(|preset| preset.config());
-    let groq = provider_preset("groq").map(|preset| preset.config());
+    let codex = provider_preset("codex").map(ProviderPreset::config);
+    let openai = provider_preset("openai").map(ProviderPreset::config);
+    let groq = provider_preset("groq").map(ProviderPreset::config);
     assert!(
         matches!(codex, Ok(config) if config.contains("chatgpt.com/backend-api/codex") && config.contains(r#""formats": ["openai.responses"]"#))
     );
