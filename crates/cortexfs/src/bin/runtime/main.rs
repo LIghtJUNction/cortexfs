@@ -101,11 +101,9 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
     }
     runtime_env.extend(provider_runtime_env(&config.source, &runtime_model)?);
-    let agent_executable = cortexfs::agent::resolve_agent_loop_executable_for_agent(
-        &config.source,
-        &config.agent,
-    )
-    .map_err(|_error| "cannot resolve agent loop executable".to_owned())?;
+    let agent_executable =
+        cortexfs::agent::resolve_agent_loop_executable_for_agent(&config.source, &config.agent)
+            .map_err(|_error| "cannot resolve agent loop executable".to_owned())?;
     let control_dir = Path::new(RUN_CONTROL_DIR);
     #[expect(
         clippy::create_dir,
