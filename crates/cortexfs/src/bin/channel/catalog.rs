@@ -133,16 +133,16 @@ mod tests {
     use super::write_discord_preset;
 
     #[test]
-    fn catalog_setup_and_presets() {
+    fn catalog_setup_and_presets() -> Result<(), Box<dyn std::error::Error>> {
         for id in ["telegram", "discord", "slack", "feishu", "matrix"] {
             assert!(lookup(id).is_some(), "{id}");
         }
         assert!(SETUPS.iter().any(|setup| setup.id == "telegram"));
-        let slack = lookup("slack").expect("slack setup");
-        assert_eq!(slack.command, "cortexfs-channel-slack");
+        assert!(lookup("slack").is_some_and(|setup| setup.command == "cortexfs-channel-slack"));
         let mut buf = Vec::new();
-        write_discord_preset(&mut buf).expect("discord preset");
-        let text = String::from_utf8(buf).expect("utf8");
+        write_discord_preset(&mut buf)?;
+        let text = String::from_utf8(buf)?;
         assert!(text.contains("bot_token"));
+        Ok(())
     }
 }
