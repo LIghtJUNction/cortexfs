@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::authority::helpers::atomic_replace_text_with_mode;
+use crate::support::atomic::atomic_replace_text_with_mode;
 use crate::support::plain::{CreatePlainDirMessages, create_plain_dir_with};
 
 pub mod broker;

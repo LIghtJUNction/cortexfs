@@ -152,7 +152,6 @@ pub use agent::view::*;
 #[cfg(test)]
 pub(crate) use agent::secret::*;
 
-pub(crate) use authority::helpers::*;
 pub use policy::subject::*;
 
 use abi::constants::{
@@ -161,6 +160,7 @@ use abi::constants::{
 };
 use abi::path::{is_object_name_for_class, is_stable_chroot_absolute_path};
 use support::plain::{open_plain_directory, plain_file_name};
+use support::unix_timestamp_text;
 
 pub mod exports;
 pub use exports::*;

@@ -41,7 +41,7 @@ use nix::libc;
 
 #[cfg(test)]
 pub(crate) use cortexfs::LayoutPathRole;
-pub(crate) use cortexfs::authority::helpers::{
+pub(crate) use cortexfs::support::atomic::{
     atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
     atomic_replace_text_preserving_metadata_if_matches,
 };

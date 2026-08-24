@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use cortexfs_runtime_client::interaction::InteractionOrigin;
 
-use crate::authority::helpers::{
+use crate::support::atomic::{
     atomic_replace_text_preserving_metadata, atomic_replace_text_with_mode,
 };
 use crate::support::plain::{CreatePlainDirMessages, create_plain_dir_with};

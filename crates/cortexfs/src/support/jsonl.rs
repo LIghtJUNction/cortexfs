@@ -4,6 +4,39 @@ use std::io::{BufRead, Error, ErrorKind, Read};
 
 use serde_json::Value;
 
+#[cfg(test)]
+pub(crate) fn append_jsonl_line(path: &std::path::Path, line: &str) -> std::io::Result<()> {
+    use crate::support::plain::{open_plain_directory, plain_file_name};
+    use std::{fs, io::Write, os::unix::fs::FileExt, path::Path};
+
+    if line.bytes().any(|byte| matches!(byte, b'\n' | b'\r')) {
+        let error = Error::new(ErrorKind::InvalidInput, "jsonl line contains a line break");
+        return Err(error);
+    }
+    let parent_dir = open_plain_directory(path.parent().unwrap_or_else(|| Path::new(".")))?;
+    let name = plain_file_name(path)?;
+    let flags = nix::fcntl::OFlag::O_APPEND
+        | nix::fcntl::OFlag::O_RDWR
+        | nix::fcntl::OFlag::O_NOFOLLOW
+        | nix::fcntl::OFlag::O_CLOEXEC;
+    let fd = nix::fcntl::openat(&parent_dir, name, flags, nix::sys::stat::Mode::empty())
+        .map_err(Error::from)?;
+    let mut file = fs::File::from(fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(Error::other("jsonl target is not a regular file"));
+    }
+    if metadata.len() != 0 {
+        let mut last = [0_u8; 1];
+        if file.read_at(&mut last, metadata.len() - 1)? != 1 || last[0] != b'\n' {
+            let message = "jsonl target has an incomplete final line";
+            return Err(Error::new(ErrorKind::InvalidData, message));
+        }
+    }
+    file.write_all(format!("{line}\n").as_bytes())?;
+    file.sync_all()
+}
+
 /// Reads one complete, size-bounded JSONL line body.
 pub(crate) fn read_jsonl_line(
     reader: &mut impl BufRead,

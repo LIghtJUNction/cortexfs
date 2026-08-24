@@ -6,8 +6,9 @@ use std::time::Duration;
 use cortexfs_metadatas::{MetadataCatalog, MetadataSourceError};
 use serde::{Deserialize, Serialize};
 
+use crate::support::atomic::{AtomicReplaceOutcome, atomic_replace_text_outcome};
 use crate::support::plain::{create_plain_dir, read_small_text_file};
-use crate::{AtomicReplaceOutcome, FuseError, atomic_replace_text_outcome, is_object_name};
+use crate::{FuseError, is_object_name};
 
 const CACHE_FILE: &str = "model-limits.json";
 const CACHE_SCHEMA: &str = "cortexfs.model-limits/v1";

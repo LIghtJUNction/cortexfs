@@ -221,9 +221,10 @@ allow/deny decisions; those functions do not persist child cancellation or
 other lifecycle effects. The `agent` and `runtime` layers own those durable
 effects and append their auditable lifecycle facts.
 
-Migration debt is explicit: `authority::helpers` still contains generic
-atomic publication primitives scheduled to move to `support`. This is a
-documented temporary debt, not a silent layer exception.
+Generic atomic publication lives in `support::atomic`; callers use that
+canonical facade for symlink-safe create, replace, metadata-preserving swap,
+and generated sibling names. `authority::helpers` is decision support only and
+must not regain durable publication effects.
 
 ---
 

@@ -306,7 +306,7 @@ other.service loaded active running unrelated\n";
         )?);
         let collision = root
             .path()
-            .join(crate::authority::helpers::generated_sibling_name(
+            .join(crate::support::atomic::generated_sibling_name(
                 "coder.sock",
                 "restore",
                 0,
@@ -329,7 +329,7 @@ other.service loaded active running unrelated\n";
         assert!(
             !root
                 .path()
-                .join(crate::authority::helpers::generated_sibling_name(
+                .join(crate::support::atomic::generated_sibling_name(
                     "coder.sock",
                     "restore",
                     1,
@@ -676,7 +676,7 @@ fn prepare_socket_sibling(
     mode: u32,
 ) -> io::Result<(String, SocketReceipt, std::os::unix::net::UnixListener)> {
     for attempt in 0..16_u8 {
-        let temporary = crate::authority::helpers::generated_sibling_name(name, "restore", attempt);
+        let temporary = crate::support::atomic::generated_sibling_name(name, "restore", attempt);
         let path = crate::support::plain::proc_fd_path(parent).join(&temporary);
         match std::os::unix::net::UnixListener::bind(path) {
             Ok(listener) => {
@@ -995,9 +995,8 @@ fn claim_socket_entry(parent: &fs::File, name: &str) -> io::Result<Option<String
     claim_socket_entry_from(
         parent,
         name,
-        (0..16_u8).map(|attempt| {
-            crate::authority::helpers::generated_sibling_name(name, "claim", attempt)
-        }),
+        (0..16_u8)
+            .map(|attempt| crate::support::atomic::generated_sibling_name(name, "claim", attempt)),
     )
 }
 

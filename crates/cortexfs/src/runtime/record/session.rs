@@ -1,5 +1,9 @@
 use super::*;
+use crate::support::atomic::{
+    atomic_create_text_with_mode, atomic_replace_text, atomic_replace_text_preserving_metadata,
+};
 use crate::support::plain::create_exclusive_file_at;
+use crate::support::unix_timestamp_text;
 use std::os::unix::fs::MetadataExt;
 
 use nix::{

@@ -19,7 +19,7 @@ use std::path::Path;
 
 mod access;
 mod child;
-pub mod helpers;
+mod helpers;
 mod model;
 mod network;
 mod tool;

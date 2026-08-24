@@ -559,8 +559,7 @@ fn claim_gc_source(session_root: &Path, source: &GcSource) -> Result<GcSourceCla
         ))
     })?;
     for attempt in 0..16_u8 {
-        let name =
-            cortexfs::authority::helpers::generated_sibling_name(&source.name, "gc", attempt);
+        let name = cortexfs::support::atomic::generated_sibling_name(&source.name, "gc", attempt);
         match nix::fcntl::renameat2(
             &parent,
             source.name.as_str(),
@@ -1173,8 +1172,7 @@ fn claim_gc_index_entry(entry: &GcIndexEntry) -> Result<GcIndexClaim, CliError> 
         CliError::unavailable(format!("cannot open {}: {error}", parent_path.display()))
     })?;
     for attempt in 0..16_u8 {
-        let claimed =
-            cortexfs::authority::helpers::generated_sibling_name(&entry.name, "gc", attempt);
+        let claimed = cortexfs::support::atomic::generated_sibling_name(&entry.name, "gc", attempt);
         match nix::fcntl::renameat2(
             &parent,
             entry.name.as_str(),

@@ -1,3 +1,4 @@
+use crate::support::atomic::generated_sibling_target;
 use crate::*;
 
 impl FuseProjection {

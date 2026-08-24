@@ -1,4 +1,5 @@
 use crate::abi::constants::DEFAULT_AGENT_STEPS;
+use crate::support::atomic::{atomic_replace_text, atomic_replace_text_with_mode};
 use crate::*;
 use cortexfs_runtime_client::agent::{AGENT_LAUNCH_ABI, is_agent_launch_abi};
 

@@ -103,7 +103,7 @@ pub(crate) fn plain_file_name(path: &Path) -> Result<&str> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))
 }
 
-fn validate_plain_name(name: &str) -> Result<()> {
+pub(crate) fn validate_plain_name(name: &str) -> Result<()> {
     if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
         return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
     }
@@ -203,42 +203,6 @@ pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u3
     )
     .map_err(std::io::Error::from)?;
     file.sync_all()?;
-    parent.sync_all()
-}
-
-/// Atomically publishes one new plain file relative to a held directory fd.
-#[doc(hidden)]
-pub fn write_file_atomic_at(
-    parent: &fs::File,
-    name: &str,
-    content: &[u8],
-    mode: u32,
-) -> Result<()> {
-    validate_plain_name(name)?;
-    let temp = format!(".{name}.tmp-{}", std::process::id());
-    let mut file = create_exclusive_file_at(parent, temp.as_str(), mode & 0o7777)
-        .map_err(std::io::Error::from)?;
-    let publish = file
-        .write_all(content)
-        .and_then(|()| file.sync_all())
-        .and_then(|()| {
-            nix::fcntl::renameat2(
-                parent,
-                temp.as_str(),
-                parent,
-                name,
-                nix::fcntl::RenameFlags::RENAME_NOREPLACE,
-            )
-            .map_err(std::io::Error::from)
-        });
-    if let Err(error) = publish {
-        let _ignored = nix::unistd::unlinkat(
-            parent,
-            temp.as_str(),
-            nix::unistd::UnlinkatFlags::NoRemoveDir,
-        );
-        return Err(error);
-    }
     parent.sync_all()
 }
 

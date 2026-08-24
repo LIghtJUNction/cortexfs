@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::atomic::atomic_replace_text;
 
 pub(crate) fn require_parent_session_context(
     parent_session_dir: &Path,

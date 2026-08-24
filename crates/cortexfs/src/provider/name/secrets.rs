@@ -1,4 +1,5 @@
 use super::names::PROVIDER_SYSTEM_SECRET_ROOT;
+use crate::support::atomic::atomic_replace_text_with_mode;
 use crate::*;
 use std::fs::File;
 use std::os::fd::AsRawFd;

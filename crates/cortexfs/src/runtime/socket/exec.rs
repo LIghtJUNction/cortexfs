@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::atomic::atomic_replace_text_with_mode;
 use cortexfs_runtime_client::interaction::InteractionOrigin;
 use std::ffi::OsString;
 use std::sync::Arc;

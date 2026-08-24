@@ -22,15 +22,15 @@ use nix::libc;
 use std::sync::{Barrier, Mutex, OnceLock};
 
 use crate::abi::path::{AbiPathKind, parse_abi_path};
-use crate::authority::helpers::generated_sibling_name;
+use crate::support::atomic::{
+    atomic_create_text_with_mode, atomic_replace_text_with_mode, generated_sibling_name,
+};
 use crate::support::jsonl::read_jsonl_line;
 use crate::support::plain::{
     CreatePlainDirMessages, create_plain_dir_exclusive, create_plain_dir_with,
     open_plain_directory, open_plain_file, plain_file_name, read_file_to_string,
     read_small_text_file, sync_plain_dir,
 };
-use crate::{atomic_create_text_with_mode, atomic_replace_text_with_mode};
-
 const STORE_DIR: &str = ".store";
 const LOCK_FILE: &str = "lock";
 const WAL_FILE: &str = "wal.jsonl";

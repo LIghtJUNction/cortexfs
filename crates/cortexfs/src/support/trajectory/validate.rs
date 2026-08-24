@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
-use crate::atomic_replace_text;
+use crate::support::atomic::atomic_replace_text;
 
 use super::types::{Trajectory, TrajectoryStep};
 

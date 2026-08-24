@@ -312,7 +312,7 @@ pub(crate) fn create_agent_files_with_hook(
         let control_path = paths.control.clone();
         own_control_children(&mut paths, &control_path, &control_fd)?;
         hook(AgentCreateStage::Executable)?;
-        crate::atomic_create_text_with_mode(&paths.executable, executable, 0o755)
+        crate::support::atomic::atomic_create_text_with_mode(&paths.executable, executable, 0o755)
             .map_err(|_error| AgentCreateError::CannotCreate)?;
         let executable_path = paths.executable.clone();
         paths.own(&executable_path)?;

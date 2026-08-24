@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::atomic::atomic_replace_text;
 
 pub(crate) const REFERENCE_HOME_UID: u32 = 1000;
 pub(crate) const REFERENCE_HOME_GID: u32 = 1000;

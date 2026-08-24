@@ -72,7 +72,7 @@ fn write_inner(
     let mut after_first = Some(after_first);
     let publish = (|| {
         for manifest in &prepared {
-            cortexfs::support::plain::write_file_atomic_at(
+            cortexfs::support::atomic::write_file_atomic_at(
                 &stage,
                 &manifest.file,
                 &manifest.bytes,

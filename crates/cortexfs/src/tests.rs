@@ -3,8 +3,13 @@ use super::agent::create::{
     create_agent_files_with_hook, rollback_agent_files,
 };
 use super::runtime::record::socket::record_unindexed_socket_request_for_test;
+use super::support::atomic::{
+    atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
+    atomic_replace_text_preserving_metadata_with_hook, atomic_replace_text_with_mode,
+};
 use super::support::columnar;
 use super::support::index::set_session_index_update_failure;
+use super::support::jsonl::append_jsonl_line;
 use super::{
     AGENT_CONTROL_FILES, ATIF_SCHEMA_VERSION, AgentControlKind, AgentExecutableRunRequest,
     AgentExecutableSocketRuntime, AgentPermissions, AgentRuntimeViewError, AgentScheduleAdvance,
@@ -33,10 +38,8 @@ use super::{
     ToolExecutionAuthority, ToolExecutionDenial, ToolExecutionPrincipal, ToolHit, ToolPath,
     ToolPathError, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError, TrajectoryObservation,
     TrajectoryObservationResult, advance_agent_schedule_from_parent_context,
-    agent_executable_socket_bwrap_args, agent_executable_socket_command, append_jsonl_line,
-    apply_reference_tree_upgrade, atomic_create_text_with_mode,
-    atomic_replace_text_preserving_metadata, atomic_replace_text_preserving_metadata_with_hook,
-    atomic_replace_text_with_mode, authorize_child_agent, authorize_session_access,
+    agent_executable_socket_bwrap_args, agent_executable_socket_command,
+    apply_reference_tree_upgrade, authorize_child_agent, authorize_session_access,
     authorize_shared_access, authorize_tool_execution, chown_reference_home_entry,
     claim_child_handoff_active, claim_child_handoff_active_with_hook, classify_abi_path,
     collect_agent_rules_from_paths, collect_history_messages_from_session,

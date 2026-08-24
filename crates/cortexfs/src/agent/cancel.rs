@@ -1,7 +1,7 @@
 use crate::abi::path::is_object_name;
 use crate::agent::child::{OwnedChildCancellationError, OwnedChildCancellationEvents};
-use crate::authority::helpers::atomic_replace_text;
 use crate::runtime::record::append_session_lines;
+use crate::support::atomic::atomic_replace_text;
 use std::path::Path;
 
 /// Builds the canonical event pair for owned child cancellation caused by

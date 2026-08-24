@@ -5,7 +5,7 @@ use std::path::Path;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use crate::authority::helpers::atomic_replace_text_with_mode;
+use crate::support::atomic::atomic_replace_text_with_mode;
 
 /// One ordered, replayable terminal fact.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

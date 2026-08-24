@@ -1,3 +1,4 @@
+use crate::support::atomic::atomic_replace_text;
 use crate::*;
 
 use std::env;

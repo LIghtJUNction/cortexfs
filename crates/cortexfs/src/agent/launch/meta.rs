@@ -4,6 +4,9 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use super::{AgentLaunchError, AgentLaunchReceipt, SystemAgentSocketReceipt};
+use crate::support::atomic::{
+    atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
+};
 
 /// Persists receipt-bound cleanup evidence for one agent launch.
 pub fn persist_agent_launch_meta(
@@ -61,10 +64,11 @@ pub fn persist_agent_launch_meta(
         }),
     );
     let encoded = serde_json::to_string(&meta).map_err(|_error| AgentLaunchError::CannotExecute)?;
+    let content = format!("{encoded}\n");
     let recorded = if create {
-        crate::atomic_create_text_with_mode(&meta_path, &format!("{encoded}\n"), 0o644)
+        atomic_create_text_with_mode(&meta_path, &content, 0o644)
     } else {
-        crate::atomic_replace_text_preserving_metadata(&meta_path, &format!("{encoded}\n"))
+        atomic_replace_text_preserving_metadata(&meta_path, &content)
     };
     recorded.map_err(|_error| AgentLaunchError::CannotExecute)?;
     let rebound =

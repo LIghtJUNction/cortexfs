@@ -1,7 +1,10 @@
 use super::*;
 use cortexfs_metadatas::{compaction_threshold_tokens, recommended_context_tokens};
 
-use crate::authority::helpers::{AtomicCommit, atomic_write_owned};
+use crate::support::atomic::{
+    AtomicCommit, atomic_create_text_with_mode, atomic_replace_text,
+    atomic_replace_text_preserving_metadata, atomic_write_owned, generated_sibling_target,
+};
 use crate::support::plain::{
     open_plain_directory, open_plain_file, path_metadata_no_follow, plain_file_name,
     read_symlink_target,

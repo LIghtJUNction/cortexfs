@@ -1,4 +1,5 @@
 use super::*;
+use crate::support::atomic::atomic_replace_text_with_mode;
 
 pub(crate) fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
     support::plain::create_plain_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)

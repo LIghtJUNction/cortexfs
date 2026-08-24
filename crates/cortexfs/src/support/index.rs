@@ -7,13 +7,15 @@ use nix::fcntl::{Flock, FlockArg};
 #[cfg(test)]
 use std::cell::Cell;
 
-use crate::{
-    ControlLineIssue, atomic_replace_text_preserving_metadata,
-    authority::helpers::{AtomicCommit, atomic_write_owned},
-    is_object_name,
-    support::control::{inspect_control_line, inspect_control_lines},
-    support::plain::{open_plain_directory, read_small_text_file},
+use crate::support::{
+    atomic::{
+        AtomicCommit, atomic_replace_text_preserving_metadata,
+        atomic_replace_text_preserving_metadata_if_matches, atomic_write_owned,
+    },
+    control::{inspect_control_line, inspect_control_lines},
+    plain::{open_plain_directory, read_small_text_file},
 };
+use crate::{ControlLineIssue, is_object_name};
 
 const MAX_SESSION_INDEX_FILE_BYTES: u64 = 64 * 1024;
 
@@ -274,7 +276,7 @@ pub fn compare_and_update_session_index(
     if SESSION_INDEX_UPDATE_FAILURE.with(|value| value.replace(false)) {
         return Err(SessionIndexUpdateError::CannotRecord);
     }
-    crate::authority::helpers::atomic_replace_text_preserving_metadata_if_matches(
+    atomic_replace_text_preserving_metadata_if_matches(
         &update.current_path,
         &format!("{session_name}\n"),
         (current_metadata.dev(), current_metadata.ino()),
