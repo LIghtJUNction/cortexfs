@@ -132,7 +132,7 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
     "native_stateless",
 ];
 
-pub(crate) const DEFAULT_AGENT_STEPS: u8 = 64;
+pub(crate) const DEFAULT_AGENT_STEPS: u8 = cortexfs_runtime_client::agent::MAX_AGENT_STEPS;
 
 /// Default private `/tmp` capacity for one sandboxed execution.
 ///

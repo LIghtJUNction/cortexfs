@@ -51,15 +51,16 @@ pub const MAX_AGENT_INVOCATION_BYTES: usize = 1024 * 1024;
 /// - [Rust MCP filesystem truncation flag](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l557)
 pub const MAX_AGENT_CONTEXT_BYTES: usize = 64 * 1024;
 
-/// Maximum continuation step accepted by a single invocation chain.
+/// Maximum legal zero-based invocation step in one hosted-agent run.
 ///
-/// This is intentionally bounded to avoid runaway loop-like continuation chains
-/// while allowing short multi-step tool use patterns.
+/// This includes the final assistant-completion step and is not a tool-call
+/// count. The host may invoke every step from zero through this value; after
+/// the final step, no further tool continuation is allowed.
 ///
 /// Related implementations:
 /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 /// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
-pub const MAX_AGENT_STEPS: u8 = 8;
+pub const MAX_AGENT_STEPS: u8 = 64;
 
 /// Nullable container that keeps `serde_json`-compatible optional fields
 /// explicit while preserving envelope-shape invariants during decoding.

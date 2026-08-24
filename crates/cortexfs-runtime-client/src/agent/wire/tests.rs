@@ -55,13 +55,14 @@ fn accepts_exact_initial_and_continuation_frames() {
         "content": "done",
         "truncated": false
     });
-    let continuation = parse(&frame(1, &observation));
+    let continuation = parse(&frame(MAX_AGENT_STEPS, &observation));
     assert!(matches!(
         continuation,
         Ok(ref value)
-            if value
-                .observation()
-                .is_some_and(|item| item.tool_call_id() == "call-1" && item.content() == "done")
+            if value.step() == MAX_AGENT_STEPS
+                && value
+                    .observation()
+                    .is_some_and(|item| item.tool_call_id() == "call-1" && item.content() == "done")
     ));
 }
 
@@ -128,14 +129,18 @@ fn rejects_unknown_fields_and_invalid_step_observations() {
         true
     }));
     let missing_observation = frame(1, &serde_json::Value::Null);
-    let unexpected_observation = frame(
-        0,
-        &serde_json::json!({
-            "tool_call_id": "call-1", "name": "fs.read", "status": "ok",
-            "content": "done", "truncated": false
-        }),
-    );
-    for invalid in [unknown, missing_observation, unexpected_observation] {
+    let observation = serde_json::json!({
+        "tool_call_id": "call-1", "name": "fs.read", "status": "ok",
+        "content": "done", "truncated": false
+    });
+    let unexpected_observation = frame(0, &observation);
+    let over_limit = frame(MAX_AGENT_STEPS + 1, &observation);
+    for invalid in [
+        unknown,
+        missing_observation,
+        unexpected_observation,
+        over_limit,
+    ] {
         assert_eq!(parse(&invalid), Err(RuntimeClientError::InvalidFrame));
     }
 }

@@ -539,6 +539,7 @@ macro_rules! cortexfs_agent_main {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cortexfs_runtime_client::agent::MAX_AGENT_STEPS;
     use std::io::Cursor;
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
@@ -920,7 +921,7 @@ mod tests {
         let base: Value = serde_json::from_slice(body)?;
         for (field, value) in [
             ("schema", json!("wrong/v1")),
-            ("step", json!(9)),
+            ("step", json!(MAX_AGENT_STEPS + 1)),
             ("observation", Value::Null),
             (
                 "history_messages",
