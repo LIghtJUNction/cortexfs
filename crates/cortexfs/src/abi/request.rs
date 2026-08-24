@@ -1,12 +1,12 @@
-use crate::*;
-
-use serde::Deserialize;
-use serde_json::Value;
-
-use crate::{MAX_SOCKET_FRAME_BYTES, is_stable_chroot_absolute_path, validate_socket_object_field};
+use super::{
+    constants::MAX_SOCKET_FRAME_BYTES,
+    path::{is_absolute_host_workspace_path, is_object_name, is_stable_chroot_absolute_path},
+};
 use cortexfs_runtime_client::interaction::{
     INTERACTION_ABI, InteractionFrame, InteractionOrigin, InteractionPayload, InteractionRequest,
 };
+use serde::Deserialize;
+use serde_json::Value;
 
 /// Stable socket session scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -429,12 +429,26 @@ pub(crate) fn validate_optional_socket_workspace(
     let Some(workspace) = workspace else {
         return Ok(());
     };
-    if support::path::is_absolute_host_workspace_path(workspace) {
+    if is_absolute_host_workspace_path(workspace) {
         Ok(())
     } else {
         Err(SocketRequestError::InvalidField {
             field: "workspace",
             value: workspace.to_owned(),
+        })
+    }
+}
+
+pub(crate) fn validate_socket_object_field(
+    field: &'static str,
+    value: &str,
+) -> Result<(), SocketRequestError> {
+    if is_object_name(value) {
+        Ok(())
+    } else {
+        Err(SocketRequestError::InvalidField {
+            field,
+            value: value.to_owned(),
         })
     }
 }

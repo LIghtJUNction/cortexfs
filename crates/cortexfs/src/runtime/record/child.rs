@@ -1,5 +1,5 @@
 use super::*;
-use crate::support::plain::create_exclusive_file_at;
+use crate::{abi::request::validate_socket_object_field, support::plain::create_exclusive_file_at};
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicU64, Ordering};

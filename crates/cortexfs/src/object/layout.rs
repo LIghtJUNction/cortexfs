@@ -350,19 +350,6 @@ pub(crate) fn require_unix_socket(
 pub mod disk;
 use disk::*;
 
-pub(crate) fn is_stable_chroot_absolute_path(value: &str) -> bool {
-    if !value.starts_with('/') || value.bytes().any(|byte| byte.is_ascii_control()) {
-        return false;
-    }
-    if value == "/" {
-        return true;
-    }
-    value
-        .split('/')
-        .skip(1)
-        .all(|part| !part.is_empty() && part != "." && part != "..")
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum JsonStringField {

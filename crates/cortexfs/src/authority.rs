@@ -1,11 +1,38 @@
-use crate::*;
+use self::helpers::{
+    atomic_replace_text, is_stable_shared_mount_for, linux_identity_can_execute,
+    linux_identity_can_read, linux_identity_can_write, most_specific_mount_for_path,
+    mounted_session_path, symlink_safe_metadata, tool_path_denial,
+};
+use crate::{
+    abi::{
+        authority::{
+            ChildAgentDenial, ChildLifecycle, SessionAccess, SessionAccessDenial, SharedAccess,
+            SharedAccessDenial, ToolExecutionDenial, ToolExecutionPrincipal,
+        },
+        path::is_object_name,
+    },
+    agent::child::{OwnedChildCancellationError, OwnedChildCancellationEvents},
+    mount::table::{MountMode, MountOption},
+    policy::{PolicyObjectClass, PolicyPermission},
+    runtime::record::append_session_lines,
+    support::toolpath::ToolPath,
+};
+use std::path::Path;
 
+mod access;
+mod child;
 pub mod helpers;
 mod model;
 mod network;
+mod tool;
 
+pub use access::{
+    AccessAuthority, AgentUnixIdentity, SessionAccessAuthority, SharedAccessAuthority,
+};
+pub use child::{ChildAgentAuthority, ChildAgentControls, ChildAgentRequest};
 pub use model::*;
 pub use network::*;
+pub use tool::{ToolExecutionAuthority, ToolExecutionGrant};
 
 /// Decides whether an agent may execute a tool through `CTX_PATH`.
 ///

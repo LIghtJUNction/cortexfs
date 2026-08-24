@@ -693,20 +693,6 @@ pub(crate) fn is_plain_existing_dir(path: &Path) -> bool {
         .is_ok_and(|metadata| metadata.is_dir())
 }
 
-pub(crate) fn validate_socket_object_field(
-    field: &'static str,
-    value: &str,
-) -> Result<(), SocketRequestError> {
-    if is_object_name(value) {
-        Ok(())
-    } else {
-        Err(SocketRequestError::InvalidField {
-            field,
-            value: value.to_owned(),
-        })
-    }
-}
-
 #[cfg(test)]
 mod permission_tests {
     use super::*;

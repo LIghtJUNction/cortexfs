@@ -158,7 +158,7 @@ use abi::constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
     DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, MODEL_ROUTE_FILE, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
-use abi::path::is_object_name_for_class;
+use abi::path::{is_object_name_for_class, is_stable_chroot_absolute_path};
 use support::plain::{open_plain_directory, plain_file_name};
 
 pub mod exports;

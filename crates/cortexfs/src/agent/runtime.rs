@@ -1,13 +1,19 @@
-use crate::*;
-use std::collections::BTreeSet;
-
-/// Runtime Unix identity used for Linux permission checks.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentUnixIdentity {
-    uid: u32,
-    gid: u32,
-    groups: Vec<u32>,
-}
+use crate::{
+    abi::authority::{AgentPermissions, ChildLifecycle},
+    agent::{
+        loopconfig::AgentLoop,
+        window::{AgentEffectiveWindow, AgentWindowSetting},
+    },
+    authority::AgentUnixIdentity,
+    mount::table::MountTable,
+    policy::PolicyV0,
+    provider::model::ModelContextLimit,
+    support::toolpath::ToolPath,
+};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 /// Derived launch/view state for one `agent/<name>.d/` control directory.
 ///
@@ -69,40 +75,6 @@ pub enum AgentRuntimeViewError {
     CannotReadControl(String),
     /// A control file has malformed content.
     InvalidControlFile(String),
-}
-
-impl AgentUnixIdentity {
-    /// Creates an identity from uid, primary gid, and supplementary groups.
-    #[must_use]
-    pub fn new(uid: u32, gid: u32, groups: impl IntoIterator<Item = u32>) -> Self {
-        Self {
-            uid,
-            gid,
-            groups: groups.into_iter().collect(),
-        }
-    }
-
-    /// Returns the runtime uid.
-    #[must_use]
-    pub const fn uid(&self) -> u32 {
-        self.uid
-    }
-
-    /// Returns the runtime primary gid.
-    #[must_use]
-    pub const fn gid(&self) -> u32 {
-        self.gid
-    }
-
-    /// Returns supplementary groups.
-    #[must_use]
-    pub fn groups(&self) -> &[u32] {
-        &self.groups
-    }
-
-    pub(crate) fn is_in_group(&self, gid: u32) -> bool {
-        self.gid == gid || self.groups.contains(&gid)
-    }
 }
 
 impl AgentRuntimeView {

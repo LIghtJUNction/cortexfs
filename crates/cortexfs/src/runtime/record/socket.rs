@@ -1,4 +1,5 @@
 use super::*;
+use crate::abi::request::validate_socket_object_field;
 
 pub(crate) type SocketRecordResult<T> = Result<T, SocketSessionRecordError>;
 

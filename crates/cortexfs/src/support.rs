@@ -7,7 +7,6 @@ pub mod jsonl;
 pub mod layout;
 pub mod manuals;
 pub mod message;
-pub mod path;
 pub mod plain;
 pub mod proc;
 pub mod process;

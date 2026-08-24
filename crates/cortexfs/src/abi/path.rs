@@ -3,7 +3,10 @@
     reason = "private split module exposes parser helpers to the parent crate"
 )]
 
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    path::{Component, Path},
+};
 
 use crate::{
     AgentControlKind, ContextJsonlKind, MAX_OBJECT_NAME_LEN, ROOT_ENTRIES, SessionControlKind,
@@ -80,6 +83,28 @@ impl ObjectClass {
 #[must_use]
 pub fn is_root_entry(name: &str) -> bool {
     ROOT_ENTRIES.contains(&name)
+}
+
+pub(crate) fn is_stable_chroot_absolute_path(value: &str) -> bool {
+    if !value.starts_with('/') || value.bytes().any(|byte| byte.is_ascii_control()) {
+        return false;
+    }
+    if value == "/" {
+        return true;
+    }
+    value
+        .split('/')
+        .skip(1)
+        .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+pub(crate) fn is_absolute_host_workspace_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.bytes().any(|byte| byte.is_ascii_control())
+        && path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::RootDir | Component::Normal(_)))
 }
 
 /// Returns whether a model, agent, tool, session, or shared object name is valid.

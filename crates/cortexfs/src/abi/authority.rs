@@ -1,4 +1,4 @@
-use crate::*;
+use crate::policy::PolicyPermission;
 
 /// Coarse agent file and shell permissions projected as Unix owner mode bits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -104,81 +104,6 @@ pub enum ToolExecutionPrincipal {
     Agent,
     /// Pure inference model endpoint.
     Model,
-}
-
-/// Positive tool execution authority decision.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolExecutionGrant {
-    hit: ToolHit,
-}
-
-impl ToolExecutionGrant {
-    /// Creates a grant for a concrete `CTX_PATH` hit.
-    #[must_use]
-    pub const fn new(hit: ToolHit) -> Self {
-        Self { hit }
-    }
-    /// Returns the executable tool selected by left-to-right `CTX_PATH`.
-    #[must_use]
-    pub const fn hit(&self) -> &ToolHit {
-        &self.hit
-    }
-}
-
-/// Inputs that define an agent's effective authority for a tool execution.
-#[derive(Clone, Copy, Debug)]
-pub struct ToolExecutionAuthority<'a> {
-    pub(crate) principal: ToolExecutionPrincipal,
-    pub(crate) identity: &'a AgentUnixIdentity,
-    pub(crate) mount_table: &'a MountTable,
-    pub(crate) agent_subject: &'a str,
-    pub(crate) agent_policy: &'a dyn PolicyEvaluator,
-    pub(crate) tool_policy: &'a dyn PolicyEvaluator,
-    pub(crate) permissions: AgentPermissions,
-}
-
-impl<'a> ToolExecutionAuthority<'a> {
-    /// Creates an authority context for one tool execution decision.
-    #[must_use]
-    pub const fn new(
-        identity: &'a AgentUnixIdentity,
-        mount_table: &'a MountTable,
-        agent_subject: &'a str,
-        agent_policy: &'a dyn PolicyEvaluator,
-        tool_policy: &'a dyn PolicyEvaluator,
-        permissions: AgentPermissions,
-    ) -> Self {
-        Self {
-            principal: ToolExecutionPrincipal::Agent,
-            identity,
-            mount_table,
-            agent_subject,
-            agent_policy,
-            tool_policy,
-            permissions,
-        }
-    }
-
-    /// Creates an authority context for a model-originated tool execution
-    /// attempt. This always denies at the `CortexFS` boundary.
-    #[must_use]
-    pub const fn model(
-        identity: &'a AgentUnixIdentity,
-        mount_table: &'a MountTable,
-        model_subject: &'a str,
-        agent_policy: &'a dyn PolicyEvaluator,
-        tool_policy: &'a dyn PolicyEvaluator,
-    ) -> Self {
-        Self {
-            principal: ToolExecutionPrincipal::Model,
-            identity,
-            mount_table,
-            agent_subject: model_subject,
-            agent_policy,
-            tool_policy,
-            permissions: AgentPermissions::ALL,
-        }
-    }
 }
 
 /// Shared-space operation kind.
@@ -293,56 +218,54 @@ impl SessionAccessDenial {
     }
 }
 
-/// Inputs that define an agent's effective authority for shared-space access.
-#[derive(Clone, Copy, Debug)]
-pub struct SharedAccessAuthority<'a> {
-    pub(crate) identity: &'a AgentUnixIdentity,
-    pub(crate) mount_table: &'a MountTable,
-    pub(crate) agent_subject: &'a str,
-    pub(crate) policy: &'a dyn PolicyEvaluator,
+/// Stable child lifecycle value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChildLifecycle {
+    /// Parent-owned durable child. The parent owns cancellation and history.
+    Owned,
+    /// Parent-owned temporary child. Runtime may remove the agent object on exit.
+    Temp,
 }
 
-impl<'a> SharedAccessAuthority<'a> {
-    /// Creates an authority context for one shared-space access decision.
-    #[must_use]
-    pub const fn new(
-        identity: &'a AgentUnixIdentity,
-        mount_table: &'a MountTable,
-        agent_subject: &'a str,
-        policy: &'a dyn PolicyEvaluator,
-    ) -> Self {
-        Self {
-            identity,
-            mount_table,
-            agent_subject,
-            policy,
+impl ChildLifecycle {
+    /// Parses `agent/<child>.d/life`.
+    pub fn parse(value: &str) -> Result<Self, ChildAgentDenial> {
+        Self::parse_exact(value.trim())
+    }
+
+    /// Parses an exact wire or tool lifecycle literal without trimming.
+    pub(crate) fn parse_exact(value: &str) -> Result<Self, ChildAgentDenial> {
+        match value {
+            "owned" => Ok(Self::Owned),
+            "temp" => Ok(Self::Temp),
+            _ => Err(ChildAgentDenial::UnsupportedLifecycle),
         }
     }
 }
 
-/// Inputs that define an agent's effective authority for durable session access.
-#[derive(Clone, Copy, Debug)]
-pub struct SessionAccessAuthority<'a> {
-    pub(crate) identity: &'a AgentUnixIdentity,
-    pub(crate) mount_table: &'a MountTable,
-    pub(crate) agent_subject: &'a str,
-    pub(crate) policy: &'a dyn PolicyEvaluator,
-}
-
-impl<'a> SessionAccessAuthority<'a> {
-    /// Creates an authority context for one private or shared session access.
-    #[must_use]
-    pub const fn new(
-        identity: &'a AgentUnixIdentity,
-        mount_table: &'a MountTable,
-        agent_subject: &'a str,
-        policy: &'a dyn PolicyEvaluator,
-    ) -> Self {
-        Self {
-            identity,
-            mount_table,
-            agent_subject,
-            policy,
-        }
-    }
+/// Child-agent attenuation refusal reason.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChildAgentDenial {
+    /// Child agent name is not a valid object name.
+    InvalidChildName,
+    /// Parent agent name is not a valid object name.
+    InvalidParentName,
+    /// Child subject or parent subject is not a valid policy subject token.
+    InvalidSubject,
+    /// `agent/<child>.d/parent` does not point at the creating parent.
+    ParentMismatch,
+    /// Parent reference syntax is invalid.
+    InvalidParentRef,
+    /// Child lifecycle is not a supported value.
+    UnsupportedLifecycle,
+    /// Child uid or gid differs from the parent without supervisor authority.
+    IdentityExpansion,
+    /// Child supplementary groups are not a subset of the parent's groups.
+    GroupExpansion,
+    /// Child policy grants authority the parent subject does not have.
+    PolicyExpansion,
+    /// Child mount table exposes paths or permissions outside the parent view.
+    MountExpansion,
+    /// Child tool path adds, duplicates, or reorders parent search tiers.
+    ToolPathExpansion,
 }

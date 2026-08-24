@@ -2,7 +2,7 @@ use crate::agent::launch::{
     AgentLaunchReceipt, SystemAgentSocketReceipt, stop_launch, stop_system_agent_socket,
 };
 use crate::support::{columnar, plain::open_plain_directory};
-use crate::{ChildHandoffReceipt, agent::runtime::AgentUnixIdentity};
+use crate::{ChildHandoffReceipt, authority::AgentUnixIdentity};
 use nix::libc;
 use std::collections::{HashMap, HashSet};
 use std::fs;
