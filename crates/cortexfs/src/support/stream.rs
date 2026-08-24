@@ -1,18 +1,15 @@
-use crate::*;
-
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::abi::path::is_object_name;
 pub use crate::context::jsonl::{
     ContextJsonlIssue, ContextJsonlKind, ContextJsonlReport, inspect_context_jsonl,
 };
+use crate::support::jsonl::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
 pub use crate::support::message::{
     MessageStreamIssue, MessageStreamReport, inspect_message_stream_jsonl,
 };
-use crate::{
-    JsonStringField, JsonU64Field, JsonlLineShape, for_each_jsonl_line, is_json_u64,
-    is_object_name, parse_jsonl_line,
-};
+use crate::{JsonStringField, JsonU64Field, is_json_u64, provider_native_fields};
 
 /// Canonical JSONL event stream validation issue.
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -3,12 +3,11 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use serde_json::{Map, Value};
-
-use crate::agent::prompt::message_content_text;
 use crate::support::columnar::{HistoryGuard, Stream};
 use crate::support::plain::{path_metadata_no_follow, read_small_text_file};
 use crate::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
+use cortexfs_context::content_text;
+use serde_json::{Map, Value};
 
 use super::types::{
     ATIF_SCHEMA_VERSION, TRAJECTORY_DEFAULT_AGENT_NAME, Trajectory, TrajectoryAgent,
@@ -264,7 +263,7 @@ fn map_messages_to_steps(
                 steps.push(TrajectoryStep {
                     step_id,
                     source: source.to_owned(),
-                    message: message_content_text(value.get("content")),
+                    message: content_text(value.get("content")),
                     tool_calls: None,
                     observation: None,
                     metrics: None,
@@ -277,7 +276,7 @@ fn map_messages_to_steps(
                 steps.push(TrajectoryStep {
                     step_id,
                     source: "agent".to_owned(),
-                    message: message_content_text(value.get("content")),
+                    message: content_text(value.get("content")),
                     tool_calls: None,
                     observation: None,
                     metrics: None,

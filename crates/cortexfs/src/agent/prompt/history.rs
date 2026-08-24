@@ -1,8 +1,10 @@
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use super::compact::{format_history_with_strategy, read_compact_strategy};
 use super::read::read_history_messages_tail;
+use crate::AgentUnixIdentity;
 use crate::runtime::compactabi::CompactInvocation;
-use crate::*;
-use serde_json::Value;
 
 #[must_use]
 pub fn current_time_unix() -> u64 {
@@ -46,8 +48,4 @@ pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String
         .render(max_chars)
         .text()
         .to_owned()
-}
-
-pub(crate) fn message_content_text(content: Option<&Value>) -> String {
-    cortexfs_context::content_text(content)
 }

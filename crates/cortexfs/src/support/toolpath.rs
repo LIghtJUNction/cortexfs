@@ -1,14 +1,10 @@
-use crate::*;
-
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::{
-    is_object_name,
-    support::plain::{open_plain_directory, path_metadata_no_follow},
-};
+use crate::abi::path::is_object_name;
+use crate::support::plain::{open_plain_directory, path_metadata_no_follow, proc_fd_path};
 use nix::libc;
 
 /// Error while resolving tool lookup through `CTX_PATH`.
@@ -175,7 +171,7 @@ pub(crate) fn append_tool_hits(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_error) => return Err(ToolPathError::CannotReadDirectory),
     };
-    let entries = match fs::read_dir(support::plain::proc_fd_path(&directory)) {
+    let entries = match fs::read_dir(proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_error) => return Err(ToolPathError::CannotReadDirectory),
