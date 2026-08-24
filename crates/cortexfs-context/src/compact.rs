@@ -40,15 +40,13 @@ pub fn compact_history<S: Summarizer>(
     summarizer: Option<&S>,
 ) -> Result<CompactedHistory, S::Error> {
     let selection = history.select(max_chars);
-    if selection.omitted() == 0 || summarizer.is_none() {
-        return Ok(render_selection(&selection, max_chars, None));
-    }
     let omitted = history
         .messages()
         .get(..selection.omitted())
         .unwrap_or_default();
     let summary = summarizer
-        .map(|value| value.summarize(omitted))
+        .filter(|_| !omitted.is_empty())
+        .map(|summarizer| summarizer.summarize(omitted))
         .transpose()?;
     Ok(render_selection(&selection, max_chars, summary.as_deref()))
 }
@@ -73,7 +71,9 @@ impl CompactedHistory {
     }
 }
 
-fn render_selection(
+/// Renders a selected history with an optional summary under a byte budget.
+#[must_use]
+pub fn render_selection(
     selection: &HistorySelection,
     max_chars: usize,
     summary: Option<&str>,
