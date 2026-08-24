@@ -138,6 +138,7 @@ pub use object::metadata::*;
 pub use reference::bootstrap::*;
 pub use reference::helpers::*;
 
+pub use agent::cancel::{owned_child_cancellation_events, record_owned_child_cancellation};
 pub use agent::child::*;
 pub use agent::launch::{
     AgentLaunchCommand, AgentLaunchMount, AgentLaunchRequest, agent_host_mount_source,

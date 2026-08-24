@@ -209,11 +209,21 @@ Inside agent core, keep Pi’s split between **mechanics** and **environment**:
 | Turn + tool scheduling | `object/executor` (+ runtime socket) | smallest correct loop |
 | Durable session append | `runtime/record` | JSONL facts; not prompt text |
 | Context projection | context/prompt modules | disposable; rebuildable |
-| Authority gate | `authority` + `policy` | mechanism then evaluator |
+| Authority gate | `authority` + `policy` | pure decision mechanism; no durable writes |
+| Child lifecycle effects | `agent` + `runtime` | cancellation state and lifecycle facts |
 | Frontend modes | bins / channel adapters | subscribe to events only |
 
 Do not grow the loop with product modes (plan boards, memory roots, hook
 DAGs). Add a tool, module, skill, or versioned ABI surface instead.
+
+The `authority` decision surface/functions validate requests and return
+allow/deny decisions; those functions do not persist child cancellation or
+other lifecycle effects. The `agent` and `runtime` layers own those durable
+effects and append their auditable lifecycle facts.
+
+Migration debt is explicit: `authority::helpers` still contains generic
+atomic publication primitives scheduled to move to `support`. This is a
+documented temporary debt, not a silent layer exception.
 
 ---
 
@@ -223,16 +233,22 @@ Layers are **directional**. A module may depend on the same layer or a lower
 layer only. Violations need an explicit design note, not a silent `use`.
 
 ```text
-L0  abi, policy          pure grammar and allowlist types
+L0  abi, policy, mount::table
+                         pure grammar and allowlist types
 L1  support              plain files, jsonl, layout, path, process helpers
 L2  authority, context   identity, packs, control inspection
 L3  provider, tool       model registry, tool schema/state (no FUSE)
-L4  reference, mount     storage generations, mount table
+L4  reference, mount::driver
+                         storage generations and mount driver
 L5  agent, runtime       launch, child, socket, durable session
 L6  object               install/swap/residue + executor/runner
 L7  fuse                 projection only
 L8  bin/*                process entrypoints; may use L0–L7, not the reverse
 ```
+
+During migration, `mount::table` is an L0 pure grammar sublayer; it only
+parses the fixed mount-table ABI. `mount::driver` remains an L4 module and
+owns mount execution.
 
 ### 4.1 Allowed / forbidden edges (hard rules)
 
@@ -453,12 +469,13 @@ tests green. Prefer **vertical slices** over horizontal rewrites.
 
 - [x] Introduce `object/executor::ExecError`
 - [x] Migrate `args`, `call`, `exec`, `path`, `policy`, `wire`, (partial) `output`/`agent` loop
-- [ ] Finish `model`, `inference`, `agent` shell, `tool`, `executor::run`
+- [x] Finish `model::run_model`, `inference::run_agent_model_once`, `agent::run_agent` shell, `tool::run_tool`, and `executor::run`
+- [x] Migrate the object-runner bin `main` entrypoint to `ExecError`
 - [ ] Add `Display` + `Error` to remaining stable domain enums without changing variants
-- [ ] Remove `From<String> for ExecError` when no callers remain
+- [x] Remove `From<String> for ExecError` when no callers remain
 
-**Exit criteria:** no `Result<_, String>` error side under `object/executor`
-(except success payloads named `String`).
+**Exit criteria:** no production `Result<_, String>` error side under
+`object/executor` (except success payloads named `String`).
 
 ### Phase B — Layer hygiene
 

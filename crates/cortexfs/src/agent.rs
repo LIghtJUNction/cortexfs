@@ -1,3 +1,4 @@
+pub mod cancel;
 pub mod child;
 pub mod compactstrategy;
 pub mod control;
