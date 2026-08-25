@@ -3,7 +3,12 @@ set -eu
 
 script_dir=$(dirname "$0")
 repo_root=$(cd -- "$script_dir/.." && pwd -P)
-lock_path=${CORTEXFS_RUSTC_LOCK:-"$repo_root/target/.cortexfs-rustc.lock"}
+target_dir=${CARGO_TARGET_DIR:-"$repo_root/target"}
+case "$target_dir" in
+  /*) ;;
+  *) target_dir="$repo_root/$target_dir" ;;
+esac
+lock_path=${CORTEXFS_RUSTC_LOCK:-"$target_dir/.cortexfs-rustc.lock"}
 lock_dir=$(dirname "$lock_path")
 mkdir -p "$lock_dir"
 
