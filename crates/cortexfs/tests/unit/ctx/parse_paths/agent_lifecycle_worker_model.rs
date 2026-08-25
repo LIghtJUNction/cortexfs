@@ -1,7 +1,7 @@
 #[test]
 fn agent_new_host_fallback_defaults_worker_to_default_worker_model() {
     let root = clean_test_dir("ctx-agent-new-host-worker-default-model");
-    let command = cmd!("agent", "new", "worker-fast", "--parent", "agent:coder");
+    let command = cmd!("agent", "new", "worker-fast", "--parent", "agent:executor");
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
         return;
     };
@@ -44,15 +44,15 @@ fn agent_new_host_fallback_defaults_executor_to_default_worker_model() {
 
 #[test]
 fn agent_new_host_fallback_keeps_non_worker_default_on_main() {
-    let root = clean_test_dir("ctx-agent-new-host-coder-stub-default-model");
-    let command = cmd!("agent", "new", "coder", "--parent", "agent:architect");
+    let root = clean_test_dir("ctx-agent-new-host-product-default-model");
+    let command = cmd!("agent", "new", "product-manager", "--parent", "agent:architect");
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
         return;
     };
 
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
     assert_eq!(
-        fs::read_to_string(root.join("agent/coder.d/model")).unwrap_or_default(),
+        fs::read_to_string(root.join("agent/product-manager.d/model")).unwrap_or_default(),
         "main\n"
     );
 }
@@ -82,7 +82,7 @@ fn agent_new_host_fallback_rejects_invalid_model_without_writing_controls() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder",
+        "agent:executor",
         "--model",
         "bad/model/name"
     );
@@ -105,7 +105,7 @@ fn agent_new_host_fallback_rejects_invalid_name_without_writing_controls() {
     let args = AgentNewArgs {
         name: "../worker".to_owned(),
         temporary: false,
-        parent: Some("agent:coder".to_owned()),
+        parent: Some("agent:executor".to_owned()),
         label: None,
         models: Vec::new(),
         tools: Vec::new(),
@@ -131,7 +131,7 @@ fn agent_new_host_fallback_rejects_invalid_mount_without_writing_controls() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder",
+        "agent:executor",
         "--mount",
         "relative:/workspace:rw"
     );

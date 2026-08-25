@@ -64,7 +64,7 @@ pub(crate) fn fuse_errno_maps_projection_errors_to_linux_errno() {
 pub(crate) fn fuse_open_error_enforces_linux_type_and_readonly_semantics() {
     let regular = FuseAttr::new("tool/fs.read".to_owned(), FuseFileType::Regular, 0, 0o755);
     let control = FuseAttr::new(
-        "agent/coder.d/cwd".to_owned(),
+        "agent/executor.d/cwd".to_owned(),
         FuseFileType::Regular,
         0,
         0o644,
@@ -171,7 +171,7 @@ pub(crate) fn access_error_uses_linux_mode_bits_and_readonly_semantics() {
         100,
     );
     let control = FuseAttr::with_owner(
-        "agent/coder.d/cwd".to_owned(),
+        "agent/executor.d/cwd".to_owned(),
         FuseFileType::Regular,
         0,
         0o640,
@@ -235,10 +235,10 @@ pub(crate) fn readonly_mutation_errno_uses_linux_readonly_filesystem_error() {
 pub(crate) fn parent_inode_uses_known_parent_or_root() {
     let paths = Mutex::new(HashMap::from([
         (FUSE_ROOT_INODE, String::new()),
-        (42, "agent/coder.d".to_owned()),
+        (42, "agent/executor.d".to_owned()),
     ]));
 
-    assert_eq!(parent_inode("agent/coder.d/status", &paths), Ok(42));
+    assert_eq!(parent_inode("agent/executor.d/status", &paths), Ok(42));
     assert_eq!(parent_inode("agent", &paths), Ok(FUSE_ROOT_INODE));
     assert_eq!(parent_inode("", &paths), Ok(FUSE_ROOT_INODE));
 }
@@ -247,17 +247,17 @@ pub(crate) fn parent_inode_uses_known_parent_or_root() {
 pub(crate) fn child_path_rejects_special_or_escaped_names() {
     assert_eq!(child_path("", "agent"), Some("agent".to_owned()));
     assert_eq!(
-        child_path("agent", "coder.sock"),
-        Some("agent/coder.sock".to_owned())
+        child_path("agent", "executor.sock"),
+        Some("agent/executor.sock".to_owned())
     );
     assert_eq!(child_path("", ""), None);
     assert_eq!(child_path("", "."), None);
     assert_eq!(child_path("", ".."), None);
-    assert_eq!(child_path("agent", "../coder.sock"), None);
-    assert_eq!(child_path("agent", "coder/sock"), None);
-    assert_eq!(child_path("agent", "coder\0sock"), None);
-    assert_eq!(child_path("agent", "coder\u{1b}sock"), None);
-    assert_eq!(child_path("agent", "coder\rsock"), None);
+    assert_eq!(child_path("agent", "../executor.sock"), None);
+    assert_eq!(child_path("agent", "executor/sock"), None);
+    assert_eq!(child_path("agent", "executor\0sock"), None);
+    assert_eq!(child_path("agent", "executor\u{1b}sock"), None);
+    assert_eq!(child_path("agent", "executor\rsock"), None);
 }
 
 #[test]
@@ -400,24 +400,25 @@ pub(crate) fn owner_rename_supports_generated_socket_claim_and_restore() {
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
     let uid = nix::unistd::Uid::current().as_raw();
-    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    assert!(fs::write(root.join("agent/executor.d/owner"), format!("{uid}\n")).is_ok());
     assert_eq!(
-        fs.projection.remove_socket_alias("agent/coder.sock", uid),
+        fs.projection
+            .remove_socket_alias("agent/executor.sock", uid),
         Ok(())
     );
     let target = PathBuf::from(format!(
-        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+        "/run/user/{uid}/cortexfs/agent/root-hash/executor.sock"
     ));
-    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
-    let node = fs.projected_node_for_path("agent/coder.sock");
+    assert!(symlink(&target, root.join("agent/executor.sock")).is_ok());
+    let node = fs.projected_node_for_path("agent/executor.sock");
     assert!(node.is_ok());
     let Ok(node) = node else { return };
     assert_eq!(fs.remember(&node), Ok(()));
-    let claim = "agent/.coder.sock.claim-1-1-0";
+    let claim = "agent/.executor.sock.claim-1-1-0";
 
     assert_eq!(
         fs.rename_owner_path(
-            "agent/coder.sock",
+            "agent/executor.sock",
             claim,
             uid,
             RenameFlags::RENAME_NOREPLACE,
@@ -436,24 +437,24 @@ pub(crate) fn owner_rename_supports_generated_socket_claim_and_restore() {
     assert!(fs.projected_readdir("agent").is_ok_and(|entries| {
         entries
             .iter()
-            .all(|entry| entry.name() != ".coder.sock.claim-1-1-0")
+            .all(|entry| entry.name() != ".executor.sock.claim-1-1-0")
     }));
     assert_eq!(
         fs.rename_owner_path(
             claim,
-            "agent/coder.sock",
+            "agent/executor.sock",
             uid,
             RenameFlags::RENAME_NOREPLACE,
         ),
         Ok(())
     );
     assert!(matches!(
-        fs::read_link(root.join("agent/coder.sock")),
+        fs::read_link(root.join("agent/executor.sock")),
         Ok(ref value) if value == &target
     ));
     assert_eq!(
         fs.path_for_inode(INodeNo(node.inode())),
-        Ok("agent/coder.sock".to_owned())
+        Ok("agent/executor.sock".to_owned())
     );
 }
 
@@ -466,8 +467,8 @@ pub(crate) fn owner_rename_noreplace_creates_missing_session_target_and_rejects_
     let Ok(fs) = fs else { return };
     let uid = nix::unistd::Uid::current().as_raw();
     let gid = nix::unistd::Gid::current().as_raw();
-    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
-    let session = format!("home/{uid}/agent/coder/session/fuse");
+    assert!(fs::write(root.join("agent/executor.d/owner"), format!("{uid}\n")).is_ok());
+    let session = format!("home/{uid}/agent/executor/session/fuse");
     assert!(fs::create_dir_all(root.join(&session)).is_ok());
     let first = format!("{session}/.state.tmp-1-1-0");
     let second = format!("{session}/.state.tmp-2-2-0");
@@ -500,10 +501,10 @@ pub(crate) fn owner_rename_noreplace_creates_missing_session_target_and_rejects_
 pub(crate) fn remove_backing_socket_entry_refuses_plain_files() {
     let root = unique_mount_test_dir("socket-unlink-plain-file");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    let path = root.join("agent").join("coder.sock");
+    let path = root.join("agent").join("executor.sock");
     assert!(fs::write(&path, "not a socket").is_ok());
 
-    let removed = remove_backing_socket_entry(&root, "agent/coder.sock");
+    let removed = remove_backing_socket_entry(&root, "agent/executor.sock");
 
     assert!(removed.is_err());
     assert!(path.exists());
@@ -513,11 +514,11 @@ pub(crate) fn remove_backing_socket_entry_refuses_plain_files() {
 pub(crate) fn remove_backing_socket_entry_allows_socket_inode_and_symlink_entry() {
     let root = unique_mount_test_dir("socket-unlink-allowed");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    let socket = root.join("agent").join("coder.sock");
+    let socket = root.join("agent").join("executor.sock");
     let listener = UnixListener::bind(&socket);
     assert!(listener.is_ok());
 
-    assert!(remove_backing_socket_entry(&root, "agent/coder.sock").is_ok());
+    assert!(remove_backing_socket_entry(&root, "agent/executor.sock").is_ok());
     assert!(!socket.exists());
 
     let outside = root.join("runtime.sock");
@@ -538,11 +539,11 @@ pub(crate) fn remove_backing_socket_entry_rejects_symlink_parent_without_removin
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(symlink(&outside, root.join("agent")).is_ok());
-    let socket = outside.join("coder.sock");
+    let socket = outside.join("executor.sock");
     let listener = UnixListener::bind(&socket);
     assert!(listener.is_ok());
 
-    let removed = remove_backing_socket_entry(&root, "agent/coder.sock");
+    let removed = remove_backing_socket_entry(&root, "agent/executor.sock");
 
     assert!(removed.is_err());
     assert!(socket.exists());

@@ -80,23 +80,26 @@ fn abi_paths_classify_by_stable_shape() {
         ("model/debug/echo", "ctx.model.exec"),
         ("model/debug/echo.sock", "ctx.model.socket"),
         ("model/debug/echo.d/id", "ctx.model.control"),
-        ("agent/coder", "ctx.agent.exec"),
-        ("agent/coder.sock", "ctx.agent.socket"),
-        ("agent/coder.d/policy", "ctx.agent.control"),
-        ("agent/coder.d/hooks/pre.d", "ctx.agent.control"),
-        ("agent/coder.d/hooks/post.d", "ctx.agent.control"),
+        ("agent/executor", "ctx.agent.exec"),
+        ("agent/executor.sock", "ctx.agent.socket"),
+        ("agent/executor.d/policy", "ctx.agent.control"),
+        ("agent/executor.d/hooks/pre.d", "ctx.agent.control"),
+        ("agent/executor.d/hooks/post.d", "ctx.agent.control"),
         ("tool/fs.read", "ctx.tool.exec"),
         ("tool/fs.read.d/schema", "ctx.tool.control"),
         ("tool/fs.read.d/hooks/pre.d", "ctx.tool.control"),
         ("tool/fs.read.d/hooks/post.d", "ctx.tool.control"),
         ("home/1000", "ctx.home.dir"),
-        ("home/1000/agent/coder/session/default", "ctx.session.dir"),
         (
-            "home/1000/agent/coder/session/default/messages.jsonl",
+            "home/1000/agent/executor/session/default",
+            "ctx.session.dir",
+        ),
+        (
+            "home/1000/agent/executor/session/default/messages.jsonl",
             "ctx.session.messages",
         ),
         (
-            "home/1000/agent/coder/session/default/events.jsonl",
+            "home/1000/agent/executor/session/default/events.jsonl",
             "ctx.session.events",
         ),
         (
@@ -112,11 +115,11 @@ fn abi_paths_classify_by_stable_shape() {
             "ctx.session.messages",
         ),
         (
-            "home/1000/agent/coder/session/index/channel/terminal_coder_default",
+            "home/1000/agent/executor/session/index/channel/terminal_executor_default",
             "ctx.session.channel",
         ),
         (
-            "home/1000/agent/coder/session/index/channel",
+            "home/1000/agent/executor/session/index/channel",
             "ctx.session.channel.dir",
         ),
         ("shared/project-a", "ctx.shared.dir"),
@@ -142,7 +145,7 @@ fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
         "cluster/default",
         "model/debug/echo.sock.d/id",
         "tool/-bad",
-        "agent/coder/extra",
+        "agent/executor/extra",
     ] {
         assert_abi_class(path, "ctx.unknown");
     }
@@ -196,16 +199,16 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     assert!(!root.join("channel").join("tool").exists());
     assert_reference_bin_placeholders(&root);
     assert_file_text(
-        &root.join("agent").join("coder"),
-        "#!/bin/sh\n# CortexFS generated object wrapper.\n# cortexfs.object=agent\n# cortexfs.name=coder\nexec '/ctx/bin/cortexfs-object-runner' \"$0\" \"$@\"\n",
+        &root.join("agent").join("executor"),
+        "#!/bin/sh\n# CortexFS generated object wrapper.\n# cortexfs.object=agent\n# cortexfs.name=executor\nexec '/ctx/bin/cortexfs-object-runner' \"$0\" \"$@\"\n",
     );
     assert!(!root.join("model").join("debug").join("echo").exists());
-    let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
+    let agent_socket_mode = fs::metadata(root.join("agent").join("executor.sock"))
         .map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(agent_socket_mode, Ok(0o700)));
     if nix::unistd::Uid::effective().is_root() {
         assert!(matches!(
-            fs::symlink_metadata(root.join("agent").join("coder.sock")),
+            fs::symlink_metadata(root.join("agent").join("executor.sock")),
             Ok(metadata)
                 if metadata.uid() == 1000 && metadata.gid() == 1000
         ));
@@ -257,7 +260,7 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     let schema = ok!(schema);
     assert!(inspect_tool_schema_json(&schema).is_ok());
 
-    let private_session_root = agent_session_root(&root, "coder");
+    let private_session_root = agent_session_root(&root, "executor");
     for index in ["by-cwd", "by-hash", "by-uuid", "channel"] {
         assert!(private_session_root.join("index").join(index).is_dir());
     }
@@ -270,7 +273,7 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
     ));
     let user_model_dir = ctx_home(&root).join("model");
     assert!(user_model_dir.is_dir());
-    assert!(!user_model_dir.join("coder").exists());
+    assert!(!user_model_dir.join("executor").exists());
 
     assert!(root.join("shared").is_dir());
     assert!(!root.join("shared").join("project-a").exists());
@@ -289,12 +292,12 @@ fn assert_channel_tool(root: &Path, name: &str) {
 }
 
 fn assert_reference_agents(root: &Path) {
-    for agent in ["architect", "coder", "reviewer", "worker"] {
+    for agent in ["architect", "executor", "product-manager"] {
         let report = inspect_object_layout(root, ObjectClass::Agent, agent);
         assert!(report.is_ok(), "{agent}: {:?}", report.issues());
         assert_object_hook_dirs(&root.join("agent").join(format!("{agent}.d")));
     }
-    for old_agent in ["base", "executor"] {
+    for old_agent in ["base", "coder", "reviewer", "worker"] {
         assert!(!root.join("agent").join(old_agent).exists());
         assert!(!root.join("agent").join(format!("{old_agent}.d")).exists());
     }
@@ -302,50 +305,47 @@ fn assert_reference_agents(root: &Path) {
     assert_file_text(&root.join("agent/architect.d/parent"), "\n");
     assert_file_text(&root.join("agent/architect.d/cwd"), "/workspace\n");
     assert_file_text(&root.join("agent/architect.d/perm"), "r--\n");
-    assert_file_text(&root.join("agent/coder.d/parent"), "agent:architect\n");
-    assert_file_text(&root.join("agent/coder.d/cwd"), "/workspace\n");
-    assert_file_text(&root.join("agent/coder.d/model"), "main\n");
-    assert_file_text(&root.join("agent/coder.d/perm"), "rwx\n");
-    assert_file_text(&root.join("agent/reviewer.d/parent"), "agent:architect\n");
-    assert_file_text(&root.join("agent/reviewer.d/model"), "main\n");
-    assert_file_text(&root.join("agent/worker.d/parent"), "agent:architect\n");
+    assert_file_text(&root.join("agent/executor.d/parent"), "agent:architect\n");
+    assert_file_text(&root.join("agent/executor.d/cwd"), "/workspace\n");
+    assert_file_text(&root.join("agent/executor.d/model"), "main\n");
+    assert_file_text(&root.join("agent/executor.d/perm"), "rwx\n");
     assert_file_text(
-        &root.join("agent/worker.d/model"),
-        &format!("{DEFAULT_WORKER_MODEL}\n"),
+        &root.join("agent/product-manager.d/parent"),
+        "agent:architect\n",
     );
+    assert_file_text(&root.join("agent/product-manager.d/model"), "main\n");
+    assert_file_text(&root.join("agent/product-manager.d/perm"), "r--\n");
 
     let architect_system = ok!(fs::read_to_string(root.join("agent/architect.d/system.md")));
     assert!(architect_system.contains("human role name is Architect"));
-    assert!(architect_system.contains("delegate implementation to `coder`"));
-    assert!(architect_system.contains("verification to `reviewer`"));
+    assert!(architect_system.contains("delegate implementation and verification to `executor`"));
+    assert!(architect_system.contains("product-manager"));
 
-    let coder_system = ok!(fs::read_to_string(root.join("agent/coder.d/system.md")));
-    assert!(coder_system.contains("default Architect -> coder/reviewer flow"));
-    assert!(coder_system.contains("fs.write"));
-    assert!(coder_system.contains("shell.exec"));
-    assert!(coder_system.contains("Leave architecture decisions"));
+    let executor_system = ok!(fs::read_to_string(root.join("agent/executor.d/system.md")));
+    assert!(executor_system.contains("implementation and verification agent"));
+    assert!(executor_system.contains("fs.write"));
+    assert!(executor_system.contains("shell.exec"));
+    assert!(executor_system.contains("smallest atomic change"));
 
-    let reviewer_system = ok!(fs::read_to_string(root.join("agent/reviewer.d/system.md")));
-    assert!(reviewer_system.contains("independent review agent"));
-
-    let worker_system = ok!(fs::read_to_string(root.join("agent/worker.d/system.md")));
-    assert!(!worker_system.contains("executor"));
-    assert!(reviewer_system.contains("correctness, ABI drift"));
+    let product_system = ok!(fs::read_to_string(
+        root.join("agent/product-manager.d/system.md")
+    ));
+    assert!(product_system.contains("clarify the user problem"));
+    assert!(product_system.contains("Do not edit source"));
 
     let architect_policy = ok!(fs::read_to_string(root.join("agent/architect.d/policy")));
-    assert!(architect_policy.contains("allow architect_t agent:coder create"));
-    assert!(architect_policy.contains("allow architect_t agent:coder start"));
-    assert!(architect_policy.contains("allow architect_t agent:reviewer read"));
+    assert!(architect_policy.contains("allow architect_t agent:executor create"));
+    assert!(architect_policy.contains("allow architect_t agent:executor start"));
+    assert!(architect_policy.contains("allow architect_t agent:product-manager read"));
     assert!(architect_policy.contains("allow architect_t tool:fs.read execute"));
 
-    let coder_policy = ok!(fs::read_to_string(root.join("agent/coder.d/policy")));
-    assert!(coder_policy.contains("allow coder_t tool:fs.write execute"));
-    assert!(coder_policy.contains("allow coder_t tool:shell.exec execute"));
-    assert!(coder_policy.contains("allow coder_t tool:bash execute"));
+    let executor_policy = ok!(fs::read_to_string(root.join("agent/executor.d/policy")));
+    assert!(executor_policy.contains("allow executor_t tool:fs.write execute"));
+    assert!(executor_policy.contains("allow executor_t tool:shell.exec execute"));
 
     for index in ["by-cwd", "by-hash", "by-uuid", "channel"] {
         assert!(
-            agent_session_root(root, "coder")
+            agent_session_root(root, "executor")
                 .join("index")
                 .join(index)
                 .is_dir()
@@ -372,14 +372,14 @@ fn reference_tree_bootstrap_accepts_socket_symlink_without_changing_target() {
         .map(|metadata| (metadata.uid(), metadata.gid()))
         .ok();
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    assert!(symlink(&outside_socket, root.join("agent").join("coder.sock")).is_ok());
+    assert!(symlink(&outside_socket, root.join("agent").join("executor.sock")).is_ok());
 
     let bootstrapped = ensure_reference_tree(&root);
 
     assert!(bootstrapped.is_ok());
     assert!(
         root.join("agent")
-            .join("coder.sock")
+            .join("executor.sock")
             .symlink_metadata()
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
     );

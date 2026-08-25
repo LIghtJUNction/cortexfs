@@ -17,19 +17,19 @@ fn tool_command_refuses_direct_ctx_path_execution() {
 #[test]
 fn abi_path_resolution_rejects_escape() {
     let root = Path::new("/ctx");
-    assert!(resolve_abi_path(root, "agent/coder.d/cwd").is_ok());
-    assert!(classify_input_path(root, "agent/coder.d/cwd").is_ok());
+    assert!(resolve_abi_path(root, "agent/executor.d/cwd").is_ok());
+    assert!(classify_input_path(root, "agent/executor.d/cwd").is_ok());
     assert!(resolve_abi_path(root, "../etc/passwd").is_err());
     assert!(classify_input_path(root, "../etc/passwd").is_err());
-    assert!(classify_input_path(root, "agent//coder").is_err());
-    assert!(resolve_abi_path(root, "agent/coder\u{1b}").is_err());
-    assert!(classify_input_path(root, "agent/coder\u{1b}").is_err());
+    assert!(classify_input_path(root, "agent//executor").is_err());
+    assert!(resolve_abi_path(root, "agent/executor\u{1b}").is_err());
+    assert!(classify_input_path(root, "agent/executor\u{1b}").is_err());
     assert!(resolve_abi_path(root, "/etc/passwd").is_err());
     assert!(resolve_abi_path(root, "/ctx/../etc/passwd").is_err());
-    assert!(classify_input_path(root, "/ctx/agent/coder\u{1b}").is_err());
+    assert!(classify_input_path(root, "/ctx/agent/executor\u{1b}").is_err());
     assert_eq!(
-        resolve_abi_path(root, "/ctx/agent/coder.d/cwd").map(|path| path.display().to_string()),
-        Ok("/ctx/agent/coder.d/cwd".to_owned())
+        resolve_abi_path(root, "/ctx/agent/executor.d/cwd").map(|path| path.display().to_string()),
+        Ok("/ctx/agent/executor.d/cwd".to_owned())
     );
 }
 
@@ -76,7 +76,7 @@ fn ls_rejects_symlink_directories_without_listing_targets() {
 fn detects_durable_session_instance_paths() {
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session/default",
+            "home/1000/agent/executor/session/default",
             "shared/im-qq-dev/agent/bot/session/group-456",
             "home/1000/model/openai/gpt-5.6.d/session/default",
             "shared/project-a/model/openai/gpt-5.6.d/session/default",
@@ -86,8 +86,8 @@ fn detects_durable_session_instance_paths() {
     );
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session",
-            "home/1000/agent/coder/session/default/messages.jsonl",
+            "home/1000/agent/executor/session",
+            "home/1000/agent/executor/session/default/messages.jsonl",
             "shared/project-a/model/openai/gpt-5.6/session/default",
         ],
         is_durable_session_instance_path,
@@ -99,7 +99,7 @@ fn detects_durable_session_instance_paths() {
 fn detects_session_control_paths() {
     for (path, expected) in [
         (
-            "home/1000/agent/coder/session/default/state",
+            "home/1000/agent/executor/session/default/state",
             Some(SessionControlKind::State),
         ),
         (
@@ -110,7 +110,7 @@ fn detects_session_control_paths() {
             "home/1000/model/openai/gpt-5.6.d/session/default/meta.json",
             Some(SessionControlKind::MetaJson),
         ),
-        ("home/1000/agent/coder/session/default/messages.jsonl", None),
+        ("home/1000/agent/executor/session/default/messages.jsonl", None),
     ] {
         assert_path_kind!(path, session_control_path_kind, expected);
     }
@@ -120,7 +120,7 @@ fn detects_session_control_paths() {
 fn detects_private_and_shared_context_pack_paths() {
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session/default/context/pack.json",
+            "home/1000/agent/executor/session/default/context/pack.json",
             "shared/im-qq-dev/agent/bot/session/group-456/context/pack.json",
         ],
         is_context_pack_path,
@@ -128,7 +128,7 @@ fn detects_private_and_shared_context_pack_paths() {
     );
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session/default/context/pack.md",
+            "home/1000/agent/executor/session/default/context/pack.md",
             "home/1000/agent/bad/name/session/default/context/pack.json",
         ],
         is_context_pack_path,
@@ -140,7 +140,7 @@ fn detects_private_and_shared_context_pack_paths() {
 fn detects_private_and_shared_event_stream_paths() {
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session/default/events.jsonl",
+            "home/1000/agent/executor/session/default/events.jsonl",
             "shared/im-qq-dev/agent/bot/session/group-456/events.jsonl",
             "home/1000/model/openai/gpt-5.6.d/session/default/events.jsonl",
             "shared/project-a/model/openai/gpt-5.6.d/session/default/events.jsonl",
@@ -150,7 +150,7 @@ fn detects_private_and_shared_event_stream_paths() {
     );
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session/default/messages.jsonl",
+            "home/1000/agent/executor/session/default/messages.jsonl",
             "shared/im-qq-dev/agent/bad/name/session/group-456/events.jsonl",
         ],
         is_session_events_path,
@@ -162,7 +162,7 @@ fn detects_private_and_shared_event_stream_paths() {
 fn detects_private_and_shared_message_stream_paths() {
     assert_path_matches(
         &[
-            "home/1000/agent/coder/session/default/messages.jsonl",
+            "home/1000/agent/executor/session/default/messages.jsonl",
             "shared/im-qq-dev/agent/bot/session/group-456/messages.jsonl",
             "home/1000/model/openai/gpt-5.6.d/session/default/messages.jsonl",
         ],
@@ -170,7 +170,7 @@ fn detects_private_and_shared_message_stream_paths() {
         true,
     );
     assert!(!is_session_messages_path(
-        "home/1000/agent/coder/session/default/events.jsonl"
+        "home/1000/agent/executor/session/default/events.jsonl"
     ));
 }
 
@@ -178,7 +178,7 @@ fn detects_private_and_shared_message_stream_paths() {
 fn detects_context_jsonl_paths() {
     for (path, expected) in [
         (
-            "home/1000/agent/coder/session/default/context/facts.jsonl",
+            "home/1000/agent/executor/session/default/context/facts.jsonl",
             Some(ContextJsonlKind::Facts),
         ),
         (
@@ -193,7 +193,7 @@ fn detects_context_jsonl_paths() {
             "shared/project-a/model/openai/gpt-5.6.d/session/default/context/dedup/index.jsonl",
             Some(ContextJsonlKind::DedupIndex),
         ),
-        ("home/1000/agent/coder/session/default/context/pack.json", None),
+        ("home/1000/agent/executor/session/default/context/pack.json", None),
     ] {
         assert_path_kind!(path, context_jsonl_path_kind, expected);
     }
@@ -203,11 +203,11 @@ fn detects_context_jsonl_paths() {
 fn detects_private_and_shared_session_index_paths() {
     for (path, expected) in [
         (
-            "home/1000/agent/coder/session/index/list",
+            "home/1000/agent/executor/session/index/list",
             Some(SessionIndexKind::List),
         ),
         (
-            "home/1000/agent/coder/session/index/current",
+            "home/1000/agent/executor/session/index/current",
             Some(SessionIndexKind::Current),
         ),
         (
@@ -215,15 +215,15 @@ fn detects_private_and_shared_session_index_paths() {
             Some(SessionIndexKind::ByCwd),
         ),
         (
-            "home/1000/agent/coder/session/index/by-hash/hash-1",
+            "home/1000/agent/executor/session/index/by-hash/hash-1",
             Some(SessionIndexKind::ByHash),
         ),
         (
-            "home/1000/agent/coder/session/index/by-uuid/uuid-1",
+            "home/1000/agent/executor/session/index/by-uuid/uuid-1",
             Some(SessionIndexKind::ByUuid),
         ),
-        ("home/1000/agent/coder/session/index/by-hash/bad:key", None),
-        ("home/1000/agent/coder/session/default", None),
+        ("home/1000/agent/executor/session/index/by-hash/bad:key", None),
+        ("home/1000/agent/executor/session/default", None),
         ("home/1000/agent/bad/name/session/index/list", None),
     ] {
         assert_path_kind!(path, session_index_path_kind, expected);
@@ -237,7 +237,7 @@ fn detects_executable_object_paths() {
             "model/openai/gpt-5.6",
             Some((ObjectClass::Model, "openai/gpt-5.6".to_owned())),
         ),
-        ("agent/coder", Some((ObjectClass::Agent, "coder".to_owned()))),
+        ("agent/executor", Some((ObjectClass::Agent, "executor".to_owned()))),
         ("tool/fs.read", Some((ObjectClass::Tool, "fs.read".to_owned()))),
         ("tool/fs.read.d/schema", None),
         ("home/1000", None),
@@ -334,10 +334,10 @@ fn detects_shared_queue_root_paths() {
 #[test]
 fn detects_agent_control_paths_with_fixed_value_syntax() {
     for (path, expected) in [
-        ("agent/coder.d/uid", Some(AgentControlKind::Uid)),
-        ("agent/coder.d/life", Some(AgentControlKind::Life)),
+        ("agent/executor.d/uid", Some(AgentControlKind::Uid)),
+        ("agent/executor.d/life", Some(AgentControlKind::Life)),
         ("agent/rev-1.d/parent", Some(AgentControlKind::Parent)),
-        ("agent/coder.d/label", None),
+        ("agent/executor.d/label", None),
         ("model/openai/gpt-5.6.d/session", None),
         ("agent/bad/name.d/uid", None),
     ] {

@@ -1,107 +1,107 @@
 #[test]
 fn parses_session_file_commands() {
-    let history = cmd!("history", "coder");
+    let history = cmd!("history", "executor");
     assert!(matches!(
         history,
         Ok(Command::History {
             ref agent,
             session: None
-        }) if agent == "coder"
+        }) if agent == "executor"
     ));
 
-    let history_flagged = cmd!("history", "coder", "--session", "focus");
+    let history_flagged = cmd!("history", "executor", "--session", "focus");
     assert!(matches!(
         history_flagged,
         Ok(Command::History {
             ref agent,
             session: Some(ref session)
-        }) if agent == "coder" && session == "focus"
+        }) if agent == "executor" && session == "focus"
     ));
     assert!(matches!(
-        cmd!("history", "coder", "focus"),
+        cmd!("history", "executor", "focus"),
         Err(ref error) if error.code == 2 && error.message.contains("unexpected argument")
     ));
 
-    let output = cmd!("agent", "output", "coder", "--session", "default");
+    let output = cmd!("agent", "output", "executor", "--session", "default");
     assert!(matches!(
         output,
         Ok(Command::Agent(AgentArgs::Output {
             ref name,
             session: Some(ref session)
-        })) if name == "coder" && session == "default"
+        })) if name == "executor" && session == "default"
     ));
 
-    let wait = cmd!("agent", "wait", "coder", "work-123", "--session", "default");
+    let wait = cmd!("agent", "wait", "executor", "work-123", "--session", "default");
     assert!(matches!(
         wait,
         Ok(Command::Agent(AgentArgs::Wait {
             ref name,
             session: Some(ref session),
             ref child,
-        })) if name == "coder" && session == "default" && child == "work-123"
+        })) if name == "executor" && session == "default" && child == "work-123"
     ));
 
-    let prompt = cmd!("agent", "prompt", "coder");
+    let prompt = cmd!("agent", "prompt", "executor");
     assert!(matches!(
         prompt,
-        Ok(Command::Agent(AgentArgs::Prompt { ref name })) if name == "coder"
+        Ok(Command::Agent(AgentArgs::Prompt { ref name })) if name == "executor"
     ));
 
-    let resume = cmd!("resume", "coder", "default");
+    let resume = cmd!("resume", "executor", "default");
     assert!(matches!(
         resume,
         Err(ref error) if error.code == 2 && error.message.contains("unexpected argument")
     ));
 
-    let resume_flagged = cmd!("resume", "coder", "-s", "focus");
+    let resume_flagged = cmd!("resume", "executor", "-s", "focus");
     assert!(matches!(
         resume_flagged,
         Ok(Command::Resume {
             agent: Some(ref agent),
             session: Some(ref session)
-        }) if agent == "coder" && session == "focus"
+        }) if agent == "executor" && session == "focus"
     ));
 
-    let send = cmd!("send", "coder", "hello", "world");
+    let send = cmd!("send", "executor", "hello", "world");
     assert!(matches!(
         send,
         Ok(Command::Send {
             ref agent,
             session: None,
             ref input
-        }) if agent == "coder" && input == "hello world"
+        }) if agent == "executor" && input == "hello world"
     ));
 
-    let send_current = cmd!("send", "coder", "hello");
+    let send_current = cmd!("send", "executor", "hello");
     assert!(matches!(
         send_current,
         Ok(Command::Send {
             ref agent,
             session: None,
             ref input
-        }) if agent == "coder" && input == "hello"
+        }) if agent == "executor" && input == "hello"
     ));
 
-    let send_flagged = cmd!("send", "coder", "--session", "focus", "hello", "world");
+    let send_flagged = cmd!("send", "executor", "--session", "focus", "hello", "world");
     assert!(matches!(
         send_flagged,
         Ok(Command::Send {
             ref agent,
             session: Some(ref session),
             ref input
-        }) if agent == "coder" && session == "focus" && input == "hello world"
+        }) if agent == "executor" && session == "focus" && input == "hello world"
     ));
 
-    let ping = cmd!("ping", "agent/coder");
+    let ping = cmd!("ping", "agent/executor");
     assert!(matches!(
         ping,
-        Ok(Command::Ping { ref path }) if path == "agent/coder"
+        Ok(Command::Ping { ref path }) if path == "agent/executor"
     ));
 
-    let cancel = cmd!("cancel", "agent/coder", "run-1");
+    let cancel = cmd!("cancel", "agent/executor", "run-1");
     assert!(matches!(
         cancel,
-        Ok(Command::Cancel { ref path, ref run }) if path == "agent/coder" && run == "run-1"
+        Ok(Command::Cancel { ref path, ref run }) if path == "agent/executor" && run == "run-1"
     ));
 }
 
@@ -189,7 +189,7 @@ fn parses_agent_session_client_commands() {
     let send = cmd!(
         "agent",
         "send",
-        "coder",
+        "executor",
         "--session",
         "test",
         "hello",
@@ -203,16 +203,16 @@ fn parses_agent_session_client_commands() {
             ref input,
             raw: false,
             ..
-        })) if name == "coder" && session == "test" && input == "hello world"
+        })) if name == "executor" && session == "test" && input == "hello world"
     ));
 
-    let repl = cmd!("agent", "repl", "coder", "--raw");
+    let repl = cmd!("agent", "repl", "executor", "--raw");
     assert!(matches!(
         repl,
         Err(ref error) if error.code == 2 && error.message == "unknown agent command: repl"
     ));
 
-    let chat = cmd!("agent", "chat", "coder", "--session", "focus");
+    let chat = cmd!("agent", "chat", "executor", "--session", "focus");
     assert!(matches!(
         chat,
         Ok(Command::Agent(AgentArgs::Chat {
@@ -220,10 +220,10 @@ fn parses_agent_session_client_commands() {
             session: Some(ref session),
             raw: false,
             ..
-        })) if name == "coder" && session == "focus"
+        })) if name == "executor" && session == "focus"
     ));
 
-    let cancel = cmd!("agent", "cancel", "coder", "--session", "test", "run-1");
+    let cancel = cmd!("agent", "cancel", "executor", "--session", "test", "run-1");
     assert!(matches!(
         cancel,
         Ok(Command::Agent(AgentArgs::Cancel {
@@ -231,13 +231,13 @@ fn parses_agent_session_client_commands() {
             session: Some(ref session),
             run: Some(ref run),
             raw: false,
-        })) if name == "coder" && session == "test" && run == "run-1"
+        })) if name == "executor" && session == "test" && run == "run-1"
     ));
 }
 
 #[test]
 fn agent_send_rejects_invalid_approval_during_parse() {
-    let command = cmd!("agent", "send", "coder", "--approve", "bad/name", "hello");
+    let command = cmd!("agent", "send", "executor", "--approve", "bad/name", "hello");
 
     assert!(matches!(
         command,
@@ -247,7 +247,7 @@ fn agent_send_rejects_invalid_approval_during_parse() {
 
 #[test]
 fn agent_chat_rejects_invalid_approval_during_parse() {
-    let command = cmd!("agent", "chat", "coder", "--approve", "bad/name");
+    let command = cmd!("agent", "chat", "executor", "--approve", "bad/name");
 
     assert!(matches!(
         command,
@@ -257,7 +257,7 @@ fn agent_chat_rejects_invalid_approval_during_parse() {
 
 #[test]
 fn rejects_removed_agent_sh_command() {
-    let command = cmd!("agent-sh", "--session", "focus", "coder");
+    let command = cmd!("agent-sh", "--session", "focus", "executor");
     assert!(matches!(
         command,
         Err(ref error) if error.code == 2 && error.message == "unknown command: agent-sh"
@@ -267,10 +267,10 @@ fn rejects_removed_agent_sh_command() {
 #[test]
 fn agent_trajectory_error_lists_actionable_projection_issues() {
     let root = clean_test_dir("ctx-agent-trajectory-invalid");
-    create_agent_fixture(&root, "coder", "agent:base", "idle", "");
+    create_agent_fixture(&root, "executor", "agent:base", "idle", "");
     let session = ctx_home(&root)
         .unwrap_or_default()
-        .join("agent/coder/session/default");
+        .join("agent/executor/session/default");
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("messages.jsonl"),
@@ -279,7 +279,7 @@ fn agent_trajectory_error_lists_actionable_projection_issues() {
     write_text_file(&session.join("events.jsonl"), "");
     write_text_file(&session.join("meta.json"), "{\"client\":\"\"}\n");
 
-    let result = agent_trajectory(&root, "coder", Some("default"));
+    let result = agent_trajectory(&root, "executor", Some("default"));
 
     assert!(matches!(
         result,
@@ -314,7 +314,7 @@ fn agent_send_prompt_root_words_do_not_override_selected_root() {
         root.to_str().unwrap_or_default(),
         "agent",
         "send",
-        "coder",
+        "executor",
         "token",
         "--root",
         attacker_root.to_str().unwrap_or_default(),
@@ -333,7 +333,7 @@ fn agent_send_prompt_root_words_do_not_override_selected_root() {
                 ..
             }),
         }) if parsed_root == root
-            && name == "coder"
+            && name == "executor"
             && input == &format!("token --root {} secret", attacker_root.display())
     ));
 }

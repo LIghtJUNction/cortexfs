@@ -7,7 +7,7 @@ use super::{
     tool_is_in_group, top_level_tool_names, tshrc_ctx_path, validate_tshrc_ctx_path,
     wtinylfu_victim_path,
 };
-use cortexfs::tool::core::tools::{TshRuntimeConfig, parse_tsh_runtime_config};
+use cortexfs_tools::{TshRuntimeConfig, parse_tsh_runtime_config};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

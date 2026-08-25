@@ -410,7 +410,7 @@ fn enable_dynamic_worker_fixture(root: &Path) {
             ("groups", "1000"),
             ("label", "user_u:agent_r:worker_t:s0"),
             ("iso", "shared"),
-            ("parent", "agent:coder"),
+            ("parent", "agent:executor"),
             ("life", "temp"),
             ("root", "/ctx/home/1000/agent/worker/root"),
             ("cwd", "/workspace"),
@@ -435,10 +435,10 @@ fn enable_dynamic_worker_fixture(root: &Path) {
     );
     assert!(installed.is_ok(), "{installed:?}");
 
-    let coder_policy = root.join("agent/coder.d/policy");
+    let coder_policy = root.join("agent/executor.d/policy");
     let mut policy = fs::read_to_string(&coder_policy).unwrap_or_default();
     policy.push_str(
-        "allow coder_t agent:worker create\nallow coder_t agent:worker start\nallow coder_t agent:worker stop\nallow coder_t agent:worker read\n",
+        "allow executor_t agent:worker create\nallow executor_t agent:worker start\nallow executor_t agent:worker stop\nallow executor_t agent:worker read\n",
     );
     write_text_file(&coder_policy, &policy);
 }

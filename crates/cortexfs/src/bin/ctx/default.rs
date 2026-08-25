@@ -1,6 +1,6 @@
 use crate::*;
 
-const DEFAULT_AGENT: &str = "coder";
+const DEFAULT_AGENT: &str = "executor";
 
 pub(crate) fn start_default_session(root: &Path) -> Result<ExitCode, CliError> {
     let agent = configured_default_agent()?;

@@ -24,10 +24,10 @@ impl Drop for OverlayTestDir {
 fn agent_tool_call_executes_visible_tsh_for_search_and_load()
 -> Result<(), Box<dyn std::error::Error>> {
     let (root, tool_control) = agent_tool_fixture("atl", "tsh")?;
-    fs::create_dir_all(root.join("home/1000/agent/coder"))?;
+    fs::create_dir_all(root.join("home/1000/agent/executor"))?;
     fs::write(
         tool_control.join("policy"),
-        "allow coder_t tool:tsh execute\n",
+        "allow executor_t tool:tsh execute\n",
     )?;
     fs::write(
         root.join("tool").join("tsh"),
@@ -141,7 +141,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         network_allowed: false,
         home_fd: 10,
         home_alias_fd: 11,
-        home_target: Path::new("/ctx/home/1000/agent/coder"),
+        home_target: Path::new("/ctx/home/1000/agent/executor"),
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
@@ -189,7 +189,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         &args,
         "--bind-fd",
         "10",
-        "/ctx/home/1000/agent/coder"
+        "/ctx/home/1000/agent/executor"
     ));
     assert!(contains_os_arg_triplet(
         &args,
@@ -226,7 +226,7 @@ fn tool_bwrap_has_no_control_environment_without_host_control()
         network_allowed: false,
         home_fd: 10,
         home_alias_fd: 11,
-        home_target: Path::new("/ctx/home/1000/agent/coder"),
+        home_target: Path::new("/ctx/home/1000/agent/executor"),
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
@@ -274,7 +274,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
     fs::create_dir_all(&workspace)?;
     fs::create_dir_all(&upper)?;
     fs::create_dir_all(&work)?;
-    let home = source.join("home/1000/agent/coder");
+    let home = source.join("home/1000/agent/executor");
     fs::create_dir_all(&home)?;
     fs::write(workspace.join("README.md"), "lower\n")?;
     let tool = root.path().join("write-workspace");
@@ -316,7 +316,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         network_allowed: false,
         home_fd: home_dir.as_raw_fd(),
         home_alias_fd: home_alias_dir.as_raw_fd(),
-        home_target: Path::new("/ctx/home/1000/agent/coder"),
+        home_target: Path::new("/ctx/home/1000/agent/executor"),
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
         control_gate: None,
@@ -351,7 +351,7 @@ fn visible_workspace_source_falls_back_to_current_namespace_workspace() {
 fn agent_tool_call_refuses_symlinked_tsh_policy() -> Result<(), Box<dyn std::error::Error>> {
     let (root, tool_control) = agent_tool_fixture("atl-policy-symlink", "tsh")?;
     let outside_policy = root.join("outside-policy");
-    fs::write(&outside_policy, "allow coder_t tool:tsh execute\n")?;
+    fs::write(&outside_policy, "allow executor_t tool:tsh execute\n")?;
     symlink(&outside_policy, tool_control.join("policy"))?;
     fs::write(root.join("tool").join("tsh"), "#!/bin/sh\nexit 0\n")?;
     fs::set_permissions(
@@ -764,7 +764,7 @@ fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error:
     let (root, tool_control) = agent_tool_fixture("atl-empty-args", "tsh")?;
     fs::write(
         tool_control.join("policy"),
-        "allow coder_t tool:tsh execute\n",
+        "allow executor_t tool:tsh execute\n",
     )?;
 
     let executed = root.join("tsh-called");

@@ -85,7 +85,7 @@ mod model_alias_tests {
         assert!(fs.socket_overlays.lock().is_ok_and(|mut sockets| {
             sockets
                 .insert(
-                    "agent/coder.sock".to_owned(),
+                    "agent/executor.sock".to_owned(),
                     SocketOverlay {
                         uid: 1000,
                         gid: 1000,

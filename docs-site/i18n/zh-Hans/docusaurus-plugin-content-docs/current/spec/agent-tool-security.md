@@ -36,9 +36,9 @@ agent policy 决定执行是否允许
 
 ```text
 /ctx/agent/
-  coder
-  coder.sock
-  coder.d/
+  executor
+  executor.sock
+  executor.d/
     owner
     uid
     gid
@@ -74,7 +74,7 @@ owner   拥有该对象的 Linux 用户 uid
 uid     runtime uid，默认等于 owner
 gid     runtime gid
 groups  补充组，每行一个 gid
-label   CortexFS agent label，例如 user_u:agent_r:coder_t:s0
+label   CortexFS agent label，例如 user_u:agent_r:executor_t:s0
 iso     隔离配置：shared、uid、userns
 parent  创建该 agent 的 parent agent/session/run
 life    生命周期 ownership，默认 owned
@@ -184,7 +184,7 @@ dead
 ```text
 /ctx/home/1000/
   agent/
-    coder/
+    executor/
       root/
       session/
       data/
@@ -197,8 +197,8 @@ dead
 推荐配置：
 
 ```text
-/ctx/agent/coder.d/root = /ctx/home/1000/agent/coder/root
-/ctx/agent/coder.d/cwd  = /workspace
+/ctx/agent/executor.d/root = /ctx/home/1000/agent/executor/root
+/ctx/agent/executor.d/cwd  = /workspace
 ```
 
 运行时环境：
@@ -208,8 +208,8 @@ CTX_ROOT=/ctx
 CTX_HOME=/ctx/home/1000
 HOME=/home/agent
 PATH=/usr/bin:/bin
-USER=coder
-LOGNAME=coder
+USER=executor
+LOGNAME=executor
 SHELL=/usr/bin/bash
 TERM=xterm-256color
 LANG=C.UTF-8
@@ -256,7 +256,7 @@ noexec
 
 ```text
 /ctx	/ctx	ro	rbind,nosuid,nodev
-/ctx/home/1000/agent/coder	/home/agent	rw	rbind,nosuid,nodev
+/ctx/home/1000/agent/executor	/home/agent	rw	rbind,nosuid,nodev
 /home/me/project	/work	rw	rbind,nosuid,nodev
 /ctx/shared/project-a	/shared/project-a	rw	rbind,nosuid,nodev
 /tmp	/tmp	rw	rbind,nosuid,nodev
@@ -308,13 +308,13 @@ noexec
 
 ```text
 agent:architect
-agent:coder
+agent:executor
 ```
 
 如需可写为：
 
 ```text
-agent:coder session:default run:01H...
+agent:executor session:default run:01H...
 ```
 
 不要把 lineage 变成单独目录树。
@@ -360,7 +360,7 @@ CTX_PATH 搜索顺序
 CortexFS 安全上下文来自稳定 agent control：
 
 ```text
-agent label subject，例如 coder_t
+agent label subject，例如 executor_t
 agent/<name>.d/policy
 tool/<tool>.d/policy
 shared/session/mount policy（相关时）
@@ -410,12 +410,12 @@ parent hidden 不能变成 child visible
 
 子 mount 不得暴露父不可见路径。例如父 agent 可见 `/work` 和 `/shared/project-a`，可授予子代理只读视图，但不能授予 `/home/user`、`/etc`、`/var/log` 或 `/shared/project-b`，除非 supervisor 显式授权。
 
-当父对象死亡时，owned 子 agent 会被取消。父死亡会取消子运行时，但不应清理子会话历史。详细继承与结果处理参见 [ctx-coreutils.md](ctx-coreutils.md#core-commands)。
+当父对象死亡时，owned 子 agent 会被取消。父死亡会取消子运行时，但不应清理子会话历史。详细继承与结果处理参见 [ctx-coreutils.md](ctx-coreutils.md#核心命令)。
 
 名称建议保持短：
 
 ```text
-coder
+executor
 reviewer
 planner
 runner

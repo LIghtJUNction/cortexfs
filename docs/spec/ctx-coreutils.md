@@ -33,14 +33,14 @@ ctx ls home
 ctx ls shared/project-a
 
 ctx which model openai/gpt-5.6
-ctx which agent coder
+ctx which agent executor
 ctx which tool fs.read
 
 ctx path shared project-a
-ctx agent history coder
-ctx agent output coder
-ctx agent resume coder --session default
-ctx agent wait coder work-123 --session default
+ctx agent history executor
+ctx agent output executor
+ctx agent resume executor --session default
+ctx agent wait executor work-123 --session default
 
 ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
@@ -52,24 +52,24 @@ ctx agent ps
 ctx agent chat reviewer
 ctx agent send reviewer --approve example.echo "run the declared echo tool"
 
-ctx terminal create coder [--session default] [--cwd /workspace]
+ctx terminal create executor [--session default] [--cwd /workspace]
 ctx terminal list
-ctx terminal status terminal-coder-default
-ctx terminal watch terminal-coder-default
-ctx terminal attach terminal-coder-default
+ctx terminal status terminal-executor-default
+ctx terminal watch terminal-executor-default
+ctx terminal attach terminal-executor-default
 
 ctx provider auth methods PROVIDER
 
-ctx cat agent/coder.d/policy
-ctx set agent/coder.d/cwd /work
-ctx append agent/coder.d/path /ctx/tool
-ctx file agent/coder.d/mount
+ctx cat agent/executor.d/policy
+ctx set agent/executor.d/cwd /work
+ctx append agent/executor.d/path /ctx/tool
+ctx file agent/executor.d/mount
 ctx file type tool/fs.read
-ctx file check agent/coder.d/mount
-ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
-ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
+ctx file check agent/executor.d/mount
+ctx schedule status home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/executor/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/executor/session/default/context/plan.json work-123 done "implemented"
 
 ctx object check tool.yaml
 ctx object install --source /var/lib/cortexfs/storage/current tool.yaml --tier system
@@ -80,7 +80,7 @@ ctx object uninstall --source /var/lib/cortexfs/storage/current tool example.ech
 ctx object residue audit --source /var/lib/cortexfs/storage/current
 ctx object residue cleanup --source /var/lib/cortexfs/storage/current --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
 
-ctx validate-name coder
+ctx validate-name executor
 ctx doctor
 ```
 
@@ -109,11 +109,12 @@ ctx bootstrap --check [SOURCE]     report tree_version, missing agents, retired 
 ctx bootstrap --dry-run [SOURCE]   show ordered migrations and reconcile/state actions (no writes)
 ```
 
-Default bootstrap materializes `architect` / `coder` / `reviewer` / `worker`, writes
+Default bootstrap materializes `architect` / `executor` / `product-manager`, writes
 `bin/cortexfs.bootstrap.json` (`schema`, `tree_version`, `managed_agents`,
-`applied_migrations`) only when state differs. Retired `base` / `executor`
-objects are reported and retained for manual review because legacy
-trees have no manifest proving ownership and full control-tree integrity.
+`applied_migrations`) only when state differs. Retired `base` / `coder` /
+`reviewer` / `worker` objects are reported and retained for manual review
+because legacy trees have no manifest proving ownership and full control-tree
+integrity.
 Session history under `home/` is never deleted by bootstrap.
 
 Top-level agent session shortcuts follow the same current-session default as
@@ -406,13 +407,13 @@ writing `agent/<name>.d/*` controls and `home/<uid>/agent/<name>/` skeleton
 directories; this fallback is a supervisor operation, not an agent policy
 grant. `ctx agent new --temp` records `life=temp` in either path. `--parent`
 records the ordinary `agent/<name>.d/parent` control value, such as
-`agent:coder session:default run:r1`, so a created worker child has a
+`agent:executor session:default run:r1`, so a created worker child has a
 wait/stop-visible parent without adding a separate process table.
 
 Creation derives `agent/<name>.d/perm` from the requested core tools; installed
 legacy manifests without this control default to `rwx` for compatibility. Use
 ordinary Unix inspection and mutation on the marker, for example
-`ls -l /ctx/agent/coder.d/perm` and `chmod 500 /ctx/agent/coder.d/perm`.
+`ls -l /ctx/agent/executor.d/perm` and `chmod 500 /ctx/agent/executor.d/perm`.
 
 `--from` accepts a host-side `agent.yaml` file, a directory containing one,
 or a short profile name. New/apply validates profile fields before materializing
@@ -621,14 +622,14 @@ Examples:
 ctx ls agent
 ctx cat model/openai/gpt-5.6.d/cap
 ctx file type tool/fs.read
-ctx exec agent/coder "fix tests"
+ctx exec agent/executor "fix tests"
 ```
 
 Object strings use ABI path form:
 
 ```text
 model/openai/gpt-5.6
-agent/coder
+agent/executor
 tool/fs.read
 ```
 
@@ -644,7 +645,7 @@ registry, or daemon catalog.
 
 ```text
 ctx which model openai/gpt-5.6
-ctx which agent coder
+ctx which agent executor
 ctx which tool fs.read
 ```
 
@@ -733,10 +734,10 @@ session behavior belongs to `--session` omission.
 Examples:
 
 ```text
-ctx agent history coder
-ctx agent output coder
-ctx agent trajectory coder
-ctx agent resume coder --session default
+ctx agent history executor
+ctx agent output executor
+ctx agent trajectory executor
+ctx agent resume executor --session default
 ```
 
 These commands read:

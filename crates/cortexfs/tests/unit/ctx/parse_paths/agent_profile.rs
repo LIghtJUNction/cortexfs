@@ -225,11 +225,11 @@ fn agent_new_from_profile_rejects_control_characters_in_mount_paths() {
 fn agent_new_from_profile_cli_overrides_model() {
     let root = clean_test_dir("ctx-agent-new-from-profile-override");
     assert!(fs::create_dir_all(&root).is_ok());
-    let profile_path = root.join("coder.yaml");
+    let profile_path = root.join("executor.yaml");
     assert!(fs::write(
         &profile_path,
         "\
-name: coder
+name: executor
 model: openai/gpt-5.6
 instructions: from profile
 ",
@@ -239,7 +239,7 @@ instructions: from profile
     let command = parse_command(vec![
         "agent".to_owned(),
         "new".to_owned(),
-        "coder".to_owned(),
+        "executor".to_owned(),
         "--from".to_owned(),
         profile_path.to_string_lossy().into_owned(),
         "--model".to_owned(),
@@ -253,7 +253,7 @@ instructions: from profile
     assert_eq!(args.instructions.as_deref(), Some("from profile"));
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
     assert_eq!(
-        fs::read_to_string(root.join("agent/coder.d/model")).unwrap_or_default(),
+        fs::read_to_string(root.join("agent/executor.d/model")).unwrap_or_default(),
         "openai/gpt-5.6\n"
     );
 }
@@ -265,7 +265,7 @@ fn agent_apply_updates_existing_controls() {
     let create = cmd!(
         "agent",
         "new",
-        "coder",
+        "executor",
         "--parent",
         "agent:architect",
         "--model",
@@ -281,7 +281,7 @@ fn agent_apply_updates_existing_controls() {
     assert!(fs::write(
         &profile_path,
         "\
-name: coder
+name: executor
 description: updated
 instructions: New persona.
 model: openai/gpt-5.6
@@ -292,18 +292,18 @@ tools:
     .is_ok());
 
     assert_eq!(
-        agent_apply(&root, "coder", &profile_path),
+        agent_apply(&root, "executor", &profile_path),
         Ok(ExitCode::SUCCESS)
     );
     assert_eq!(
-        fs::read_to_string(root.join("agent/coder.d/system.md")).unwrap_or_default(),
+        fs::read_to_string(root.join("agent/executor.d/system.md")).unwrap_or_default(),
         "New persona.\n"
     );
     assert_eq!(
-        fs::read_to_string(root.join("agent/coder.d/model")).unwrap_or_default(),
+        fs::read_to_string(root.join("agent/executor.d/model")).unwrap_or_default(),
         "openai/gpt-5.6\n"
     );
-    let policy = fs::read_to_string(root.join("agent/coder.d/policy")).unwrap_or_default();
+    let policy = fs::read_to_string(root.join("agent/executor.d/policy")).unwrap_or_default();
     assert!(policy.contains("model:openai/gpt-5.6"));
     assert!(policy.contains("tool:fs.read"));
 }
@@ -313,12 +313,12 @@ fn agent_apply_creates_missing_optional_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-missing-optional");
     assert!(fs::create_dir_all(&root).is_ok());
     let Ok(Command::Agent(AgentArgs::New(args))) =
-        cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6")
+        cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6")
     else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     assert!(fs::remove_file(control.join("system.md")).is_ok());
     assert!(fs::remove_file(control.join("meta.json")).is_ok());
     let profile_path = root.join("missing-optional.yaml");
@@ -329,7 +329,7 @@ fn agent_apply_creates_missing_optional_controls() {
     .is_ok());
 
     assert_eq!(
-        agent_apply(&root, "coder", &profile_path),
+        agent_apply(&root, "executor", &profile_path),
         Ok(ExitCode::SUCCESS)
     );
     let system_path = control.join("system.md");
@@ -368,7 +368,7 @@ fn agent_apply_preserves_controls_omitted_from_profile() {
     let create = cmd!(
         "agent",
         "new",
-        "coder",
+        "executor",
         "--model",
         "openai/gpt-5.6"
     );
@@ -378,7 +378,7 @@ fn agent_apply_preserves_controls_omitted_from_profile() {
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
 
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     assert!(fs::write(control.join("meta.json"), "{\"description\":\"original\"}\n").is_ok());
     let original_model = fs::read_to_string(control.join("model")).unwrap_or_default();
     let original_meta = fs::read_to_string(control.join("meta.json")).unwrap_or_default();
@@ -387,7 +387,7 @@ fn agent_apply_preserves_controls_omitted_from_profile() {
     assert!(fs::write(&profile_path, "instructions: Updated persona.\n").is_ok());
 
     assert_eq!(
-        agent_apply(&root, "coder", &profile_path),
+        agent_apply(&root, "executor", &profile_path),
         Ok(ExitCode::SUCCESS)
     );
     assert_eq!(
@@ -411,18 +411,18 @@ fn agent_apply_tools_failure_rolls_back_matching_policy_receipt() {
     let root = clean_test_dir("ctx-agent-apply-tools-failure");
     assert!(fs::create_dir_all(&root).is_ok());
     let Ok(Command::Agent(AgentArgs::New(args))) =
-        cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6")
+        cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6")
     else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let old_policy = fs::read_to_string(control.join("policy")).unwrap_or_default();
     let old_tools = fs::read_to_string(control.join("tools")).unwrap_or_default();
     let profile = root.join("tools-failure.yaml");
     assert!(fs::write(&profile, "tools:\n  - fs.read\n").is_ok());
     set_profile_tools_policy_fault(1);
-    assert!(agent_apply(&root, "coder", &profile).is_err());
+    assert!(agent_apply(&root, "executor", &profile).is_err());
     assert_eq!(fs::read_to_string(control.join("policy")).unwrap_or_default(), old_policy);
     assert_eq!(fs::read_to_string(control.join("tools")).unwrap_or_default(), old_tools);
 }
@@ -432,17 +432,17 @@ fn agent_apply_tools_race_never_overwrites_foreign_policy() {
     let root = clean_test_dir("ctx-agent-apply-tools-race");
     assert!(fs::create_dir_all(&root).is_ok());
     let Ok(Command::Agent(AgentArgs::New(args))) =
-        cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6")
+        cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6")
     else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let old_tools = fs::read_to_string(control.join("tools")).unwrap_or_default();
     let profile = root.join("tools-race.yaml");
     assert!(fs::write(&profile, "tools:\n  - fs.read\n").is_ok());
     set_profile_tools_policy_fault(2);
-    assert!(agent_apply(&root, "coder", &profile).is_err());
+    assert!(agent_apply(&root, "executor", &profile).is_err());
     assert_eq!(fs::read_to_string(control.join("policy")).unwrap_or_default(), "foreign policy\n");
     assert_eq!(fs::read_to_string(control.join("tools")).unwrap_or_default(), old_tools);
 }
@@ -454,11 +454,11 @@ fn agent_apply_rejects_symlinked_control_directory_without_external_write() {
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
     assert!(fs::create_dir_all(&external).is_ok());
     assert!(fs::write(external.join("system.md"), "external\n").is_ok());
-    assert!(symlink(&external, root.join("agent/coder.d")).is_ok());
+    assert!(symlink(&external, root.join("agent/executor.d")).is_ok());
     let profile_path = root.join("update.yaml");
     assert!(fs::write(&profile_path, "instructions: changed\n").is_ok());
 
-    assert!(agent_apply(&root, "coder", &profile_path).is_err());
+    assert!(agent_apply(&root, "executor", &profile_path).is_err());
     assert_eq!(
         fs::read_to_string(external.join("system.md")).unwrap_or_default(),
         "external\n"
@@ -469,12 +469,12 @@ fn agent_apply_rejects_symlinked_control_directory_without_external_write() {
 fn agent_apply_invalid_model_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-invalid-model");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
+    let create = cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let before = agent_apply_control_snapshot(&control);
     let profile_path = root.join("invalid-model.yaml");
     assert!(fs::write(
@@ -483,7 +483,7 @@ fn agent_apply_invalid_model_does_not_change_controls() {
     )
     .is_ok());
 
-    assert!(agent_apply(&root, "coder", &profile_path).is_err());
+    assert!(agent_apply(&root, "executor", &profile_path).is_err());
     assert_eq!(agent_apply_control_snapshot(&control), before);
 }
 
@@ -491,12 +491,12 @@ fn agent_apply_invalid_model_does_not_change_controls() {
 fn agent_apply_invalid_mount_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-invalid-mount");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
+    let create = cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let before = agent_apply_control_snapshot(&control);
     let profile_path = root.join("invalid-mount.yaml");
     assert!(fs::write(
@@ -505,7 +505,7 @@ fn agent_apply_invalid_mount_does_not_change_controls() {
     )
     .is_ok());
 
-    assert!(agent_apply(&root, "coder", &profile_path).is_err());
+    assert!(agent_apply(&root, "executor", &profile_path).is_err());
     assert_eq!(agent_apply_control_snapshot(&control), before);
 }
 
@@ -513,12 +513,12 @@ fn agent_apply_invalid_mount_does_not_change_controls() {
 fn agent_apply_protected_mount_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-protected-mount");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
+    let create = cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let before = agent_apply_control_snapshot(&control);
     let profile_path = root.join("protected-mount.yaml");
     assert!(fs::write(
@@ -527,7 +527,7 @@ fn agent_apply_protected_mount_does_not_change_controls() {
     )
     .is_ok());
 
-    assert!(agent_apply(&root, "coder", &profile_path).is_err());
+    assert!(agent_apply(&root, "executor", &profile_path).is_err());
     assert_eq!(agent_apply_control_snapshot(&control), before);
 }
 
@@ -535,12 +535,12 @@ fn agent_apply_protected_mount_does_not_change_controls() {
 fn agent_apply_merges_meta_and_preserves_unknown_keys() {
     let root = clean_test_dir("ctx-agent-apply-profile-meta-merge");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
+    let create = cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let meta_path = root.join("agent/coder.d/meta.json");
+    let meta_path = root.join("agent/executor.d/meta.json");
     assert!(fs::write(
         &meta_path,
         r#"{"description":"old","source":"manual","unknown":{"keep":true}}"#
@@ -554,7 +554,7 @@ fn agent_apply_merges_meta_and_preserves_unknown_keys() {
     assert!(fs::write(&profile_path, "description: updated\n").is_ok());
 
     assert_eq!(
-        agent_apply(&root, "coder", &profile_path),
+        agent_apply(&root, "executor", &profile_path),
         Ok(ExitCode::SUCCESS)
     );
     let meta: serde_json::Value =
@@ -582,12 +582,12 @@ fn agent_apply_merges_meta_and_preserves_unknown_keys() {
 fn agent_apply_invalid_meta_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-invalid-meta");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
+    let create = cmd!("agent", "new", "executor", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     assert!(fs::write(control.join("meta.json"), "not-json\n").is_ok());
     let before = agent_apply_control_snapshot(&control);
     let profile_path = root.join("invalid-meta.yaml");
@@ -597,7 +597,7 @@ fn agent_apply_invalid_meta_does_not_change_controls() {
     )
     .is_ok());
 
-    assert!(agent_apply(&root, "coder", &profile_path).is_err());
+    assert!(agent_apply(&root, "executor", &profile_path).is_err());
     assert_eq!(agent_apply_control_snapshot(&control), before);
 }
 

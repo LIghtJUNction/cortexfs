@@ -281,7 +281,7 @@ fn event_stream_rejects_invalid_approval_frames() {
 #[test]
 fn event_stream_accepts_child_lifecycle_frames() {
     let report = inspect_event_stream_jsonl(
-        r#"{"type":"agent.child.cancel","parent":"coder","child":"rev-123","reason":"parent_dead"}
+        r#"{"type":"agent.child.cancel","parent":"executor","child":"rev-123","reason":"parent_dead"}
 {"type":"agent.stop","agent":"rev-123","status":"cancelled"}
 "#,
     );

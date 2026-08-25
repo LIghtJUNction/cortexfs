@@ -13,8 +13,8 @@ fn shared_access_authority_requires_mount_linux_permission_and_policy() {
         "ro",
         "bind,nosuid,nodev,noexec",
     );
-    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-    let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+    let policy = allow_shared_policy("executor_t", "project-a", SharedAccess::Read);
+    let authority = SharedAccessAuthority::new(&identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
@@ -33,8 +33,8 @@ fn shared_access_authority_denies_write_on_read_only_mount() {
     let identity = ok!(unix_identity_for(&file));
     let mounts =
         mount_table_for_source_target("/ctx/shared/project-a", &shared, "ro", "bind,nosuid,nodev");
-    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Write);
-    let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+    let policy = allow_shared_policy("executor_t", "project-a", SharedAccess::Write);
+    let authority = SharedAccessAuthority::new(&identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_shared_access("project-a", &file, SharedAccess::Write, authority),
@@ -58,14 +58,14 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
         mount_table_for_source_target("/ctx/shared/project-b", &shared, "ro", "bind,nosuid,nodev");
     let empty_policy = PolicyV0::parse("");
     let empty_policy = ok!(empty_policy);
-    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
+    let policy = allow_shared_policy("executor_t", "project-a", SharedAccess::Read);
 
     assert_eq!(
         authorize_shared_access(
             "project-a",
             &file,
             SharedAccess::Read,
-            SharedAccessAuthority::new(&identity, &mounts, "coder_t", &empty_policy),
+            SharedAccessAuthority::new(&identity, &mounts, "executor_t", &empty_policy),
         ),
         Err(SharedAccessDenial::Policy)
     );
@@ -74,7 +74,7 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
             "project-a",
             &file,
             SharedAccess::Read,
-            SharedAccessAuthority::new(&identity, &wrong_mounts, "coder_t", &policy),
+            SharedAccessAuthority::new(&identity, &wrong_mounts, "executor_t", &policy),
         ),
         Err(SharedAccessDenial::WrongSharedPath)
     );
@@ -83,7 +83,7 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
             "project-a",
             &file,
             SharedAccess::Read,
-            SharedAccessAuthority::new(&identity, &MountTable::default(), "coder_t", &policy,),
+            SharedAccessAuthority::new(&identity, &MountTable::default(), "executor_t", &policy,),
         ),
         Err(SharedAccessDenial::NotMounted)
     );
@@ -106,8 +106,8 @@ fn shared_access_authority_checks_linux_mode_bits() {
     );
     let mounts =
         mount_table_for_source_target("/ctx/shared/project-a", &shared, "ro", "bind,nosuid,nodev");
-    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-    let authority = SharedAccessAuthority::new(&other_identity, &mounts, "coder_t", &policy);
+    let policy = allow_shared_policy("executor_t", "project-a", SharedAccess::Read);
+    let authority = SharedAccessAuthority::new(&other_identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_shared_access("project-a", &file, SharedAccess::Read, authority),

@@ -156,7 +156,7 @@ mod adapter_tests {
         assert_eq!(
             ctxchat_args(
                 Path::new("/ctx"),
-                "coder",
+                "executor",
                 "work",
                 true,
                 &["example.echo".to_owned(), "fs.read".to_owned()],
@@ -164,7 +164,7 @@ mod adapter_tests {
             [
                 "--root",
                 "/ctx",
-                "coder",
+                "executor",
                 "--session",
                 "work",
                 "--raw",

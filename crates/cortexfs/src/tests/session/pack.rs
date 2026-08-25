@@ -3,7 +3,7 @@ fn context_pack_sources_are_session_relative_and_inspectable() {
     let report = crate::inspect_context_pack_json(
         r#"{
   "session": "default",
-  "agent": "coder",
+  "agent": "executor",
   "items": [
 {"kind": "summary", "source": "context/summary.md"},
 {"kind": "messages", "source": "messages.jsonl"},

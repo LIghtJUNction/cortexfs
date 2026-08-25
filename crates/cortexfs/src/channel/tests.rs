@@ -78,7 +78,7 @@ fn bridge_reuses_socket_sessions_and_returns_assistant_text()
     });
     let bridge = AgentChannelBridge::new_with_channel(
         socket,
-        ChannelSessionRoute::new("coder", "im")?,
+        ChannelSessionRoute::new("executor", "im")?,
         None,
         ChannelId::new("telegram.primary")?,
     );
@@ -124,7 +124,7 @@ fn bridge_forwards_stream_events_to_progress_sink() -> Result<(), Box<dyn std::e
             b"{\"type\":\"delta\",\"text\":\"pong\"}\n{\"type\":\"done\",\"status\":\"ok\"}\n",
         )
     });
-    let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("coder", "im")?, None);
+    let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("executor", "im")?, None);
     let inbound = InboundMessage {
         id: "message-2".to_owned(),
         target: MessageTarget {
@@ -164,7 +164,7 @@ fn bridge_returns_safe_progress_error_without_provider_details()
             b"{\"type\":\"delta\",\"text\":\"sensitive partial output\"}\n{\"type\":\"error\",\"recoverable\":false,\"message\":\"sk-secret-provider-detail\"}\n{\"type\":\"done\",\"status\":\"error\"}\n",
         )
     });
-    let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("coder", "im")?, None);
+    let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("executor", "im")?, None);
     let inbound = InboundMessage {
         id: "message-3".to_owned(),
         target: MessageTarget {
@@ -208,8 +208,11 @@ fn driver_streams_effects_before_final_delivery() -> Result<(), Box<dyn std::err
             b"{\"type\":\"delta\",\"run\":\"run-1\",\"text\":\"pong\"}\n{\"type\":\"done\",\"run\":\"run-1\",\"status\":\"ok\"}\n",
         )
     });
-    let bridge =
-        AgentChannelBridge::new(agent_socket, ChannelSessionRoute::new("coder", "im")?, None);
+    let bridge = AgentChannelBridge::new(
+        agent_socket,
+        ChannelSessionRoute::new("executor", "im")?,
+        None,
+    );
     let channel = ChannelId::new("telegram")?;
     let config = DriverConfig {
         socket: root.path().join("channel.sock"),
@@ -301,7 +304,7 @@ fn driver_routes_non_message_event_with_structured_payload()
         channel,
         bridge: AgentChannelBridge::new(
             agent_socket,
-            ChannelSessionRoute::new("coder", "im")?,
+            ChannelSessionRoute::new("executor", "im")?,
             None,
         ),
         hub: DriverHub::default(),
@@ -382,7 +385,7 @@ fn driver_round_trips_runtime_command_on_the_channel_socket()
         thread: None,
         reply_to: None,
     };
-    let route = ChannelSessionRoute::new("coder", "im")?;
+    let route = ChannelSessionRoute::new("executor", "im")?;
     let bridge = AgentChannelBridge::new(agent_socket, route.clone(), None);
     let config = DriverConfig {
         socket: root.path().join("channel.sock"),
@@ -451,7 +454,7 @@ fn driver_accepts_unsolicited_status_and_receipt_frames() -> Result<(), Box<dyn 
         channel: channel.clone(),
         bridge: AgentChannelBridge::new(
             root.path().join("agent.sock"),
-            ChannelSessionRoute::new("coder", "im")?,
+            ChannelSessionRoute::new("executor", "im")?,
             None,
         ),
         hub: DriverHub::default(),
@@ -500,7 +503,7 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
     let hub = DriverHub::default();
     let bridge = AgentChannelBridge::new(
         root.path().join("agent.sock"),
-        ChannelSessionRoute::new("coder", "im")?,
+        ChannelSessionRoute::new("executor", "im")?,
         None,
     );
     let adapter_config = DriverConfig {
@@ -598,7 +601,7 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
 fn bridge_answers_slash_help_without_an_agent_socket() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = AgentChannelBridge::new(
         "/tmp/missing-agent.sock",
-        ChannelSessionRoute::new("coder", "im")?,
+        ChannelSessionRoute::new("executor", "im")?,
         None,
     );
     let reply = bridge.handle(InboundMessage {
@@ -624,7 +627,7 @@ fn bridge_answers_slash_help_without_an_agent_socket() -> Result<(), Box<dyn std
 fn slash_new_rotates_the_derived_session() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = AgentChannelBridge::new(
         "/tmp/missing-agent.sock",
-        ChannelSessionRoute::new("coder", "im")?,
+        ChannelSessionRoute::new("executor", "im")?,
         None,
     );
     let inbound = InboundMessage {

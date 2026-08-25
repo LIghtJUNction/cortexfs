@@ -7,7 +7,7 @@ use std::time::Duration;
 fn session_gc_storage_root_is_pinned_across_current_switch() {
     let root = clean_test_dir("session-gc-current-pin");
     let generations = root.join("generations");
-    let relative = Path::new("home/1000/agent/coder/session");
+    let relative = Path::new("home/1000/agent/executor/session");
     for generation in ["old", "new"] {
         assert!(fs::create_dir_all(generations.join(generation).join(relative)).is_ok());
     }
@@ -24,11 +24,11 @@ fn session_gc_storage_root_is_pinned_across_current_switch() {
     assert!(pinned.is_some());
     let archive = pinned
         .as_deref()
-        .map(|path| gc_archive_agent_root(path, "coder", None));
+        .map(|path| gc_archive_agent_root(path, "executor", None));
     assert_eq!(
         archive,
         Some(Ok(generations
-            .join("old/home/1000/archived_sessions/coder")))
+            .join("old/home/1000/archived_sessions/executor")))
     );
 }
 
@@ -38,7 +38,7 @@ fn create_agent_session_gc_fixture(root: &Path) -> PathBuf {
     let session_root = home
         .unwrap_or_else(|_| root.join("home/0"))
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session");
     for directory in ["index/by-cwd", "index/by-hash", "index/by-uuid"] {
         assert!(fs::create_dir_all(session_root.join(directory)).is_ok());
@@ -71,7 +71,7 @@ fn agent_session_gc_args(
     keep: &[&str],
 ) -> AgentSessionGcArgs {
     AgentSessionGcArgs {
-        name: "coder".to_owned(),
+        name: "executor".to_owned(),
         dry_run: !yes,
         yes,
         delete,
@@ -92,7 +92,7 @@ fn fixture_archive_root(session_root: &Path) -> PathBuf {
         .and_then(Path::parent)
         .and_then(Path::parent)
         .unwrap_or(session_root)
-        .join("archived_sessions/coder")
+        .join("archived_sessions/executor")
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn parses_agent_session_gc_delete_command() {
         "agent",
         "session",
         "gc",
-        "coder",
+        "executor",
         "--match",
         "e2e-*",
         "--keep",
@@ -123,7 +123,7 @@ fn parses_agent_session_gc_delete_command() {
             ref keep,
             ref patterns,
             older_than_days: Some(7),
-        }))) if name == "coder"
+        }))) if name == "executor"
             && keep == &vec!["keep-me".to_owned()]
             && patterns == &vec!["e2e-*".to_owned()]
     ));
@@ -136,7 +136,7 @@ fn parses_agent_session_archive_command() {
         "agent",
         "session",
         "archive",
-        "coder",
+        "executor",
         "release-run",
         "--archive-dir",
         "/tmp/cortexfs-archive"
@@ -148,7 +148,7 @@ fn parses_agent_session_archive_command() {
             ref name,
             ref session,
             archive_dir: Some(ref archive_dir),
-        }))) if name == "coder"
+        }))) if name == "executor"
             && session == "release-run"
             && archive_dir == &PathBuf::from("/tmp/cortexfs-archive")
     ));
@@ -158,11 +158,11 @@ fn parses_agent_session_archive_command() {
 /// Rejects archive roots that are ambiguous or incompatible with delete mode.
 fn rejects_invalid_session_archive_options() {
     assert!(matches!(
-        cmd!("agent", "session", "archive", "coder", "run", "--archive-dir", "relative"),
+        cmd!("agent", "session", "archive", "executor", "run", "--archive-dir", "relative"),
         Err(ref error) if error.code == 2 && error.message.contains("absolute")
     ));
     assert!(matches!(
-        cmd!("agent", "session", "gc", "coder", "--delete", "--archive-dir", "/tmp/archive"),
+        cmd!("agent", "session", "gc", "executor", "--delete", "--archive-dir", "/tmp/archive"),
         Err(ref error) if error.code == 2 && error.message.contains("cannot be used")
     ));
 }
@@ -194,20 +194,20 @@ fn parses_agent_session_archive_help_topics() {
 
 #[test]
 fn parses_and_applies_agent_session_select_compare_and_swap() {
-    let command = cmd!("agent", "session", "select", "coder", "default", "--from", "current");
+    let command = cmd!("agent", "session", "select", "executor", "default", "--from", "current");
     assert!(matches!(
         command,
         Ok(Command::Agent(AgentArgs::SessionSelect {
             ref name,
             ref target,
             ref from,
-        })) if name == "coder" && target == "default" && from == "current"
+        })) if name == "executor" && target == "default" && from == "current"
     ));
 
     let root = clean_test_dir("ctx-agent-session-select");
     let session_root = create_agent_session_gc_fixture(&root);
     let list = fs::read_to_string(session_root.join("index/list")).unwrap_or_default();
-    assert!(agent_session_select(&root, "coder", "default", "current").is_ok());
+    assert!(agent_session_select(&root, "executor", "default", "current").is_ok());
     assert_eq!(
         fs::read_to_string(session_root.join("index/current")).ok().as_deref(),
         Some("default\n")
@@ -216,8 +216,8 @@ fn parses_and_applies_agent_session_select_compare_and_swap() {
         fs::read_to_string(session_root.join("index/list")).unwrap_or_default(),
         list
     );
-    assert!(agent_session_select(&root, "coder", "current", "current").is_err());
-    assert!(agent_session_select(&root, "coder", "missing", "default").is_err());
+    assert!(agent_session_select(&root, "executor", "current", "current").is_err());
+    assert!(agent_session_select(&root, "executor", "missing", "default").is_err());
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn agent_session_gc_and_select_share_index_guard() {
     let select_root = root.to_path_buf();
     let (sent, received) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || {
-        let result = agent_session_select(&select_root, "coder", "default", "current");
+        let result = agent_session_select(&select_root, "executor", "default", "current");
         let _ignored = sent.send(result);
     });
     assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
@@ -264,7 +264,7 @@ fn benchmark_like_secondary_index_create_and_gc_repeats_twice() {
             Ok(())
         );
         assert!(secondary.is_file());
-        assert!(agent_session_select(&root, "coder", "default", "e2e-cycle").is_ok());
+        assert!(agent_session_select(&root, "executor", "default", "e2e-cycle").is_ok());
         let args = agent_session_gc_args(true, true, &["e2e-cycle"], &[]);
         assert!(agent_session_gc(&root, &args).is_ok());
         assert!(!session_root.join("e2e-cycle").exists());
@@ -326,7 +326,7 @@ fn agent_session_archive_uses_default_destination() {
     let session_root = create_agent_session_gc_fixture(&root);
     assert!(fs::write(session_root.join("manual/events.jsonl"), "raw-event\n").is_ok());
     let args = AgentSessionArchiveArgs {
-        name: "coder".to_owned(),
+        name: "executor".to_owned(),
         session: "manual".to_owned(),
         archive_dir: None,
     };
@@ -349,13 +349,13 @@ fn agent_session_archive_uses_custom_destination() {
     let session_root = create_agent_session_gc_fixture(&root);
     let archive = root.join("external-archive");
     let args = AgentSessionArchiveArgs {
-        name: "coder".to_owned(),
+        name: "executor".to_owned(),
         session: "manual".to_owned(),
         archive_dir: Some(archive.clone()),
     };
 
     assert!(agent_session_archive(&root, &args).is_ok());
-    assert!(archive.join("coder/manual").is_dir());
+    assert!(archive.join("executor/manual").is_dir());
     assert!(!session_root.join("manual").exists());
 }
 
@@ -369,7 +369,7 @@ fn agent_session_gc_uses_custom_destination() {
     args.archive_dir = Some(archive.clone());
 
     assert!(agent_session_gc(&root, &args).is_ok());
-    assert!(archive.join("coder/e2e-old").is_dir());
+    assert!(archive.join("executor/e2e-old").is_dir());
     assert!(!session_root.join("e2e-old").exists());
 }
 
@@ -382,7 +382,7 @@ fn agent_session_archive_refuses_current_default_and_active() {
 
     for session in ["default", "current", "manual"] {
         let args = AgentSessionArchiveArgs {
-            name: "coder".to_owned(),
+            name: "executor".to_owned(),
             session: session.to_owned(),
             archive_dir: None,
         };
@@ -402,7 +402,7 @@ fn assert_archive_overlap_refused(
     assert!(fs::write(session_root.join("manual/source"), "live\n").is_ok());
     let list = fs::read_to_string(session_root.join("index/list")).unwrap_or_default();
     let args = AgentSessionArchiveArgs {
-        name: "coder".to_owned(),
+        name: "executor".to_owned(),
         session: "manual".to_owned(),
         archive_dir: Some(archive_dir),
     };
@@ -433,7 +433,7 @@ fn agent_session_archive_rejects_equal_live_root() {
         &root,
         &session_root,
         session_root.clone(),
-        &session_root.join("coder"),
+        &session_root.join("executor"),
     );
 }
 
@@ -446,7 +446,7 @@ fn agent_session_archive_rejects_inside_live_session() {
         &root,
         &session_root,
         session_root.join("manual"),
-        &session_root.join("manual/coder"),
+        &session_root.join("manual/executor"),
     );
 }
 
@@ -477,7 +477,7 @@ fn agent_session_archive_rejects_parent_components() {
     let root = clean_test_dir("ctx-agent-session-archive-parent-component");
     let session_root = create_agent_session_gc_fixture(&root);
     let args = AgentSessionArchiveArgs {
-        name: "coder".to_owned(),
+        name: "executor".to_owned(),
         session: "manual".to_owned(),
         archive_dir: Some(root.join("archive/../elsewhere")),
     };
@@ -516,7 +516,7 @@ fn agent_session_gc_rejects_overlapping_archive_root() {
             .as_deref(),
         Some(list.as_str())
     );
-    assert!(!session_root.join("coder").exists());
+    assert!(!session_root.join("executor").exists());
 }
 
 #[test]

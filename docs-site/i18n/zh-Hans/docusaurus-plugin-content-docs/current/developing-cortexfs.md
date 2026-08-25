@@ -67,8 +67,8 @@ read xattr/stat            查看文件类型、来源、token 预估、安全�
 对图片、PDF、音频、归档及其他非文本输入，不要把字节塞进 prompt，也不要发明单独上传 API。将文件放到代理可见位置，再在对话中通过路径引用：
 
 ```bash
-ctx agent start coder --session default --mount "$PWD" /workspace rw
-ctx send coder "Analyze /workspace/assets/screenshot.png and compare it with /workspace/docs/DESIGN.md"
+ctx agent start executor --session default --mount "$PWD" /workspace rw
+ctx send executor "Analyze /workspace/assets/screenshot.png and compare it with /workspace/docs/DESIGN.md"
 ```
 
 若材料在多个代理或会话间共享，请使用共享空间：
@@ -124,10 +124,9 @@ ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
 根代理是可继承的根身份。子代理不是复制一个进程，而是缩小可见世界：
 
 ```text
-base
-├── coder
-│   └── reviewer
-└── operator
+architect
+├── executor
+└── product-manager
 ```
 
 父代理可创建子代理，但子代理的模型、工具、挂载、共享空间、uid/gid/组和策略都必须是父权限的子集。子任务交接、结果、引用与生命周期记录位于父会话下的 `context/child/<id>/`。所属子任务随父任务失效一起取消；脱离的子任务需要显式策略。

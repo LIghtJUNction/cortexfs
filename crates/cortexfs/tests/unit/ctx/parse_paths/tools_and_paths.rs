@@ -2,13 +2,13 @@
 fn bootstrap_output_lists_all_reference_agents() {
     assert_eq!(
         BOOTSTRAP_REFERENCE_AGENT_SUMMARY_LINE,
-        "agents=architect,coder,reviewer,worker"
+        "agents=architect,executor,product-manager"
     );
 }
 
 #[test]
-fn reference_bootstrap_gives_coder_source_editing_tools() {
-    let root = clean_test_dir("ctx-reference-coder-source-tools");
+fn reference_bootstrap_gives_executor_source_editing_tools() {
+    let root = clean_test_dir("ctx-reference-executor-source-tools");
 
     assert!(ensure_reference_tree(&root).is_ok());
 
@@ -21,66 +21,57 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
         );
     }
 
-    let coder_policy = fs::read_to_string(root.join("agent/coder.d/policy")).unwrap_or_default();
-    assert!(coder_policy.contains("allow coder_t tool:fs.read execute"));
-    assert!(coder_policy.contains("allow coder_t tool:fs.write execute"));
-    assert!(coder_policy.contains("allow coder_t tool:fs.replace execute"));
-    assert!(coder_policy.contains("allow coder_t tool:shell.exec execute"));
+    let executor_policy =
+        fs::read_to_string(root.join("agent/executor.d/policy")).unwrap_or_default();
+    assert!(executor_policy.contains("allow executor_t tool:fs.read execute"));
+    assert!(executor_policy.contains("allow executor_t tool:fs.write execute"));
+    assert!(executor_policy.contains("allow executor_t tool:fs.replace execute"));
+    assert!(executor_policy.contains("allow executor_t tool:shell.exec execute"));
 
-    let reviewer_policy =
-        fs::read_to_string(root.join("agent/reviewer.d/policy")).unwrap_or_default();
-    assert!(!reviewer_policy.contains("tool:fs.write execute"));
-    assert!(!reviewer_policy.contains("tool:fs.replace execute"));
-    assert!(!reviewer_policy.contains("tool:shell.exec execute"));
+    let product_policy =
+        fs::read_to_string(root.join("agent/product-manager.d/policy")).unwrap_or_default();
+    assert!(!product_policy.contains("tool:fs.write execute"));
+    assert!(!product_policy.contains("tool:fs.replace execute"));
+    assert!(!product_policy.contains("tool:shell.exec execute"));
 
-    let coder_prompt = fs::read_to_string(root.join("agent/coder.d/system.md")).unwrap_or_default();
-    assert!(coder_prompt.contains("writable project checkout mounted at `/workspace`"));
-    assert!(coder_prompt.contains("fs.write"));
-    assert!(coder_prompt.contains("fs.replace"));
-    assert!(coder_prompt.contains("shell.exec"));
-    assert!(coder_prompt.contains("do not stop at a plan"));
-    assert!(coder_prompt.contains("implement the requested change directly through `tsh`"));
-    assert!(coder_prompt.contains("formatter, static check, lint, and focused tests"));
-    assert!(coder_prompt.contains("inspect the applicable project rules"));
-    assert!(coder_prompt.contains("current workspace state"));
-    assert!(!coder_prompt.contains("git status --short"));
-    assert!(!coder_prompt.contains("find /workspace -name AGENTS.md -print"));
-    assert!(
-        coder_prompt
-            .contains("never overwrite, revert, delete, or reformat unrelated user changes")
-    );
-    assert!(coder_prompt.contains("Never run destructive git commands"));
+    let executor_prompt =
+        fs::read_to_string(root.join("agent/executor.d/system.md")).unwrap_or_default();
+    assert!(executor_prompt.contains("writable project checkout mounted at `/workspace`"));
+    assert!(executor_prompt.contains("fs.write"));
+    assert!(executor_prompt.contains("fs.replace"));
+    assert!(executor_prompt.contains("shell.exec"));
+    assert!(executor_prompt.contains("smallest atomic change"));
+    assert!(executor_prompt.contains("run focused formatter/check/lint/tests"));
+    assert!(executor_prompt.contains("Read the applicable rules"));
+    assert!(executor_prompt.contains("current workspace state"));
+    assert!(executor_prompt.contains("Do not invent a result"));
 }
 
 #[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_reference_tree(&root).is_ok());
-    let control = root.join("agent").join("coder.d");
-    assert!(
-        fs::write(
-            control.join("system.md"),
-            "Be precise.
+    let control = root.join("agent").join("executor.d");
+    assert!(fs::write(
+        control.join("system.md"),
+        "Be precise.
 "
-        )
-        .is_ok()
-    );
-    assert!(
-        fs::write(
-            control.join("prompt.template.md"),
-            "agent={{agent}}
+    )
+    .is_ok());
+    assert!(fs::write(
+        control.join("prompt.template.md"),
+        "agent={{agent}}
 time={{current_time_unix}}
 inst={{agent_instructions}}
 {{runtime_contract}}
 ",
-        )
-        .is_ok()
-    );
+    )
+    .is_ok());
 
-    let prompt = build_agent_system_prompt(&root, "coder", "123");
+    let prompt = build_agent_system_prompt(&root, "executor", "123");
     assert!(matches!(
         prompt,
-        Ok(ref prompt) if prompt.contains("agent=coder")
+        Ok(ref prompt) if prompt.contains("agent=executor")
             && prompt.contains("time=123")
             && prompt.contains("inst=Be precise.")
             && prompt.contains("`tsh` is always native")
@@ -240,13 +231,13 @@ fn parses_bootstrap_and_mount_commands() {
 
 #[test]
 fn parses_exec_command_with_arguments() {
-    let command = cmd!("exec", "agent/coder", "fix tests");
+    let command = cmd!("exec", "agent/executor", "fix tests");
     assert!(matches!(
         command,
         Ok(Command::Exec {
             ref path,
             ref args
-        }) if path == "agent/coder" && args == &["fix tests".to_owned()]
+        }) if path == "agent/executor" && args == &["fix tests".to_owned()]
     ));
 }
 

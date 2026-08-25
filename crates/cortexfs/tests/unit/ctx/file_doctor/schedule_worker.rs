@@ -2,11 +2,11 @@ const REPLACED_WORKER_PLAN: &str = r#"{
   "version": 1,
   "mode": "dag-react",
   "nodes": [
-    {"id": "local", "kind": "dag", "agent": "coder"}
+    {"id": "local", "kind": "dag", "agent": "executor"}
   ]
 }
 "#;
-const WORKER_PLAN_ABI_PATH: &str = "home/1000/agent/coder/session/default/context/plan.json";
+const WORKER_PLAN_ABI_PATH: &str = "home/1000/agent/executor/session/default/context/plan.json";
 
 fn assert_worker_claimed_active(root: &Path, child: &Path) {
     assert_eq!(schedule_claim_worker(root), Ok(()));
@@ -24,7 +24,7 @@ fn assert_worker_claimed_active(root: &Path, child: &Path) {
             .unwrap_or_default(),
         active_inode
     );
-    let active_wait = agent_wait(root, "coder", Some("default"), "work-123");
+    let active_wait = agent_wait(root, "executor", Some("default"), "work-123");
     assert!(matches!(
         active_wait,
         Err(ref error)
@@ -35,7 +35,7 @@ fn assert_worker_claimed_active(root: &Path, child: &Path) {
 }
 
 fn assert_worker_child_row_status(root: &Path, status: &str) {
-    let rows = agent_child_rows(root, "coder", Some("default"));
+    let rows = agent_child_rows(root, "executor", Some("default"));
     assert!(matches!(
         rows,
         Ok(ref rows) if rows.contains(&AgentChildRow {
@@ -167,7 +167,7 @@ fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
     create_complete_session_layout(&session);
     write_worker_schedule_plan(&session);

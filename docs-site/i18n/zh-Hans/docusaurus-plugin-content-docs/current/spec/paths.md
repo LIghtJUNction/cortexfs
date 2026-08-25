@@ -21,9 +21,9 @@ tool、home、shared 以及持久会话路径提供组合函数。`root_entry_pa
 
 | 角色 | Crate 函数 | 示例 |
 | --- | --- | --- |
-| 公共客户端 ABI | `agent_client_socket` | `/ctx/agent/coder.sock` |
-| 私有系统运行时 | `system_agent_runtime_socket` | `/run/cortexfs/agent/coder.sock` |
-| 持久 backing tree | `agent_backing_socket` | `/var/lib/cortexfs/storage/current/agent/coder.sock` |
+| 公共客户端 ABI | `agent_client_socket` | `/ctx/agent/executor.sock` |
+| 私有系统运行时 | `system_agent_runtime_socket` | `/run/cortexfs/agent/executor.sock` |
+| 持久 backing tree | `agent_backing_socket` | `/var/lib/cortexfs/storage/current/agent/executor.sock` |
 
 公共客户端路径是通道适配器契约，除非部署显式配置其他运行时合同。channel
 适配器不得从主机文件系统推断第二个 socket 路径。

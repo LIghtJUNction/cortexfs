@@ -11,9 +11,9 @@ mod tests {
     fn config() -> RunConfig {
         RunConfig {
             broker: BrokerConfig {
-                agent: "coder".into(),
+                agent: "executor".into(),
                 session: "session-1".into(),
-                unit: "cortexfs-agent-coder-session-1-terminal".into(),
+                unit: "cortexfs-agent-executor-session-1-terminal".into(),
             },
             program: OsString::from("/usr/bin/tsh"),
             args: Vec::new(),
@@ -24,7 +24,7 @@ mod tests {
     fn ctxterm_requires_broker_identity() {
         assert!(parse_args(Vec::new()).is_err());
         assert!(parse_args(["/usr/bin/tsh"].map(OsString::from).to_vec()).is_err());
-        assert!(parse_args(["--broker", "coder"].map(OsString::from).to_vec()).is_err());
+        assert!(parse_args(["--broker", "executor"].map(OsString::from).to_vec()).is_err());
     }
 
     #[test]
@@ -33,9 +33,9 @@ mod tests {
             parse_args(
                 [
                     "--broker",
-                    "coder",
+                    "executor",
                     "session-1",
-                    "cortexfs-agent-coder-session-1-terminal",
+                    "cortexfs-agent-executor-session-1-terminal",
                     "--",
                     "/usr/bin/tsh",
                     "--login",
@@ -56,7 +56,7 @@ mod tests {
         let command = pty_command_with_env(
             &config(),
             [
-                (OsString::from("CTX_AGENT"), OsString::from("coder")),
+                (OsString::from("CTX_AGENT"), OsString::from("executor")),
                 (OsString::from("HOME"), OsString::from("/home/agent")),
                 (OsString::from("PATH"), OsString::from("/tmp/evil")),
                 (OsString::from("LD_PRELOAD"), OsString::from("evil.so")),
@@ -66,7 +66,7 @@ mod tests {
             .iter_full_env_as_str()
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
             .collect::<Vec<_>>();
-        assert!(env.contains(&("CTX_AGENT".into(), "coder".into())));
+        assert!(env.contains(&("CTX_AGENT".into(), "executor".into())));
         assert!(env.contains(&("HOME".into(), "/home/agent".into())));
         assert!(env.contains(&("PATH".into(), "/usr/bin:/bin".into())));
         assert!(!env.iter().any(|entry| entry.0 == "LD_PRELOAD"));

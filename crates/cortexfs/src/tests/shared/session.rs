@@ -136,7 +136,7 @@ fn session_access_authority_enforces_private_home_uid() {
     let home = root.join("home-1000");
     let messages = home
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("default")
         .join("messages.jsonl");
@@ -148,13 +148,13 @@ fn session_access_authority_enforces_private_home_uid() {
     let other_identity = AgentUnixIdentity::new(1001, metadata.gid(), []);
     let mounts =
         mount_table_for_source_target("/ctx/home/1000", &home, "ro", "bind,nosuid,nodev,noexec");
-    let policy = policy_with_rules(["allow coder_t session:default read"]);
+    let policy = policy_with_rules(["allow executor_t session:default read"]);
 
     assert_eq!(
         authorize_session_access(
             &messages,
             SessionAccess::Read,
-            SessionAccessAuthority::new(&owner_identity, &mounts, "coder_t", &policy),
+            SessionAccessAuthority::new(&owner_identity, &mounts, "executor_t", &policy),
         ),
         Ok(())
     );
@@ -162,7 +162,7 @@ fn session_access_authority_enforces_private_home_uid() {
         authorize_session_access(
             &messages,
             SessionAccess::Read,
-            SessionAccessAuthority::new(&other_identity, &mounts, "coder_t", &policy),
+            SessionAccessAuthority::new(&other_identity, &mounts, "executor_t", &policy),
         ),
         Err(SessionAccessDenial::LinuxPermission)
     );
@@ -184,15 +184,15 @@ fn session_access_authority_rejects_unmounted_and_non_session_paths() {
         "bind,nosuid,nodev,noexec",
     );
     let policy = policy_with_rules([
-        "allow coder_t shared:project-a read",
-        "allow coder_t session:default read",
+        "allow executor_t shared:project-a read",
+        "allow executor_t session:default read",
     ]);
 
     assert_eq!(
         authorize_session_access(
             &file,
             SessionAccess::Read,
-            SessionAccessAuthority::new(&identity, &mounts, "coder_t", &policy),
+            SessionAccessAuthority::new(&identity, &mounts, "executor_t", &policy),
         ),
         Err(SessionAccessDenial::InvalidSessionPath)
     );
@@ -200,7 +200,7 @@ fn session_access_authority_rejects_unmounted_and_non_session_paths() {
         authorize_session_access(
             &file,
             SessionAccess::Read,
-            SessionAccessAuthority::new(&identity, &MountTable::default(), "coder_t", &policy),
+            SessionAccessAuthority::new(&identity, &MountTable::default(), "executor_t", &policy),
         ),
         Err(SessionAccessDenial::NotMounted)
     );

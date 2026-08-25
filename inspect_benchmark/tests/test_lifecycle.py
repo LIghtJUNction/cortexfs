@@ -272,11 +272,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(successful.runtime_success)
         self.assertIsNone(successful.error_code)
         self.assertEqual(
-            [
-                item["code"]
-                for item in successful.frames
-                if item["type"] == "error"
-            ],
+            [item["code"] for item in successful.frames if item["type"] == "error"],
             ["ERETRY", "EFALLBACK"],
         )
 
@@ -314,9 +310,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exited.error_code, "ERETRY")
         self.assertEqual(exited.error_message, "candidate failed")
 
-        timed_out = await self.run_real_agent(
-            [recoverable], delay=0.2, timeout=0.01
-        )
+        timed_out = await self.run_real_agent([recoverable], delay=0.2, timeout=0.01)
         self.assertTrue(timed_out.timed_out)
         self.assertEqual(timed_out.error_code, "ETIMEDOUT")
 
@@ -444,11 +438,13 @@ class LifecycleSystemTests(unittest.TestCase):
         with patch.object(system, "_command", side_effect=self.command_fixture()):
             health = system._preflight("ctx", ["architect", "coder"], 1)
         self.assertEqual(list(health["pings"]), ["architect", "coder"])
-        with patch.object(
-            system, "_command", side_effect=self.command_fixture("ping agent/coder")
+        with (
+            patch.object(
+                system, "_command", side_effect=self.command_fixture("ping agent/coder")
+            ),
+            self.assertRaisesRegex(ValueError, "ping"),
         ):
-            with self.assertRaisesRegex(ValueError, "ping"):
-                system._preflight("ctx", ["architect", "coder"], 1)
+            system._preflight("ctx", ["architect", "coder"], 1)
 
     def test_preflight_rejects_dirty_status_doctor_and_mount(self) -> None:
         for failure, message in (
@@ -456,12 +452,14 @@ class LifecycleSystemTests(unittest.TestCase):
             ("ctx doctor", "doctor"),
             ("findmnt", "FUSE"),
         ):
-            with self.subTest(failure=failure):
-                with patch.object(
+            with (
+                self.subTest(failure=failure),
+                patch.object(
                     system, "_command", side_effect=self.command_fixture(failure)
-                ):
-                    with self.assertRaisesRegex(ValueError, message):
-                        system._preflight("ctx", ["coder"], 1)
+                ),
+                self.assertRaisesRegex(ValueError, message),
+            ):
+                system._preflight("ctx", ["coder"], 1)
 
     def test_preflight_requires_exact_idle_first_status_line(self) -> None:
         with patch.object(
@@ -483,9 +481,9 @@ class LifecycleSystemTests(unittest.TestCase):
                     "_command",
                     side_effect=self.command_fixture(status_output=status_output),
                 ),
+                self.assertRaisesRegex(ValueError, "must begin with idle"),
             ):
-                with self.assertRaisesRegex(ValueError, "must begin with idle"):
-                    system._preflight("ctx", ["coder"], 1)
+                system._preflight("ctx", ["coder"], 1)
 
     def session_tree(self, root: Path, current: str = "default") -> Path:
         session = root / "home" / "1000" / "agent" / "coder" / "session"
@@ -632,7 +630,9 @@ class LifecycleSystemTests(unittest.TestCase):
                 self.assertEqual(invoked.call_count, 1)
                 self.assertTrue(owned.is_dir())
 
-            missing_baseline = agents.SessionBaseline("owned", True, "missing", ("default",))
+            missing_baseline = agents.SessionBaseline(
+                "owned", True, "missing", ("default",)
+            )
             with patch.object(system, "_command") as invoked:
                 receipt = system._archive_session(
                     "ctx", "coder", missing_baseline, 1, root=root, uid=1000

@@ -2,7 +2,7 @@
 fn reference_tree_bootstrap_ignores_symlink_session_meta_during_migration() {
     let root = clean_test_dir("reference-tree-session-meta-symlink");
     let outside = clean_test_dir("reference-tree-session-meta-symlink-outside");
-    let session = agent_session_root(&root, "coder").join("default");
+    let session = agent_session_root(&root, "executor").join("default");
     assert!(fs::create_dir_all(&session).is_ok());
     write_text_file(&outside.join("meta.json"), "{\"model\":\"legacy\"}\n");
     assert!(symlink(outside.join("meta.json"), session.join("meta.json")).is_ok());
@@ -47,11 +47,11 @@ fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
     let root = clean_test_dir("reference-tree-valid-model-alias");
     let user_model = ctx_home(&root).join("model");
     assert!(fs::create_dir_all(&user_model).is_ok());
-    assert!(symlink("/ctx/model/openai/gpt-5.6", user_model.join("coder")).is_ok());
+    assert!(symlink("/ctx/model/openai/gpt-5.6", user_model.join("executor")).is_ok());
 
     assert!(ensure_reference_tree(&root).is_ok());
 
-    let model_link = fs::read_link(user_model.join("coder"));
+    let model_link = fs::read_link(user_model.join("executor"));
     assert!(
         matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/openai/gpt-5.6"))
     );
@@ -81,7 +81,7 @@ fn reference_tree_bootstrap_rejects_symlink_model_alias_parent_without_writing_t
     assert!(symlink(&outside, user.join("model")).is_ok());
 
     assert!(ensure_reference_tree(&root).is_err());
-    assert!(!outside.join("coder").exists());
+    assert!(!outside.join("executor").exists());
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn root_bootstrap_chowns_reference_home_symlinks_without_following_targets() {
         .join("home")
         .join("1000")
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("pwn");
     assert!(symlink(&target, &link).is_ok());
@@ -297,16 +297,19 @@ fn root_bootstrap_assigns_reference_home_to_agent_identity() {
 
     for path in [
         root.join("home").join("1000"),
-        root.join("home").join("1000").join("agent").join("coder"),
         root.join("home")
             .join("1000")
             .join("agent")
-            .join("coder")
+            .join("executor"),
+        root.join("home")
+            .join("1000")
+            .join("agent")
+            .join("executor")
             .join("session"),
         root.join("home")
             .join("1000")
             .join("agent")
-            .join("coder")
+            .join("executor")
             .join("session")
             .join("index"),
     ] {

@@ -83,22 +83,22 @@ fn parses_agent_lifecycle_commands() {
     let ps = cmd!("agent", "ps");
     assert!(matches!(ps, Ok(Command::Agent(AgentArgs::Ps))));
 
-    let watch = cmd!("agent", "watch", "coder", "--session", "test");
+    let watch = cmd!("agent", "watch", "executor", "--session", "test");
     assert!(matches!(
         watch,
         Ok(Command::Agent(AgentArgs::Watch {
             ref name,
             session: Some(ref session)
-        })) if name == "coder" && session == "test"
+        })) if name == "executor" && session == "test"
     ));
 
-    let attach = cmd!("agent", "attach", "coder");
+    let attach = cmd!("agent", "attach", "executor");
     assert!(matches!(
         attach,
         Ok(Command::Agent(AgentArgs::Attach {
             ref name,
             session: None
-        })) if name == "coder"
+        })) if name == "executor"
     ));
 }
 
@@ -110,15 +110,15 @@ fn agent_inspect_projects_definition_instance_session_and_model() {
     ensure_runtime_model_fixture(&root);
     let session = ctx_home(&root)
         .unwrap_or_default()
-        .join("agent/coder/session/default");
+        .join("agent/executor/session/default");
     assert!(fs::create_dir_all(&session).is_ok());
     write_text_file(&session.join("state"), "idle\n");
     write_text_file(&session.join("cwd"), "/workspace\n");
 
-    let lines = agent_inspect_lines(&root, "coder", Some("default"));
+    let lines = agent_inspect_lines(&root, "executor", Some("default"));
     assert!(lines.is_ok(), "agent inspect: {lines:?}");
     let lines = lines.unwrap_or_default();
-    assert!(lines.iter().any(|line| line.ends_with("/agent/coder")));
+    assert!(lines.iter().any(|line| line.ends_with("/agent/executor")));
     assert!(lines.iter().any(|line| line == "session.state=idle"));
     assert!(lines.iter().any(|line| line == "model.name=main"));
     assert!(lines.iter().any(|line| line.starts_with("model.cap=")));
@@ -255,7 +255,7 @@ fn agent_new_request_json_accepts_explicit_parent_ref() {
         "work-123",
         "--temp",
         "--parent",
-        "agent:coder session:default run:r1",
+        "agent:executor session:default run:r1",
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -263,7 +263,7 @@ fn agent_new_request_json_accepts_explicit_parent_ref() {
     };
     assert_eq!(
         agent_new_request_json(&args),
-        Ok("{\"name\":\"work-123\",\"life\":\"temp\",\"parent\":\"agent:coder session:default run:r1\"}".to_owned())
+        Ok("{\"name\":\"work-123\",\"life\":\"temp\",\"parent\":\"agent:executor session:default run:r1\"}".to_owned())
     );
 }
 
@@ -276,7 +276,7 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
         "worker",
         "--temp",
         "--parent",
-        "agent:coder",
+        "agent:executor",
         "--label",
         "worker_t",
         "--model",
@@ -330,7 +330,7 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/parent")).unwrap_or_default(),
-        "agent:coder\n"
+        "agent:executor\n"
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/model"))
@@ -602,8 +602,8 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
     assert!(ensure_reference_tree(&source).is_ok());
     ensure_runtime_model_fixture(&source);
     let projection = clean_test_dir("agent-runtime-gate-projection");
-    let source_control = source.join("agent/coder.d");
-    let projected_control = projection.join("agent/coder.d");
+    let source_control = source.join("agent/executor.d");
+    let projected_control = projection.join("agent/executor.d");
     assert!(fs::create_dir_all(&projected_control).is_ok());
     for file in [
         "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
@@ -612,7 +612,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
         assert!(fs::copy(source_control.join(file), projected_control.join(file)).is_ok());
     }
     ensure_runtime_model_fixture(&projection);
-    let session = source.join("home/1000/agent/coder/session/runtime-test");
+    let session = source.join("home/1000/agent/executor/session/runtime-test");
     assert!(fs::create_dir_all(&session).is_ok());
     write_text_file(&session.join("current_run"), "run-1\n");
 
@@ -620,7 +620,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
         &projection,
         &source,
         &projection,
-        "coder",
+        "executor",
         "runtime-test",
         "run-1",
     ));
@@ -635,7 +635,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
         &projection,
         &source,
         &projection,
-        "coder",
+        "executor",
         "missing",
         "run-1",
     ));
@@ -643,7 +643,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
         &projection,
         &source,
         &projection,
-        "coder",
+        "executor",
         "runtime-test",
         "missing",
     ));
@@ -652,7 +652,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
         &projection,
         &source,
         &projection,
-        "coder",
+        "executor",
         "runtime-test",
         "run-1",
     ));
@@ -665,7 +665,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
                 &projection,
                 &source,
                 &projection,
-                "coder",
+                "executor",
                 "runtime-test",
                 "run-1",
             ),
@@ -677,7 +677,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
         &projection,
         &source,
         Path::new("/different-projection"),
-        "coder",
+        "executor",
         "runtime-test",
         "run-1",
     ));
@@ -706,16 +706,16 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     ensure_runtime_model_fixture(&source);
     let projection = clean_test_dir("agent-new-selection-projection");
-    let projected_control = projection.join("agent/coder.d");
+    let projected_control = projection.join("agent/executor.d");
     fs::create_dir_all(&projected_control)?;
     for file in [
         "owner", "uid", "gid", "groups", "perm", "label", "iso", "root", "cwd", "env",
         "path", "mount", "model", "policy", "parent", "life",
     ] {
-        fs::copy(source.join("agent/coder.d").join(file), projected_control.join(file))?;
+        fs::copy(source.join("agent/executor.d").join(file), projected_control.join(file))?;
     }
     ensure_runtime_model_fixture(&projection);
-    let session = source.join("home/1000/agent/coder/session/runtime-test");
+    let session = source.join("home/1000/agent/executor/session/runtime-test");
     fs::create_dir_all(&session)?;
     write_text_file(&session.join("current_run"), "run-1\n");
     let marker = projection.join("runtime-tool.marker");
@@ -742,7 +742,7 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
             .env_remove("CTX_SOURCE");
         if runtime {
             command
-                .env("CTX_AGENT", "coder")
+                .env("CTX_AGENT", "executor")
                 .env("CTX_SESSION", "runtime-test")
                 .env("CTX_RUN_ID", "run-1")
                 .env("CTX_ROOT", &projection)

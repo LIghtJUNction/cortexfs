@@ -13,6 +13,7 @@ Rust 规模统一由 `scripts/source-budget.sh` 门控：新增/变更需遵守 
 性能改动必须使用 `.agents/skills/cortexfs-performance`：先建立可复现 release 基线与噪声，收益须超过 `max(3%, 2×noise)` 且满足任务的 p95/RSS 门槛；禁止 `unsafe`、`target-cpu=native`、全局 `target-feature` 和默认 CUDA，任何可选加速都必须保留等价 CPU fallback 与缓存一致性，并由独立 reviewer 审核原始数据和 diff。
 
 去重与复用约定：
+
 - 新增或修改 Rust 逻辑前，先查已有 helper、模块和相邻实现；有 `.codegraph/` 时先用 CodeGraph 定位同义实现，再决定是否写新代码。
 - 新增函数前必须确认没有同义函数；若只是为改名、换错误包装或迁移位置而新增 helper，优先改调用点复用现有实现。
 - 不要复制一段逻辑后只改变量名、错误包装或所在模块；存在等价逻辑时优先复用，确实需要抽取时只抽窄边界 helper。
@@ -24,6 +25,8 @@ Rust 规模统一由 `scripts/source-budget.sh` 门控：新增/变更需遵守 
 - 禁止新增 `#[path]`、测试 `include!` 模块绕行、兼容模块别名、调用方/领域前缀的共享 helper `use ... as ...`、生产代码 glob import，以及只改名或透传的薄 wrapper。仅允许构建脚本生成的 `OUT_DIR` `include!`、解决 trait/type 名称冲突所必需的别名、为保持旧 flat-suite 共享夹具而冻结在 `src/tests/**` 与 `object/executor/tests/**` 内的测试父模块 glob，以及尚待独立重构且必须保持测试全名和共享词法作用域的既有 `tests/unit/ctx*` flat harness；不得扩大这些例外。
 
 测试约定：
+
+- 构建与测试必须串行：使用 `scripts/serialize-cargo.sh` 或 `scripts/test.sh`；`.cargo/config.toml` 已通过共享 `flock` 锁串行化 `rustc`。禁止同时启动多个 Cargo、Clippy 或测试命令，先等待当前命令结束。
 - FUSE 集成测试挂载点固定使用 `tests/mounts/cortexfs`。
 - 该目录只作为本地测试挂载点，不要在其中放源码、fixture 或持久化数据。
 - provider/model 设计必须保持中立；不要把 Ollama 写成核心默认路径、核心能力或特殊分支。

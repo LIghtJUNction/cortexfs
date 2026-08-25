@@ -108,7 +108,7 @@ fn rejected_agent_hook_is_streamed_as_safe_recoverable_error()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-agent-hook-error")?;
     let model = root.join("model-script");
-    let hooks = root.join("agent/coder.d/hooks/pre.d");
+    let hooks = root.join("agent/executor.d/hooks/pre.d");
     fs::create_dir_all(&hooks)?;
     write_executable_script(&hooks.join("reject"), "#!/bin/sh\nexit 7\n")?;
     write_executable_script(

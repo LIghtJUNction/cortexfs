@@ -1,7 +1,7 @@
 #[test]
 fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
     let root = clean_test_dir("reference-tree-conflict");
-    write_text_file(&root.join("agent").join("coder.sock"), "not socket\n");
+    write_text_file(&root.join("agent").join("executor.sock"), "not socket\n");
     assert!(matches!(
         ensure_reference_tree(&root),
         Err(ReferenceTreeError::CannotSocket(_))
@@ -15,13 +15,13 @@ fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
     assert!(
         symlink(
             root.join("missing-runtime.sock"),
-            root.join("agent").join("coder.sock")
+            root.join("agent").join("executor.sock")
         )
         .is_ok()
     );
 
     assert!(ensure_reference_tree(&root).is_ok());
-    let metadata = fs::symlink_metadata(root.join("agent").join("coder.sock"));
+    let metadata = fs::symlink_metadata(root.join("agent").join("executor.sock"));
     assert!(matches!(metadata, Ok(ref metadata) if metadata.file_type().is_socket()));
 }
 
@@ -32,7 +32,7 @@ fn reference_tree_bootstrap_repairs_plain_socket_placeholder_owner() {
     }
     let root = clean_test_dir("reference-tree-socket-owner-upgrade");
     assert!(ensure_reference_tree(&root).is_ok());
-    let socket = root.join("agent/coder.sock");
+    let socket = root.join("agent/executor.sock");
     assert!(
         nix::unistd::fchownat(
             nix::fcntl::AT_FDCWD,
@@ -178,13 +178,13 @@ fn reference_home_chown_repairs_plain_file_and_directory() {
 fn object_layout_accepts_model_agent_and_tool_triples() {
     let root = clean_test_dir("object-layout-ok");
     create_complete_object_layout(&root, ObjectClass::Model, "debug/echo", "socket");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "");
     create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "");
     let _model_socket = bind_socket(&root.join("model").join("debug").join("echo.sock"));
-    let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
+    let _agent_socket = bind_socket(&root.join("agent").join("executor.sock"));
 
     let model = inspect_object_layout(&root, ObjectClass::Model, "debug/echo");
-    let agent = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    let agent = inspect_object_layout(&root, ObjectClass::Agent, "executor");
     let tool = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(model.is_ok());
     assert!(agent.is_ok());
@@ -204,7 +204,7 @@ fn fuse_projection_exposes_object_hook_directories() {
             .any(|entry| entry.name() == OBJECT_HOOK_DIR)
     );
 
-    for path in ["agent/coder.d", "tool/fs.read.d"] {
+    for path in ["agent/executor.d", "tool/fs.read.d"] {
         let entries = ok!(projection.readdir(path));
         assert!(entries.iter().any(|entry| entry.name() == OBJECT_HOOK_DIR));
 
@@ -245,7 +245,7 @@ fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
         &[
             ("description", "Read a visible file"),
             ("schema", "{\"type\":\"object\",\"properties\":{}}"),
-            ("policy", "allow coder_t tool:fs.read execute"),
+            ("policy", "allow executor_t tool:fs.read execute"),
         ],
     );
     let tool = ok!(tool);

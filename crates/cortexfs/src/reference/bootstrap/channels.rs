@@ -65,7 +65,7 @@ fn ensure_channel_tool(root: &Path, channel: &str, name: &str) -> Result<(), Ref
 }
 
 fn channel_tool_policy(name: &str) -> String {
-    ["architect_t", "coder_t", "reviewer_t", "worker_t"]
+    ["architect_t", "executor_t", "product-manager_t"]
         .iter()
         .map(|subject| format!("allow {subject} tool:{name} execute"))
         .collect::<Vec<_>>()

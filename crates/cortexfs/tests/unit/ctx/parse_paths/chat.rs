@@ -3,7 +3,7 @@ fn terminal_connect_error_classifies_socket_failures() {
     let socket = Path::new("/tmp/cortexfs-terminal.sock");
     let missing = terminal_connect_cli_error(
         socket,
-        "coder",
+        "executor",
         "test",
         &cortexfs::runtime::terminal::broker::BrokerProtocolError::Io(std::io::Error::from(
             std::io::ErrorKind::NotFound,
@@ -13,12 +13,12 @@ fn terminal_connect_error_classifies_socket_failures() {
     assert!(
         missing
             .message
-            .contains("ctx agent start coder --session test")
+            .contains("ctx agent start executor --session test")
     );
 
     let refused = terminal_connect_cli_error(
         socket,
-        "coder",
+        "executor",
         "test",
         &cortexfs::runtime::terminal::broker::BrokerProtocolError::Io(std::io::Error::from(
             std::io::ErrorKind::ConnectionRefused,
@@ -35,16 +35,16 @@ fn terminal_connect_error_classifies_socket_failures() {
 #[test]
 fn top_level_send_uses_agent_send_request_shape() {
     let root = clean_test_dir("ctx-top-level-send-agent-shape");
-    let agent_dir = root.join("agent").join("coder.d");
+    let agent_dir = root.join("agent").join("executor.d");
     assert!(fs::create_dir_all(&agent_dir).is_ok());
     assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "coder");
+    let server = spawn_agent_socket_request_capture(&root, "executor");
 
     let result = run(vec![
         std::ffi::OsString::from("--root"),
         root.as_os_str().to_os_string(),
         std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("executor"),
         std::ffi::OsString::from("hello"),
     ]);
 
@@ -65,13 +65,13 @@ fn top_level_send_uses_agent_send_request_shape() {
 fn top_level_send_defaults_cwd_to_workspace() {
     let root = clean_test_dir("ctx-top-level-send-default-cwd");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "coder");
+    let server = spawn_agent_socket_request_capture(&root, "executor");
 
     let result = run(vec![
         std::ffi::OsString::from("--root"),
         root.as_os_str().to_os_string(),
         std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("executor"),
         std::ffi::OsString::from("hello"),
     ]);
 
@@ -88,12 +88,12 @@ fn top_level_send_defaults_cwd_to_workspace() {
 fn top_level_send_ignores_external_session_workspace() {
     let root = clean_test_dir("ctx-top-level-send-session-workspace");
     let workspace = clean_test_dir("ctx-top-level-send-session-workspace-source");
-    let agent_dir = root.join("agent").join("coder.d");
+    let agent_dir = root.join("agent").join("executor.d");
     let session = root
         .join("home")
         .join(current_uid_for_test())
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("default");
     assert!(fs::create_dir_all(&agent_dir).is_ok());
@@ -106,13 +106,13 @@ fn top_level_send_ignores_external_session_workspace() {
         )
         .is_ok()
     );
-    let server = spawn_agent_socket_request_capture(&root, "coder");
+    let server = spawn_agent_socket_request_capture(&root, "executor");
 
     let result = run(vec![
         std::ffi::OsString::from("--root"),
         root.as_os_str().to_os_string(),
         std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("executor"),
         std::ffi::OsString::from("hello"),
     ]);
 
@@ -130,25 +130,25 @@ fn top_level_send_ignores_external_session_workspace() {
 #[test]
 fn top_level_send_ignores_root_session_workspace() {
     let root = clean_test_dir("ctx-top-level-send-invalid-session-workspace");
-    let agent_dir = root.join("agent").join("coder.d");
+    let agent_dir = root.join("agent").join("executor.d");
     let session = root
         .join("home")
         .join(current_uid_for_test())
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("default");
     assert!(fs::create_dir_all(&agent_dir).is_ok());
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
     assert!(fs::write(session.join("workspace"), "/\n").is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "coder");
+    let server = spawn_agent_socket_request_capture(&root, "executor");
 
     let result = run(vec![
         std::ffi::OsString::from("--root"),
         root.as_os_str().to_os_string(),
         std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("executor"),
         std::ffi::OsString::from("hello"),
     ]);
 
@@ -170,7 +170,7 @@ fn top_level_resume_uses_agent_resume_request_shape() {
         .join("home")
         .join(current_uid_for_test())
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("default");
     assert!(fs::create_dir_all(&session).is_ok());
@@ -180,13 +180,13 @@ fn top_level_resume_uses_agent_resume_request_shape() {
         return;
     };
     assert!(fs::write(session.join("workspace"), format!("{}\n", current.display())).is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "coder");
+    let server = spawn_agent_socket_request_capture(&root, "executor");
 
     let result = run(vec![
         std::ffi::OsString::from("--root"),
         root.as_os_str().to_os_string(),
         std::ffi::OsString::from("resume"),
-        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("executor"),
     ]);
 
     assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));

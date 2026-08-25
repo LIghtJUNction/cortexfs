@@ -32,7 +32,7 @@ Telegram、Discord、Slack 会话还接受 `/help`、`/models`、`/model`、
 所有者可读写的文件：
 
 ```bash
-ctx agent start coder --session default
+ctx agent start executor --session default
 sudo install -d -m 0700 /etc/cortexfs/channels
 sudoedit /etc/cortexfs/channels/discord.toml
 sudo chmod 600 /etc/cortexfs/channels/discord.toml
@@ -44,8 +44,8 @@ sudo chmod 600 /etc/cortexfs/channels/discord.toml
 ```toml
 application_id = "DISCORD_APPLICATION_ID"
 bot_token = "DISCORD_BOT_TOKEN"
-agent_socket = "/ctx/agent/coder.sock"
-agent = "coder"
+agent_socket = "/ctx/agent/executor.sock"
+agent = "executor"
 session_prefix = "discord"
 ```
 
@@ -66,7 +66,7 @@ sudo journalctl -u cortexfs-channel@discord.service -f
 ```bash
 sudo ctx storage update --prune /var/lib/cortexfs/storage
 sudo systemctl restart cortexfs.service
-sudo systemctl restart cortexfs-agent@coder.socket
+sudo systemctl restart cortexfs-agent@executor.socket
 sudo systemctl restart cortexfs-channel@discord.service
 sudo ctx doctor
 ```

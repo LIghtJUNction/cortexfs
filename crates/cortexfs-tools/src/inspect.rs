@@ -1,4 +1,4 @@
-use crate::support::plain::{open_plain_directory, path_metadata_no_follow, proc_fd_path};
+use crate::plain::{open_plain_directory, path_metadata_no_follow, proc_fd_path};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -7,15 +7,10 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
-pub mod cli;
-
-pub(crate) use cli::{run_fs_list_cli, run_fs_stat_cli};
-
-const MAX_FS_LIST_ENTRIES: usize = 256;
+pub const MAX_FS_LIST_ENTRIES: usize = 256;
 
 #[derive(Debug)]
 pub struct FsListTool;
-
 #[derive(Debug)]
 pub struct FsStatTool;
 
@@ -24,7 +19,7 @@ impl Tool for FsListTool {
         ToolSpec {
             name: "fs.list",
             description: "List bounded file metadata in a visible directory.",
-            input_schema: super::FS_LIST_SCHEMA,
+            input_schema: crate::schemas::FS_LIST_SCHEMA,
         }
     }
 
@@ -50,15 +45,12 @@ impl Tool for FsListTool {
                 .map_err(|error| ToolError::denied(format!("entry stat failed: {error}")))?;
             let name = entry.file_name().to_string_lossy().into_owned();
             values.insert(name.clone(), metadata_value(&name, &metadata));
-            if values.len() > MAX_FS_LIST_ENTRIES
-                && let Some(last) = values.keys().next_back().cloned()
-            {
-                values.remove(&last);
+            if values.len() > MAX_FS_LIST_ENTRIES {
+                values.pop_last();
             }
         }
-        let values = values.into_values().take(max).collect::<Vec<_>>();
         output
-            .json_message(&Value::Array(values))
+            .json_message(&Value::Array(values.into_values().take(max).collect()))
             .map_err(|error| ToolError::new("EIO", error.to_string()))
     }
 }
@@ -68,7 +60,7 @@ impl Tool for FsStatTool {
         ToolSpec {
             name: "fs.stat",
             description: "Read bounded no-follow metadata for one visible path.",
-            input_schema: super::FS_STAT_SCHEMA,
+            input_schema: crate::schemas::FS_STAT_SCHEMA,
         }
     }
 
@@ -99,14 +91,14 @@ fn request_max_entries(invocation: &ToolInvocation) -> ToolResult<usize> {
     let Some(value) = invocation.value_field("max_entries") else {
         return Ok(MAX_FS_LIST_ENTRIES);
     };
-    let value = value
+    value
         .as_u64()
         .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| (1..=MAX_FS_LIST_ENTRIES).contains(value));
-    value.ok_or_else(|| ToolError::invalid("max_entries must be 1..256"))
+        .filter(|value| (1..=MAX_FS_LIST_ENTRIES).contains(value))
+        .ok_or_else(|| ToolError::invalid("max_entries must be 1..256"))
 }
 
-fn metadata_value(name: &str, metadata: &fs::Metadata) -> Value {
+pub(crate) fn metadata_value(name: &str, metadata: &fs::Metadata) -> Value {
     let kind = if metadata.is_dir() {
         "directory"
     } else if metadata.is_file() {

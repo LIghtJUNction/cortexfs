@@ -63,20 +63,20 @@ export CTX_PATH="$CTX_ROOT/tool:$CTX_HOME/tool"
 ## 使用方法
 
 ```bash
-agent.sh coder
-agent.sh coder "fix tests"
-agent.sh --chat coder
-agent.sh --attach coder
-agent.sh --watch coder
-agent.sh --session default coder
-agent.sh --resume coder
-agent.sh --history coder
-agent.sh --pack coder
-agent.sh --tools coder
-agent.sh --children coder
-agent.sh --cancel coder
-agent.sh --status coder
-agent.sh --raw coder "prompt"
+agent.sh executor
+agent.sh executor "fix tests"
+agent.sh --chat executor
+agent.sh --attach executor
+agent.sh --watch executor
+agent.sh --session default executor
+agent.sh --resume executor
+agent.sh --history executor
+agent.sh --pack executor
+agent.sh --tools executor
+agent.sh --children executor
+agent.sh --cancel executor
+agent.sh --status executor
+agent.sh --raw executor "prompt"
 ```
 
 在没有提示的情况下，`agent.sh AGENT` 通过打开代理聊天界面

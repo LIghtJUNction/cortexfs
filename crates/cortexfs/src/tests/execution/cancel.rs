@@ -76,9 +76,9 @@ fn wait_delta_then_cancel(
 #[test]
 fn cancel_after_partial_delta_persists_only_cancelled_done() {
     let root = reference_tree("agent-partial-delta-cancel");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     write_cancellable_partial_agent(&executable);
 
     let (mut client, mut socket) = ok!(UnixStream::pair());

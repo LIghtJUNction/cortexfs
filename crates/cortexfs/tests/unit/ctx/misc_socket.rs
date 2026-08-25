@@ -6,7 +6,7 @@ fn ctx_latest_run_id_refuses_symlink_events() {
         .join("home")
         .join("1000")
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("default");
     create_complete_session_layout(&session);
@@ -20,7 +20,7 @@ fn ctx_latest_run_id_refuses_symlink_events() {
             .is_ok()
     );
 
-    assert!(latest_run_id(&root, "coder", "default").is_err());
+    assert!(latest_run_id(&root, "executor", "default").is_err());
     assert_eq!(
         fs::read_to_string(outside.join("events.jsonl")).unwrap_or_default(),
         "{\"type\":\"start\",\"run\":\"outside\"}\n"
@@ -33,7 +33,7 @@ fn ctx_latest_run_id_reads_projected_columnar_events() {
     let session = root
         .join("home")
         .join("1000")
-        .join("agent/coder/session/default");
+        .join("agent/executor/session/default");
     write_text_file(&session.join("messages.jsonl"), "");
     write_text_file(&session.join("events.jsonl"), "");
     assert!(
@@ -53,7 +53,7 @@ fn ctx_latest_run_id_reads_projected_columnar_events() {
     );
 
     assert_eq!(
-        latest_run_id(&root, "coder", "default"),
+        latest_run_id(&root, "executor", "default"),
         Ok("latest".to_owned())
     );
 }
@@ -123,9 +123,9 @@ fn agent_chat_request_socket_prefers_runtime_socket_over_visible_socket()
     let root = clean_test_dir("ctx-agent-chat-request-prefers-runtime");
     let visible_parent = root.join("agent");
     fs::create_dir_all(&visible_parent)?;
-    let visible_socket = visible_parent.join("coder.sock");
+    let visible_socket = visible_parent.join("executor.sock");
     let visible_listener = std::os::unix::net::UnixListener::bind(&visible_socket)?;
-    let runtime_socket = match agent_chat_runtime_socket(&root, "coder") {
+    let runtime_socket = match agent_chat_runtime_socket(&root, "executor") {
         Ok(socket) => socket,
         Err(error) => {
             return Err(format!("runtime chat socket path should be available: {error:?}").into());
@@ -137,7 +137,7 @@ fn agent_chat_request_socket_prefers_runtime_socket_over_visible_socket()
     fs::create_dir_all(runtime_parent)?;
     let runtime_listener = std::os::unix::net::UnixListener::bind(&runtime_socket)?;
 
-    let selected_socket = match agent_chat_request_socket(&root, "coder") {
+    let selected_socket = match agent_chat_request_socket(&root, "executor") {
         Ok(socket) => socket,
         Err(error) => {
             return Err(format!("chat request socket should be available: {error:?}").into());

@@ -1,0 +1,9 @@
+# Keep independent editor/diagnostic Cargo invocations from compiling at once.
+# `rustc-wrapper` is shared by Cargo processes, unlike Cargo's per-process
+# `build.jobs` setting, so the lock also covers pi-lens and pre-commit runs.
+[build]
+jobs = 1
+rustc-wrapper = "scripts/serialize-rustc.sh"
+
+[env]
+RUSTC_WRAPPER = { value = "scripts/serialize-rustc.sh", force = true }

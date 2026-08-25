@@ -54,7 +54,7 @@ pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
 /// Canonical model aliases exposed directly below `/ctx/model`.
 pub const MODEL_ALIASES: &[&str] = &["main", "helper", "fast", "reason", "code", "vision"];
 /// Stable Agent aliases backed by canonical executable and socket symlinks.
-pub const AGENT_ALIASES: &[(&str, &str)] = &[("main", "coder")];
+pub const AGENT_ALIASES: &[(&str, &str)] = &[("main", "executor")];
 pub const DEFAULT_WORKER_MODEL: &str = "openai/gpt-5.6";
 
 /// Returns the canonical Agent target for a reserved alias.

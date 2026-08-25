@@ -302,7 +302,7 @@ CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
 代理通过 `agent.update` 工具自我迭代。该工具向收据绑定的 run 能力 socket 发送一条 `agent.update` frame：
 
 ```json
-{"op":"agent.update","request_id":"tool-1","agent":"coder","session":"default","run":"run-1","control":"system.md","content":"..."}
+{"op":"agent.update","request_id":"tool-1","agent":"executor","session":"default","run":"run-1","control":"system.md","content":"..."}
 ```
 
 该通道只接收 `CTX_CONTROL_SOCKET=/run/cortexfs/control.sock`，不含 bearer 凭据。每次 bwrap 启动前，主机记录该 host pid 与 `/proc/<pid>/stat` 启动时间，再释放一次性 `--block-fd`。socket 只接受 owner UID 且内核 peer PID 为已注册启动根进程或其活跃后代的请求；缺失进程状态、PID 回收、重父化、环路、祖先深度过大都拒绝。旧的 `token` JSON 输入仍保持可解析以支持迁移，但会被忽略；新客户端应不再携带该字段，且不得从环境值推导权限。

@@ -496,8 +496,8 @@ both constrain the final agent-visible tool set.
 MCP-originated tools use the same policy object class:
 
 ```text
-allow coder_t tool:github.search_issues execute
-allow coder_t tool:figma.get_file execute
+allow executor_t tool:github.search_issues execute
+allow executor_t tool:figma.get_file execute
 ```
 
 Tool lookup is strictly `CTX_PATH`:
@@ -605,7 +605,7 @@ Shared sessions are ordinary directories:
 ```text
 /ctx/shared/project-a/
   agent/
-    coder/
+    executor/
       session/
         design-review/
 ```
@@ -639,14 +639,14 @@ allow <subject_type> <object_class>:<object_name> <permission>
 Examples:
 
 ```text
-allow coder_t tool:fs.read execute
-allow coder_t tool:shell.exec execute
-allow coder_t model:openai/gpt-5.6 use
-allow coder_t shared:project-a read
-allow coder_t shared:project-a write
-allow coder_t network:default connect
-allow coder_t agent:reviewer create
-allow coder_t agent:reviewer start
+allow executor_t tool:fs.read execute
+allow executor_t tool:shell.exec execute
+allow executor_t model:openai/gpt-5.6 use
+allow executor_t shared:project-a read
+allow executor_t shared:project-a write
+allow executor_t network:default connect
+allow executor_t agent:reviewer create
+allow executor_t agent:reviewer start
 ```
 
 Rules:
@@ -679,23 +679,23 @@ network: connect
 Agent policy uses concrete names:
 
 ```text
-allow coder_t agent:reviewer create
-allow coder_t agent:reviewer start
+allow executor_t agent:reviewer create
+allow executor_t agent:reviewer start
 ```
 
 Do not add glob, inheritance, variables, or templates:
 
 ```text
-allow coder_t agent:* create
+allow executor_t agent:* create
 ```
 
 The only stable network object name is `default`:
 
 ```text
-allow coder_t network:default connect
+allow executor_t network:default connect
 ```
 
-Without `allow coder_t network:default connect`, there is no network access.
+Without `allow executor_t network:default connect`, there is no network access.
 
 Permission check order:
 
@@ -726,7 +726,7 @@ shared/<name>/agent/<agent>/session/<session>/events.jsonl
 Minimum event shape:
 
 ```json
-{"ts":"2026-06-22T12:00:00Z","type":"tool.call","agent":"coder","session":"default","object":"tool/fs.read","status":"ok"}
+{"ts":"2026-06-22T12:00:00Z","type":"tool.call","agent":"executor","session":"default","object":"tool/fs.read","status":"ok"}
 ```
 
 Policy decides whether sensitive content is logged. Default logging should

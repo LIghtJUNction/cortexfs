@@ -65,8 +65,8 @@ fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         writeln!(out, "# /etc/cortexfs/channels/{family}.env")?;
-        writeln!(out, "CORTEXFS_AGENT=coder")?;
-        writeln!(out, "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock")?;
+        writeln!(out, "CORTEXFS_AGENT=executor")?;
+        writeln!(out, "CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock")?;
         writeln!(out, "CORTEXFS_CHANNEL_ID={family}.primary")?;
         if spec.id == "slack" {
             writeln!(
@@ -110,8 +110,8 @@ fn write_discord_preset(out: &mut impl Write) -> Result<(), Box<dyn Error>> {
     writeln!(out, "# /etc/cortexfs/channels/discord.toml")?;
     writeln!(out, "application_id = \"DISCORD_APPLICATION_ID\"")?;
     writeln!(out, "bot_token = \"DISCORD_BOT_TOKEN\"")?;
-    writeln!(out, "agent_socket = \"/ctx/agent/coder.sock\"")?;
-    writeln!(out, "agent = \"coder\"")?;
+    writeln!(out, "agent_socket = \"/ctx/agent/executor.sock\"")?;
+    writeln!(out, "agent = \"executor\"")?;
     writeln!(out, "session_prefix = \"discord\"")?;
     Ok(())
 }

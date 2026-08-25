@@ -47,14 +47,14 @@ attachment   零个或多个 watch/attach 客户端
 
 ~~~json
 {
-  "id": "terminal-coder-default",
-  "agent": "coder",
+  "id": "terminal-executor-default",
+  "agent": "executor",
   "session": "default",
   "owner": "1000",
   "cwd": "/workspace",
   "command": ["/ctx/bin/tsh"],
   "state": "running",
-  "socket": "/run/user/1000/cortexfs/terminal/coder/default/main.sock",
+  "socket": "/run/user/1000/cortexfs/terminal/executor/default/main.sock",
   "created_at": 1735689600
 }
 ~~~

@@ -364,8 +364,8 @@ tool 自有 policy
 MCP 来源工具使用同一策略对象类：
 
 ```text
-allow coder_t tool:github.search_issues execute
-allow coder_t tool:figma.get_file execute
+allow executor_t tool:github.search_issues execute
+allow executor_t tool:figma.get_file execute
 ```
 
 工具查找严格为 `CTX_PATH`：
@@ -462,7 +462,7 @@ conflict  不可覆盖 pending/claimed/lease/result/terminal 证据；不完整�
 ```text
 /ctx/shared/project-a/
   agent/
-    coder/
+    executor/
       session/
         design-review/
 ```
@@ -492,14 +492,14 @@ allow <subject_type> <object_class>:<object_name> <permission>
 示例：
 
 ```text
-allow coder_t tool:fs.read execute
-allow coder_t tool:shell.exec execute
-allow coder_t model:openai/gpt-5.6 use
-allow coder_t shared:project-a read
-allow coder_t shared:project-a write
-allow coder_t network:default connect
-allow coder_t agent:reviewer create
-allow coder_t agent:reviewer start
+allow executor_t tool:fs.read execute
+allow executor_t tool:shell.exec execute
+allow executor_t model:openai/gpt-5.6 use
+allow executor_t shared:project-a read
+allow executor_t shared:project-a write
+allow executor_t network:default connect
+allow executor_t agent:reviewer create
+allow executor_t agent:reviewer start
 ```
 
 规则：
@@ -532,23 +532,23 @@ network: connect
 agent policy 使用具体名称：
 
 ```text
-allow coder_t agent:reviewer create
-allow coder_t agent:reviewer start
+allow executor_t agent:reviewer create
+allow executor_t agent:reviewer start
 ```
 
 不要引入 glob、继承、变量或模板：
 
 ```text
-allow coder_t agent:* create
+allow executor_t agent:* create
 ```
 
 唯一稳定网络对象名为 `default`：
 
 ```text
-allow coder_t network:default connect
+allow executor_t network:default connect
 ```
 
-没有 `allow coder_t network:default connect`，则没有网络访问。
+没有 `allow executor_t network:default connect`，则没有网络访问。
 
 权限检查顺序：
 
@@ -578,7 +578,7 @@ shared/<name>/agent/<agent>/session/<session>/events.jsonl
 最小事件形态：
 
 ```json
-{"ts":"2026-06-22T12:00:00Z","type":"tool.call","agent":"coder","session":"default","object":"tool/fs.read","status":"ok"}
+{"ts":"2026-06-22T12:00:00Z","type":"tool.call","agent":"executor","session":"default","object":"tool/fs.read","status":"ok"}
 ```
 
 policy 决定是否记录敏感内容。默认日志记录事实与错误，不记录完整 secrets 或大段 prompt。

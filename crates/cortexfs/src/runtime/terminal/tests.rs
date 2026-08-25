@@ -7,7 +7,10 @@ use super::*;
 
 #[test]
 fn terminal_id_is_stable_for_agent_and_session() {
-    assert_eq!(terminal_id("coder", "default"), "terminal-coder-default");
+    assert_eq!(
+        terminal_id("executor", "default"),
+        "terminal-executor-default"
+    );
 }
 
 #[test]
@@ -15,8 +18,8 @@ fn ensure_layout_writes_metadata_and_event_stream() {
     let root = tempfile::tempdir().expect("temporary terminal root");
     let session = root.path().join("session");
     let record = TerminalRecord {
-        id: "terminal-coder-default".to_owned(),
-        agent: "coder".to_owned(),
+        id: "terminal-executor-default".to_owned(),
+        agent: "executor".to_owned(),
         session: "default".to_owned(),
         owner: "1000".to_owned(),
         cwd: "/workspace".to_owned(),
@@ -53,8 +56,8 @@ fn next_sequence_continues_existing_event_history() {
 fn mark_state_updates_metadata_and_text_projections() {
     let root = tempfile::tempdir().expect("temporary terminal root");
     let record = TerminalRecord {
-        id: "terminal-coder-default".to_owned(),
-        agent: "coder".to_owned(),
+        id: "terminal-executor-default".to_owned(),
+        agent: "executor".to_owned(),
         session: "default".to_owned(),
         owner: "1000".to_owned(),
         cwd: "/workspace".to_owned(),

@@ -90,8 +90,8 @@ into the prompt and do not invent a separate upload API. Put the file somewhere
 visible to the agent, then reference the path in the conversation:
 
 ```bash
-ctx agent start coder --session default --mount "$PWD" /workspace rw
-ctx send coder "Analyze /workspace/assets/screenshot.png and compare it with /workspace/docs/DESIGN.md"
+ctx agent start executor --session default --mount "$PWD" /workspace rw
+ctx send executor "Analyze /workspace/assets/screenshot.png and compare it with /workspace/docs/DESIGN.md"
 ```
 
 For material shared across agents or sessions, use shared space:
@@ -156,14 +156,13 @@ orchestration concepts should not become new root ABI.
 
 ### Agent Tree
 
-The base agent is the inheritable root identity. Child agents are not about
+The architect is the inheritable root identity. Child agents are not about
 duplicating a process; they narrow the visible world:
 
 ```text
-base
-├── coder
-│   └── reviewer
-└── operator
+architect
+├── executor
+└── product-manager
 ```
 
 A parent can create a child, but the child's model, tools, mounts, shared space,

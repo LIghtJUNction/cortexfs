@@ -146,7 +146,7 @@ mod session_append_create_receipt_tests {
 
     #[test]
     fn first_history_marker_has_an_independent_create_receipt() -> Result<(), String> {
-        let path = "home/1000/agent/coder/session/one/messages.jsonl";
+        let path = "home/1000/agent/executor/session/one/messages.jsonl";
         let node = session_append_create_receipt(path, 0o640, 1000, 1001)
             .ok_or_else(|| "session append path should have a create receipt".to_owned())?;
 

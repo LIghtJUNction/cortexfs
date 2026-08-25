@@ -1,13 +1,13 @@
 use super::*;
 
 /// Monotonic target version written to the backing source.
-pub const REFERENCE_TREE_VERSION: u32 = 8;
+pub const REFERENCE_TREE_VERSION: u32 = 9;
 
 /// Relative path for bootstrap state under the source root.
 pub const BOOTSTRAP_STATE_REL: &str = "bin/cortexfs.bootstrap.json";
 
 /// Agents formerly shipped by the reference tree and no longer installed.
-pub const RETIRED_REFERENCE_AGENTS: &[&str] = &["base", "executor"];
+pub const RETIRED_REFERENCE_AGENTS: &[&str] = &["base", "coder", "reviewer", "worker"];
 
 /// Migration id recording that retired reference agents were reviewed.
 pub const MIGRATION_RETIRED_AGENTS: &str = "retired-agents";
@@ -19,6 +19,8 @@ pub const MIGRATION_AGENT_UPDATE: &str = "agent-update";
 pub const MIGRATION_CURRENT_MODELS: &str = "current-models";
 /// Migration id recording the coarse agent permission controls.
 pub const MIGRATION_AGENT_PERMISSIONS: &str = "agent-permissions";
+/// Migration id recording the architect/executor/product-manager starter tree.
+pub const MIGRATION_INITIAL_AGENTS: &str = "initial-agents";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ReferenceTreeMigration {
@@ -46,6 +48,10 @@ const REFERENCE_TREE_MIGRATIONS: &[ReferenceTreeMigration] = &[
     ReferenceTreeMigration {
         target_version: 8,
         id: MIGRATION_AGENT_PERMISSIONS,
+    },
+    ReferenceTreeMigration {
+        target_version: 9,
+        id: MIGRATION_INITIAL_AGENTS,
     },
 ];
 
@@ -101,9 +107,6 @@ const fn bootstrap_state_schema_default() -> u32 {
 #[must_use]
 pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
     let state = read_bootstrap_state(root);
-    let worker_is_managed = state
-        .as_ref()
-        .is_some_and(|state| state.managed_agents.iter().any(|name| name == "worker"));
     let mut plan = BootstrapPlan {
         actions: Vec::new(),
         current_version: state.as_ref().map(|value| value.tree_version),
@@ -138,15 +141,8 @@ pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
     for agent in REFERENCE_AGENTS {
         let exec = cortexfs_paths::agent_path(root, agent.name);
         let control = cortexfs_paths::agent_control_path(root, agent.name);
-        let socket = cortexfs_paths::agent_socket_path(root, agent.name);
-        let exists = exec.exists() || control.exists() || fs::symlink_metadata(socket).is_ok();
-        if agent.name == "worker" && exists && !worker_is_managed {
-            plan.actions.push(BootstrapAction::SkipAgent {
-                name: agent.name.to_owned(),
-                reason: "existing worker requires manual review before reference-tree promotion"
-                    .to_owned(),
-            });
-        } else if !exists {
+        let exists = exec.exists() || control.exists();
+        if !exists {
             plan.actions.push(BootstrapAction::EnsureAgent {
                 name: agent.name.to_owned(),
             });

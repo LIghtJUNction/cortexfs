@@ -17,14 +17,14 @@ fn resume_accepts_default_and_explicit_forms() {
     assert!(matches!(
         parse_command(vec![
             "resume".to_owned(),
-            "coder".to_owned(),
+            "executor".to_owned(),
             "--session".to_owned(),
             "work".to_owned()
         ]),
         Ok(Command::Resume {
             agent: Some(agent),
             session: Some(session)
-        }) if agent == "coder" && session == "work"
+        }) if agent == "executor" && session == "work"
     ));
 }
 

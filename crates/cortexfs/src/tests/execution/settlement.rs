@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn done_is_emitted_only_after_terminal_facts_are_durable() {
     let root = reference_tree("agent-terminal-settlement");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     let session = crate::shell_single_quote(&session_root.join("default").display().to_string());
     let moved =
         crate::shell_single_quote(&session_root.join("moved-default").display().to_string());
@@ -54,9 +54,9 @@ mv -- {session} {moved}
 #[test]
 fn empty_success_persists_done_and_replays_without_execution() {
     let root = reference_tree("agent-empty-success-settlement");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     let counter = root.join("empty-success-count");
     let counter_arg = crate::shell_single_quote(&counter.display().to_string());
     write_text_file(

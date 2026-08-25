@@ -297,14 +297,12 @@ pub(crate) fn tool_is_in_group(name: &str, group: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('.') && suffix.len() > 1)
 }
 
-pub(crate) fn read_tsh_config(
-    root: &Path,
-) -> Result<cortexfs::tool::core::tools::TshRuntimeConfig, TshError> {
+pub(crate) fn read_tsh_config(root: &Path) -> Result<cortexfs_tools::TshRuntimeConfig, TshError> {
     let mut config = if let Some(content) = read_tsh_config_text(root)? {
-        cortexfs::tool::core::tools::parse_tsh_runtime_config(&content)
+        cortexfs_tools::parse_tsh_runtime_config(&content)
             .map_err(|message| TshError::usage(format!("invalid tsh.d/config: {message}")))?
     } else {
-        cortexfs::tool::core::tools::TshRuntimeConfig::default()
+        cortexfs_tools::TshRuntimeConfig::default()
     };
     if let Some(capacity) = env::var("CTX_TOOL_CACHE")
         .ok()

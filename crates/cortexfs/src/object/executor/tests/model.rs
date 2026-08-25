@@ -11,23 +11,23 @@ fn object_path_parses_class_and_name() {
 #[test]
 fn object_args_use_exec_metadata_for_proc_fd_wrappers() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-object-path-proc-fd")?;
-    let wrapper = root.join("coder");
+    let wrapper = root.join("executor");
     fs::write(
         &wrapper,
-        "#!/usr/bin/cortexfs-object-runner\n# cortexfs.object=agent\n# cortexfs.name=coder\n",
+        "#!/usr/bin/cortexfs-object-runner\n# cortexfs.object=agent\n# cortexfs.name=executor\n",
     )?;
     let file = fs::File::open(&wrapper)?;
     let fd_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
 
     let (path, rest) = split_object_args(vec![fd_path.into_os_string(), OsString::from("hello")])?;
 
-    assert_eq!(path, PathBuf::from("/ctx/agent/coder"));
+    assert_eq!(path, PathBuf::from("/ctx/agent/executor"));
     assert_eq!(rest, vec![OsString::from("hello")]);
     assert_eq!(
         ObjectPath::parse(&path),
         Ok(ObjectPath {
             class: "agent".to_owned(),
-            name: "coder".to_owned(),
+            name: "executor".to_owned(),
         })
     );
 
@@ -207,30 +207,33 @@ fn model_path_rejects_symlink_intermediate_directory() -> Result<(), Box<dyn std
 fn agent_model_config_prefers_current_user_agent_control() -> Result<(), Box<dyn std::error::Error>>
 {
     let root = unique_temp_dir("runner-agent-user-control-override")?;
-    let global_agent = root.join("agent/coder.d");
+    let global_agent = root.join("agent/executor.d");
     fs::create_dir_all(&global_agent)?;
     fs::write(global_agent.join("model"), "main\n")?;
-    fs::write(global_agent.join("label"), "user_u:agent_r:coder_t:s0\n")?;
+    fs::write(global_agent.join("label"), "user_u:agent_r:executor_t:s0\n")?;
     fs::write(
         global_agent.join("policy"),
-        "allow coder_t model:main use\n",
+        "allow executor_t model:main use\n",
     )?;
     let uid = nix::unistd::Uid::effective().as_raw().to_string();
-    let user_agent = root.join("home").join(uid).join("agent").join("coder.d");
+    let user_agent = root.join("home").join(uid).join("agent").join("executor.d");
     fs::create_dir_all(&user_agent)?;
     fs::write(user_agent.join("model"), "debug/echo\n")?;
     fs::write(user_agent.join("window"), "auto\n")?;
-    fs::write(user_agent.join("label"), "user_u:agent_r:usercoder_t:s0\n")?;
+    fs::write(
+        user_agent.join("label"),
+        "user_u:agent_r:userexecutor_t:s0\n",
+    )?;
     fs::write(
         user_agent.join("policy"),
-        "allow usercoder_t model:debug/echo use\n",
+        "allow userexecutor_t model:debug/echo use\n",
     )?;
     fs::create_dir_all(root.join("model/debug"))?;
     fs::create_dir_all(root.join("model/debug/echo.d"))?;
     fs::write(root.join("model/debug/echo.d/limit"), "unknown\n")?;
     write_executable_script(&root.join("model/debug/echo"), "#!/bin/sh\nexit 0\n")?;
 
-    let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
+    let config = AgentModelRunConfig::new_with_paths("executor", root.clone(), root.clone());
 
     assert!(matches!(config, Ok(ref config) if config.model == "debug/echo"));
     let _ignored = fs::remove_dir_all(root);
@@ -306,7 +309,7 @@ fn model_candidates_ignore_symlinked_route_file() -> Result<(), Box<dyn std::err
 fn agent_model_config_allows_primary_selected_through_alias_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-agent-model-policy-primary")?;
-    let agent_dir = root.join("agent/coder.d");
+    let agent_dir = root.join("agent/executor.d");
     fs::create_dir_all(&agent_dir)?;
     fs::create_dir_all(root.join("model/debug"))?;
     symlink("/ctx/model/debug/echo", root.join("model/main"))?;
@@ -315,10 +318,13 @@ fn agent_model_config_allows_primary_selected_through_alias_policy()
     fs::write(agent_dir.join("window"), "auto\n")?;
     fs::create_dir_all(root.join("model/debug/echo.d"))?;
     fs::write(root.join("model/debug/echo.d/limit"), "unknown\n")?;
-    fs::write(agent_dir.join("label"), " user_u:agent_r:coder_t:s0\n")?;
-    fs::write(agent_dir.join("policy"), "allow coder_t model:main use\n")?;
+    fs::write(agent_dir.join("label"), " user_u:agent_r:executor_t:s0\n")?;
+    fs::write(
+        agent_dir.join("policy"),
+        "allow executor_t model:main use\n",
+    )?;
 
-    let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
+    let config = AgentModelRunConfig::new_with_paths("executor", root.clone(), root.clone());
 
     assert!(matches!(config, Ok(ref config) if config.model == "debug/echo"));
     let _ignored = fs::remove_dir_all(root);
@@ -329,7 +335,7 @@ fn agent_model_config_allows_primary_selected_through_alias_policy()
 fn agent_model_config_denies_route_fallback_without_selected_model_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-agent-model-policy-fallback")?;
-    let agent_dir = root.join("agent/coder.d");
+    let agent_dir = root.join("agent/executor.d");
     fs::create_dir_all(&agent_dir)?;
     fs::create_dir_all(root.join("model/primary/approved.d"))?;
     fs::create_dir_all(root.join("model/evil"))?;
@@ -342,13 +348,13 @@ fn agent_model_config_denies_route_fallback_without_selected_model_policy()
     fs::write(agent_dir.join("window"), "auto\n")?;
     fs::create_dir_all(root.join("model/evil/leak.d"))?;
     fs::write(root.join("model/evil/leak.d/limit"), "unknown\n")?;
-    fs::write(agent_dir.join("label"), "user_u:agent_r:coder_t:s0\n")?;
+    fs::write(agent_dir.join("label"), "user_u:agent_r:executor_t:s0\n")?;
     fs::write(
         agent_dir.join("policy"),
-        "allow coder_t model:primary/approved use\n",
+        "allow executor_t model:primary/approved use\n",
     )?;
 
-    let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
+    let config = AgentModelRunConfig::new_with_paths("executor", root.clone(), root.clone());
 
     assert!(matches!(
         config,
@@ -395,7 +401,7 @@ fn candidate_admission<'a>(
     ProviderCandidateAdmission {
         ctx_root: root,
         setting,
-        agent: "coder",
+        agent: "executor",
         system: "",
         context,
         skills,
@@ -494,7 +500,7 @@ fn unknown_candidate_keeps_legacy_skill_cap() -> Result<(), Box<dyn std::error::
 
 #[test]
 fn agent_window_environment_fails_closed_on_missing_or_noncanonical_setting() {
-    let agent = OsStr::new("coder");
+    let agent = OsStr::new("executor");
     for setting in [
         None,
         Some(""),
@@ -512,7 +518,7 @@ fn agent_window_environment_fails_closed_on_missing_or_noncanonical_setting() {
     }
     assert!(matches!(
         parse_agent_window_environment(Some(agent), Some(OsStr::new("auto"))),
-        Ok(Some((ref name, AgentWindowSetting::Auto))) if name == "coder"
+        Ok(Some((ref name, AgentWindowSetting::Auto))) if name == "executor"
     ));
 }
 

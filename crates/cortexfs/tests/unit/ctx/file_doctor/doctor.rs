@@ -168,7 +168,7 @@ fn doctor_reports_reference_tree_layout_breakage() {
         fs::remove_dir_all(fixture_path(
             &root,
             &[
-                "home", "1000", "agent", "coder", "session", "index", "by-cwd",
+                "home", "1000", "agent", "executor", "session", "index", "by-cwd",
             ],
         ))
         .is_ok()
@@ -239,10 +239,10 @@ fn formats_shared_queue_layout_issues_for_doctor() {
 fn formats_object_layout_issues_for_file_check() {
     assert_eq!(
         format_object_layout_issues(&[
-            PathLayoutIssue::missing("agent/coder".to_owned(), LayoutPathRole::Executable),
+            PathLayoutIssue::missing("agent/executor".to_owned(), LayoutPathRole::Executable),
             PathLayoutIssue::invalid_value("model/openai/gpt-5.6.d/session".to_owned(), "native_thread".to_owned()),
         ]),
-        "missing executable agent/coder, invalid value model/openai/gpt-5.6.d/session=native_thread"
+        "missing executable agent/executor, invalid value model/openai/gpt-5.6.d/session=native_thread"
     );
 }
 

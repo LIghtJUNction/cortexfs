@@ -1,15 +1,15 @@
 #[test]
 fn agent_executable_socket_runtime_passes_history_messages() {
     let root = reference_tree("agent-executable-socket-runtime-history");
-    let session_root = agent_session_root(&root, "coder");
+    let session_root = agent_session_root(&root, "executor");
     write_text_file(
         &session_root.join("default").join("messages.jsonl"),
         r#"{"content":"remember prior","role":"user"}
 {"content":[{"text":"prior answer","type":"text"}],"role":"assistant"}
 "#,
     );
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
@@ -57,9 +57,9 @@ printf '{"type":"delta","run":"%s","text":"%s %s"}\n' "$CTX_RUN_ID" "$history" "
 #[test]
 fn agent_request_failures_are_terminal_without_failing_the_socket_runtime() {
     let root = reference_tree("agent-request-failure-terminal");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent/executor");
     write_text_file(
         &agent_executable,
         "#!/bin/sh\nIFS= read -r envelope || exit 2\nexit 1\n",
@@ -112,9 +112,9 @@ fn agent_request_failures_are_terminal_without_failing_the_socket_runtime() {
 #[test]
 fn successful_agent_without_done_gets_canonical_terminal_frame() {
     let root = reference_tree("agent-success-canonical-done");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     write_text_file(
         &executable,
         "#!/bin/sh\nprintf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"ok\"}\\n' \"$CTX_RUN_ID\"\n",
@@ -153,9 +153,9 @@ fn successful_agent_without_done_gets_canonical_terminal_frame() {
 #[test]
 fn duplicate_agent_done_is_rejected_before_terminal_delivery() {
     let root = reference_tree("agent-duplicate-done");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     write_text_file(
         &executable,
         "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"error\"}\\n' \"$CTX_RUN_ID\"\n",
@@ -195,9 +195,9 @@ fn duplicate_agent_done_is_rejected_before_terminal_delivery() {
 #[test]
 fn agent_executable_socket_runtime_stops_child_after_cancel() {
     let root = reference_tree("agent-executable-socket-runtime-cancel");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
@@ -275,10 +275,10 @@ printf '{"type":"delta","run":"%s","text":"too-late"}\n' "$CTX_RUN_ID"
 #[test]
 fn sdk_envelope_cancel_stops_active_step_before_respawn() {
     let root = reference_tree("sdk-envelope-cancel-step");
-    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    write_text_file(&root.join("agent/executor.d/abi"), "sdk-envelope-v1\n");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     write_text_file(
         &executable,
         "#!/bin/sh\ntrap 'printf term > \"$CTX_SOURCE/envelope-terminated\"; exit 0' TERM\nIFS= read -r envelope\ntouch \"$CTX_SOURCE/envelope-ready\"\nsleep 10\nprintf '{\"type\":\"message\",\"run\":\"%s\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"late\"}]}\\n' \"$CTX_RUN_ID\"\n",
@@ -316,37 +316,37 @@ fn sdk_envelope_cancel_stops_active_step_before_respawn() {
 #[test]
 fn sdk_envelope_cancel_during_tool_has_no_result_or_respawn() {
     let root = reference_tree("sdk-envelope-cancel-tool");
-    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    write_text_file(&root.join("agent/executor.d/abi"), "sdk-envelope-v1\n");
     write_text_file(
-        &root.join("agent/coder.d/path"),
+        &root.join("agent/executor.d/path"),
         &format!("{}\n", root.join("tool").display()),
     );
     write_text_file(
-        &root.join("agent/coder.d/mount"),
+        &root.join("agent/executor.d/mount"),
         &format!(
             "{}\t{}\trw\trbind,nosuid,nodev\n",
             root.display(),
             root.display()
         ),
     );
-    let policy_path = root.join("agent/coder.d/policy");
+    let policy_path = root.join("agent/executor.d/policy");
     let mut policy = ok!(fs::read_to_string(&policy_path));
-    policy.push_str("allow coder_t tool:long execute\n");
+    policy.push_str("allow executor_t tool:long execute\n");
     write_text_file(&policy_path, &policy);
-    write_text_file(&root.join("agent/coder.d/tools"), "long\n");
+    write_text_file(&root.join("agent/executor.d/tools"), "long\n");
     assert!(fs::create_dir_all(root.join("tool/long.d")).is_ok());
     write_text_file(
         &root.join("tool/long.d/policy"),
-        "allow coder_t tool:long execute\n",
+        "allow executor_t tool:long execute\n",
     );
     write_text_file(
         &root.join("tool/long"),
         "#!/bin/sh\ntouch \"$CTX_SOURCE/tool-ready\"\nsh -c 'trap \"\" TERM; sleep 2; touch \"$CTX_SOURCE/tool-leak\"' &\nwait\n",
     );
     set_file_mode(&root.join("tool/long"), 0o755);
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let executable = root.join("agent/executor");
     write_text_file(
         &executable,
         "#!/bin/sh\nIFS= read -r envelope\nif [ \"$CTX_AGENT_STEP\" = 0 ]; then printf '{\"type\":\"tool_call\",\"run\":\"%s\",\"id\":\"long-1\",\"name\":\"long\",\"arguments\":{\"args\":[]}}\\n' \"$CTX_RUN_ID\"; else touch \"$CTX_SOURCE/respawned\"; fi\n",
@@ -384,9 +384,9 @@ fn sdk_envelope_cancel_during_tool_has_no_result_or_respawn() {
 #[test]
 fn agent_process_error_is_host_owned() {
     let root = reference_tree("agent-executable-socket-runtime-error-output");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     write_text_file(
         &agent_executable,
         r"#!/bin/sh
@@ -417,9 +417,9 @@ exit 1
 #[test]
 fn agent_executable_socket_runtime_reports_pre_event_process_failure() {
     let root = reference_tree("agent-pre-event-failure");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
@@ -431,7 +431,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     write_text_file(
         &failing_program,
         r"#!/bin/sh
-printf 'bwrap: unable to bind /ctx/agent/coder\n' >&2
+printf 'bwrap: unable to bind /ctx/agent/executor\n' >&2
 exit 1
 ",
     );
@@ -451,7 +451,7 @@ exit 1
             default_cwd: "/work",
             model: Some("debug/echo"),
             network_allowed: false,
-            agent_name: "coder",
+            agent_name: "executor",
             agent_executable: &agent_executable,
             environment: RunEnvironment::Sandbox {
                 program: &failing_program,

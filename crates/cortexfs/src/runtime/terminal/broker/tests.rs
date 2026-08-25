@@ -10,12 +10,12 @@ fn request_json_is_flat_and_rejects_unknown_fields() -> Result<(), Box<dyn std::
     let request = BrokerRequest::Connect(ConnectRequest {
         abi: BROKER_ABI.into(),
         nonce: "abcdefghijklmnopqrstuvwx".into(),
-        agent: "coder".into(),
+        agent: "executor".into(),
         session: "default".into(),
         mode: TerminalMode::Watch,
     });
     let value = serde_json::to_value(request)?;
-    assert_eq!(value.get("agent"), Some(&serde_json::json!("coder")));
+    assert_eq!(value.get("agent"), Some(&serde_json::json!("executor")));
     let mut unknown = value;
     let object = unknown
         .as_object_mut()

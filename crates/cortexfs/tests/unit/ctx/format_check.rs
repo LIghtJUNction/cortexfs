@@ -236,7 +236,7 @@ fn formats_session_control_issues_for_file_check() {
 #[test]
 fn file_check_validates_session_control_files() {
     let root = clean_test_dir("ctx-session-control-check");
-    let session = fixture_path(&root, &["home", "1000", "agent", "coder", "session", "default"]);
+    let session = fixture_path(&root, &["home", "1000", "agent", "executor", "session", "default"]);
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(session.join("state"), "idle\n").is_ok());
     assert!(fs::write(session.join("cwd"), "/work\n").is_ok());
@@ -246,14 +246,14 @@ fn file_check_validates_session_control_files() {
     )
     .is_ok());
 
-    assert!(file_check(&root, "home/1000/agent/coder/session/default/state").is_ok());
-    assert!(file_check(&root, "home/1000/agent/coder/session/default/cwd").is_ok());
-    assert!(file_check(&root, "home/1000/agent/coder/session/default/meta.json").is_ok());
+    assert!(file_check(&root, "home/1000/agent/executor/session/default/state").is_ok());
+    assert!(file_check(&root, "home/1000/agent/executor/session/default/cwd").is_ok());
+    assert!(file_check(&root, "home/1000/agent/executor/session/default/meta.json").is_ok());
 
     assert!(fs::write(session.join("cwd"), "../host\n").is_ok());
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/default/cwd",
+        "home/1000/agent/executor/session/default/cwd",
         &["invalid value"],
     );
 }
@@ -261,19 +261,19 @@ fn file_check_validates_session_control_files() {
 #[test]
 fn file_check_validates_agent_control_files() {
     let root = clean_test_dir("ctx-agent-control-check");
-    let control = root.join("agent").join("coder.d");
+    let control = root.join("agent").join("executor.d");
     assert!(fs::create_dir_all(&control).is_ok());
     assert!(fs::write(control.join("uid"), "1000\n").is_ok());
     assert!(fs::write(control.join("life"), "detached\n").is_ok());
     assert!(fs::write(
         control.join("parent"),
-        "agent:coder session:default run:r1\n"
+        "agent:executor session:default run:r1\n"
     )
     .is_ok());
 
-    assert!(file_check(&root, "agent/coder.d/uid").is_ok());
-    assert_file_check_error_contains(&root, "agent/coder.d/life", &["invalid value"]);
-    assert!(file_check(&root, "agent/coder.d/parent").is_ok());
+    assert!(file_check(&root, "agent/executor.d/uid").is_ok());
+    assert_file_check_error_contains(&root, "agent/executor.d/life", &["invalid value"]);
+    assert!(file_check(&root, "agent/executor.d/parent").is_ok());
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
     let by_cwd = fixture_path(
         &root,
         &[
-            "home", "1000", "agent", "coder", "session", "index", "by-hash",
+            "home", "1000", "agent", "executor", "session", "index", "by-hash",
         ],
     );
     assert!(fs::create_dir_all(&by_cwd).is_ok());
@@ -330,7 +330,7 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
 
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/index/by-hash/hash-1",
+        "home/1000/agent/executor/session/index/by-hash/hash-1",
         &["secondary index entry is a symlink"],
     );
 }
@@ -434,7 +434,7 @@ fn file_check_validates_event_stream_files() {
             "home",
             "1000",
             "agent",
-            "coder",
+            "executor",
             "session",
             "default",
             "events.jsonl",
@@ -448,7 +448,7 @@ fn file_check_validates_event_stream_files() {
 
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/default/events.jsonl",
+        "home/1000/agent/executor/session/default/events.jsonl",
         &["provider native field"],
     );
 
@@ -482,7 +482,7 @@ fn file_check_rejects_session_streams_without_final_newline() {
     let root = clean_test_dir("ctx-stream-newline-check");
     let session = fixture_path(
         &root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
     let messages = session.join("messages.jsonl");
     let events = session.join("events.jsonl");
@@ -491,7 +491,7 @@ fn file_check_rejects_session_streams_without_final_newline() {
     write_text_file(&messages, "{\"role\":\"user\",\"content\":\"hello\"}");
     let message_error = file_check(
         &root,
-        "home/1000/agent/coder/session/default/messages.jsonl",
+        "home/1000/agent/executor/session/default/messages.jsonl",
     );
     assert_eq!(
         message_error,
@@ -503,7 +503,7 @@ fn file_check_rejects_session_streams_without_final_newline() {
     write_text_file(&events, "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}");
     let event_error = file_check(
         &root,
-        "home/1000/agent/coder/session/default/events.jsonl",
+        "home/1000/agent/executor/session/default/events.jsonl",
     );
     assert_eq!(
         event_error,
@@ -523,14 +523,14 @@ fn file_check_rejects_session_streams_without_final_newline() {
     assert!(
         file_check(
             &root,
-            "home/1000/agent/coder/session/default/messages.jsonl"
+            "home/1000/agent/executor/session/default/messages.jsonl"
         )
         .is_ok()
     );
     assert!(
         file_check(
             &root,
-            "home/1000/agent/coder/session/default/events.jsonl"
+            "home/1000/agent/executor/session/default/events.jsonl"
         )
         .is_ok()
     );
@@ -542,7 +542,7 @@ fn file_check_reads_projected_columnar_session_streams() {
     let root = clean_test_dir("ctx-columnar-stream-check");
     let session = fixture_path(
         &root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
     create_complete_session_layout(&session);
     write_text_file(&session.join("messages.jsonl"), "");
@@ -574,12 +574,12 @@ fn file_check_reads_projected_columnar_session_streams() {
 
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/default/messages.jsonl",
+        "home/1000/agent/executor/session/default/messages.jsonl",
         &["missing content line 1"],
     );
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/default/events.jsonl",
+        "home/1000/agent/executor/session/default/events.jsonl",
         &["unknown type line 1 native_thread"],
     );
 }

@@ -100,16 +100,16 @@ bwrap 沙箱。默认情况下，它以读写方式挂载调用者的当前目�
 `/workspace`，而 `HOME` 是沙盒自己的 `/home/agent`：
 
 ```bash
-ctx agent start coder --session default
-ctx agent watch coder --session default
-ctx agent attach coder --session default
+ctx agent start executor --session default
+ctx agent watch executor --session default
+ctx agent attach executor --session default
 ```
 
 `watch` 仅观察终端输出；`attach` 加入终端并进行写入
 stdin。请明确声明额外的挂载点：
 
 ```bash
-ctx agent start coder --session docs \
+ctx agent start executor --session docs \
   --mount "$PWD" /workspace rw \
   --mount "$PWD/docs" /docs ro \
   --cwd /workspace

@@ -110,10 +110,10 @@ mod tests {
         let workspace = root.path().join("workspace");
         fs::create_dir_all(&workspace)?;
 
-        ensure_default_workspace_mount(root.path(), "coder", &workspace)
+        ensure_default_workspace_mount(root.path(), "executor", &workspace)
             .map_err(|error| io::Error::other(error.message))?;
 
-        let mount = fs::read_to_string(root.path().join("agent").join("coder.d").join("mount"))?;
+        let mount = fs::read_to_string(root.path().join("agent").join("executor.d").join("mount"))?;
         assert!(mount.contains("/workspace\trw\trbind,nosuid,nodev"));
         Ok(())
     }

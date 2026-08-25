@@ -22,10 +22,10 @@ cortexfs-paths = "0.1.7"
 
 | 角色 | API | 示例 |
 | --- | --- | --- |
-| 公共客户端 ABI | `agent_client_socket` | /ctx/agent/coder.sock |
-| 私有 systemd listener | `system_agent_runtime_socket` | /run/cortexfs/agent/coder.sock |
-| 持久回写树 | `agent_backing_socket` | /var/lib/cortexfs/storage/current/agent/coder.sock |
-| 用户终端 ABI | `session_terminal_path` | /ctx/home/1000/agent/coder/session/default/terminal/main.sock |
+| 公共客户端 ABI | `agent_client_socket` | /ctx/agent/executor.sock |
+| 私有 systemd listener | `system_agent_runtime_socket` | /run/cortexfs/agent/executor.sock |
+| 持久回写树 | `agent_backing_socket` | /var/lib/cortexfs/storage/current/agent/executor.sock |
+| 用户终端 ABI | `session_terminal_path` | /ctx/home/1000/agent/executor/session/default/terminal/main.sock |
 | 终端 Broker 端点 | `BROKER_SOCKET` | /run/cortexfs/terminal/broker.sock |
 
 IM 适配器通常从 `agent_client_socket` 或显式配置的 runtime contract 读取其
@@ -55,12 +55,12 @@ use cortexfs_paths::{
 };
 
 let root = ctx_root();
-validate_component("coder")?;
-let socket = agent_socket_path(&root, "coder");
-let status = agent_control_file_path(&root, "coder", "status");
+validate_component("executor")?;
+let socket = agent_socket_path(&root, "executor");
+let status = agent_control_file_path(&root, "executor", "status");
 let model = model_path(&root, "openai", "gpt-5.6");
 let tool = tool_path(&root, "fs.read");
-let messages = session_file_path(&root, "1000", "coder", "default", "messages.jsonl");
+let messages = session_file_path(&root, "1000", "executor", "default", "messages.jsonl");
 ~~~
 
 动态名称故意保持为 `&str`，使 crate 保持无额外依赖。调用方应当在拼装不可信值

@@ -2,15 +2,15 @@
 fn agent_ps_reads_parent_status_and_pid_controls() {
     let root = clean_test_dir("ctx-agent-ps");
     let pid = std::process::id().to_string();
-    create_agent_fixture(&root, "coder", "", "idle", &pid);
-    create_agent_fixture(&root, "reviewer", "agent:coder session:default run:r1", "busy", &pid);
+    create_agent_fixture(&root, "executor", "", "idle", &pid);
+    create_agent_fixture(&root, "reviewer", "agent:executor session:default run:r1", "busy", &pid);
     create_agent_fixture(&root, "auditor", "agent:reviewer", "ready", "");
 
     let mut processes = read_agent_processes(&root).unwrap_or_default();
     processes.sort_by(|left, right| left.name.cmp(&right.name));
     assert!(processes.iter().any(|process| {
         process.name == "reviewer"
-            && process.parent.as_deref() == Some("coder")
+            && process.parent.as_deref() == Some("executor")
             && process.parent_session.as_deref() == Some("default")
             && process.parent_run.as_deref() == Some("r1")
             && process.ppid.as_deref() == Some(pid.as_str())
@@ -21,7 +21,7 @@ fn agent_ps_reads_parent_status_and_pid_controls() {
     assert_eq!(
         render_agent_status_lines(&processes),
         vec![
-            format!("coder [idle] pid={pid}"),
+            format!("executor [idle] model=openai/gpt-5.6 role=worker pid={pid}"),
             format!("`- reviewer [busy] parent_session=default parent_run=r1 ppid={pid} pid={pid}"),
             format!("   `- auditor [ready] ppid={pid}"),
         ]
@@ -31,7 +31,7 @@ fn agent_ps_reads_parent_status_and_pid_controls() {
 #[test]
 fn agent_ps_marks_ready_agent_dead_when_recorded_pid_is_gone() {
     let root = clean_test_dir("ctx-agent-ps-stale-pid");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready", "999999999");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready", "999999999");
 
     assert_eq!(
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
@@ -42,16 +42,16 @@ fn agent_ps_marks_ready_agent_dead_when_recorded_pid_is_gone() {
 #[test]
 fn agent_ps_defaults_worker_and_executor_prefixes_to_default_worker_model() {
     let root = clean_test_dir("ctx-agent-ps-worker-prefix-model");
-    create_agent_fixture(&root, "coder", "", "idle", "");
-    create_agent_fixture(&root, "worker-fast", "agent:coder", "ready", "");
-    create_agent_fixture(&root, "executor-fast", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "executor", "", "idle", "");
+    create_agent_fixture(&root, "worker-fast", "agent:executor", "ready", "");
+    create_agent_fixture(&root, "executor-fast", "agent:executor", "ready", "");
     assert!(!root.join("agent/worker-fast.d/model").exists());
     assert!(!root.join("agent/executor-fast.d/model").exists());
 
     assert_eq!(
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
         vec![
-            "coder [idle]".to_owned(),
+            "executor [idle] model=openai/gpt-5.6 role=worker".to_owned(),
             "+- executor-fast [ready] model=openai/gpt-5.6 role=worker".to_owned(),
             "`- worker-fast [ready] model=openai/gpt-5.6 role=worker".to_owned(),
         ]
@@ -62,7 +62,7 @@ fn agent_ps_defaults_worker_and_executor_prefixes_to_default_worker_model() {
 fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
     let mut processes = vec![
         AgentProcess {
-            name: "coder".to_owned(),
+            name: "executor".to_owned(),
             parent: Some("worker".to_owned()),
             parent_session: None,
             parent_run: None,
@@ -74,7 +74,7 @@ fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
         },
         AgentProcess {
             name: "worker".to_owned(),
-            parent: Some("coder".to_owned()),
+            parent: Some("executor".to_owned()),
             parent_session: None,
             parent_run: None,
             status: "ready".to_owned(),
@@ -89,7 +89,7 @@ fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
     assert_eq!(
         render_agent_status_lines(&processes),
         vec![
-            "coder [busy] pid=100".to_owned(),
+            "executor [busy] role=worker pid=100".to_owned(),
             "`- worker [ready] model=api.test/gpt-5.6 role=worker pid=101".to_owned(),
         ]
     );
@@ -98,7 +98,7 @@ fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
 #[test]
 fn agent_process_tree_escapes_control_file_values() {
     let process = AgentProcess {
-        name: "coder".to_owned(),
+        name: "executor".to_owned(),
         parent: None,
         parent_session: None,
         parent_run: Some("r1\u{1b}[31m".to_owned()),
@@ -122,7 +122,7 @@ fn agent_process_tree_escapes_control_file_values() {
     assert_eq!(
         rendered,
         vec![
-            "coder [idle\\u{1b}]52;c;payload\\u{7}] model=bad\\u{1b}[31m life=temp\\u{1b}[31m parent_run=r1\\u{1b}[31m ppid=122\\u{1b}[31m pid=123\\u{1b}[31m"
+            "executor [idle\\u{1b}]52;c;payload\\u{7}] model=bad\\u{1b}[31m life=temp\\u{1b}[31m role=worker parent_run=r1\\u{1b}[31m ppid=122\\u{1b}[31m pid=123\\u{1b}[31m"
                 .to_owned()
         ]
     );
@@ -134,8 +134,8 @@ fn agent_process_tree_escapes_control_file_values() {
 #[test]
 fn agent_ps_shows_non_default_worker_model() {
     let root = clean_test_dir("ctx-agent-ps-worker-model");
-    create_agent_fixture(&root, "coder", "", "idle", "");
-    create_agent_fixture(&root, "worker", "agent:coder session:default", "ready", "");
+    create_agent_fixture(&root, "executor", "", "idle", "");
+    create_agent_fixture(&root, "worker", "agent:executor session:default", "ready", "");
     write_text_file(
         &root.join("agent/worker.d/model"),
         "api.test/gpt-5.6\n",
@@ -144,7 +144,7 @@ fn agent_ps_shows_non_default_worker_model() {
     assert_eq!(
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
         vec![
-            "coder [idle]".to_owned(),
+            "executor [idle] model=openai/gpt-5.6 role=worker".to_owned(),
             "`- worker [ready] model=api.test/gpt-5.6 role=worker parent_session=default".to_owned(),
         ]
     );
@@ -153,14 +153,14 @@ fn agent_ps_shows_non_default_worker_model() {
 #[test]
 fn agent_ps_shows_non_owned_worker_lifecycle() {
     let root = clean_test_dir("ctx-agent-ps-worker-life");
-    create_agent_fixture(&root, "coder", "", "idle", "");
-    create_agent_fixture(&root, "worker", "agent:coder session:default", "ready", "");
+    create_agent_fixture(&root, "executor", "", "idle", "");
+    create_agent_fixture(&root, "worker", "agent:executor session:default", "ready", "");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
 
     assert_eq!(
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
         vec![
-            "coder [idle]".to_owned(),
+            "executor [idle] model=openai/gpt-5.6 role=worker".to_owned(),
             "`- worker [ready] model=openai/gpt-5.6 life=temp role=worker parent_session=default".to_owned(),
         ]
     );
@@ -169,7 +169,7 @@ fn agent_ps_shows_non_owned_worker_lifecycle() {
 #[test]
 fn agent_ps_rejects_invalid_lifecycle() {
     let root = clean_test_dir("ctx-agent-ps-invalid-life");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready", "");
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
     assert!(matches!(
@@ -183,7 +183,7 @@ fn agent_ps_rejects_invalid_lifecycle() {
 #[test]
 fn agent_ps_rejects_invalid_model() {
     let root = clean_test_dir("ctx-agent-ps-invalid-model");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready", "");
     write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
 
     assert!(matches!(
@@ -216,8 +216,8 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
     create_agent_fixture(&root, "nested", "agent:task-a", "ready", "");
     assert!(fs::create_dir_all(root.join("agent/control-only.d")).is_ok());
     write_text_file(&root.join("agent/control-only.d/parent"), "agent:worker\n");
-    create_agent_fixture(&root, "coder", "", "ready", &pid);
-    create_agent_fixture(&root, "worker", "agent:coder run:r1 session:default", "ready", &pid);
+    create_agent_fixture(&root, "executor", "", "ready", &pid);
+    create_agent_fixture(&root, "worker", "agent:executor run:r1 session:default", "ready", &pid);
     write_text_file(
         &root.join("agent/worker.d/model"),
         "api.test/gpt-5.6\n",
@@ -243,7 +243,7 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
             "model=api.test/gpt-5.6".to_owned(),
             "life=owned".to_owned(),
             "role=worker".to_owned(),
-            "parent=agent:coder session:default run:r1".to_owned(),
+            "parent=agent:executor session:default run:r1".to_owned(),
             "children=3".to_owned(),
             format!("pid={pid}"),
             format!("ppid={pid}"),
@@ -260,7 +260,7 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
 #[test]
 fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
     let root = clean_test_dir("ctx-agent-status-stale-pid");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready", "999999999");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready", "999999999");
 
     assert_eq!(
         agent_status_lines(&root, "worker"),
@@ -269,7 +269,7 @@ fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
             "model=openai/gpt-5.6".to_owned(),
             "life=owned".to_owned(),
             "role=worker".to_owned(),
-            "parent=agent:coder".to_owned(),
+            "parent=agent:executor".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
             "ppid=-".to_owned(),
@@ -286,18 +286,18 @@ fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
 #[test]
 fn agent_status_child_count_skips_dead_and_stale_pid_children() {
     let root = clean_test_dir("ctx-agent-status-live-child-count");
-    create_agent_fixture(&root, "coder", "agent:base", "ready", "");
-    create_agent_fixture(&root, "worker-fast", "agent:coder", "ready", "");
-    create_agent_fixture(&root, "dead", "agent:coder", "dead", "");
-    create_agent_fixture(&root, "stale", "agent:coder", "busy", "999999999");
+    create_agent_fixture(&root, "executor", "agent:base", "ready", "");
+    create_agent_fixture(&root, "worker-fast", "agent:executor", "ready", "");
+    create_agent_fixture(&root, "dead", "agent:executor", "dead", "");
+    create_agent_fixture(&root, "stale", "agent:executor", "busy", "999999999");
 
     assert_eq!(
-        agent_status_lines(&root, "coder"),
+        agent_status_lines(&root, "executor"),
         Ok(vec![
             "ready".to_owned(),
-            "model=main".to_owned(),
+            "model=openai/gpt-5.6".to_owned(),
             "life=owned".to_owned(),
-            "role=agent".to_owned(),
+            "role=worker".to_owned(),
             "parent=agent:base".to_owned(),
             "children=1".to_owned(),
             "pid=-".to_owned(),
@@ -322,7 +322,7 @@ fn agent_status_child_count_skips_dead_and_stale_pid_children() {
 #[test]
 fn agent_status_escapes_control_file_values() {
     let root = clean_test_dir("ctx-agent-status-escape-fields");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready\u{1b}]52;c;x\u{7}", "");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready\u{1b}]52;c;x\u{7}", "");
     write_text_file(&root.join("agent/worker.d/root"), "/tmp/\u{1b}[31m\n");
 
     let lines = agent_status_lines(&root, "worker").unwrap_or_default();
@@ -333,7 +333,7 @@ fn agent_status_escapes_control_file_values() {
             "model=openai/gpt-5.6".to_owned(),
             "life=owned".to_owned(),
             "role=worker".to_owned(),
-            "parent=agent:coder".to_owned(),
+            "parent=agent:executor".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
             "ppid=-".to_owned(),
@@ -352,7 +352,7 @@ fn agent_status_escapes_control_file_values() {
 #[test]
 fn agent_status_rejects_invalid_lifecycle() {
     let root = clean_test_dir("ctx-agent-status-invalid-life");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready", "");
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
     assert!(matches!(
@@ -366,7 +366,7 @@ fn agent_status_rejects_invalid_lifecycle() {
 #[test]
 fn agent_status_rejects_invalid_model() {
     let root = clean_test_dir("ctx-agent-status-invalid-model");
-    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "worker", "agent:executor", "ready", "");
     write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
 
     assert!(matches!(
@@ -443,8 +443,8 @@ fn status_helpers_report_ctx_and_agent_tree() {
     let root = clean_test_dir("ctx-status-tree");
     let pid = std::process::id().to_string();
     write_text_file(&root.join("status"), "ready\n");
-    create_agent_fixture(&root, "coder", "", "idle", &pid);
-    create_agent_fixture(&root, "reviewer", "agent:coder session:default run:r1", "busy", &pid);
+    create_agent_fixture(&root, "executor", "", "idle", &pid);
+    create_agent_fixture(&root, "reviewer", "agent:executor session:default run:r1", "busy", &pid);
 
     assert_eq!(ctx_state(true, true, true), "running");
     assert_eq!(ctx_state(true, true, false), "available");
@@ -456,7 +456,7 @@ fn status_helpers_report_ctx_and_agent_tree() {
     assert_eq!(
         rendered,
         vec![
-            format!("coder [idle] pid={pid}"),
+            format!("executor [idle] model=openai/gpt-5.6 role=worker pid={pid}"),
             format!("`- reviewer [busy] parent_session=default parent_run=r1 ppid={pid} pid={pid}"),
         ]
     );

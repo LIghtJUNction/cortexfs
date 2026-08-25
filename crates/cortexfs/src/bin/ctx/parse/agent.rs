@@ -694,7 +694,7 @@ mod approval_tests {
     fn send_and_chat_parse_repeatable_explicit_approvals() {
         let send = parse_agent_send_args(
             [
-                "coder",
+                "executor",
                 "--approve",
                 "example.echo",
                 "--approve",
@@ -711,7 +711,7 @@ mod approval_tests {
         assert_eq!(send.approvals, ["example.echo", "fs.read"]);
         assert_eq!(send.input, "go");
         let parsed = parse_agent_session_raw_args(
-            ["coder", "--approve", "example.echo"]
+            ["executor", "--approve", "example.echo"]
                 .into_iter()
                 .map(str::to_owned),
             "agent chat",

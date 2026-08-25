@@ -421,8 +421,8 @@ may influence model behavior, but they do not grant authority.
 The reference tree reserves the Agent alias `main`:
 
 ```text
-agent/main      -> agent/coder
-agent/main.sock -> agent/coder.sock
+agent/main      -> agent/executor
+agent/main.sock -> agent/executor.sock
 ```
 
 An Agent alias is an entry-point link, not a second Agent or a second control
@@ -583,7 +583,7 @@ An agent iterates itself through the `agent.update` tool. The tool sends one
 `agent.update` frame over the receipt-bound run capability socket:
 
 ```json
-{"op":"agent.update","request_id":"tool-1","agent":"coder","session":"default","run":"run-1","control":"system.md","content":"..."}
+{"op":"agent.update","request_id":"tool-1","agent":"executor","session":"default","run":"run-1","control":"system.md","content":"..."}
 ```
 
 The sandbox receives exactly `CTX_CONTROL_SOCKET=/run/cortexfs/control.sock` for
@@ -675,7 +675,7 @@ summarize  summarize omitted messages with the built-in provider-neutral summari
 Custom compaction executables receive one bounded JSONL frame on stdin:
 
 ```json
-{"abi":"cortexfs.compact/v1","agent":"coder","session":"default","max_chars":8000,"omitted":2,"messages":[{"role":"user","content":"..."}]}
+{"abi":"cortexfs.compact/v1","agent":"executor","session":"default","max_chars":8000,"omitted":2,"messages":[{"role":"user","content":"..."}]}
 ```
 
 Exit zero with bounded stdout text continues the run; the host inserts that text
@@ -689,7 +689,7 @@ before and after each model action. A hook is an executable regular file and
 receives one JSONL frame such as:
 
 ```json
-{"abi":"cortexfs.hook/v1","phase":"pre","action":"model","agent":"coder","run":"run-1","step":0}
+{"abi":"cortexfs.hook/v1","phase":"pre","action":"model","agent":"executor","run":"run-1","step":0}
 ```
 
 The frame is deliberately metadata-only. Hooks do not receive the current

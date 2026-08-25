@@ -29,7 +29,7 @@ fn direct_agent_runtime<'a>(
         default_cwd: "/work",
         model: Some("debug/echo"),
         network_allowed: false,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: executable,
         environment: RunEnvironment::Native,
     }

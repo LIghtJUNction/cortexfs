@@ -439,7 +439,7 @@ fn openai_chat_tool_call_response_parses_as_canonical_tool_call() {
 fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     let messages = provider_messages_for_agent(
         "what tools?",
-        Some("coder"),
+        Some("executor"),
         "Always answer tersely.",
         &test_prompt_context(),
     );
@@ -468,8 +468,8 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         Some("what tools?")
     );
 
-    let prompt = render_agent_system_prompt("coder", "", &test_prompt_context());
-    assert!(prompt.contains("CortexFS agent `coder`"));
+    let prompt = render_agent_system_prompt("executor", "", &test_prompt_context());
+    assert!(prompt.contains("CortexFS agent `executor`"));
     assert!(prompt.contains(
         "Do not claim provider, host, assistant-platform, or hidden-platform access, including `image_gen`"
     ));
@@ -479,7 +479,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
 fn agent_prompt_context_renders_workspace_runtime_hint() {
     let mut prompt_context = test_prompt_context();
     prompt_context.tool_injection = default_agent_tool_context();
-    let prompt = render_agent_system_prompt("coder", "", &prompt_context);
+    let prompt = render_agent_system_prompt("executor", "", &prompt_context);
 
     let expected = "\
 Runtime workspace:
@@ -499,10 +499,10 @@ fn agent_prompt_template_controls_rendered_system_message() {
         "agent={{agent}}\ninstructions={{agent_instructions}}\ncontract={{runtime_contract}}\n"
             .to_owned();
 
-    let prompt = render_agent_system_prompt("coder", "custom identity", &context);
+    let prompt = render_agent_system_prompt("executor", "custom identity", &context);
 
-    assert!(prompt.starts_with("agent=coder\ninstructions=custom identity\n"));
-    assert!(prompt.contains("contract=You are CortexFS agent `coder`."));
+    assert!(prompt.starts_with("agent=executor\ninstructions=custom identity\n"));
+    assert!(prompt.contains("contract=You are CortexFS agent `executor`."));
     assert!(!prompt.contains("## Rules"));
 }
 

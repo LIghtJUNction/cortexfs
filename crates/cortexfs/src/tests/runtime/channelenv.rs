@@ -82,7 +82,7 @@ fn channel_environment_is_scoped_to_one_run() -> Result<(), Box<dyn std::error::
         .ok_or("missing channel context")?;
     let env = [("CTX_PATH".to_owned(), base.to_env())];
     let identity = AgentUnixIdentity::new(uid, gid, []);
-    let session_root = root.path().join("home/1000/agent/coder/session");
+    let session_root = root.path().join("home/1000/agent/executor/session");
     fs::create_dir_all(&session_root)?;
     let runtime = AgentExecutableSocketRuntime {
         ctx_root: root.path(),
@@ -93,7 +93,7 @@ fn channel_environment_is_scoped_to_one_run() -> Result<(), Box<dyn std::error::
         default_cwd: "/workspace",
         model: None,
         network_allowed: false,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: Path::new("/agent"),
         environment: RunEnvironment::Native,
     };

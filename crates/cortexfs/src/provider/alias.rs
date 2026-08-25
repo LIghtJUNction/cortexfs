@@ -84,7 +84,7 @@ fn capability_model<'a>(
     models.iter().find(|model| match alias {
         "fast" => has_word(&model.model, "fast"),
         "reason" => model.cap.lines().any(|cap| cap.trim() == "reasoning"),
-        "code" => ["code", "coder", "coding"]
+        "code" => ["code", "executor", "coding"]
             .iter()
             .any(|word| has_word(&model.model, word)),
         "vision" => model

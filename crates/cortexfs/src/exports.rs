@@ -46,6 +46,9 @@ pub use context::pack::{
     ContextPackIssue, ContextPackReport, ContextPackSourceError, inspect_context_pack_json,
     validate_context_pack_source,
 };
+pub use cortexfs_tools::{
+    FsListTool, FsReadTool, FsReplaceTool, FsStatTool, FsWriteTool, ShellExecTool, TshConfigTool,
+};
 pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTable};
 pub use policy::{
     PolicyError, PolicyEvaluator, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0,
@@ -119,10 +122,8 @@ pub use support::trajectory::{
     TrajectoryStep, TrajectoryToolCall, trajectory_from_session_dir, trajectory_from_session_jsonl,
     validate_trajectory, write_trajectory_json,
 };
-pub use tool::core::tools::inspect::{FsListTool, FsStatTool};
-pub use tool::core::tools::{
-    FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
-    run_core_tool_cli, run_core_tool_cli_with_root,
+pub use tool::core::{
+    core_tool_specs, run_core_tool, run_core_tool_cli, run_core_tool_cli_with_root,
 };
 pub use tool::state::{
     TshContextState, TshLoadedToolState, read_tsh_context_state, retain_tsh_context_tool,

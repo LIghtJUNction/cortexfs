@@ -13,6 +13,7 @@ readonly BINARIES=(
     cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
+    cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager
 )
 readonly UNITS=(
     cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket
@@ -85,12 +86,12 @@ build_release() {
     (
         cd "$ROOT"
         CARGO_TARGET_DIR="$(dirname "$target")" \
-            cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+            scripts/serialize-cargo.sh cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
             -p cortexfs-channel-tools \
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
             -p cortexfs-channel-voice -p cortexfs-channel-slack \
-            -p cortexfs-channel-mqtt
+            -p cortexfs-channel-mqtt -p cortexfs-agents --bins
     )
 }
 

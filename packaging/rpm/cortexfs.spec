@@ -53,7 +53,8 @@ for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
     cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner \
     cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
-    cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp; do
+    cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp \
+    cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager; do
     install -m 0755 "target/release/$binary" "%{buildroot}%{_bindir}/$binary"
 done
 for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
@@ -136,6 +137,9 @@ fi
 %{_bindir}/cortexfs-channel-slack
 %{_bindir}/cortexfs-channel-mqtt
 %{_bindir}/ctxmcp
+%{_bindir}/cortexfs-agent-architect
+%{_bindir}/cortexfs-agent-executor
+%{_bindir}/cortexfs-agent-product-manager
 %dir %{_prefix}/lib/cortexfs
 %{_prefix}/lib/cortexfs/update-linux
 %{_prefix}/lib/systemd/system/cortexfs.service

@@ -182,7 +182,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
         let source = root.path().join("source");
-        let socket = root.path().join("coder.sock");
+        let socket = root.path().join("executor.sock");
         let agent_marker = root.path().join("agent-called");
         let provider_marker = root.path().join("provider-called");
         let ctx = env!("CARGO_BIN_EXE_ctx");
@@ -196,7 +196,7 @@ mod tests {
         }
 
         bootstrap_fixture(root.path(), ctx, &source)?;
-        let agent = source.join("agent/coder");
+        let agent = source.join("agent/executor");
         fs::write(
             &agent,
             format!("#!/bin/sh\ntouch {}\n", agent_marker.display()),
@@ -211,13 +211,13 @@ mod tests {
             format!("#!/bin/sh\ntouch {}\n", provider_marker.display()),
         )?;
         fs::set_permissions(&provider, fs::Permissions::from_mode(0o755))?;
-        fs::write(source.join("agent/coder.d/model"), "debug/echo\n")?;
+        fs::write(source.join("agent/executor.d/model"), "debug/echo\n")?;
         fs::write(
-            source.join("agent/coder.d/policy"),
-            "allow coder_t model:debug/echo use\nallow coder_t tool:tsh execute\n",
+            source.join("agent/executor.d/policy"),
+            "allow executor_t model:debug/echo use\nallow executor_t tool:tsh execute\n",
         )?;
 
-        let mut activation = spawn_activation(root.path(), &source, &socket, runtime, "coder")?;
+        let mut activation = spawn_activation(root.path(), &source, &socket, runtime, "executor")?;
         wait_for_socket(&mut activation, &socket)?;
         let mut stream = UnixStream::connect(&socket).map_err(|error| {
             let stderr = activation.terminate_with_stderr();
@@ -272,22 +272,22 @@ mod tests {
             source.join("bin/cortexfs-object-runner"),
             fs::Permissions::from_mode(0o755),
         )?;
-        let agent = source.join("agent/reviewer");
+        let agent = source.join("agent/executor");
         assert!(fs::read_to_string(&agent)?.contains("cortexfs-object-runner"));
-        fs::write(source.join("agent/reviewer.d/model"), "debug/echo\n")?;
-        let policy = source.join("agent/reviewer.d/policy");
+        fs::write(source.join("agent/executor.d/model"), "debug/echo\n")?;
+        let policy = source.join("agent/executor.d/policy");
         fs::write(
             &policy,
             format!(
-                "{}allow reviewer_t model:debug/echo use\n",
+                "{}allow executor_t model:debug/echo use\n",
                 fs::read_to_string(&policy)?
             ),
         )?;
 
         for attempt in 1..=7 {
-            let socket = root.path().join(format!("coder-{attempt}.sock"));
+            let socket = root.path().join(format!("executor-{attempt}.sock"));
             let mut activation =
-                spawn_activation(root.path(), &source, &socket, runtime, "reviewer")?;
+                spawn_activation(root.path(), &source, &socket, runtime, "executor")?;
             wait_for_socket(&mut activation, &socket)?;
             let mut stream = UnixStream::connect(&socket)?;
             writeln!(
@@ -327,7 +327,7 @@ mod tests {
             let state = source
                 .join("home")
                 .join(nix::unistd::geteuid().as_raw().to_string())
-                .join("agent/reviewer/session/default/state");
+                .join("agent/executor/session/default/state");
             assert_eq!(fs::read_to_string(state)?, "done\n");
         }
         Ok(())

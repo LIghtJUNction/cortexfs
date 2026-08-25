@@ -1392,7 +1392,11 @@ mod tests {
         capability.ping("startup-run-1")?;
         assert_eq!(startup_receiver.recv()?, Ok(()));
         assert_eq!(
-            capability.update_prompt("update-denied", "policy", "allow coder_t tool:tsh execute"),
+            capability.update_prompt(
+                "update-denied",
+                "policy",
+                "allow executor_t tool:tsh execute"
+            ),
             Err(RunCapabilityError::InvalidFrame)
         );
         let oversized =

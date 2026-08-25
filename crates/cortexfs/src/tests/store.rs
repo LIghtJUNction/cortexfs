@@ -1,7 +1,7 @@
 static LEGACY_SNAPSHOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn store_session(root: &Path) -> PathBuf {
-    let session_root = agent_session_root(root, "coder");
+    let session_root = agent_session_root(root, "executor");
     let layout = ensure_durable_session_layout(
         &session_root,
         "default",
@@ -17,20 +17,20 @@ fn store_session(root: &Path) -> PathBuf {
 fn session_history_stream_maps_only_abi_marker_paths() {
     assert_eq!(
         super::columnar::Stream::from_abi_path(
-            "home/1000/agent/coder/session/default/messages.jsonl",
+            "home/1000/agent/executor/session/default/messages.jsonl",
         ),
         Some(super::columnar::Stream::Messages),
     );
     assert_eq!(
         super::columnar::Stream::from_abi_path(
-            "shared/team/agent/coder/session/default/events.jsonl",
+            "shared/team/agent/executor/session/default/events.jsonl",
         ),
         Some(super::columnar::Stream::Events),
     );
     assert_eq!(
         (
             super::columnar::Stream::from_abi_path(
-                "home/1000/agent/coder/session/default/latest.md",
+                "home/1000/agent/executor/session/default/latest.md",
             ),
             super::columnar::Stream::from_abi_path("messages.jsonl"),
         ),

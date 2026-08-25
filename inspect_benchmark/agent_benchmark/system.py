@@ -10,10 +10,11 @@ import subprocess
 import time
 import uuid
 from collections import Counter
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any
 
 from .agents import (
     CleanupReceipt,
@@ -23,7 +24,6 @@ from .agents import (
     run_ctx_agent,
     sanitize,
 )
-
 
 DEFAULT_AGENTS = ("architect", "coder", "reviewer", "worker")
 ALLOWED_CATEGORIES = frozenset(

@@ -22,8 +22,8 @@ Common object shapes:
 ```text
 /ctx/model/main
 /ctx/model/debug/echo
-/ctx/agent/coder
-/ctx/agent/coder.sock
+/ctx/agent/executor
+/ctx/agent/executor.sock
 /ctx/tool/fs.read
 ```
 
@@ -46,9 +46,11 @@ echo "summarize this file" | /ctx/model/main
 
 Change the `/ctx/model/main` alias when you want a different default model.
 Do that by changing the alias instead of adding provider-specific root entries.
-The reference tree provides `architect`, `coder`, `reviewer`, and `worker`.
-`architect` is the root planning and coordination agent; `coder`, `reviewer`,
-and `worker` use `agent:architect` as their parent.
+The reference tree provides `architect`, `executor`, and `product-manager`.
+`architect` is the root planning and coordination agent; `executor` and
+`product-manager` use `agent:architect` as their parent. `executor` is the
+writable implementation and verification role; `product-manager` is read-only
+and turns user needs into measurable acceptance criteria.
 
 Bootstrap and inspect the reference source with:
 
@@ -60,23 +62,23 @@ ctx bootstrap --dry-run
 
 `ctx bootstrap` writes `bin/cortexfs.bootstrap.json` only when the schema,
 tree version, managed-agent list, or required migrations need refresh. Retired
-`base` and `executor` objects are reported but retained for
+`base`, `coder`, `reviewer`, and `worker` objects are reported but retained for
 manual review because old installations have no manifest proving ownership and
 full control-tree integrity. A successful bootstrap makes the next `--check`
 clean.
 
-The default `coder.d/system.md` treats `coder` as the parent integrator:
+The default `executor.d/system.md` treats `executor` as the parent integrator:
 independent implementation work should be a delegated `react` node in
 `context/plan.json`, delegated nodes that omit `agent` use `worker`, and
 delegated nodes that omit `session` use the current parent session name.
 Advance one schedule step with:
 
 ```bash
-ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
-ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
-ctx agent wait coder work-123 --session default
+ctx schedule status home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/executor/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/executor/session/default/context/plan.json work-123 done "implemented"
+ctx agent wait executor work-123 --session default
 ```
 
 `status` reads the plan, child table, and delegated worker
@@ -210,20 +212,20 @@ When you start an agent from the current directory, that directory is mounted as
 `/workspace` by default:
 
 ```bash
-ctx agent start coder --session default
-ctx send coder "Analyze /workspace/assets/screenshot.png and summarize UI issues"
+ctx agent start executor --session default
+ctx send executor "Analyze /workspace/assets/screenshot.png and summarize UI issues"
 ```
 
 Use explicit mounts when you need tighter visibility:
 
 ```bash
-ctx agent start coder --session image-review \
+ctx agent start executor --session image-review \
   --no-default-workspace \
   --mount "$PWD/assets" /input ro \
   --mount "$PWD/docs" /docs ro \
   --cwd /docs
 
-ctx send coder --session image-review "Inspect /input/screenshot.png and use /docs/DESIGN.md"
+ctx send executor --session image-review "Inspect /input/screenshot.png and use /docs/DESIGN.md"
 ```
 
 Use shared space when multiple agents or sessions need the same material:
@@ -248,9 +250,9 @@ at `/workspace/.git`. The agent's `HOME` is the sandbox's own `/home/agent`, so
 shell configuration and caches are not written into the project directory:
 
 ```bash
-ctx agent start coder --session default
-ctx agent watch coder --session default
-ctx agent attach coder --session default
+ctx agent start executor --session default
+ctx agent watch executor --session default
+ctx agent attach executor --session default
 ```
 
 The terminal socket lives at:
@@ -267,7 +269,7 @@ sockets. `watch` is read-only; `attach` connects your stdin to the terminal.
 Control the sandbox explicitly when needed:
 
 ```bash
-ctx agent start coder --session review \
+ctx agent start executor --session review \
   --no-default-workspace \
   --mount "$PWD" /workspace rw \
   --mount "$PWD/docs" /docs ro \
@@ -320,20 +322,20 @@ The repository still includes `agent.sh` as a shell frontend:
 ```bash
 install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
 agent.sh --help
-agent.sh coder
-agent.sh coder "summarize this repository"
-agent.sh --chat coder
-agent.sh --attach coder
-agent.sh --watch coder
-agent.sh --session default coder "inspect the failing test"
-agent.sh --resume coder
+agent.sh executor
+agent.sh executor "summarize this repository"
+agent.sh --chat executor
+agent.sh --attach executor
+agent.sh --watch executor
+agent.sh --session default executor "inspect the failing test"
+agent.sh --resume executor
 ```
 
-`agent.sh coder` opens the chat UI through
-`ctx agent chat coder --session default`. With prompt arguments, it forwards one
-message to `ctx agent send coder --session default`. Use
-`agent.sh --watch coder` to observe the agent terminal, and `agent.sh --attach
-coder` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
+`agent.sh executor` opens the chat UI through
+`ctx agent chat executor --session default`. With prompt arguments, it forwards one
+message to `ctx agent send executor --session default`. Use
+`agent.sh --watch executor` to observe the agent terminal, and `agent.sh --attach
+executor` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
 private chat database.
 
 ## Installed Multi-Turn Smoke
@@ -343,11 +345,11 @@ session ABI instead of adding a test entrance:
 
 ```bash
 ctx bootstrap
-ctx agent start coder --session default --cwd /workspace
-ctx agent send coder --session default "round one: read the current task"
-ctx agent send coder --session default "round two: continue from the previous turn"
-ctx agent history coder --session default
-ctx agent output coder --session default
+ctx agent start executor --session default --cwd /workspace
+ctx agent send executor --session default "round one: read the current task"
+ctx agent send executor --session default "round two: continue from the previous turn"
+ctx agent history executor --session default
+ctx agent output executor --session default
 ```
 
 This path checks `agent/<agent>.sock`, `messages.jsonl`, `latest.md`, current
@@ -375,10 +377,10 @@ User-editable system prompts live at:
 For example:
 
 ```bash
-ctx cat agent/coder.d/system.md
-ctx set agent/coder.d/system.md "You are a careful Rust coding agent."
-ctx cat agent/coder.d/prompt.template.md
-ctx agent prompt coder
+ctx cat agent/executor.d/system.md
+ctx set agent/executor.d/system.md "You are a careful Rust coding agent."
+ctx cat agent/executor.d/prompt.template.md
+ctx agent prompt executor
 ```
 
 `system.md` only defines persona and working style. `prompt.template.md`
@@ -406,8 +408,8 @@ snapshot into that agent's private session directory (same text as
 `{{rules}}` / `{{skills}}`; snapshot write never blocks the run):
 
 ```bash
-cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
-cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/SKILLS.md
 ```
 
 - `AGENTS.md`: effective merged rules (global + project layers)
@@ -435,9 +437,9 @@ mounts, policy, Linux uid/gid, and mode bits.
 ## Inspect History
 
 ```bash
-ctx agent history coder
-ctx agent output coder
-ctx agent trajectory coder
+ctx agent history executor
+ctx agent output executor
+ctx agent trajectory executor
 ```
 
 Without `--session`, these commands use `session/index/current` first and fall

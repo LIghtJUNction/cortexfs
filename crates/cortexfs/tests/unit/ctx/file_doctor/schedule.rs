@@ -7,7 +7,7 @@ fn file_check_validates_message_stream_files() {
             "home",
             "1000",
             "agent",
-            "coder",
+            "executor",
             "session",
             "default",
             "messages.jsonl",
@@ -21,7 +21,7 @@ fn file_check_validates_message_stream_files() {
 
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/default/messages.jsonl",
+        "home/1000/agent/executor/session/default/messages.jsonl",
         &["provider native field"],
     );
 
@@ -32,7 +32,7 @@ fn file_check_validates_message_stream_files() {
     assert!(
         file_check(
             &root,
-            "home/1000/agent/coder/session/default/messages.jsonl"
+            "home/1000/agent/executor/session/default/messages.jsonl"
         )
         .is_ok()
     );
@@ -47,7 +47,7 @@ fn file_check_validates_context_jsonl_files() {
             "shared",
             "project-a",
             "agent",
-            "coder",
+            "executor",
             "session",
             "default",
             "context",
@@ -66,13 +66,13 @@ fn file_check_validates_context_jsonl_files() {
     assert!(
         file_check(
             &root,
-            "shared/project-a/agent/coder/session/default/context/facts.jsonl"
+            "shared/project-a/agent/executor/session/default/context/facts.jsonl"
         )
         .is_ok()
     );
     assert_file_check_error_contains(
         &root,
-        "shared/project-a/agent/coder/session/default/context/swap/index.jsonl",
+        "shared/project-a/agent/executor/session/default/context/swap/index.jsonl",
         &["invalid context jsonl"],
     );
 }
@@ -133,14 +133,14 @@ fn file_check_validates_agent_schedule_plan_files() {
 
 #[test]
 fn schedule_advance_materializes_implicit_worker_handoff() {
-    let root = clean_test_dir("ctx-schedule-advance-coder-worker");
+    let root = clean_test_dir("ctx-schedule-advance-executor-worker");
     let ensured = ensure_reference_tree(&root);
     assert!(ensured.is_ok());
     enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         &root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
     create_complete_session_layout(&session);
     write_worker_schedule_plan(&session);
@@ -150,7 +150,7 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
     let advanced = schedule_command(
         &root,
         &ScheduleArgs::Advance {
-            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            path: "home/1000/agent/executor/session/default/context/plan.json".to_owned(),
             done: Vec::new(),
         },
     );
@@ -163,18 +163,18 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
         Ok((
             "openai/gpt-5.6".to_owned(),
             "temp".to_owned(),
-            "agent:coder".to_owned()
+            "agent:executor".to_owned()
         ))
     );
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder run:r1 session:default\n",
+        "agent:executor run:r1 session:default\n",
     );
     assert_eq!(
         schedule_handoff_agent_details(&root, "worker").map(|(_, _, parent)| parent),
-        Ok("agent:coder session:default run:r1".to_owned())
+        Ok("agent:executor session:default run:r1".to_owned())
     );
-    write_text_file(&root.join("agent/worker.d/parent"), "agent:coder\n");
+    write_text_file(&root.join("agent/worker.d/parent"), "agent:executor\n");
     let child = session.join("context").join("child").join("work-123");
     assert!(matches!(
         fs::read_to_string(child.join("agent")).as_deref(),
@@ -194,7 +194,7 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
     ));
     assert_worker_child_row_status(&root, "pending");
 
-    let pending_wait = agent_wait(&root, "coder", Some("default"), "work-123");
+    let pending_wait = agent_wait(&root, "executor", Some("default"), "work-123");
     assert!(matches!(
         pending_wait,
         Err(ref error)
@@ -228,7 +228,7 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
     ));
 
     assert_eq!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Ok(ExitCode::SUCCESS)
     );
 
@@ -305,7 +305,7 @@ fn schedule_claim_and_result_reject_channel_removed_from_current_plan() {
   "version": 1,
   "mode": "dag-react",
   "nodes": [
-    {"id": "local", "kind": "dag", "agent": "coder"}
+    {"id": "local", "kind": "dag", "agent": "executor"}
   ]
 }
 "#,
@@ -524,7 +524,7 @@ fn schedule_result_rejects_invalid_child_session_without_recording() {
 
     assert!(matches!(
         schedule_command(&root, &ScheduleArgs::Result {
-            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            path: "home/1000/agent/executor/session/default/context/plan.json".to_owned(),
             child: "work-123".to_owned(),
             status: ChildContextStatus::Done,
             result: "done\n".to_owned(),
@@ -556,7 +556,7 @@ fn schedule_result_rejects_invalid_backing_parent_without_recording() {
 
     assert!(matches!(
         schedule_command(&root, &ScheduleArgs::Result {
-            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            path: "home/1000/agent/executor/session/default/context/plan.json".to_owned(),
             child: "work-123".to_owned(),
             status: ChildContextStatus::Done,
             result: "done\n".to_owned(),
@@ -588,7 +588,7 @@ fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         &root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
     create_complete_session_layout(&session);
     write_worker_schedule_plan(&session);
@@ -605,7 +605,7 @@ fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
     write_text_file(&child.join("refs.jsonl"), "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder session:default run:r1\n",
+        "agent:executor session:default run:r1\n",
     );
     write_text_file(&root.join("agent/worker.d/status"), "busy\n");
     write_text_file(&root.join("agent/worker.d/pid"), "999999999\n");
@@ -645,7 +645,7 @@ fn schedule_handoff_agent_model_defaults_missing_worker_model_to_default_worker_
         Ok((
             "openai/gpt-5.6".to_owned(),
             "temp".to_owned(),
-            "agent:coder".to_owned()
+            "agent:executor".to_owned()
         ))
     );
 }
@@ -698,7 +698,7 @@ fn schedule_status_uses_dash_model_for_local_nodes() {
     assert!(ensure_reference_tree(&root).is_ok());
     let session = fixture_path(
         &root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
     create_complete_session_layout(&session);
     write_text_file(
@@ -707,14 +707,14 @@ fn schedule_status_uses_dash_model_for_local_nodes() {
   "version": 1,
   "mode": "dag-react",
   "nodes": [
-    {"id": "plan", "kind": "dag", "agent": "coder"}
+    {"id": "plan", "kind": "dag", "agent": "executor"}
   ]
 }
 "#,
     );
 
     assert_eq!(
-        assert_schedule_status_rows(&root, &["plan\tdag\tcoder\t-\t-\t-\t-\t-\t-\tready"]),
+        assert_schedule_status_rows(&root, &["plan\tdag\texecutor\t-\t-\t-\t-\t-\t-\tready"]),
         Ok(())
     );
 }
@@ -724,18 +724,18 @@ fn schedule_parent_ref_output_names_parent_agent_and_session() {
     let root = clean_test_dir("ctx-schedule-parent-ref-output");
     let session = fixture_path(
         &root,
-        &["home", "1000", "agent", "coder", "session", "default"],
+        &["home", "1000", "agent", "executor", "session", "default"],
     );
 
     assert_eq!(
-        schedule_parent_ref_for_output("coder", &session),
-        Ok("agent:coder session:default".to_owned())
+        schedule_parent_ref_for_output("executor", &session),
+        Ok("agent:executor session:default".to_owned())
     );
 }
 
 #[test]
 fn schedule_child_context_output_paths_name_stable_abi_files() {
-    let context = "home/1000/agent/coder/session/default/context";
+    let context = "home/1000/agent/executor/session/default/context";
     assert_eq!(
         schedule_context_abi_path(&format!("{context}/plan.json"), "advance"),
         Ok(context.to_owned())
@@ -743,13 +743,13 @@ fn schedule_child_context_output_paths_name_stable_abi_files() {
     assert_eq!(
         schedule_child_context_abi_paths(context, "work-123"),
         Ok(ScheduleChildContextAbiPaths {
-            status: "home/1000/agent/coder/session/default/context/child/work-123/status"
+            status: "home/1000/agent/executor/session/default/context/child/work-123/status"
                 .to_owned(),
-            handoff: "home/1000/agent/coder/session/default/context/child/work-123/handoff.md"
+            handoff: "home/1000/agent/executor/session/default/context/child/work-123/handoff.md"
                 .to_owned(),
-            result: "home/1000/agent/coder/session/default/context/child/work-123/result.md"
+            result: "home/1000/agent/executor/session/default/context/child/work-123/result.md"
                 .to_owned(),
-            refs: "home/1000/agent/coder/session/default/context/child/work-123/refs.jsonl"
+            refs: "home/1000/agent/executor/session/default/context/child/work-123/refs.jsonl"
                 .to_owned(),
         })
     );

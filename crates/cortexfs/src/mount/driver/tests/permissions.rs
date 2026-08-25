@@ -20,7 +20,7 @@ mod permission_tests {
     #[test]
     fn access_error_checks_socket_write_access_with_mode_bits() {
         let attr = FuseAttr::new(
-            "agent/coder.sock".to_owned(),
+            "agent/executor.sock".to_owned(),
             FuseFileType::Socket,
             0,
             0o666,
@@ -71,7 +71,7 @@ mod permission_tests {
     #[test]
     fn fuse_open_error_maps_socket_open_to_no_device_or_address() {
         let attr = FuseAttr::new(
-            "agent/coder.sock".to_owned(),
+            "agent/executor.sock".to_owned(),
             FuseFileType::Socket,
             0,
             0o666,

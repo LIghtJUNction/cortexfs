@@ -619,6 +619,7 @@ dependencies = [
  "parquet",
  "portable-pty",
  "reqwest",
+ "rustix",
  "rustls 0.23.42",
  "rustyline",
  "semver",

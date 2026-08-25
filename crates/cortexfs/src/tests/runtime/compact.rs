@@ -33,7 +33,7 @@ fn compact_strategy_summarize_inserts_builtin_summary() -> Result<(), Box<dyn st
         CompactStrategy::Summarize,
         root.path(),
         &CompactInvocation {
-            agent: "coder",
+            agent: "executor",
             session: "default",
             max_chars: 80,
         },
@@ -62,7 +62,7 @@ fn custom_compact_executable_receives_bounded_history_frame()
     let summary = run_custom_compact(
         &phase.join("mycompact"),
         &CompactInvocation {
-            agent: "coder",
+            agent: "executor",
             session: "default",
             max_chars: 80,
         },

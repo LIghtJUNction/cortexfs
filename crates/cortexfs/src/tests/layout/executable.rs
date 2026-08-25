@@ -47,15 +47,15 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
     let agent = install_executable_object_wrapper(
         &root,
         ObjectClass::Agent,
-        "coder",
+        "executor",
         &target.display().to_string(),
         &[("uid", "1000"), ("gid", "1000"), ("owner", "1000")],
     );
     assert!(agent.is_ok());
-    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "executor");
     assert!(report.is_ok(), "{:?}", report.issues());
-    let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
-    assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
+    let _agent_socket = bind_socket(&root.join("agent").join("executor.sock"));
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "executor").is_ok());
     assert_eq!(ObjectBootstrapError::InvalidControlValue.errno(), "EINVAL");
 }
 
@@ -113,7 +113,7 @@ fn agent_bootstrap_defaults_to_sdk_envelope_for_ask_approval() {
         install_executable_object_wrapper(
             &root,
             ObjectClass::Agent,
-            "coder",
+            "executor",
             &target,
             &[("approval", "ask"), ("abi", "argv-v1")],
         ),
@@ -123,7 +123,7 @@ fn agent_bootstrap_defaults_to_sdk_envelope_for_ask_approval() {
         install_executable_object_wrapper(
             &root,
             ObjectClass::Agent,
-            "coder",
+            "executor",
             &target,
             &[
                 ("approval", "ask"),
@@ -137,14 +137,14 @@ fn agent_bootstrap_defaults_to_sdk_envelope_for_ask_approval() {
         install_executable_object_wrapper(
             &root,
             ObjectClass::Agent,
-            "coder",
+            "executor",
             &target,
             &[("approval", "ask")],
         )
         .is_ok()
     );
     assert_eq!(
-        fs::read_to_string(root.join("agent/coder.d/abi"))
+        fs::read_to_string(root.join("agent/executor.d/abi"))
             .ok()
             .as_deref(),
         Some("sdk-envelope-v1\n")
@@ -171,7 +171,7 @@ fn executable_object_bootstrap_creates_hook_phase_directories() {
         install_executable_object_wrapper(
             &root,
             ObjectClass::Agent,
-            "coder",
+            "executor",
             &target.display().to_string(),
             &[("uid", "1000"), ("gid", "1000"), ("owner", "1000")],
         )
@@ -197,7 +197,7 @@ fn executable_object_bootstrap_creates_hook_phase_directories() {
     );
 
     for (class, name) in [
-        (ObjectClass::Agent, "coder"),
+        (ObjectClass::Agent, "executor"),
         (ObjectClass::Tool, "fs.read"),
     ] {
         let control_dir = root.join(class.as_str()).join(format!("{name}.d"));
@@ -281,25 +281,25 @@ fn executable_object_bootstrap_rejects_symlink_control_directory() {
 #[test]
 fn object_layout_accepts_socket_symlink_to_live_unix_socket() {
     let root = clean_test_dir("object-layout-socket-symlink");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let runtime_socket = root.join("runtime").join("coder.sock");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let runtime_socket = root.join("runtime").join("executor.sock");
     let _listener = bind_socket(&runtime_socket);
-    assert!(symlink(runtime_socket, root.join("agent").join("coder.sock")).is_ok());
+    assert!(symlink(runtime_socket, root.join("agent").join("executor.sock")).is_ok());
 
-    assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "executor").is_ok());
 }
 
 #[test]
 fn object_layout_rejects_dangling_agent_socket_symlink() {
     let root = clean_test_dir("object-layout-dangling-agent-socket");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let missing_socket = root.join("runtime").join("coder.sock");
-    assert!(symlink(missing_socket, root.join("agent").join("coder.sock")).is_ok());
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let missing_socket = root.join("runtime").join("executor.sock");
+    assert!(symlink(missing_socket, root.join("agent").join("executor.sock")).is_ok());
 
-    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "executor");
     assert!(
         report.issues().contains(&PathLayoutIssue::wrong_kind(
-            "agent/coder.sock".to_owned(),
+            "agent/executor.sock".to_owned(),
             LayoutPathRole::Socket
         )),
         "{:?}",
@@ -311,14 +311,14 @@ fn object_layout_rejects_dangling_agent_socket_symlink() {
 fn object_layout_rejects_symlink_class_directory_for_socket_lookup() {
     let root = clean_test_dir("object-layout-socket-symlink-class");
     let outside = clean_test_dir("object-layout-socket-symlink-class-outside");
-    create_complete_object_layout(&outside, ObjectClass::Agent, "coder", "none");
-    let _listener = bind_socket(&outside.join("agent").join("coder.sock"));
+    create_complete_object_layout(&outside, ObjectClass::Agent, "executor", "none");
+    let _listener = bind_socket(&outside.join("agent").join("executor.sock"));
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(symlink(outside.join("agent"), root.join("agent")).is_ok());
 
-    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "executor");
     assert!(report.issues().contains(&PathLayoutIssue::missing(
-        "agent/coder.sock".to_owned(),
+        "agent/executor.sock".to_owned(),
         LayoutPathRole::Socket
     )));
 }
@@ -327,16 +327,16 @@ fn object_layout_rejects_symlink_class_directory_for_socket_lookup() {
 fn object_layout_reports_missing_parts() {
     let root = clean_test_dir("object-layout-bad");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    write_text_file(&root.join("agent").join("coder"), "#!/bin/sh\n");
+    write_text_file(&root.join("agent").join("executor"), "#!/bin/sh\n");
 
-    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "executor");
     assert!(!report.is_ok());
     assert!(report.issues().contains(&PathLayoutIssue::wrong_kind(
-        "agent/coder".to_owned(),
+        "agent/executor".to_owned(),
         LayoutPathRole::Executable
     )));
     assert!(report.issues().contains(&PathLayoutIssue::missing(
-        "agent/coder.d".to_owned(),
+        "agent/executor.d".to_owned(),
         LayoutPathRole::ControlDirectory
     )));
 }

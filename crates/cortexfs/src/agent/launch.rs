@@ -225,8 +225,8 @@ mod user_manager_tests {
     #[test]
     fn counts_only_agent_terminal_unit_names() {
         let listing = "\
-cortexfs-agent-coder-default-terminal.service loaded active running CortexFS agent terminal\n\
-cortexfs-agent-coder.socket loaded active listening CortexFS agent socket\n\
+cortexfs-agent-executor-default-terminal.service loaded active running CortexFS agent terminal\n\
+cortexfs-agent-executor.socket loaded active listening CortexFS agent socket\n\
 cortexfs-agent-reviewer-work-terminal.service loaded active running CortexFS agent terminal\n\
 other.service loaded active running unrelated\n";
         assert_eq!(parse_running_agent_terminal_count(listing), 2);
@@ -284,7 +284,7 @@ other.service loaded active running unrelated\n";
     fn bootstrap_socket_prepare_and_cleanup_are_exact_and_idempotent()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
-        let visible = root.path().join("coder.sock");
+        let visible = root.path().join("executor.sock");
         let runtime = root.path().join("runtime.sock");
         let listener = UnixListener::bind(&visible)?;
         fs::set_permissions(&visible, fs::Permissions::from_mode(0o777))?;
@@ -307,7 +307,7 @@ other.service loaded active running unrelated\n";
         let collision = root
             .path()
             .join(crate::support::atomic::generated_sibling_name(
-                "coder.sock",
+                "executor.sock",
                 "restore",
                 0,
             ));
@@ -330,7 +330,7 @@ other.service loaded active running unrelated\n";
             !root
                 .path()
                 .join(crate::support::atomic::generated_sibling_name(
-                    "coder.sock",
+                    "executor.sock",
                     "restore",
                     1,
                 ))
@@ -350,7 +350,7 @@ other.service loaded active running unrelated\n";
     fn socket_alias_operations_preserve_wrong_types_and_targets()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
-        let visible = root.path().join("coder.sock");
+        let visible = root.path().join("executor.sock");
         let runtime = root.path().join("runtime.sock");
         let wrong = root.path().join("wrong.sock");
         let owner = (
@@ -457,7 +457,7 @@ other.service loaded active running unrelated\n";
     #[test]
     fn socket_alias_operations_reject_writable_parent() -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
-        let visible = root.path().join("coder.sock");
+        let visible = root.path().join("executor.sock");
         let runtime = root.path().join("runtime.sock");
         std::os::unix::fs::symlink(&runtime, &visible)?;
         fs::set_permissions(root.path(), fs::Permissions::from_mode(0o777))?;

@@ -35,7 +35,7 @@ After installing the normal CortexFS package, start an agent and write the
 Discord adapter configuration to one owner-only file:
 
 ```bash
-ctx agent start coder --session default
+ctx agent start executor --session default
 sudo install -d -m 0700 /etc/cortexfs/channels
 sudoedit /etc/cortexfs/channels/discord.toml
 sudo chmod 600 /etc/cortexfs/channels/discord.toml
@@ -81,9 +81,9 @@ sudo journalctl -u cortexfs-channel@discord.service -f
 
 The adapter keeps one bounded WebSocket connection and uses the public
 `/ctx/agent/main.sock` alias for the existing durable session ABI. The default
-reference tree materializes `agent/main -> agent/coder` and
-`agent/main.sock -> agent/coder.sock`; the canonical control and session owner
-remains `coder`.
+reference tree materializes `agent/main -> agent/executor` and
+`agent/main.sock -> agent/executor.sock`; the canonical control and session owner
+remains `executor`.
 It validates that the endpoint is a live Unix socket before connecting. Channel
 state and tools are visible under `/ctx/channel/discord/` and
 `/ctx/channel/discord.d/`; credentials remain outside `/ctx`. There is no
@@ -141,7 +141,7 @@ before starting the channel:
 ```bash
 sudo ctx storage update --prune /var/lib/cortexfs/storage
 sudo systemctl restart cortexfs.service
-sudo systemctl restart cortexfs-agent@coder.socket
+sudo systemctl restart cortexfs-agent@executor.socket
 sudo systemctl restart cortexfs-channel@discord.service
 sudo ctx doctor
 ```
@@ -420,8 +420,8 @@ sudo chmod 600 /etc/cortexfs/channels/nostr-driver.env
 The driver file selects the ordinary Agent and never contains Nostr keys:
 
 ```dotenv
-CORTEXFS_AGENT=coder
-CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock
+CORTEXFS_AGENT=executor
+CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock
 CORTEXFS_CHANNEL_SESSION_PREFIX=nostr
 ```
 
@@ -459,8 +459,8 @@ and WeCom credentials in separate owner-only files:
 
 ```dotenv
 # /etc/cortexfs/channels/wecom-ws-driver.env, mode 0600
-CORTEXFS_AGENT=coder
-CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock
+CORTEXFS_AGENT=executor
+CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock
 CORTEXFS_CHANNEL_SESSION_PREFIX=wecom-ws
 ```
 
@@ -497,8 +497,8 @@ environment:
 
 ```dotenv
 # /etc/cortexfs/channels/wechat-driver.env, mode 0600
-CORTEXFS_AGENT=coder
-CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock
+CORTEXFS_AGENT=executor
+CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock
 CORTEXFS_CHANNEL_SESSION_PREFIX=wechat
 ```
 
@@ -530,8 +530,8 @@ owner-only broker environment:
 
 ```dotenv
 # /etc/cortexfs/channels/amqp-driver.env, mode 0600
-CORTEXFS_AGENT=coder
-CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock
+CORTEXFS_AGENT=executor
+CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock
 CORTEXFS_CHANNEL_SESSION_PREFIX=amqp
 ```
 
@@ -541,8 +541,8 @@ The broker file contains only AMQP settings and secrets:
 # /etc/cortexfs/channels/amqp.env, mode 0600
 CORTEXFS_AMQP_URL=amqps://user:password@broker/vhost
 CORTEXFS_AMQP_EXCHANGE=agent.events
-CORTEXFS_AMQP_QUEUE=cortexfs-coder
-CORTEXFS_AMQP_ROUTING_KEYS=agent.coder
+CORTEXFS_AMQP_QUEUE=cortexfs-executor
+CORTEXFS_AMQP_ROUTING_KEYS=agent.executor
 CORTEXFS_AMQP_PREFETCH=4
 CORTEXFS_AMQP_DURABLE_ACK=true
 ```
@@ -572,9 +572,9 @@ to the configured outbound topic:
 ```dotenv
 # /etc/cortexfs/channels/mqtt.env, mode 0600
 CORTEXFS_MQTT_BROKER_URL=mqtts://broker.example.org:8883
-CORTEXFS_MQTT_TOPICS=agents/coder,events/agent
+CORTEXFS_MQTT_TOPICS=agents/executor,events/agent
 CORTEXFS_MQTT_OUTBOUND_TOPIC=agents/replies
-CORTEXFS_MQTT_CLIENT_ID=cortexfs-coder
+CORTEXFS_MQTT_CLIENT_ID=cortexfs-executor
 CORTEXFS_MQTT_USERNAME=read-from-a-secret-store
 CORTEXFS_MQTT_PASSWORD=read-from-a-secret-store
 CORTEXFS_MQTT_QOS=1

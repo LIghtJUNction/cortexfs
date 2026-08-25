@@ -11,18 +11,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 fn declared_tools_extend_openai_tool_manifest_and_cache_does_not() {
     let root = temp_path("provider-loaded-tools");
     let _ignored = fs::remove_dir_all(&root);
-    let control = root.join("agent").join("coder.d");
+    let control = root.join("agent").join("executor.d");
     fs::create_dir_all(&control).expect("agent control");
     fs::write(control.join("owner"), "1000\n").expect("owner");
     fs::write(control.join("uid"), "1000\n").expect("uid");
     fs::write(control.join("gid"), "1000\n").expect("gid");
     fs::write(control.join("groups"), "1000\n").expect("groups");
     fs::write(control.join("perm"), "rwx\n").expect("perm");
-    fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").expect("label");
+    fs::write(control.join("label"), "user_u:agent_r:executor_t:s0\n").expect("label");
     fs::write(control.join("iso"), "shared\n").expect("iso");
     fs::write(control.join("parent"), "\n").expect("parent");
     fs::write(control.join("life"), "owned\n").expect("life");
-    fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n").expect("root");
+    fs::write(control.join("root"), "/ctx/home/1000/agent/executor/root\n").expect("root");
     fs::write(control.join("cwd"), "/workspace\n").expect("cwd");
     fs::write(control.join("env"), "\n").expect("env");
     fs::write(
@@ -47,7 +47,7 @@ fn declared_tools_extend_openai_tool_manifest_and_cache_does_not() {
     fs::write(model_control.join("limit"), "unknown\n").expect("limit");
     fs::write(
         control.join("policy"),
-        "allow coder_t model:local/chat use\n",
+        "allow executor_t model:local/chat use\n",
     )
     .expect("policy");
     fs::write(control.join("tools"), "bash\nshell.exec\n").expect("tools");
@@ -55,7 +55,7 @@ fn declared_tools_extend_openai_tool_manifest_and_cache_does_not() {
     fs::write(control.join("pid"), "\n").expect("pid");
     fs::write(control.join("log"), "\n").expect("log");
     fs::write(control.join("meta.json"), "{}\n").expect("meta");
-    let view = crate::derive_agent_runtime_view(&root, "coder").expect("view");
+    let view = crate::derive_agent_runtime_view(&root, "executor").expect("view");
     let mut state = crate::TshContextState::default();
     state.tools = vec![
         crate::TshLoadedToolState {
@@ -83,7 +83,7 @@ fn declared_tools_extend_openai_tool_manifest_and_cache_does_not() {
     )
     .expect("state");
     assert_eq!(
-        current_agent_openai_tools_for(Some("coder"), &root),
+        current_agent_openai_tools_for(Some("executor"), &root),
         vec!["bash".to_owned(), "tsh".to_owned()]
     );
     let _ignored = fs::remove_dir_all(root);

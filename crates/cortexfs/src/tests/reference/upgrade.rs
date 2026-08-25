@@ -14,9 +14,8 @@ fn reference_tree_bootstrap_writes_bootstrap_state() {
         state.managed_agents,
         vec![
             "architect".to_owned(),
-            "coder".to_owned(),
-            "reviewer".to_owned(),
-            "worker".to_owned()
+            "executor".to_owned(),
+            "product-manager".to_owned()
         ]
     );
     assert_eq!(
@@ -26,7 +25,8 @@ fn reference_tree_bootstrap_writes_bootstrap_state() {
             MIGRATION_ROLLING_TREE.to_owned(),
             crate::reference::bootstrap::MIGRATION_AGENT_UPDATE.to_owned(),
             crate::reference::bootstrap::MIGRATION_CURRENT_MODELS.to_owned(),
-            crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS.to_owned()
+            crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS.to_owned(),
+            crate::reference::bootstrap::MIGRATION_INITIAL_AGENTS.to_owned()
         ]
     );
     assert!(root.join(BOOTSTRAP_STATE_REL).is_file());
@@ -53,29 +53,31 @@ fn version_six_plan_records_current_model_refresh() {
         migrations,
         vec![
             (7, crate::reference::bootstrap::MIGRATION_CURRENT_MODELS),
-            (8, crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS)
+            (8, crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS),
+            (9, crate::reference::bootstrap::MIGRATION_INITIAL_AGENTS)
         ]
     );
     assert_eq!(plan.current_version, Some(6));
-    assert_eq!(plan.target_version, 8);
+    assert_eq!(plan.target_version, 9);
     assert!(ensure_reference_tree(&root).is_ok());
     assert!(matches!(
         read_bootstrap_state(&root),
         Some(state)
-            if state.tree_version == 8
+            if state.tree_version == 9
                 && state.applied_migrations
                     == [
                         MIGRATION_RETIRED_AGENTS,
                         MIGRATION_ROLLING_TREE,
                         crate::reference::bootstrap::MIGRATION_AGENT_UPDATE,
                         crate::reference::bootstrap::MIGRATION_CURRENT_MODELS,
-                        crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS
+                        crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS,
+                        crate::reference::bootstrap::MIGRATION_INITIAL_AGENTS
                     ]
     ));
 }
 
 #[test]
-fn skipped_version_plan_orders_migrations_through_version_eight() {
+fn skipped_version_plan_orders_migrations_through_version_nine() {
     let root = reference_tree("reference-tree-plan-v3-v7");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
@@ -97,7 +99,8 @@ fn skipped_version_plan_orders_migrations_through_version_eight() {
             (5, MIGRATION_ROLLING_TREE),
             (6, crate::reference::bootstrap::MIGRATION_AGENT_UPDATE),
             (7, crate::reference::bootstrap::MIGRATION_CURRENT_MODELS),
-            (8, crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS)
+            (8, crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS),
+            (9, crate::reference::bootstrap::MIGRATION_INITIAL_AGENTS)
         ]
     );
 }
@@ -107,7 +110,7 @@ fn bootstrap_retry_rebuilds_unique_deterministic_migration_audit() {
     let root = reference_tree("reference-tree-migration-audit");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
-        r#"{"schema":1,"tree_version":3,"managed_agents":["architect","coder","reviewer","worker"],"applied_migrations":["unknown","retired-agents","retired-agents"]}"#,
+        r#"{"schema":1,"tree_version":3,"managed_agents":["architect","executor","product-manager"],"applied_migrations":["unknown","retired-agents","retired-agents"]}"#,
     );
 
     assert!(ensure_reference_tree(&root).is_ok());
@@ -123,7 +126,8 @@ fn bootstrap_retry_rebuilds_unique_deterministic_migration_audit() {
                 MIGRATION_ROLLING_TREE,
                 crate::reference::bootstrap::MIGRATION_AGENT_UPDATE,
                 crate::reference::bootstrap::MIGRATION_CURRENT_MODELS,
-                crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS
+                crate::reference::bootstrap::MIGRATION_AGENT_PERMISSIONS,
+                crate::reference::bootstrap::MIGRATION_INITIAL_AGENTS
             ]
     ));
 }
@@ -131,7 +135,7 @@ fn bootstrap_retry_rebuilds_unique_deterministic_migration_audit() {
 #[test]
 fn future_version_rejects_before_mutating_tree() {
     let root = clean_test_dir("reference-tree-future-version");
-    let state = r#"{"schema":1,"tree_version":9,"managed_agents":["future"],"applied_migrations":["future"]}"#;
+    let state = r#"{"schema":1,"tree_version":10,"managed_agents":["future"],"applied_migrations":["future"]}"#;
     write_text_file(&root.join(BOOTSTRAP_STATE_REL), state);
     write_text_file(&root.join("sentinel"), "keep\n");
 
@@ -139,7 +143,7 @@ fn future_version_rejects_before_mutating_tree() {
     assert_eq!(
         plan.actions,
         vec![BootstrapAction::RejectVersion {
-            current: 9,
+            current: 10,
             target: REFERENCE_TREE_VERSION
         }]
     );
@@ -160,83 +164,78 @@ fn future_version_rejects_before_mutating_tree() {
 }
 
 #[test]
-fn reference_tree_bootstrap_preserves_unmanaged_worker_for_manual_review() {
-    let root = reference_tree("reference-tree-custom-worker");
+fn reference_tree_bootstrap_promotes_unmanaged_executor() {
+    let root = reference_tree("reference-tree-custom-executor");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
         r#"{"schema":1,"tree_version":3,"managed_agents":["architect","coder","reviewer"],"applied_migrations":["retired-agents"]}"#,
     );
-    write_text_file(&root.join("agent/worker"), "custom worker wrapper\n");
+    write_text_file(&root.join("agent/executor"), "custom executor wrapper\n");
     write_text_file(
-        &root.join("agent/worker.d/system.md"),
-        "custom worker prompt\n",
+        &root.join("agent/executor.d/system.md"),
+        "custom executor prompt\n",
     );
 
     assert!(ensure_reference_tree(&root).is_ok());
-    assert_file_text(&root.join("agent/worker"), "custom worker wrapper\n");
-    assert_file_text(
-        &root.join("agent/worker.d/system.md"),
-        "custom worker prompt\n",
-    );
+    assert!(root.join("agent/executor").is_file());
     let plan = plan_reference_tree_upgrade(&root);
-    assert!(plan.actions.iter().any(|action| matches!(
+    assert!(!plan.actions.iter().any(|action| matches!(
         action,
-        BootstrapAction::SkipAgent { name, reason }
-            if name == "worker" && reason.contains("existing worker requires manual review")
+        BootstrapAction::SkipAgent { name, .. } if name == "executor"
     )));
     let state = read_bootstrap_state(&root);
     assert!(matches!(
         state,
-        Some(state) if state.tree_version == 3
-            && !state.managed_agents.iter().any(|name| name == "worker")
+        Some(state) if state.tree_version == REFERENCE_TREE_VERSION
+            && state.managed_agents.iter().any(|name| name == "executor")
     ));
 }
 
 #[test]
-fn reference_tree_bootstrap_promotes_missing_worker() {
-    let root = reference_tree("reference-tree-missing-worker");
+fn reference_tree_bootstrap_promotes_missing_executor() {
+    let root = reference_tree("reference-tree-missing-executor");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
         r#"{"schema":1,"tree_version":3,"managed_agents":["architect","coder","reviewer"],"applied_migrations":["retired-agents"]}"#,
     );
-    assert!(fs::remove_file(root.join("agent/worker")).is_ok());
-    assert!(fs::remove_file(root.join("agent/worker.sock")).is_ok());
-    assert!(fs::remove_dir_all(root.join("agent/worker.d")).is_ok());
+    assert!(fs::remove_file(root.join("agent/executor")).is_ok());
+    assert!(fs::remove_file(root.join("agent/executor.sock")).is_ok());
+    assert!(fs::remove_dir_all(root.join("agent/executor.d")).is_ok());
 
     assert!(ensure_reference_tree(&root).is_ok());
-    assert!(root.join("agent/worker").is_file());
+    assert!(root.join("agent/executor").is_file());
     let state = read_bootstrap_state(&root);
     assert!(matches!(
         state,
         Some(state) if state.tree_version == REFERENCE_TREE_VERSION
-            && state.managed_agents.iter().any(|name| name == "worker")
+            && state.managed_agents.iter().any(|name| name == "executor")
     ));
 }
 
 #[test]
-fn direct_upgrade_does_not_promote_state_before_missing_worker_is_materialized() {
-    let root = reference_tree("reference-tree-direct-upgrade-missing-worker");
+fn direct_upgrade_does_not_promote_state_before_missing_executor_is_materialized() {
+    let root = reference_tree("reference-tree-direct-upgrade-missing-executor");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
         r#"{"schema":1,"tree_version":3,"managed_agents":["architect","coder","reviewer"],"applied_migrations":["retired-agents"]}"#,
     );
-    assert!(fs::remove_file(root.join("agent/worker")).is_ok());
-    assert!(fs::remove_file(root.join("agent/worker.sock")).is_ok());
-    assert!(fs::remove_dir_all(root.join("agent/worker.d")).is_ok());
+    assert!(fs::remove_file(root.join("agent/executor")).is_ok());
+    assert!(fs::remove_file(root.join("agent/executor.sock")).is_ok());
+    assert!(fs::remove_dir_all(root.join("agent/executor.d")).is_ok());
 
     let plan = apply_reference_tree_upgrade(&root);
     assert!(matches!(
         plan,
         Ok(ref plan) if plan.actions.iter().any(|action| matches!(
             action,
-            BootstrapAction::EnsureAgent { name } if name == "worker"
+            BootstrapAction::EnsureAgent { name } if name == "executor"
         ))
     ));
     let state = read_bootstrap_state(&root);
     assert!(matches!(
         state,
         Some(state) if state.tree_version == 3
-            && !state.managed_agents.iter().any(|name| name == "worker")
+            && !state.managed_agents.iter().any(|name| name == "executor")
     ));
 }
 
@@ -246,7 +245,7 @@ fn reference_tree_bootstrap_keeps_retired_agents_for_manual_review() {
     assert!(ensure_reference_tree(&root).is_ok());
 
     // Simulate leftover agents from older reference trees.
-    for name in ["base", "executor"] {
+    for name in ["base", "coder", "reviewer", "worker"] {
         assert!(
             install_executable_object_wrapper(&root, ObjectClass::Agent, name, "/bin/false", &[])
                 .is_ok()
@@ -267,7 +266,7 @@ fn reference_tree_bootstrap_keeps_retired_agents_for_manual_review() {
     }
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
-        r#"{"schema":1,"tree_version":4,"managed_agents":["architect","coder","reviewer","worker"],"applied_migrations":["retired-agents"]}"#,
+        r#"{"schema":1,"tree_version":4,"managed_agents":["architect","executor","product-manager"],"applied_migrations":["retired-agents"]}"#,
     );
 
     assert!(ensure_reference_tree(&root).is_ok());
@@ -277,7 +276,7 @@ fn reference_tree_bootstrap_keeps_retired_agents_for_manual_review() {
     ));
 
     let plan = plan_reference_tree_upgrade(&root);
-    for name in ["base", "executor"] {
+    for name in ["base", "coder", "reviewer", "worker"] {
         assert!(root.join("agent").join(name).exists(), "{name} exec");
         assert!(
             root.join("agent").join(format!("{name}.d")).exists(),
@@ -290,7 +289,7 @@ fn reference_tree_bootstrap_keeps_retired_agents_for_manual_review() {
         )));
     }
     // Current agents remain.
-    for name in ["architect", "coder", "reviewer", "worker"] {
+    for name in ["architect", "executor", "product-manager"] {
         assert!(root.join("agent").join(name).is_file());
         assert!(root.join("agent").join(format!("{name}.d")).is_dir());
     }
@@ -350,7 +349,7 @@ fn upgrade_plan_writes_state_when_required_fields_drift() {
     assert!(ensure_reference_tree(&root).is_ok());
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
-        r#"{"schema":2,"tree_version":4,"managed_agents":["architect","coder","reviewer","worker"],"applied_migrations":[]}"#,
+        r#"{"schema":1,"tree_version":4,"managed_agents":["architect","executor","product-manager"],"applied_migrations":[]}"#,
     );
 
     let plan = plan_reference_tree_upgrade(&root);
@@ -384,21 +383,20 @@ fn plan_reference_tree_upgrade_reports_missing_agents() {
         })
         .collect();
     assert!(missing.contains(&"architect"));
-    assert!(missing.contains(&"coder"));
-    assert!(missing.contains(&"reviewer"));
-    assert!(missing.contains(&"worker"));
+    assert!(missing.contains(&"executor"));
+    assert!(missing.contains(&"product-manager"));
     assert_eq!(plan.target_version, REFERENCE_TREE_VERSION);
     assert!(plan.current_version.is_none());
 }
 
 #[test]
-fn reference_tree_worker_uses_default_worker_model() {
-    assert_eq!(reference_agent_model("worker"), DEFAULT_WORKER_MODEL);
+fn reference_tree_executor_uses_default_model() {
+    assert_eq!(reference_agent_model("executor"), "main");
 }
 
 #[test]
-fn reference_tree_worker_policy_can_write_source() {
-    let policy = reference_agent_policy("worker_t", "worker");
+fn reference_tree_executor_policy_can_write_source() {
+    let policy = reference_agent_policy("executor_t", "executor");
     assert!(
         ["tool:fs.write", "tool:fs.replace", "tool:shell.exec"]
             .iter()
@@ -408,27 +406,28 @@ fn reference_tree_worker_policy_can_write_source() {
 }
 
 #[test]
-fn reference_tree_architect_children_include_worker() {
+fn reference_tree_architect_children_include_initial_roles() {
     let children = reference_agent_children("architect");
-    assert!(children.contains(&"worker"), "{children:?}");
+    assert!(children.contains(&"executor"), "{children:?}");
+    assert!(children.contains(&"product-manager"), "{children:?}");
 }
 
 #[test]
-fn reference_tree_architect_prompt_assigns_bounded_worker_execution() {
+fn reference_tree_architect_prompt_assigns_executor_work() {
     let prompt = reference_agent_system_prompt("architect");
     assert!(
-        prompt.contains("simple bounded execution to `worker`"),
+        prompt.contains("delegate implementation and verification to `executor`"),
         "{prompt}"
     );
 }
 
 #[test]
-fn reference_tree_worker_is_not_retired() {
-    let root = reference_tree("reference-tree-worker-current");
+fn reference_tree_executor_is_not_retired() {
+    let root = reference_tree("reference-tree-executor-current");
     let plan = plan_reference_tree_upgrade(&root);
     assert!(!plan.actions.iter().any(|action| matches!(
         action,
-        BootstrapAction::SkipAgent { name, .. } if name == "worker"
+        BootstrapAction::SkipAgent { name, .. } if name == "executor"
     )));
 }
 

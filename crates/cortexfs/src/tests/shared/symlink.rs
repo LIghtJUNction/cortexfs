@@ -16,8 +16,8 @@ fn shared_access_authority_rejects_symlink_paths() {
         "ro",
         "bind,nosuid,nodev,noexec",
     );
-    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-    let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+    let policy = allow_shared_policy("executor_t", "project-a", SharedAccess::Read);
+    let authority = SharedAccessAuthority::new(&identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_shared_access("project-a", &link, SharedAccess::Read, authority),
@@ -41,8 +41,8 @@ fn shared_access_authority_rejects_symlink_intermediate_paths() {
         "ro",
         "bind,nosuid,nodev,noexec",
     );
-    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-    let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+    let policy = allow_shared_policy("executor_t", "project-a", SharedAccess::Read);
+    let authority = SharedAccessAuthority::new(&identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
@@ -57,7 +57,7 @@ fn session_access_authority_rejects_symlink_paths() -> Result<(), Box<dyn std::e
     let outside = root.join("outside-host");
     let link = home
         .join("agent")
-        .join("coder")
+        .join("executor")
         .join("session")
         .join("default")
         .join("messages.jsonl");
@@ -73,8 +73,8 @@ fn session_access_authority_rejects_symlink_paths() -> Result<(), Box<dyn std::e
     let identity = AgentUnixIdentity::new(1000, metadata.gid(), []);
     let mounts =
         mount_table_for_source_target("/ctx/home/1000", &home, "ro", "bind,nosuid,nodev,noexec");
-    let policy = policy_with_rules(["allow coder_t session:default read"]);
-    let authority = SessionAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+    let policy = policy_with_rules(["allow executor_t session:default read"]);
+    let authority = SessionAccessAuthority::new(&identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_session_access(&link, SessionAccess::Read, authority),
@@ -89,7 +89,7 @@ fn session_access_authority_rejects_symlink_intermediate_paths()
     let root = clean_test_dir("session-authority-symlink-intermediate-deny");
     let home = root.join("home-1000");
     let outside = root.join("outside-host");
-    let session_parent = home.join("agent").join("coder").join("session");
+    let session_parent = home.join("agent").join("executor").join("session");
     let file = session_parent.join("default").join("messages.jsonl");
     write_fixture_file(&outside.join("default").join("messages.jsonl"), 0o644);
     let Some(parent) = session_parent.parent() else {
@@ -102,8 +102,8 @@ fn session_access_authority_rejects_symlink_intermediate_paths()
     let identity = AgentUnixIdentity::new(1000, metadata.gid(), []);
     let mounts =
         mount_table_for_source_target("/ctx/home/1000", &home, "ro", "bind,nosuid,nodev,noexec");
-    let policy = policy_with_rules(["allow coder_t session:default read"]);
-    let authority = SessionAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+    let policy = policy_with_rules(["allow executor_t session:default read"]);
+    let authority = SessionAccessAuthority::new(&identity, &mounts, "executor_t", &policy);
 
     assert_eq!(
         authorize_session_access(&file, SessionAccess::Read, authority),

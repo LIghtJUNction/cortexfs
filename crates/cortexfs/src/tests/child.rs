@@ -4,9 +4,9 @@ fn child_agent_authority_accepts_attenuated_owned_child() {
     let child_identity = AgentUnixIdentity::new(1000, 100, [10, 30]);
     let parent_policy = PolicyV0::parse(
         "\
-allow coder_t tool:fs.read execute
-allow coder_t model:debug/echo use
-allow coder_t shared:project-a read
+allow executor_t tool:fs.read execute
+allow executor_t model:debug/echo use
+allow executor_t shared:project-a read
 ",
     );
     let parent_policy = ok!(parent_policy);
@@ -36,7 +36,7 @@ allow reviewer_t shared:project-a read
 
     let request = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder session:default run:r123",
+        "agent:executor session:default run:r123",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &child_identity,
@@ -47,9 +47,9 @@ allow reviewer_t shared:project-a read
         ),
     );
     let authority = ChildAgentAuthority::new(
-        "coder",
+        "executor",
         &parent_identity,
-        "coder_t",
+        "executor_t",
         &parent_policy,
         &parent_mounts,
         &parent_tool_path,
@@ -61,7 +61,7 @@ allow reviewer_t shared:project-a read
 
     let temp_request = ChildAgentRequest::new(
         "scratch",
-        "agent:coder session:default run:r124",
+        "agent:executor session:default run:r124",
         ChildLifecycle::Temp,
         ChildAgentControls::new(
             &child_identity,
@@ -88,20 +88,20 @@ fn authorize_child_tool_path(
     let child_tool_path = child_path.map(ToolPath::parse);
     let request = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder",
+        "agent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &identity,
-            "coder_t",
+            "executor_t",
             &policy,
             &mounts,
             child_tool_path.as_ref(),
         ),
     );
     let authority = ChildAgentAuthority::new(
-        "coder",
+        "executor",
         &identity,
-        "coder_t",
+        "executor_t",
         &policy,
         &mounts,
         &parent_tool_path,
@@ -177,8 +177,8 @@ fn child_agent_authority_attenuates_worker_prefix_model_policy() {
     let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
     let parent_policy = PolicyV0::parse(
         "\
-allow coder_t model:api.test/gpt-5.6 use
-allow coder_t tool:fs.read execute
+allow executor_t model:api.test/gpt-5.6 use
+allow executor_t tool:fs.read execute
 ",
     );
     let parent_policy = ok!(parent_policy);
@@ -203,9 +203,9 @@ allow worker-fast_t tool:fs.read execute
     let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
     let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
     let authority = ChildAgentAuthority::new(
-        "coder",
+        "executor",
         &parent_identity,
-        "coder_t",
+        "executor_t",
         &parent_policy,
         &parent_mounts,
         &parent_tool_path,
@@ -213,7 +213,7 @@ allow worker-fast_t tool:fs.read execute
 
     let worker = ChildAgentRequest::new(
         "worker-fast",
-        "agent:coder session:default run:r125",
+        "agent:executor session:default run:r125",
         ChildLifecycle::Temp,
         ChildAgentControls::new(
             &child_identity,
@@ -230,7 +230,7 @@ allow worker-fast_t tool:fs.read execute
 
     let expanded = ChildAgentRequest::new(
         "worker-fast",
-        "agent:coder session:default run:r126",
+        "agent:executor session:default run:r126",
         ChildLifecycle::Temp,
         ChildAgentControls::new(
             &child_identity,
@@ -252,7 +252,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
     let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
     let expanded_identity = AgentUnixIdentity::new(1001, 100, [10]);
     let expanded_groups = AgentUnixIdentity::new(1000, 100, [10, 20]);
-    let parent_policy = allow_tool_policy("coder_t", "fs.read");
+    let parent_policy = allow_tool_policy("executor_t", "fs.read");
     let child_policy = allow_tool_policy("reviewer_t", "fs.read");
     let expanded_policy = allow_tool_policy("reviewer_t", "shell.exec");
     let parent_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
@@ -264,9 +264,9 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
     let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
     let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
     let authority = ChildAgentAuthority::new(
-        "coder",
+        "executor",
         &parent_identity,
-        "coder_t",
+        "executor_t",
         &parent_policy,
         &parent_mounts,
         &parent_tool_path,
@@ -274,7 +274,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
 
     let base = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder",
+        "agent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &child_identity,
@@ -291,7 +291,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
 
     let identity_request = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder",
+        "agent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &expanded_identity,
@@ -308,7 +308,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
 
     let group_request = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder",
+        "agent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &expanded_groups,
@@ -325,7 +325,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
 
     let policy_request = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder",
+        "agent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &child_identity,
@@ -342,7 +342,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
 
     let mount_request = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder",
+        "agent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &child_identity,
@@ -362,7 +362,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
 fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
     let parent_identity = AgentUnixIdentity::new(1000, 100, [10]);
     let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
-    let parent_policy = allow_tool_policy("coder_t", "fs.read");
+    let parent_policy = allow_tool_policy("executor_t", "fs.read");
     let child_policy = allow_tool_policy("reviewer_t", "fs.read");
     let parent_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
     let parent_mounts = ok!(parent_mounts);
@@ -371,9 +371,9 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
     let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
     let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
     let authority = ChildAgentAuthority::new(
-        "coder",
+        "executor",
         &parent_identity,
-        "coder_t",
+        "executor_t",
         &parent_policy,
         &parent_mounts,
         &parent_tool_path,
@@ -398,7 +398,7 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
 
     let bad_ref = ChildAgentRequest::new(
         "reviewer",
-        "parent:coder",
+        "parent:executor",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &child_identity,
@@ -415,7 +415,7 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
 
     let duplicate_run = ChildAgentRequest::new(
         "reviewer",
-        "agent:coder session:default run:r1 run:r2",
+        "agent:executor session:default run:r1 run:r2",
         ChildLifecycle::Owned,
         ChildAgentControls::new(
             &child_identity,
@@ -444,7 +444,7 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
 #[test]
 fn owned_child_cancellation_records_state_and_events_without_deleting_history() {
     let root = clean_test_dir("owned-child-cancel");
-    let parent_session = agent_home(&root, "coder");
+    let parent_session = agent_home(&root, "executor");
     let child_session = agent_home(&root, "rev-123");
 
     create_complete_session_layout(&parent_session);
@@ -458,7 +458,7 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
     write_text_file(&child_session.join("events.jsonl"), "");
 
     let recorded =
-        record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session);
+        record_owned_child_cancellation("executor", "rev-123", &parent_session, &child_session);
     assert!(recorded.is_ok(), "{recorded:?}");
     let events = ok!(recorded);
     assert_file_text(&child_session.join("state"), "cancelled\n");
@@ -481,7 +481,7 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
 #[test]
 fn owned_child_cancellation_appends_to_columnar_history() {
     let root = clean_test_dir("owned-child-cancel-columnar");
-    let parent_session = agent_home(&root, "coder");
+    let parent_session = agent_home(&root, "executor");
     let child_session = agent_home(&root, "rev-123");
     for session in [&parent_session, &child_session] {
         create_complete_session_layout(session);
@@ -502,7 +502,7 @@ fn owned_child_cancellation_appends_to_columnar_history() {
     ));
 
     let events = ok!(record_owned_child_cancellation(
-        "coder",
+        "executor",
         "rev-123",
         &parent_session,
         &child_session,
@@ -546,11 +546,11 @@ fn owned_child_cancellation_rejects_bad_names_and_missing_history() {
         Err(OwnedChildCancellationError::InvalidParentName)
     );
     assert_eq!(
-        record_owned_child_cancellation("coder", "bad/child", &parent_session, &child_session),
+        record_owned_child_cancellation("executor", "bad/child", &parent_session, &child_session),
         Err(OwnedChildCancellationError::InvalidChildName)
     );
     assert_eq!(
-        record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session),
+        record_owned_child_cancellation("executor", "rev-123", &parent_session, &child_session),
         Err(OwnedChildCancellationError::MissingChildHistory)
     );
     assert_eq!(
@@ -579,7 +579,7 @@ fn owned_child_cancellation_rejects_symlink_history_files() {
     );
 
     assert_eq!(
-        record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session),
+        record_owned_child_cancellation("executor", "rev-123", &parent_session, &child_session),
         Err(OwnedChildCancellationError::MissingParentEvents)
     );
     assert_file_text(&outside.join("events.jsonl"), "");
@@ -596,7 +596,7 @@ fn owned_child_cancellation_rejects_symlink_history_files() {
     );
 
     assert_eq!(
-        record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session),
+        record_owned_child_cancellation("executor", "rev-123", &parent_session, &child_session),
         Err(OwnedChildCancellationError::MissingChildHistory)
     );
     assert_file_text(&outside.join("events.jsonl"), "");

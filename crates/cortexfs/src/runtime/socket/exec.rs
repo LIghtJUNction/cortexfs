@@ -1741,10 +1741,10 @@ mod completion_tests {
             root.join("bin/cortexfs-object-runner"),
             fs::Permissions::from_mode(0o755),
         )?;
-        fs::write(root.join("agent/coder.d/model"), "fixture/chat\n")?;
+        fs::write(root.join("agent/executor.d/model"), "fixture/chat\n")?;
         fs::write(
-            root.join("agent/coder.d/policy"),
-            "allow coder_t model:fixture/chat use\n",
+            root.join("agent/executor.d/policy"),
+            "allow executor_t model:fixture/chat use\n",
         )
     }
 
@@ -1781,7 +1781,7 @@ mod completion_tests {
             default_cwd: "/",
             model: None,
             network_allowed: false,
-            agent_name: "coder",
+            agent_name: "executor",
             agent_executable: &executable,
             environment: RunEnvironment::Native,
         };
@@ -1830,7 +1830,7 @@ mod completion_tests {
         let (address, upstream_thread) = spawn_provider_upstream()?;
         prepare_provider_fixture(root.path(), &runner, address)?;
 
-        let view = derive_agent_runtime_view(root.path(), "coder")
+        let view = derive_agent_runtime_view(root.path(), "executor")
             .map_err(|error| io::Error::other(format!("{error:?}")))?;
         let session_root = view.home().join("session");
         fs::create_dir_all(session_root.join("default"))?;
@@ -1855,7 +1855,7 @@ mod completion_tests {
                 "test-secret".to_owned(),
             ),
         ];
-        let agent_executable = root.path().join("agent/coder");
+        let agent_executable = root.path().join("agent/executor");
         let runtime = AgentExecutableSocketRuntime {
             ctx_root: root.path(),
             source_root: root.path(),
@@ -1865,7 +1865,7 @@ mod completion_tests {
             default_cwd: "/workspace",
             model: Some("fixture/chat"),
             network_allowed: true,
-            agent_name: "coder",
+            agent_name: "executor",
             agent_executable: &agent_executable,
             environment: RunEnvironment::Sandbox {
                 program: Path::new("/usr/bin/bwrap"),
@@ -1922,7 +1922,7 @@ mod completion_tests {
     fn owned_child_channel_uses_canonical_parent_home() -> io::Result<()> {
         let root = completion_root("canonical-child-channel")?;
         assert!(prepare_empty_reference_fixture(root.path()).is_ok());
-        let parent = derive_agent_runtime_view(root.path(), "coder");
+        let parent = derive_agent_runtime_view(root.path(), "executor");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
             return Ok(());
@@ -1930,7 +1930,7 @@ mod completion_tests {
         let channel = canonical_owned_child_channel(
             root.path(),
             parent.owner(),
-            "coder",
+            "executor",
             "default",
             "worker-1",
         );
@@ -1941,7 +1941,7 @@ mod completion_tests {
         assert_ne!(
             channel.unwrap_or_default(),
             root.path()
-                .join("agent/coder.d/session/default/context/child/worker-1")
+                .join("agent/executor.d/session/default/context/child/worker-1")
         );
         Ok(())
     }
@@ -1950,7 +1950,7 @@ mod completion_tests {
     fn owned_child_channel_rejects_parent_owner_mismatch() -> io::Result<()> {
         let root = completion_root("child-channel-owner-mismatch")?;
         assert!(prepare_empty_reference_fixture(root.path()).is_ok());
-        let parent = derive_agent_runtime_view(root.path(), "coder");
+        let parent = derive_agent_runtime_view(root.path(), "executor");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
             return Ok(());
@@ -1959,7 +1959,7 @@ mod completion_tests {
             canonical_owned_child_channel(
                 root.path(),
                 parent.owner().saturating_add(1),
-                "coder",
+                "executor",
                 "default",
                 "worker-1",
             ),

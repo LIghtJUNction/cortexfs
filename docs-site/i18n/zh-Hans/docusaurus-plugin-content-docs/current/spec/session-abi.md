@@ -99,11 +99,11 @@ SKILLS.md  仅 skill 目录元数据（name、description、SKILL.md 路径）
 用户可以通过普通文件操作查看历史记录：
 
 ```bash
-ctx agent history coder
-ctx agent output coder
-less /ctx/home/$(id -u)/agent/coder/session/default/messages.jsonl
-cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
-cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+ctx agent history executor
+ctx agent output executor
+less /ctx/home/$(id -u)/agent/executor/session/default/messages.jsonl
+cat /ctx/home/$(id -u)/agent/executor/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/SKILLS.md
 ```
 
 如果省略 `--session`，客户端命令解析 `session/index/current`
@@ -174,11 +174,11 @@ index/by-uuid/<uuid>  单值：该外部 uuid 对应会话名
 会话列表不是根级功能。客户端从会话索引读取当前代理：
 
 ```text
-/ctx/home/1000/agent/coder/session/index/list
-/ctx/home/1000/agent/coder/session/index/current
-/ctx/home/1000/agent/coder/session/index/by-cwd/<hash>
-/ctx/home/1000/agent/coder/session/index/by-hash/<hash>
-/ctx/home/1000/agent/coder/session/index/by-uuid/<uuid>
+/ctx/home/1000/agent/executor/session/index/list
+/ctx/home/1000/agent/executor/session/index/current
+/ctx/home/1000/agent/executor/session/index/by-cwd/<hash>
+/ctx/home/1000/agent/executor/session/index/by-hash/<hash>
+/ctx/home/1000/agent/executor/session/index/by-uuid/<uuid>
 ```
 
 共享会话在 `shared` 下读取匹配索引。临时会话不会出现在
@@ -200,6 +200,6 @@ chroot 根目录只是运行时环境：
 销毁会话历史。
 
 上下文窗口限制、可重建的提示工作集以及上下文压缩
-规则在 [agent-runtime.md](agent-runtime.md#context-window-control) 中定义。
+规则在 [agent-runtime.md](agent-runtime.md#上下文窗口控制) 中定义。
 子进程传递通道及其持久化结果文件定义在
-[ctx-coreutils.md](ctx-coreutils.md#core-commands)。
+[ctx-coreutils.md](ctx-coreutils.md#核心命令)。

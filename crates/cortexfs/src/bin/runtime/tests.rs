@@ -9,12 +9,12 @@ use std::path::Path;
 
 #[test]
 pub(crate) fn runtime_config_parses_agent_and_default_source() {
-    let parsed = RuntimeConfig::parse(vec![OsString::from("--agent"), OsString::from("coder")]);
+    let parsed = RuntimeConfig::parse(vec![OsString::from("--agent"), OsString::from("executor")]);
     assert_eq!(
         parsed,
         Ok(RuntimeConfig {
             source: Path::new(DEFAULT_SOURCE).to_path_buf(),
-            agent: "coder".to_owned(),
+            agent: "executor".to_owned(),
             mode: RuntimeMode::Serve,
         })
     );
@@ -48,13 +48,13 @@ pub(crate) fn runtime_config_parses_internal_socket_alias_modes() {
             OsString::from("--source"),
             OsString::from("/tmp/ctx"),
             OsString::from("--agent"),
-            OsString::from("coder"),
+            OsString::from("executor"),
         ]);
         assert_eq!(
             parsed,
             Ok(RuntimeConfig {
                 source: Path::new("/tmp/ctx").to_path_buf(),
-                agent: "coder".to_owned(),
+                agent: "executor".to_owned(),
                 mode,
             })
         );
@@ -68,14 +68,14 @@ pub(crate) fn runtime_config_rejects_conflicting_or_positional_internal_modes() 
             OsString::from("--prepare-socket-alias"),
             OsString::from("--cleanup-socket-alias"),
             OsString::from("--agent"),
-            OsString::from("coder"),
+            OsString::from("executor"),
         ])
         .is_err()
     );
     assert!(
         RuntimeConfig::parse(vec![
             OsString::from("--prepare-socket-alias"),
-            OsString::from("coder"),
+            OsString::from("executor"),
         ])
         .is_err()
     );

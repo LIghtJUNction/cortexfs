@@ -74,8 +74,11 @@ fn webhook_routes_provider_event_through_the_common_bridge()
         verify_token: None,
         channel: Some(ChannelId::new("discord.primary")?),
     };
-    let bridge =
-        AgentChannelBridge::new(agent_socket, ChannelSessionRoute::new("coder", "im")?, None);
+    let bridge = AgentChannelBridge::new(
+        agent_socket,
+        ChannelSessionRoute::new("executor", "im")?,
+        None,
+    );
     let client = reqwest::blocking::Client::new();
     let response = handle(
         &config,

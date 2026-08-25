@@ -292,9 +292,9 @@ fn ctx_file_writes_reject_symlink_intermediate_parent_without_writing_target() {
 fn ctx_file_set_and_append_refuse_session_history_without_side_effects() {
     let root = clean_test_dir("ctx-file-session-history-read-only");
     let paths = [
-        "home/1000/agent/coder/session/default/messages.jsonl",
+        "home/1000/agent/executor/session/default/messages.jsonl",
         "home/1000/model/openai/gpt-5.6.d/session/default/events.jsonl",
-        "shared/team/agent/coder/session/default/events.jsonl",
+        "shared/team/agent/executor/session/default/events.jsonl",
         "shared/team/model/openai/gpt-5.6.d/session/default/messages.jsonl",
     ];
 

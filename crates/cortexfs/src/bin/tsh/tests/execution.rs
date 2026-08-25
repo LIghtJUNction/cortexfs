@@ -3,7 +3,7 @@ use crate::*;
 
 #[test]
 fn persistent_context_uses_only_reserved_bwrap_home_mapping() {
-    let authoritative = Path::new("/var/lib/cortexfs/storage/current/home/1000/agent/coder");
+    let authoritative = Path::new("/var/lib/cortexfs/storage/current/home/1000/agent/executor");
     assert_eq!(
         persistent_context_visible_home(authoritative, Some(std::ffi::OsStr::new("/home/agent"))),
         PathBuf::from("/home/agent")
@@ -32,7 +32,7 @@ pub(crate) fn tsh_terminal_without_run_capability_uses_ephemeral_context()
         .arg("--nocapture")
         .env_clear()
         .env(CHILD, "1")
-        .env("CTX_AGENT", "coder")
+        .env("CTX_AGENT", "executor")
         .env_remove("CTX_SESSION")
         .env_remove("CTX_RUN_ID")
         .env_remove("CTX_SOURCE")
@@ -52,18 +52,18 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         let projection =
             PathBuf::from(std::env::var_os("CORTEXFS_TSH_RECEIPT_ROOT").unwrap_or_default());
         let socket = std::env::var_os("CTX_CONTROL_SOCKET").unwrap_or_default();
-        let path = persistent_context_path_with_capability(&projection, "coder", &socket)
+        let path = persistent_context_path_with_capability(&projection, "executor", &socket)
             .map_err(|error| io::Error::other(error.message))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "agent cache path missing"))?;
         assert!(fs::create_dir_all(path.parent().unwrap_or(&path)).is_ok());
         assert!(cortexfs::write_tsh_context_state(&path, &ToolContext::new(4).to_state()).is_ok());
-        let load_path = persistent_context_path_with_capability(&projection, "coder", &socket)
+        let load_path = persistent_context_path_with_capability(&projection, "executor", &socket)
             .map_err(|error| io::Error::other(error.message))?
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "loaded agent cache path missing")
             })?;
         assert!(cortexfs::read_tsh_context_state(&load_path).is_ok());
-        let second_path = persistent_context_path_with_capability(&projection, "coder", &socket)
+        let second_path = persistent_context_path_with_capability(&projection, "executor", &socket)
             .map_err(|error| io::Error::other(error.message))?
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "second agent cache path missing")
@@ -79,7 +79,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
     let projection = root.path().join("projection");
     let source = root.path().join("source");
     for tree in [&projection, &source] {
-        let control = tree.join("agent/coder.d");
+        let control = tree.join("agent/executor.d");
         assert!(fs::create_dir_all(&control).is_ok());
         for (name, value) in [
             ("abi", "sdk-envelope-v1\n"),
@@ -88,7 +88,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
             ("gid", "1000\n"),
             ("groups", "1000\n"),
             ("perm", "rwx\n"),
-            ("label", "user_u:agent_r:coder_t:s0\n"),
+            ("label", "user_u:agent_r:executor_t:s0\n"),
             ("iso", "shared\n"),
             ("parent", "\n"),
             ("life", "owned\n"),
@@ -99,7 +99,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
             ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev\n"),
             ("model", "local/chat\n"),
             ("window", "auto\n"),
-            ("policy", "allow coder_t model:local/chat use\n"),
+            ("policy", "allow executor_t model:local/chat use\n"),
         ] {
             assert!(fs::write(control.join(name), value).is_ok());
         }
@@ -107,7 +107,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         assert!(fs::create_dir_all(&model_control).is_ok());
         assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
     }
-    let session = source.join("home/1000/agent/coder/session/live");
+    let session = source.join("home/1000/agent/executor/session/live");
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(session.join("current_run"), "run-1\n").is_ok());
     let control = root.path().join("control");
@@ -117,7 +117,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
     let (capability, listener) = cortexfs::runtime::control::RunCapability::create_with_source(
         &control,
         &source,
-        "coder",
+        "executor",
         "live",
         "run-1",
         identity.uid(),
@@ -139,7 +139,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         .arg("--nocapture")
         .env("CORTEXFS_TSH_RECEIPT_CLIENT", "1")
         .env("CORTEXFS_TSH_RECEIPT_ROOT", &projection)
-        .env("CTX_AGENT", "coder")
+        .env("CTX_AGENT", "executor")
         .env("CTX_SESSION", "live")
         .env("CTX_RUN_ID", "run-1")
         .env("CTX_SOURCE", &source)
@@ -150,12 +150,12 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
     assert!(matches!(server.join(), Ok(Ok(()))));
     assert!(
         source
-            .join("home/1000/agent/coder/session/live/context/tsh.json")
+            .join("home/1000/agent/executor/session/live/context/tsh.json")
             .is_file()
     );
     assert!(
         !projection
-            .join("home/1000/agent/coder/session/live/context/tsh.json")
+            .join("home/1000/agent/executor/session/live/context/tsh.json")
             .exists()
     );
     Ok(())
@@ -204,7 +204,7 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
             .env("CORTEXFS_TSH_CACHE_CHILD", "1")
             .env("CORTEXFS_TSH_CACHE_PROJECTION", &projection)
             .env("CTX_SOURCE", &source)
-            .env("CTX_AGENT", "coder")
+            .env("CTX_AGENT", "executor")
             .env("CTX_SESSION", "live")
             .env("CTX_RUN_ID", "run-1")
             .output();
@@ -219,7 +219,7 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
         PathBuf::from(std::env::var_os("CORTEXFS_TSH_CACHE_PROJECTION").unwrap_or_default());
     let source = PathBuf::from(std::env::var_os("CTX_SOURCE").unwrap_or_default());
     for root in [&projection, &source] {
-        let control = root.join("agent/coder.d");
+        let control = root.join("agent/executor.d");
         assert!(fs::create_dir_all(&control).is_ok());
         for (name, value) in [
             ("abi", "sdk-envelope-v1\n"),
@@ -228,7 +228,7 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
             ("gid", "1000\n"),
             ("groups", "1000\n"),
             ("perm", "rwx\n"),
-            ("label", "user_u:agent_r:coder_t:s0\n"),
+            ("label", "user_u:agent_r:executor_t:s0\n"),
             ("iso", "shared\n"),
             ("parent", "\n"),
             ("life", "owned\n"),
@@ -239,12 +239,12 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
             ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev\n"),
             ("model", "main\n"),
             ("window", "auto\n"),
-            ("policy", "allow coder_t model:main use\n"),
+            ("policy", "allow executor_t model:main use\n"),
         ] {
             assert!(fs::write(control.join(name), value).is_ok());
         }
     }
-    let session = source.join("home/1000/agent/coder/session/live");
+    let session = source.join("home/1000/agent/executor/session/live");
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(session.join("current_run"), "run-1\n").is_ok());
     let Err(error) = persistent_context_path(&projection) else {
@@ -291,7 +291,7 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
             .env("CORTEXFS_TSH_ENV_CHILD", "1")
             .env("CORTEXFS_SHOULD_NOT_LEAK", "secret")
             .env("CORTEXFS_TSH_ROOT", &root)
-            .env("CTX_AGENT", "coder")
+            .env("CTX_AGENT", "executor")
             .env("CTX_SESSION", "live")
             .env("CTX_RUN_ID", "run-1")
             .env("CTX_SOURCE", &root)
@@ -304,7 +304,7 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     let root = std::env::var_os("CORTEXFS_TSH_ROOT")
         .map(PathBuf::from)
         .unwrap_or_default();
-    let control = root.join("agent").join("coder.d");
+    let control = root.join("agent").join("executor.d");
     let tool_control = root.join("tool").join("probe.d");
     assert!(fs::create_dir_all(&control).is_ok());
     assert!(fs::create_dir_all(&tool_control).is_ok());
@@ -313,11 +313,11 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     assert!(fs::write(control.join("gid"), "1000\n").is_ok());
     assert!(fs::write(control.join("groups"), "1000\n").is_ok());
     assert!(fs::write(control.join("perm"), "rwx\n").is_ok());
-    assert!(fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").is_ok());
+    assert!(fs::write(control.join("label"), "user_u:agent_r:executor_t:s0\n").is_ok());
     assert!(fs::write(control.join("iso"), "shared\n").is_ok());
     assert!(fs::write(control.join("parent"), "\n").is_ok());
     assert!(fs::write(control.join("life"), "owned\n").is_ok());
-    assert!(fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n").is_ok());
+    assert!(fs::write(control.join("root"), "/ctx/home/1000/agent/executor/root\n").is_ok());
     assert!(fs::write(control.join("cwd"), "/workspace\n").is_ok());
     assert!(fs::write(control.join("env"), "\n").is_ok());
     assert!(fs::write(control.join("model"), "main\n").is_ok());
@@ -330,7 +330,7 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     assert!(fs::write(control.join("pid"), "\n").is_ok());
     assert!(fs::write(control.join("log"), "\n").is_ok());
     assert!(fs::write(control.join("meta.json"), "{}\n").is_ok());
-    let session = root.join("home/1000/agent/coder/session/live");
+    let session = root.join("home/1000/agent/executor/session/live");
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(session.join("current_run"), "run-1\n").is_ok());
     assert!(
@@ -354,14 +354,14 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     assert!(
         fs::write(
             control.join("policy"),
-            "allow coder_t model:main use\nallow coder_t tool:probe execute\n",
+            "allow executor_t model:main use\nallow executor_t tool:probe execute\n",
         )
         .is_ok()
     );
     assert!(
         fs::write(
             tool_control.join("policy"),
-            "allow coder_t tool:probe execute\n"
+            "allow executor_t tool:probe execute\n"
         )
         .is_ok()
     );
@@ -372,7 +372,7 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
             r#"#!/bin/sh
 [ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] || exit 10
 [ "$CTX_TOOL_MODE" = cli ] || exit 11
-[ "$CTX_AGENT" = coder ] || exit 12
+[ "$CTX_AGENT" = executor ] || exit 12
 [ "$CTX_SESSION" = live ] || exit 16
 [ "$CTX_RUN_ID" = run-1 ] || exit 17
 [ "$CTX_SOURCE" = "$CTX_ROOT" ] || exit 18
@@ -392,17 +392,17 @@ exit 0
 
     assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
     assert!(matches!(
-        validate_tsh_runtime_context(&root, "coder", "live", "wrong-run", &root),
+        validate_tsh_runtime_context(&root, "executor", "live", "wrong-run", &root),
         Err(ref error) if error.message.contains("session mismatch")
     ));
     assert!(matches!(
-        validate_tsh_runtime_context(&root, "coder", "../bad", "run-1", &root),
+        validate_tsh_runtime_context(&root, "executor", "../bad", "run-1", &root),
         Err(ref error) if error.message.contains("invalid agent runtime context")
     ));
     assert!(matches!(
         validate_tsh_runtime_context_values(
             &root,
-            "coder",
+            "executor",
             Some("live".to_owned()),
             None,
             Some(root.clone()),
@@ -419,7 +419,7 @@ exit 0
     ));
 
     let backing = root.join("backing");
-    let backing_control = backing.join("agent/coder.d");
+    let backing_control = backing.join("agent/executor.d");
     assert!(fs::create_dir_all(&backing_control).is_ok());
     let entries = fs::read_dir(&control).ok();
     assert!(entries.is_some());
@@ -430,10 +430,10 @@ exit 0
             }
         }
     }
-    let backing_session = backing.join("home/1000/agent/coder/session/live");
+    let backing_session = backing.join("home/1000/agent/executor/session/live");
     assert!(fs::create_dir_all(&backing_session).is_ok());
     assert!(fs::write(backing_session.join("current_run"), "run-1\n").is_ok());
-    assert!(validate_tsh_runtime_context(&root, "coder", "live", "run-1", &backing).is_ok());
+    assert!(validate_tsh_runtime_context(&root, "executor", "live", "run-1", &backing).is_ok());
     for (file, replacement) in [
         ("env", "MISMATCH=1\n"),
         ("path", "/mismatch/tool\n"),
@@ -445,7 +445,7 @@ exit 0
         let original = fs::read_to_string(&path).unwrap_or_default();
         assert!(fs::write(&path, replacement).is_ok());
         assert!(matches!(
-            validate_tsh_runtime_context(&root, "coder", "live", "run-1", &backing),
+            validate_tsh_runtime_context(&root, "executor", "live", "run-1", &backing),
             Err(ref error) if error.message.contains("source mismatch")
         ));
         assert!(fs::write(path, original).is_ok());

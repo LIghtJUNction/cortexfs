@@ -30,14 +30,14 @@ ctx ls home
 ctx ls shared/project-a
 
 ctx which model openai/gpt-5.6
-ctx which agent coder
+ctx which agent executor
 ctx which tool fs.read
 
 ctx path shared project-a
-ctx agent history coder
-ctx agent output coder
-ctx agent resume coder --session default
-ctx agent wait coder work-123 --session default
+ctx agent history executor
+ctx agent output executor
+ctx agent resume executor --session default
+ctx agent wait executor work-123 --session default
 
 ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
@@ -49,22 +49,22 @@ ctx agent ps
 ctx agent chat reviewer
 ctx agent send reviewer --approve example.echo "run the declared echo tool"
 
-ctx terminal create coder [--session default] [--cwd /workspace]
+ctx terminal create executor [--session default] [--cwd /workspace]
 ctx terminal list
-ctx terminal status terminal-coder-default
-ctx terminal watch terminal-coder-default
-ctx terminal attach terminal-coder-default
+ctx terminal status terminal-executor-default
+ctx terminal watch terminal-executor-default
+ctx terminal attach terminal-executor-default
 
-ctx cat agent/coder.d/policy
-ctx set agent/coder.d/cwd /work
-ctx append agent/coder.d/path /ctx/tool
-ctx file agent/coder.d/mount
+ctx cat agent/executor.d/policy
+ctx set agent/executor.d/cwd /work
+ctx append agent/executor.d/path /ctx/tool
+ctx file agent/executor.d/mount
 ctx file type tool/fs.read
-ctx file check agent/coder.d/mount
-ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
-ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
+ctx file check agent/executor.d/mount
+ctx schedule status home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/executor/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/executor/session/default/context/plan.json work-123 done "implemented"
 
 ctx object check tool.yaml
 ctx object install --source /var/lib/cortexfs/storage/current tool.yaml --tier system
@@ -75,7 +75,7 @@ ctx object uninstall --source /var/lib/cortexfs/storage/current tool example.ech
 ctx object residue audit --source /var/lib/cortexfs/storage/current
 ctx object residue cleanup --source /var/lib/cortexfs/storage/current --path REL --dev DEV --ino INO
 
-ctx validate-name coder
+ctx validate-name executor
 ctx doctor
 ```
 
@@ -101,8 +101,8 @@ ctx bootstrap --check [SOURCE]     报告 tree_version、缺失 agents、退休�
 ctx bootstrap --dry-run [SOURCE]   展示迁移与 reconcile/state 动作顺序（不写入）
 ```
 
-默认 bootstrap 物化 `architect` / `coder` / `reviewer` / `worker`，仅在状态变化时写入
-`bin/cortexfs.bootstrap.json`（`schema`、`tree_version`、`managed_agents`、`applied_migrations`）。`base` / `executor` 已退休对象会被报告并保留人工复核，因为旧树无所有权清单与完整控制树完整性证明。`home/` 下的会话历史不被 bootstrap 删除。
+默认 bootstrap 物化 `architect` / `executor` / `product-manager`，仅在状态变化时写入
+`bin/cortexfs.bootstrap.json`（`schema`、`tree_version`、`managed_agents`、`applied_migrations`）。`base` / `coder` / `reviewer` / `worker` 已退休对象会被报告并保留人工复核，因为旧树无所有权清单与完整控制树完整性证明。`home/` 下的会话历史不被 bootstrap 删除。
 
 顶层 agent session 快捷方式与 `ctx agent ...` 的当前会话默认行为一致：
 
@@ -264,7 +264,7 @@ ctx agent wait NAME CHILD
 `ctx agent new` 只会在完整的 agent runtime 上下文中（`CTX_AGENT`、`CTX_SESSION`、`CTX_RUN_ID`、`CTX_SOURCE`）调用 `/ctx/tool/agent.create`。
 普通主机调用会直接通过写 `agent/<name>.d/*` 控制文件和 `home/<uid>/agent/<name>/` 骨架目录来创建标准 agent 对象，这属于 supervisor 操作，不授予 agent policy。
 `ctx agent new --temp` 在两个入口均记录 `life=temp`。
-`--parent` 记录标准 `agent/<name>.d/parent`，例如 `agent:coder session:default run:r1`；这样创建的 worker child 在 wait/stop 时会有可见 parent，而不会新增独立进程表命名空间。
+`--parent` 记录标准 `agent/<name>.d/parent`，例如 `agent:executor session:default run:r1`；这样创建的 worker child 在 wait/stop 时会有可见 parent，而不会新增独立进程表命名空间。
 
 `--from` 接受 host 侧 `agent.yaml`、包含一个文件的目录、或短名称 profile。`new/apply` 在写入普通 `.d/*` 控制前先校验 profile 字段。`apply` 保留未指定控制和未知 `meta.json` 键；拒绝符号链接控制与无效 profile/meta。
 
@@ -359,14 +359,14 @@ CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
 ctx ls agent
 ctx cat model/openai/gpt-5.6.d/cap
 ctx file type tool/fs.read
-ctx exec agent/coder "fix tests"
+ctx exec agent/executor "fix tests"
 ```
 
 对象字符串使用 ABI path：
 
 ```text
 model/openai/gpt-5.6
-agent/coder
+agent/executor
 tool/fs.read
 ```
 
@@ -380,7 +380,7 @@ tool/fs.read
 
 ```text
 ctx which model openai/gpt-5.6
-ctx which agent coder
+ctx which agent executor
 ctx which tool fs.read
 ```
 
@@ -451,10 +451,10 @@ eval "$(ctx cd project-a --shell)"
 示例：
 
 ```text
-ctx agent history coder
-ctx agent output coder
-ctx agent trajectory coder
-ctx agent resume coder --session default
+ctx agent history executor
+ctx agent output executor
+ctx agent trajectory executor
+ctx agent resume executor --session default
 ```
 
 命令读取：

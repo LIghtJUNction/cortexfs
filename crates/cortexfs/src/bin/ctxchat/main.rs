@@ -323,7 +323,7 @@ mod tests {
     fn parse_preserves_repeatable_approval_policy() -> io::Result<()> {
         let options = parse(
             [
-                "coder",
+                "executor",
                 "--session",
                 "work",
                 "--approval",

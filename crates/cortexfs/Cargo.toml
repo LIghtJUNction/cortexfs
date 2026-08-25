@@ -22,6 +22,7 @@ cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
 cortexfs-protocol = { version = "0.1.7", path = "../cortexfs-protocol" }
 cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
 cortexfs-tool-sdk = { version = "0.1.0", path = "../cortexfs-tool-sdk" }
+cortexfs-tools = { version = "0.1.20", path = "../cortexfs-tools" }
 fuser = "0.18.0"
 getrandom = "0.4.3"
 imap = { version = "3.0.0-alpha.15", default-features = false, features = ["rustls-tls"] }

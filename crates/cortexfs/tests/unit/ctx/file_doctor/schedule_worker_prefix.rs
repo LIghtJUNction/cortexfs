@@ -43,15 +43,15 @@ fn schedule_status_defaults_worker_prefix_to_default_worker_model_when_policy_al
         permissions.set_mode(0o755);
         assert!(fs::set_permissions(&executable, permissions).is_ok());
         write_text_file(&root.join(format!("agent/{agent}.d/life")), "temp\n");
-        write_text_file(&root.join("agent/coder.d/label"), "coder\n");
+        write_text_file(&root.join("agent/executor.d/label"), "executor\n");
         write_text_file(
-            &root.join("agent/coder.d/policy"),
-            &format!("allow coder agent:{agent} create\n"),
+            &root.join("agent/executor.d/policy"),
+            &format!("allow executor agent:{agent} create\n"),
         );
         let session = fixture_path(
             &root,
             &[
-                "home", "1000", "agent", "coder", "session", "default",
+                "home", "1000", "agent", "executor", "session", "default",
             ],
         );
         create_complete_session_layout(&session);

@@ -1,21 +1,21 @@
 #[test]
 fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     let root = clean_test_dir("agent-runtime-view");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let control = root.join("agent").join("coder.d");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let control = root.join("agent").join("executor.d");
     write_text_file(
         &control.join("env"),
         "CTX_ROOT=/ignored\nHOME=/ignored\nPATH=/tmp/pwn\nLD_PRELOAD=/tmp/libpwn.so\nRUST_LOG=info\nCTX_PROVIDER_SECRET_PATH=/tmp/secret\nTERM=vt100\n",
     );
     write_text_file(&control.join("model"), "main\n");
-    write_text_file(&control.join("policy"), "allow coder_t model:main use\n");
+    write_text_file(&control.join("policy"), "allow executor_t model:main use\n");
 
-    let view = derive_agent_runtime_view(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "executor");
     let view = ok!(view);
     let home = ctx_home(&root);
-    let agent_home = agent_home(&root, "coder");
+    let agent_home = agent_home(&root, "executor");
 
-    assert_eq!(view.agent_name(), "coder");
+    assert_eq!(view.agent_name(), "executor");
     assert_eq!(view.control_dir(), control.as_path());
     assert_eq!(view.ctx_root(), root.as_path());
     assert_eq!(view.ctx_home(), home.as_path());
@@ -24,13 +24,13 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(view.identity().uid(), 1000);
     assert_eq!(view.identity().gid(), 100);
     assert_eq!(view.identity().groups(), &[10, 20]);
-    assert_eq!(view.label(), "user_u:agent_r:coder_t:s0");
-    assert_eq!(view.policy_subject(), "coder_t");
+    assert_eq!(view.label(), "user_u:agent_r:executor_t:s0");
+    assert_eq!(view.policy_subject(), "executor_t");
     assert_eq!(view.iso(), "shared");
     assert_eq!(view.parent(), None);
     assert_eq!(view.lifecycle(), ChildLifecycle::Owned);
     assert_eq!(view.approval(), crate::AgentApprovalMode::Auto);
-    assert_eq!(view.root(), Path::new("/ctx/home/1000/agent/coder/root"));
+    assert_eq!(view.root(), Path::new("/ctx/home/1000/agent/executor/root"));
     assert_eq!(view.cwd(), Path::new("/work"));
     assert_eq!(view.model(), "main");
     assert_eq!(view.window_setting(), AgentWindowSetting::Auto);
@@ -44,7 +44,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     );
     assert_eq!(view.mount_table().entries().len(), 1);
     assert!(view.policy().allows(
-        "coder_t",
+        "executor_t",
         PolicyObjectClass::Model,
         "main",
         PolicyPermission::Use,
@@ -79,16 +79,16 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
 #[test]
 fn agent_runtime_view_loads_a_custom_loop_control() {
     let root = clean_test_dir("agent-runtime-loop-control");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let control = root.join("agent/coder.d");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let control = root.join("agent/executor.d");
     write_text_file(&control.join("loop"), "coding\n");
 
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
     assert_eq!(view.loop_kind(), &crate::AgentLoop::Coding);
     assert_eq!(env_value(view.env(), "CTX_AGENT_LOOP"), Some("coding"));
 
     write_text_file(&control.join("loop"), "custom-review\n");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
     assert_eq!(
         view.loop_kind(),
         &crate::AgentLoop::Custom("custom-review".to_owned())
@@ -98,12 +98,12 @@ fn agent_runtime_view_loads_a_custom_loop_control() {
 #[test]
 fn agent_runtime_view_resolves_auto_and_explicit_windows() {
     let root = clean_test_dir("agent-runtime-window-resolution");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let control = root.join("agent/coder.d");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let control = root.join("agent/executor.d");
     write_text_file(&control.join("model"), "local/chat\n");
     write_text_file(&root.join("model/local/chat.d/limit"), "64\n");
 
-    let auto = ok!(derive_agent_runtime_view(&root, "coder"));
+    let auto = ok!(derive_agent_runtime_view(&root, "executor"));
     assert_eq!(auto.window_setting(), AgentWindowSetting::Auto);
     assert_eq!(auto.effective_window().tokens(), Some(32));
     assert_eq!(
@@ -117,20 +117,20 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
     for value in ["1\n", "64\n"] {
         write_text_file(&control.join("window"), value);
         assert!(
-            derive_agent_runtime_view(&root, "coder").is_ok(),
+            derive_agent_runtime_view(&root, "executor").is_ok(),
             "{value:?}"
         );
     }
     write_text_file(&control.join("window"), "65\n");
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "window"
     ));
     write_text_file(&root.join("model/local/chat.d/limit"), "1000000\n");
     write_text_file(&root.join("model/local/chat.d/recommended"), "500000\n");
     write_text_file(&root.join("model/local/chat.d/compact"), "450000\n");
     write_text_file(&control.join("window"), "auto\n");
-    let recommended = ok!(derive_agent_runtime_view(&root, "coder"));
+    let recommended = ok!(derive_agent_runtime_view(&root, "executor"));
     assert_eq!(recommended.model_limit().tokens(), Some(1_000_000));
     assert_eq!(recommended.model_recommended().tokens(), Some(500_000));
     assert_eq!(recommended.model_compact().tokens(), Some(450_000));
@@ -147,12 +147,12 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
     write_text_file(&root.join("model/local/chat.d/limit"), "unknown\n");
     write_text_file(&control.join("window"), "32\n");
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "window"
     ));
     write_text_file(&control.join("window"), "auto\n");
     assert_eq!(
-        ok!(derive_agent_runtime_view(&root, "coder")).effective_window(),
+        ok!(derive_agent_runtime_view(&root, "executor")).effective_window(),
         ModelContextLimit::Unknown
     );
 }
@@ -161,7 +161,7 @@ fn agent_runtime_view_resolves_auto_and_explicit_windows() {
 #[ignore = "requires an explicit models.dev live-network check"]
 fn live_models_dev_metadata_reaches_agent_context_environment() -> std::io::Result<()> {
     let root = clean_test_dir("agent-runtime-live-model-metadata");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
     let cache = tempfile::tempdir()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -198,13 +198,13 @@ fn live_models_dev_metadata_reaches_agent_context_environment() -> std::io::Resu
             policy.compaction_threshold_tokens.unwrap_or_default()
         ),
     );
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     write_text_file(&control.join("model"), &format!("{model}\n"));
     write_text_file(
         &control.join("policy"),
-        &format!("allow coder_t model:{model} use\n"),
+        &format!("allow executor_t model:{model} use\n"),
     );
-    let view = derive_agent_runtime_view(&root, "coder")
+    let view = derive_agent_runtime_view(&root, "executor")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     assert_eq!(view.model_limit().tokens(), policy.max_tokens);
     assert_eq!(view.model_recommended().tokens(), policy.recommended_tokens);
@@ -218,25 +218,25 @@ fn live_models_dev_metadata_reaches_agent_context_environment() -> std::io::Resu
 #[test]
 fn agent_runtime_view_rejects_malformed_alias_and_limit() {
     let root = clean_test_dir("agent-runtime-window-invalid-model-state");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let control = root.join("agent/coder.d");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let control = root.join("agent/executor.d");
     write_text_file(&control.join("model"), "main\n");
     assert!(fs::remove_file(root.join("model/main")).is_ok());
     assert!(symlink("../escape", root.join("model/main")).is_ok());
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "model"
     ));
     assert!(fs::remove_file(root.join("model/main")).is_ok());
     assert!(symlink("/ctx/model/local/chat", root.join("model/main")).is_ok());
     write_text_file(&root.join("model/local/chat.d/limit"), "0\n");
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "limit"
     ));
     assert!(fs::remove_file(root.join("model/local/chat.d/limit")).is_ok());
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::MissingControlFile(ref file)) if file == "limit"
     ));
 }
@@ -244,25 +244,25 @@ fn agent_runtime_view_rejects_malformed_alias_and_limit() {
 #[test]
 fn agent_runtime_view_requires_sdk_envelope_abi() {
     let root = clean_test_dir("agent-runtime-abi");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let control = root.join("agent/coder.d");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let control = root.join("agent/executor.d");
     write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
-    assert!(derive_agent_runtime_view(&root, "coder").is_ok());
+    assert!(derive_agent_runtime_view(&root, "executor").is_ok());
 
     assert!(fs::remove_file(control.join("abi")).is_ok());
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::MissingControlFile(ref file)) if file == "abi"
     ));
     write_text_file(&control.join("abi"), "argv-v1\n");
     assert!(matches!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "abi"
     ));
     write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
     write_text_file(&control.join("approval"), "ask\n");
     assert_eq!(
-        ok!(derive_agent_runtime_view(&root, "coder")).approval(),
+        ok!(derive_agent_runtime_view(&root, "executor")).approval(),
         crate::AgentApprovalMode::Ask
     );
 }
@@ -270,11 +270,15 @@ fn agent_runtime_view_requires_sdk_envelope_abi() {
 #[test]
 fn agent_runtime_view_prefers_current_user_agent_control() {
     let root = clean_test_dir("agent-runtime-view-user-override");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
     let uid = nix::unistd::Uid::effective().as_raw().to_string();
-    let user_control = root.join("home").join(&uid).join("agent").join("coder.d");
+    let user_control = root
+        .join("home")
+        .join(&uid)
+        .join("agent")
+        .join("executor.d");
     assert!(fs::create_dir_all(&user_control).is_ok());
-    let root_control = format!("/ctx/home/{uid}/agent/coder/root");
+    let root_control = format!("/ctx/home/{uid}/agent/executor/root");
     let tool_path = format!("/ctx/tool:/ctx/home/{uid}/tool");
     for (file, value) in [
         ("owner", uid.as_str()),
@@ -282,7 +286,7 @@ fn agent_runtime_view_prefers_current_user_agent_control() {
         ("gid", uid.as_str()),
         ("groups", uid.as_str()),
         ("perm", "rwx"),
-        ("label", "user_u:agent_r:usercoder_t:s0"),
+        ("label", "user_u:agent_r:userexecutor_t:s0"),
         ("iso", "shared"),
         ("parent", "agent:base"),
         ("life", "owned"),
@@ -294,17 +298,17 @@ fn agent_runtime_view_prefers_current_user_agent_control() {
         ("model", "debug/echo"),
         ("abi", "sdk-envelope-v1"),
         ("window", "auto"),
-        ("policy", "allow usercoder_t model:debug/echo use"),
+        ("policy", "allow userexecutor_t model:debug/echo use"),
     ] {
         write_text_file(&user_control.join(file), &format!("{value}\n"));
     }
 
-    let view = derive_agent_runtime_view(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "executor");
     let view = ok!(view);
 
     assert_eq!(view.control_dir(), user_control.as_path());
     assert_eq!(view.owner().to_string(), uid);
-    assert_eq!(view.policy_subject(), "usercoder_t");
+    assert_eq!(view.policy_subject(), "userexecutor_t");
     assert_eq!(view.model(), "debug/echo");
 }
 
@@ -401,11 +405,11 @@ fn agent_runtime_view_rejects_invalid_control_files() {
 
     for (file, value) in cases {
         let root = clean_test_dir(&format!("agent-runtime-invalid-{file}"));
-        create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-        write_text_file(&root.join("agent").join("coder.d").join(file), value);
+        create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+        write_text_file(&root.join("agent").join("executor.d").join(file), value);
 
         assert_eq!(
-            derive_agent_runtime_view(&root, "coder"),
+            derive_agent_runtime_view(&root, "executor"),
             Err(AgentRuntimeViewError::InvalidControlFile(file.to_owned()))
         );
         assert_eq!(
@@ -418,15 +422,15 @@ fn agent_runtime_view_rejects_invalid_control_files() {
 #[test]
 fn agent_runtime_view_rejects_symlink_control_files() {
     let root = clean_test_dir("agent-runtime-symlink-control");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
     let outside = root.join("outside-label");
-    write_text_file(&outside, "user_u:agent_r:coder_t:s0\n");
-    let label = root.join("agent").join("coder.d").join("label");
+    write_text_file(&outside, "user_u:agent_r:executor_t:s0\n");
+    let label = root.join("agent").join("executor.d").join("label");
     assert!(fs::remove_file(&label).is_ok());
     assert!(symlink(&outside, &label).is_ok());
 
     assert_eq!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::CannotReadControl("label".to_owned()))
     );
 }
@@ -435,12 +439,12 @@ fn agent_runtime_view_rejects_symlink_control_files() {
 fn agent_runtime_view_rejects_symlink_agent_directory() {
     let root = clean_test_dir("agent-runtime-symlink-agent-dir");
     let outside = clean_test_dir("agent-runtime-symlink-agent-dir-outside");
-    create_complete_object_layout(&outside, ObjectClass::Agent, "coder", "none");
+    create_complete_object_layout(&outside, ObjectClass::Agent, "executor", "none");
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(symlink(outside.join("agent"), root.join("agent")).is_ok());
 
     assert_eq!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::MissingControlDirectory)
     );
 }
@@ -448,22 +452,22 @@ fn agent_runtime_view_rejects_symlink_agent_directory() {
 #[test]
 fn agent_runtime_view_reports_missing_controls_and_bad_agent_names() {
     let root = clean_test_dir("agent-runtime-missing");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
     assert_eq!(
         derive_agent_runtime_view(&root, "bad/name"),
         Err(AgentRuntimeViewError::InvalidAgentName)
     );
 
-    let model = root.join("agent").join("coder.d").join("model");
+    let model = root.join("agent").join("executor.d").join("model");
     assert!(fs::remove_file(model).is_ok());
     assert_eq!(
-        derive_agent_runtime_view(&root, "coder"),
+        derive_agent_runtime_view(&root, "executor"),
         Err(AgentRuntimeViewError::MissingControlFile(
-            "model".to_owned()
+            "limit".to_owned()
         ))
     );
     assert_eq!(
-        AgentRuntimeViewError::MissingControlFile("model".to_owned()).errno(),
+        AgentRuntimeViewError::MissingControlFile("limit".to_owned()).errno(),
         "ENOENT"
     );
 }
@@ -513,12 +517,15 @@ fn agent_runtime_view_accepts_parent_run_field() {
     let control = root.join("agent").join("worker.d");
     write_text_file(
         &control.join("parent"),
-        "agent:coder session:default run:r123\n",
+        "agent:executor session:default run:r123\n",
     );
 
     let view = derive_agent_runtime_view(&root, "worker");
     let view = ok!(view);
-    assert_eq!(view.parent(), Some("agent:coder session:default run:r123"));
+    assert_eq!(
+        view.parent(),
+        Some("agent:executor session:default run:r123")
+    );
 }
 
 #[test]
@@ -526,7 +533,7 @@ fn agent_runtime_view_rejects_unknown_parent_field() {
     let root = clean_test_dir("agent-runtime-parent-unknown-field");
     create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
     let control = root.join("agent").join("worker.d");
-    write_text_file(&control.join("parent"), "agent:coder task:work\n");
+    write_text_file(&control.join("parent"), "agent:executor task:work\n");
 
     assert_eq!(
         derive_agent_runtime_view(&root, "worker"),
@@ -585,7 +592,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     let allowed = root.join("tool");
     let env_only = root.join("env-tool");
 
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
     write_fixture_file(&env_only.join("fs.read"), 0o755);
     write_text_file(
         &root.join("work").join("AGENTS.md"),
@@ -596,7 +603,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
         "{\"servers\":{\"fs\":{\"tools\":[\"fs.read\"]}}}\n",
     );
 
-    let control = root.join("agent").join("coder.d");
+    let control = root.join("agent").join("executor.d");
     write_text_file(&control.join("path"), &format!("{}\n", allowed.display()));
     write_text_file(
         &control.join("env"),
@@ -604,10 +611,10 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     );
     write_text_file(
         &control.join("policy"),
-        "allow coder_t tool:fs.read execute\n",
+        "allow executor_t tool:fs.read execute\n",
     );
 
-    let view = derive_agent_runtime_view(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "executor");
     let view = ok!(view);
     assert_eq!(
         env_value(view.env(), "CTX_PATH").map(str::to_owned),
@@ -617,7 +624,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
 
     let identity = ok!(unix_identity_for(&env_only.join("fs.read")));
     let mounts = mount_table_for_target(&env_only, "rw", "bind,nosuid,nodev");
-    let tool_policy = allow_tool_policy("coder_t", "fs.read");
+    let tool_policy = allow_tool_policy("executor_t", "fs.read");
     let denied = authorize_tool_execution(
         view.tool_path(),
         "fs.read",
@@ -636,13 +643,13 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
 #[test]
 fn agent_runtime_view_accepts_missing_and_empty_optional_tools_control() {
     let root = clean_test_dir("agent-runtime-optional-tools");
-    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-    let control = root.join("agent/coder.d");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
+    let control = root.join("agent/executor.d");
     assert!(!control.join("tools").exists());
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
     assert!(view.declared_tools().is_empty());
     write_text_file(&control.join("tools"), "\n");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
     assert!(view.declared_tools().is_empty());
 }
 use super::*;

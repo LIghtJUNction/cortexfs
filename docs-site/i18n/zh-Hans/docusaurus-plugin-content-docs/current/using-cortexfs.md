@@ -21,8 +21,8 @@ ctx ls tool
 ```text
 /ctx/model/main
 /ctx/model/debug/echo
-/ctx/agent/coder
-/ctx/agent/coder.sock
+/ctx/agent/executor
+/ctx/agent/executor.sock
 /ctx/tool/fs.read
 ```
 
@@ -41,9 +41,9 @@ echo "summarize this file" | /ctx/model/main
 
 当你想更换默认模型时，修改 `/ctx/model/main` 的别名即可。请通过修改别名，而不是新增 provider 特定的根目录入口来完成。
 
-参考树定义了 `architect`、`coder`、`reviewer`、`worker`：
+参考树定义了 `architect`、`executor`、`product-manager`：
 
-`architect` 是根规划与协调代理；`coder`、`reviewer` 和 `worker` 以 `agent:architect` 为父项。
+`architect` 是根规划与协调代理；`executor` 和 `product-manager` 以 `agent:architect` 为父项。`executor` 负责可写的实现与验证，`product-manager` 负责澄清用户价值和验收标准且默认只读。
 
 用以下命令启动并检查参考源：
 
@@ -53,16 +53,16 @@ ctx bootstrap --check
 ctx bootstrap --dry-run
 ```
 
-`ctx bootstrap` 仅在以下任一项发生变化时才写入 `bin/cortexfs.bootstrap.json`：架构、树版本、受管代理列表或需要刷新的迁移条目。已淘汰的 `base` 与 `executor` 对象仍会被报告并保留，供人工复核，因为旧安装没有所有权清单和完整控制树完整性证明。一次成功的 `bootstrap` 会让下一次 `--check` 结果干净。
+`ctx bootstrap` 仅在以下任一项发生变化时才写入 `bin/cortexfs.bootstrap.json`：架构、树版本、受管代理列表或需要刷新的迁移条目。已淘汰的 `base`、`coder`、`reviewer` 与 `worker` 对象仍会被报告并保留，供人工复核，因为旧安装没有所有权清单和完整控制树完整性证明。一次成功的 `bootstrap` 会让下一次 `--check` 结果干净。
 
-默认的 `coder.d/system.md` 会把 `coder` 视为父级整合方：独立实现工作应表现为 `context/plan.json` 中的委托 `react` 节点；若委托节点省略 `agent`，则默认 `worker`，若省略 `session`，则使用当前父会话名。用如下命令推进计划：
+默认的 `executor.d/system.md` 会把 `executor` 视为父级整合方：独立实现工作应表现为 `context/plan.json` 中的委托 `react` 节点；若委托节点省略 `agent`，则默认 `worker`，若省略 `session`，则使用当前父会话名。用如下命令推进计划：
 
 ```bash
-ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
-ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
-ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
-ctx agent wait coder work-123 --session default
+ctx schedule status home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/executor/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/executor/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/executor/session/default/context/plan.json work-123 done "implemented"
+ctx agent wait executor work-123 --session default
 ```
 
 `status` 读取计划、子节点表和委托 worker 的 `agent/<name>`、`agent/<name>.d/model`、`life`。当委托 backing agent 缺失时，它不会伪造 `main`/`owned` 默认值，随后打印
@@ -163,20 +163,20 @@ AGFS 风格的服务组合通过现有文件 ABI 完成：使用 `shared/<space>
 在当前目录启动代理时，该目录会默认挂载到 `/workspace`：
 
 ```bash
-ctx agent start coder --session default
-ctx send coder "Analyze /workspace/assets/screenshot.png and summarize UI issues"
+ctx agent start executor --session default
+ctx send executor "Analyze /workspace/assets/screenshot.png and summarize UI issues"
 ```
 
 需要更严格可见性时，使用显式挂载：
 
 ```bash
-ctx agent start coder --session image-review \
+ctx agent start executor --session image-review \
   --no-default-workspace \
   --mount "$PWD/assets" /input ro \
   --mount "$PWD/docs" /docs ro \
   --cwd /docs
 
-ctx send coder --session image-review "Inspect /input/screenshot.png and use /docs/DESIGN.md"
+ctx send executor --session image-review "Inspect /input/screenshot.png and use /docs/DESIGN.md"
 ```
 
 当多个代理或会话共享同一材料时，使用共享空间：
@@ -195,9 +195,9 @@ ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
 `ctx agent start` 默认会将调用者当前目录以只读方式挂载到沙箱内的 `/workspace`，随后从 `/workspace` 启动 `ctxterm -> tsh`。若调用目录包含 `.git`，额外以只读方式覆盖挂载到 `/workspace/.git`。代理的 `HOME` 是沙箱自身的 `/home/agent`，因此 shell 配置和缓存不会写入项目目录：
 
 ```bash
-ctx agent start coder --session default
-ctx agent watch coder --session default
-ctx agent attach coder --session default
+ctx agent start executor --session default
+ctx agent watch executor --session default
+ctx agent attach executor --session default
 ```
 
 终端套接字位于：
@@ -211,7 +211,7 @@ FUSE 可见路径统一指向 root 所有的 `/run/cortexfs/terminal/broker.sock
 在需要时显式控制沙箱：
 
 ```bash
-ctx agent start coder --session review \
+ctx agent start executor --session review \
   --no-default-workspace \
   --mount "$PWD" /workspace rw \
   --mount "$PWD/docs" /docs ro \
@@ -257,16 +257,16 @@ tsh help fs.read
 ```bash
 install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
 agent.sh --help
-agent.sh coder
-agent.sh coder "summarize this repository"
-agent.sh --chat coder
-agent.sh --attach coder
-agent.sh --watch coder
-agent.sh --session default coder "inspect the failing test"
-agent.sh --resume coder
+agent.sh executor
+agent.sh executor "summarize this repository"
+agent.sh --chat executor
+agent.sh --attach executor
+agent.sh --watch executor
+agent.sh --session default executor "inspect the failing test"
+agent.sh --resume executor
 ```
 
-`agent.sh coder` 通过 `ctx agent chat coder --session default` 打开聊天界面；带入 prompt 参数时会转发一条消息到 `ctx agent send coder --session default`。使用 `agent.sh --watch coder` 观察代理终端，`agent.sh --attach coder` 仅在需要进入 `ctxterm -> tsh` 时使用。`agent.sh` 不会保有私有聊天数据库。
+`agent.sh executor` 通过 `ctx agent chat executor --session default` 打开聊天界面；带入 prompt 参数时会转发一条消息到 `ctx agent send executor --session default`。使用 `agent.sh --watch executor` 观察代理终端，`agent.sh --attach executor` 仅在需要进入 `ctxterm -> tsh` 时使用。`agent.sh` 不会保有私有聊天数据库。
 
 ## 已安装环境中的多轮 smoke
 
@@ -274,11 +274,11 @@ agent.sh --resume coder
 
 ```bash
 ctx bootstrap
-ctx agent start coder --session default --cwd /workspace
-ctx agent send coder --session default "round one: read the current task"
-ctx agent send coder --session default "round two: continue from the previous turn"
-ctx agent history coder --session default
-ctx agent output coder --session default
+ctx agent start executor --session default --cwd /workspace
+ctx agent send executor --session default "round one: read the current task"
+ctx agent send executor --session default "round two: continue from the previous turn"
+ctx agent history executor --session default
+ctx agent output executor --session default
 ```
 
 该路径会校验 `agent/<agent>.sock`、`messages.jsonl`、`latest.md`、会话选择与 prompt 历史注入。会话的持久事实保留在
@@ -298,10 +298,10 @@ ctx agent output coder --session default
 示例：
 
 ```bash
-ctx cat agent/coder.d/system.md
-ctx set agent/coder.d/system.md "You are a careful Rust coding agent."
-ctx cat agent/coder.d/prompt.template.md
-ctx agent prompt coder
+ctx cat agent/executor.d/system.md
+ctx set agent/executor.d/system.md "You are a careful Rust coding agent."
+ctx cat agent/executor.d/prompt.template.md
+ctx agent prompt executor
 ```
 
 `system.md` 只定义人设与工作风格，`prompt.template.md` 定义这些内容如何与规则、技能元数据、工具注入、消息历史和运行时契约拼接，构成模型可见的第一条系统消息。模板变量包括 `{{agent}}`、`{{current_time_unix}}`、`{{agent_instructions}}`、`{{rules}}`、`{{skills}}`、`{{tool_injection}}`、`{{history_messages}}`、`{{runtime_contract}}`。
@@ -313,8 +313,8 @@ ctx agent prompt coder
 代理运行时会在该代理私有 session 目录中落一份“可用”快照（文本内容与 `{{rules}}` / `{{skills}}` 一致；快照写入不会阻塞运行）：
 
 ```bash
-cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
-cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/SKILLS.md
 ```
 
 - `AGENTS.md`：生效规则（全局 + 项目层合并）
@@ -336,9 +336,9 @@ cd "$(ctx path shared project-a)"
 ## 查看历史
 
 ```bash
-ctx agent history coder
-ctx agent output coder
-ctx agent trajectory coder
+ctx agent history executor
+ctx agent output executor
+ctx agent trajectory executor
 ```
 
 不加 `--session` 时，命令首先读取 `session/index/current`，再回退到 `default`，因此查看当前最新会话不需要独立的 `latest` 子命令。

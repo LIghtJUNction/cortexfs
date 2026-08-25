@@ -73,7 +73,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
         "CTX_PROVIDER_SECRET_PATH",
         "CTX_PROVIDER_SECRET_PROVIDER",
         "CTX_PROVIDER_SECRET_SLOT",
-        "/run/user/1000/cortexfs/credentials/coder-default",
+        "/run/user/1000/cortexfs/credentials/executor-default",
     ] {
         assert!(!args.iter().any(|arg| arg == secret));
     }
@@ -101,9 +101,9 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
 #[test]
 fn agent_executable_socket_direct_does_not_inherit_provider_secrets() {
     let root = reference_tree("agent-direct-secrets");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
@@ -161,7 +161,7 @@ printf '{"type":"delta","run":"%s","text":"secret-not-inherited"}\n' "$CTX_RUN_I
             default_cwd: "/work",
             model: Some("debug/echo"),
             network_allowed: false,
-            agent_name: "coder",
+            agent_name: "executor",
             agent_executable: &agent_executable,
             environment: RunEnvironment::Native,
         },
@@ -182,9 +182,9 @@ printf '{"type":"delta","run":"%s","text":"secret-not-inherited"}\n' "$CTX_RUN_I
 #[test]
 fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let root = reference_tree("agent-executable-socket-runtime-bwrap-args");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     let mut env = view.env().to_vec();
     env.push((
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
@@ -193,7 +193,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     env.push(("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()));
     env.push((
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
-        "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
+        "/run/user/1000/cortexfs/credentials/executor-default".to_owned(),
     ));
     env.push((
         "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
@@ -211,7 +211,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         default_cwd: "/workspace",
         model: Some("debug/echo"),
         network_allowed: false,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: &agent_executable,
         environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
@@ -220,7 +220,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         },
     };
     let environment = [
-        ("CTX_AGENT".to_owned(), "coder".to_owned()),
+        ("CTX_AGENT".to_owned(), "executor".to_owned()),
         ("CTX_ROOT".to_owned(), root.display().to_string()),
         ("CTX_SOURCE".to_owned(), root.display().to_string()),
     ];
@@ -250,7 +250,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         &args,
         "--setenv",
         "CTX_AGENT",
-        "coder"
+        "executor"
     ));
     assert_control_environment(&args);
     let opened = ok!(open_agent_executable_no_follow(&agent_executable));
@@ -354,10 +354,10 @@ fn prepared_bwrap_command(
     initial_env: &[(String, String)],
 ) -> Result<PreparedBwrapCommand, std::io::Error> {
     let root = reference_tree(case);
-    let session_root = agent_session_root(&root, "coder");
-    let view = derive_agent_runtime_view(&root, "coder")
+    let session_root = agent_session_root(&root, "executor");
+    let view = derive_agent_runtime_view(&root, "executor")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let agent_executable = root.join("agent/coder");
+    let agent_executable = root.join("agent/executor");
     write_text_file(&agent_executable, script);
     set_file_mode(&agent_executable, 0o755);
     let opened = open_agent_executable_no_follow(&agent_executable)
@@ -400,9 +400,9 @@ fn prepared_bwrap_command(
 #[test]
 fn network_denied_provider_does_not_create_egress() {
     let root = reference_tree("agent-bwrap-egress-spawn-failure");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent/executor");
     write_text_file(&agent_executable, "#!/bin/sh\nexit 0\n");
     set_file_mode(&agent_executable, 0o755);
     let model_control = root.join("model/fixture/chat.d");
@@ -422,7 +422,7 @@ fn network_denied_provider_does_not_create_egress() {
         default_cwd: "/workspace",
         model: Some("fixture/chat"),
         network_allowed: false,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: &agent_executable,
         environment: RunEnvironment::Sandbox {
             program: Path::new("/definitely/missing/bwrap"),
@@ -460,9 +460,9 @@ fn network_denied_provider_does_not_create_egress() {
 #[test]
 fn debug_alias_does_not_create_provider_egress() {
     let root = reference_tree("agent-bwrap-debug-no-egress");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent/coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent/executor");
     write_text_file(&agent_executable, "#!/bin/sh\nexit 0\n");
     set_file_mode(&agent_executable, 0o755);
     let control_dir = root.join("runtime");
@@ -482,7 +482,7 @@ fn debug_alias_does_not_create_provider_egress() {
             default_cwd: "/workspace",
             model: Some("main"),
             network_allowed: false,
-            agent_name: "coder",
+            agent_name: "executor",
             agent_executable: &agent_executable,
             environment: RunEnvironment::Sandbox {
                 program: Path::new("/definitely/missing/bwrap"),
@@ -518,10 +518,10 @@ fn debug_alias_does_not_create_provider_egress() {
 fn agent_executable_socket_bwrap_ignores_request_workspace()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = reference_tree("agent-bwrap-workspace");
-    let session_root = agent_session_root(&root, "coder");
-    let view = derive_agent_runtime_view(&root, "coder")
+    let session_root = agent_session_root(&root, "executor");
+    let view = derive_agent_runtime_view(&root, "executor")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let agent_executable = root.join("agent").join("coder");
+    let agent_executable = root.join("agent").join("executor");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
@@ -559,7 +559,7 @@ printf '{"type":"delta","run":"%s","text":"%s-%s-%s"}\n' "$CTX_RUN_ID" "$workspa
             default_cwd: "/workspace",
             model: Some("debug/echo"),
             network_allowed: false,
-            agent_name: "coder",
+            agent_name: "executor",
             agent_executable: &agent_executable,
             environment: RunEnvironment::Sandbox {
                 program: Path::new("/usr/bin/bwrap"),
@@ -577,9 +577,9 @@ printf '{"type":"delta","run":"%s","text":"%s-%s-%s"}\n' "$CTX_RUN_ID" "$workspa
 #[test]
 fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
     let root = reference_tree("bwrap-network");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let session_root = agent_session_root(&root, "executor");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     let runtime = AgentExecutableSocketRuntime {
         ctx_root: &root,
         source_root: &root,
@@ -589,7 +589,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         default_cwd: "/workspace",
         model: Some("debug/echo"),
         network_allowed: true,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: &agent_executable,
         environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
@@ -635,14 +635,14 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
 #[test]
 fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
     let root = reference_tree("agent-bwrap-explicit-workspace");
-    let session_root = agent_session_root(&root, "coder");
-    let control = root.join("agent").join("coder.d");
+    let session_root = agent_session_root(&root, "executor");
+    let control = root.join("agent").join("executor.d");
     write_text_file(
         &control.join("mount"),
         "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/repo-explicit\t/workspace\trw\trbind,nosuid,nodev\n",
     );
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let agent_executable = root.join("agent").join("coder");
+    let view = ok!(derive_agent_runtime_view(&root, "executor"));
+    let agent_executable = root.join("agent").join("executor");
     let runtime = AgentExecutableSocketRuntime {
         ctx_root: &root,
         source_root: &root,
@@ -652,7 +652,7 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         default_cwd: "/workspace",
         model: Some("debug/echo"),
         network_allowed: false,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: &agent_executable,
         environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
@@ -703,7 +703,7 @@ import json, os, socket, sys
 run = os.environ["CTX_RUN_ID"]
 stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 stream.connect(os.environ["CTX_CONTROL_SOCKET"])
-stream.sendall((json.dumps({"op":"ping", "request_id":"startup-" + run, "agent":"coder", "session":"default", "run":run}) + "\n").encode())
+stream.sendall((json.dumps({"op":"ping", "request_id":"startup-" + run, "agent":"executor", "session":"default", "run":run}) + "\n").encode())
 reply_bytes = b""
 while not reply_bytes.endswith(b"\n"):
     chunk = stream.recv(16384)
@@ -726,7 +726,7 @@ fn assert_unregistered_bwrap_capability_client_is_denied(
     sibling
         .args([
             "-c",
-            "import os, socket, sys; s=socket.socket(socket.AF_UNIX); s.connect(os.environ['CTX_CONTROL_SOCKET']); s.sendall(b'{\"op\":\"ping\",\"request_id\":\"sibling\",\"agent\":\"coder\",\"session\":\"default\",\"run\":\"run-1\"}\\n');\ntry: reply=s.recv(1)\nexcept OSError: reply=b''\nsys.exit(1 if reply else 0)",
+            "import os, socket, sys; s=socket.socket(socket.AF_UNIX); s.connect(os.environ['CTX_CONTROL_SOCKET']); s.sendall(b'{\"op\":\"ping\",\"request_id\":\"sibling\",\"agent\":\"executor\",\"session\":\"default\",\"run\":\"run-1\"}\\n');\ntry: reply=s.recv(1)\nexcept OSError: reply=b''\nsys.exit(1 if reply else 0)",
         ])
         .env("CTX_CONTROL_SOCKET", capability.socket());
     let output = sibling.output()?;
@@ -762,7 +762,7 @@ fn run_registered_bwrap_capability_probe(
         default_cwd: "/workspace",
         model: Some("debug/echo"),
         network_allowed: false,
-        agent_name: "coder",
+        agent_name: "executor",
         agent_executable: executable,
         environment: RunEnvironment::Sandbox {
             program: Path::new("/usr/bin/bwrap"),
@@ -818,10 +818,10 @@ fn run_registered_bwrap_capability_probe(
 fn agent_bwrap_capability_allows_only_registered_launch_roots()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = reference_tree("agent-bwrap-capability");
-    let session_root = agent_session_root(&root, "coder");
-    let view = derive_agent_runtime_view(&root, "coder")
+    let session_root = agent_session_root(&root, "executor");
+    let view = derive_agent_runtime_view(&root, "executor")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-    let executable = root.join("agent").join("coder");
+    let executable = root.join("agent").join("executor");
     write_text_file(&executable, BWRAP_CAPABILITY_PROBE);
     set_file_mode(&executable, 0o755);
     let control_dir = root.join("runtime");
@@ -830,7 +830,7 @@ fn agent_bwrap_capability_allows_only_registered_launch_roots()
     let (capability, listener) = crate::runtime::control::RunCapability::create_with_source(
         &control_dir,
         &root,
-        "coder",
+        "executor",
         "default",
         "run-1",
         view.identity().uid(),

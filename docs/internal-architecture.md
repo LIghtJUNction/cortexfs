@@ -121,7 +121,8 @@ Agent core
   cortexfs-runtime               sockets, session record, egress, handshakes
   cortexfs-object                install / replace / one-shot executor
   cortexfs-runtime-client        interaction frames (shared by all UIs)
-  cortexfs-tool-sdk / agent-sdk  capability process contracts
+  cortexfs-tools                  default filesystem/shell/tsh tools
+  cortexfs-tool-sdk / agent-sdk   capability process contracts
 
 Projection / application
   cortexfs-fuse                  fuser projection only
@@ -146,6 +147,8 @@ cortexfs-runtime          socket, session record, egress, control handshakes
         ▲
 cortexfs-object           install / replace / executor / runner helpers
         ▲
+cortexfs-tools            default fs / shell / tsh tool implementations
+        ▲
 cortexfs-fuse             fuser projection only
         ▲
 cortexfs (facade)         re-exports + optional features; bins depend on facade
@@ -163,6 +166,7 @@ sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 | `cortexfs-protocol` | pure parse/IR crates | agent loop, FUSE, secrets, filesystem ABI |
 | `cortexfs-runtime` | `abi`, `support` | FUSE mount loop, object install stages |
 | `cortexfs-object` | `abi`, `support`, runtime-client, tool-sdk | FUSE server |
+| `cortexfs-tools` | paths, tool-sdk, `nix` fs/process, serde_json | FUSE, provider HTTP, agent lifecycle |
 | `cortexfs-fuse` | `abi`, `support`, `fuser` | object executor, provider HTTP |
 | SDKs | `runtime-client` (+ minimal abi types) | full `cortexfs` monolith when avoidable |
 | `channel-*` | channel-sdk, runtime-client | fuse, object executor, provider registry |

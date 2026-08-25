@@ -5,7 +5,7 @@ fn agent_new_request_json_accepts_parent_session_and_run_fields() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder session:default run:r123"
+        "agent:executor session:default run:r123"
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -15,7 +15,7 @@ fn agent_new_request_json_accepts_parent_session_and_run_fields() {
     assert_eq!(
         agent_new_request_json(&args),
         Ok(
-            "{\"name\":\"worker-fast\",\"parent\":\"agent:coder session:default run:r123\"}"
+            "{\"name\":\"worker-fast\",\"parent\":\"agent:executor session:default run:r123\"}"
                 .to_owned()
         )
     );
@@ -28,7 +28,7 @@ fn agent_new_request_json_rejects_duplicate_parent_session_field() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder session:default session:feature"
+        "agent:executor session:default session:feature"
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -38,7 +38,7 @@ fn agent_new_request_json_rejects_duplicate_parent_session_field() {
     assert_eq!(
         agent_new_request_json(&args),
         Err(CliError::usage(
-            "invalid agent parent: agent:coder session:default session:feature"
+            "invalid agent parent: agent:executor session:default session:feature"
         ))
     );
 }
@@ -50,7 +50,7 @@ fn agent_new_request_json_rejects_duplicate_parent_run_field() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder session:default run:r1 run:r2"
+        "agent:executor session:default run:r1 run:r2"
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -60,7 +60,7 @@ fn agent_new_request_json_rejects_duplicate_parent_run_field() {
     assert_eq!(
         agent_new_request_json(&args),
         Err(CliError::usage(
-            "invalid agent parent: agent:coder session:default run:r1 run:r2"
+            "invalid agent parent: agent:executor session:default run:r1 run:r2"
         ))
     );
 }
@@ -72,7 +72,7 @@ fn agent_new_request_json_rejects_parent_session_before_agent() {
         "new",
         "worker-fast",
         "--parent",
-        "session:default agent:coder"
+        "session:default agent:executor"
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -82,7 +82,7 @@ fn agent_new_request_json_rejects_parent_session_before_agent() {
     assert_eq!(
         agent_new_request_json(&args),
         Err(CliError::usage(
-            "invalid agent parent: session:default agent:coder"
+            "invalid agent parent: session:default agent:executor"
         ))
     );
 }
@@ -94,7 +94,7 @@ fn agent_new_request_json_rejects_unknown_parent_field() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder task:work"
+        "agent:executor task:work"
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -104,7 +104,7 @@ fn agent_new_request_json_rejects_unknown_parent_field() {
     assert_eq!(
         agent_new_request_json(&args),
         Err(CliError::usage(
-            "invalid agent parent: agent:coder task:work"
+            "invalid agent parent: agent:executor task:work"
         ))
     );
 }
@@ -116,7 +116,7 @@ fn agent_new_request_json_rejects_invalid_parent_run_field() {
         "new",
         "worker-fast",
         "--parent",
-        "agent:coder run:bad/name"
+        "agent:executor run:bad/name"
     );
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -126,7 +126,7 @@ fn agent_new_request_json_rejects_invalid_parent_run_field() {
     assert_eq!(
         agent_new_request_json(&args),
         Err(CliError::usage(
-            "invalid agent parent: agent:coder run:bad/name"
+            "invalid agent parent: agent:executor run:bad/name"
         ))
     );
 }

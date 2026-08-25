@@ -69,8 +69,8 @@ ctx status          # show CortexFS status
 ctx help            # show concise CLI help
 ```
 
-`ctx resume coder --session SESSION` restores an explicit session. The default
-interactive agent is `coder`; set `CTX_DEFAULT_AGENT` to choose another agent.
+`ctx resume executor --session SESSION` restores an explicit session. The default
+interactive agent is `executor`; set `CTX_DEFAULT_AGENT` to choose another agent.
 The longer `ctx agent ...` commands remain available for lifecycle, raw socket,
 PTY, history, and diagnostic operations.
 
@@ -136,16 +136,16 @@ over-mounted read-only at `/workspace/.git`. The agent starts with `pwd` set to
 `/workspace`, while `HOME` is the sandbox's own `/home/agent`:
 
 ```bash
-ctx agent start coder --session default
-ctx agent watch coder --session default
-ctx agent attach coder --session default
+ctx agent start executor --session default
+ctx agent watch executor --session default
+ctx agent attach executor --session default
 ```
 
 `watch` only observes terminal output; `attach` joins the terminal and writes
 stdin. Declare additional mounts explicitly:
 
 ```bash
-ctx agent start coder --session docs \
+ctx agent start executor --session docs \
   --mount "$PWD" /workspace rw \
   --mount "$PWD/docs" /docs ro \
   --cwd /workspace

@@ -18,7 +18,7 @@ fn dedicated_worker_role_names_exclude_shared_entries() {
 
 #[test]
 fn non_worker_role_names_keep_main_default() {
-    for name in ["coder", "reviewer", "work", "task-worker"] {
+    for name in ["reviewer", "work", "task-worker"] {
         assert!(!is_worker_agent_name(name), "{name}");
         assert_eq!(default_agent_model_for_name(name), "main");
     }

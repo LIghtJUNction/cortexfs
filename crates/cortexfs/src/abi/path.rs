@@ -474,7 +474,7 @@ mod tests {
         assert!(!parse_abi_path("model/debug/echo.d/recommended").is_writable_control_path());
         assert!(!parse_abi_path("model/debug/echo.d/compact").is_writable_control_path());
         assert!(!parse_abi_path("model/debug/echo.d/metadata.json").is_writable_control_path());
-        assert!(parse_abi_path("agent/coder.d/cwd").is_writable_control_path());
+        assert!(parse_abi_path("agent/executor.d/cwd").is_writable_control_path());
         assert!(parse_abi_path("tool/fs.read.d/schema").is_writable_control_path());
         assert!(parse_abi_path("shared/team/tool/repo.d/schema").is_writable_control_path());
         assert!(parse_abi_path("home/1000/channel/discord.d/cap").is_writable_control_path());

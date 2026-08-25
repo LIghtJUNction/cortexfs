@@ -40,12 +40,12 @@ mod tests {
     #[test]
     fn omitted_provider_follows_selected_model_alias() -> io::Result<()> {
         let root = tempfile::tempdir()?;
-        fs::create_dir_all(root.path().join("agent/coder.d"))?;
+        fs::create_dir_all(root.path().join("agent/executor.d"))?;
         fs::create_dir_all(root.path().join("model"))?;
-        fs::write(root.path().join("agent/coder.d/model"), "main\n")?;
+        fs::write(root.path().join("agent/executor.d/model"), "main\n")?;
         symlink("/ctx/model/openai/gpt-test", root.path().join("model/main"))?;
-        assert_eq!(provider("", root.path(), "coder")?, "openai");
-        assert_eq!(provider("anthropic", root.path(), "coder")?, "anthropic");
+        assert_eq!(provider("", root.path(), "executor")?, "openai");
+        assert_eq!(provider("anthropic", root.path(), "executor")?, "anthropic");
         Ok(())
     }
 }

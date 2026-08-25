@@ -15,13 +15,13 @@ fn parses_leading_root_global_option_only() {
         }) if root == Path::new("/tmp/ctx-alt")
     ));
 
-    let exec = parse_cli_args(&["exec", "agent/coder", "--root", "/tmp/ctx-alt"]);
+    let exec = parse_cli_args(&["exec", "agent/executor", "--root", "/tmp/ctx-alt"]);
     assert!(matches!(
         exec,
         Ok(Cli {
             command: Command::Exec { ref path, ref args },
             ..
-        }) if path == "agent/coder"
+        }) if path == "agent/executor"
             && args == &["--root".to_owned(), "/tmp/ctx-alt".to_owned()]
     ));
 
@@ -73,7 +73,7 @@ fn parses_spec_which_command() {
 
 #[test]
 fn parses_top_level_agent_inspect_command() {
-    for target in ["agent/coder", "/ctx/agent/coder"] {
+    for target in ["agent/executor", "/ctx/agent/executor"] {
         let command = parse_command(vec![
             "inspect".to_owned(),
             target.to_owned(),
@@ -85,7 +85,7 @@ fn parses_top_level_agent_inspect_command() {
             Ok(Command::Agent(AgentArgs::Inspect {
                 ref name,
                 session: Some(ref session)
-            })) if name == "coder" && session == "debug"
+            })) if name == "executor" && session == "debug"
         ));
     }
 
@@ -116,23 +116,23 @@ fn parses_man_command() {
 
 #[test]
 fn parses_top_level_file_content_commands() {
-    let cat = cmd!("cat", "agent/coder.d/cwd");
+    let cat = cmd!("cat", "agent/executor.d/cwd");
     assert!(matches!(
         cat,
-        Ok(Command::Cat { ref path }) if path == "agent/coder.d/cwd"
+        Ok(Command::Cat { ref path }) if path == "agent/executor.d/cwd"
     ));
 
-    let set = cmd!("set", "agent/coder.d/cwd", "/work");
+    let set = cmd!("set", "agent/executor.d/cwd", "/work");
     assert!(matches!(
         set,
-        Ok(Command::Set { ref path, ref value }) if path == "agent/coder.d/cwd" && value == "/work"
+        Ok(Command::Set { ref path, ref value }) if path == "agent/executor.d/cwd" && value == "/work"
     ));
 
-    let append = cmd!("append", "agent/coder.d/path", "/ctx/tool");
+    let append = cmd!("append", "agent/executor.d/path", "/ctx/tool");
     assert!(matches!(
         append,
         Ok(Command::Append { ref path, ref value })
-            if path == "agent/coder.d/path" && value == "/ctx/tool"
+            if path == "agent/executor.d/path" && value == "/ctx/tool"
     ));
 }
 

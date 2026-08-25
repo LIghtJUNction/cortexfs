@@ -54,7 +54,7 @@ shared/  用户与 agent 共用空间
 
 ## 稳定参考树
 
-这是规范定义的稳定形状。如下对象名如 `debug/echo`、`openai/gpt-5.6`、`base`、`coder`、`reviewer`、`executor`、`worker`、`1000`、`project-a` 都是有效示例。
+这是规范定义的稳定形状。如下对象名如 `debug/echo`、`openai/gpt-5.6`、`base`、`executor`、`reviewer`、`executor`、`worker`、`1000`、`project-a` 都是有效示例。
 
 ```text
 /ctx/
@@ -126,9 +126,9 @@ shared/  用户与 agent 共用空间
       log
       meta.json
 
-    coder
-    coder.sock
-    coder.d/
+    executor
+    executor.sock
+    executor.d/
       owner
       uid
       gid
@@ -321,7 +321,7 @@ shared/  用户与 agent 共用空间
               by-hash/
               by-uuid/
 
-        coder/
+        executor/
           root/
           session/
             index/
@@ -348,7 +348,7 @@ shared/  用户与 agent 共用空间
           log
 
       agent/
-        coder/
+        executor/
           session/
             index/
               by-cwd/

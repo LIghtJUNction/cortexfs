@@ -3,12 +3,17 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let tool_name = "native";
     let (root, tool_control) = agent_tool_fixture("loaded-native-tool", tool_name)?;
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let tool_dir = root.join("tool");
-    fs::create_dir_all(root.join("home").join("1000").join("agent").join("coder"))?;
+    fs::create_dir_all(
+        root.join("home")
+            .join("1000")
+            .join("agent")
+            .join("executor"),
+    )?;
     fs::write(
         tool_control.join("policy"),
-        "allow coder_t tool:native execute\n",
+        "allow executor_t tool:native execute\n",
     )?;
     write_sdk_tool(&tool_dir.join(tool_name), tool_name, "loaded-direct")?;
 
@@ -28,7 +33,7 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
         matches!(before_declaration, Err(ref error) if error.message().contains("declare it in the agent tools control"))
     );
 
-    let view = cortexfs::derive_agent_runtime_view(&root, "coder")
+    let view = cortexfs::derive_agent_runtime_view(&root, "executor")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let mut state = cortexfs::TshContextState::default();
     state.tools = vec![cortexfs::TshLoadedToolState {
@@ -59,7 +64,7 @@ fn only_declared_native_tool_executes_without_bypassing_policy()
     assert_sdk_output_contract(&tool_dir.join(tool_name), &config, &call)?;
     write_sdk_tool(&tool_dir.join(tool_name), tool_name, "loaded-direct")?;
 
-    fs::write(control.join("policy"), "allow coder_t model:main use\n")?;
+    fs::write(control.join("policy"), "allow executor_t model:main use\n")?;
     let declared_but_denied = execute_prepared_agent_tool_call(&config, &call);
     assert_eq!(
         declared_but_denied,

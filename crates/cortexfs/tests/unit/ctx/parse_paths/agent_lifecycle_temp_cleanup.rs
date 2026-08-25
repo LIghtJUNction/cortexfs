@@ -1,9 +1,9 @@
 #[test]
 fn agent_wait_does_not_reap_canonical_temp_worker() -> Result<(), CliError> {
     let root = clean_test_dir("ctx-agent-wait-temp-worker-cleanup");
-    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
-    create_agent_fixture(&root, "worker", "agent:coder session:default run:r1", "busy", "101");
-    write_text_file(&root.join("agent/coder.d/log"), "");
+    create_agent_fixture(&root, "executor", "agent:base", "busy", "100");
+    create_agent_fixture(&root, "worker", "agent:executor session:default run:r1", "busy", "101");
+    write_text_file(&root.join("agent/executor.d/log"), "");
     write_text_file(&root.join("agent/worker.d/log"), "");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let socket = root.join("agent/worker.sock");
@@ -11,7 +11,7 @@ fn agent_wait_does_not_reap_canonical_temp_worker() -> Result<(), CliError> {
         .map_err(|error| CliError::unavailable(format!("cannot bind socket: {error}")))?;
     let session = ctx_home(&root)
         .unwrap_or_default()
-        .join("agent/coder/session/default");
+        .join("agent/executor/session/default");
     create_complete_session_layout(&session);
     let child = session.join("context/child/work-123");
     assert!(fs::create_dir_all(child.join("artifact")).is_ok());
@@ -26,7 +26,7 @@ fn agent_wait_does_not_reap_canonical_temp_worker() -> Result<(), CliError> {
     write_text_file(&child.join("refs.jsonl"), "");
 
     assert_eq!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Ok(ExitCode::from(130))
     );
 
@@ -47,15 +47,15 @@ fn agent_wait_does_not_reap_canonical_temp_worker() -> Result<(), CliError> {
 #[test]
 fn agent_wait_reaps_dedicated_temp_worker() -> Result<(), CliError> {
     let root = clean_test_dir("ctx-wait-temp-prefix");
-    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
+    create_agent_fixture(&root, "executor", "agent:base", "busy", "100");
     create_agent_fixture(
         &root,
         "worker-fast",
-        "agent:coder session:default run:r1",
+        "agent:executor session:default run:r1",
         "busy",
         "101",
     );
-    write_text_file(&root.join("agent/coder.d/log"), "");
+    write_text_file(&root.join("agent/executor.d/log"), "");
     write_text_file(&root.join("agent/worker-fast.d/log"), "");
     write_text_file(&root.join("agent/worker-fast.d/life"), "temp\n");
     let socket = root.join("agent/worker-fast.sock");
@@ -63,7 +63,7 @@ fn agent_wait_reaps_dedicated_temp_worker() -> Result<(), CliError> {
         .map_err(|error| CliError::unavailable(format!("cannot bind socket: {error}")))?;
     let session = ctx_home(&root)
         .unwrap_or_default()
-        .join("agent/coder/session/default");
+        .join("agent/executor/session/default");
     create_complete_session_layout(&session);
     let child = session.join("context/child/work-fast");
     assert!(fs::create_dir_all(child.join("artifact")).is_ok());
@@ -78,7 +78,7 @@ fn agent_wait_reaps_dedicated_temp_worker() -> Result<(), CliError> {
     write_text_file(&child.join("refs.jsonl"), "");
 
     assert_eq!(
-        agent_wait(&root, "coder", Some("default"), "work-fast"),
+        agent_wait(&root, "executor", Some("default"), "work-fast"),
         Ok(ExitCode::from(130))
     );
 
@@ -99,7 +99,7 @@ fn agent_wait_reaps_dedicated_temp_worker() -> Result<(), CliError> {
 #[test]
 fn agent_stop_sends_stop_request_over_agent_socket() -> Result<(), CliError> {
     let root = clean_test_dir("ctx-agent-stop-request");
-    create_agent_fixture(&root, "worker-fast", "agent:coder", "busy", "101");
+    create_agent_fixture(&root, "worker-fast", "agent:executor", "busy", "101");
     write_text_file(&root.join("agent/worker-fast.d/log"), "");
     write_text_file(&root.join("agent/worker-fast.d/life"), "temp\n");
     let socket = root.join("agent/worker-fast.sock");
@@ -132,7 +132,7 @@ fn temp_cleanup_preflights_before_removal() {
     create_agent_fixture(
         &root,
         "worker-fast",
-        "agent:coder session:default run:r1",
+        "agent:executor session:default run:r1",
         "busy",
         "101",
     );
@@ -164,7 +164,7 @@ fn temp_cleanup_rejects_unwritable_control_subtree_before_removal() {
         return;
     }
     let root = clean_test_dir("ctx-stop-temp-control-preflight");
-    create_agent_fixture(&root, "worker-fast", "agent:coder", "busy", "101");
+    create_agent_fixture(&root, "worker-fast", "agent:executor", "busy", "101");
     write_text_file(&root.join("agent/worker-fast.d/log"), "");
     write_text_file(&root.join("agent/worker-fast.d/life"), "temp\n");
     let cache = root.join("agent/worker-fast.d/cache");
@@ -190,7 +190,7 @@ fn temp_cleanup_rejects_unwritable_control_subtree_before_removal() {
 fn temp_cleanup_unlinks_control_symlink_without_following_target() {
     let root = clean_test_dir("ctx-stop-temp-control-symlink");
     let outside = clean_test_dir("ctx-stop-temp-control-symlink-outside");
-    create_agent_fixture(&root, "worker-fast", "agent:coder", "busy", "101");
+    create_agent_fixture(&root, "worker-fast", "agent:executor", "busy", "101");
     write_text_file(&root.join("agent/worker-fast.d/log"), "");
     write_text_file(&root.join("agent/worker-fast.d/life"), "temp\n");
     write_text_file(&outside.join("keep"), "keep\n");

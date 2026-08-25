@@ -1,0 +1,32 @@
+[package]
+name = "cortexfs-agents"
+description = "Initial role agents for CortexFS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "cortexfs-agent-architect"
+path = "src/bin/architect.rs"
+
+[[bin]]
+name = "cortexfs-agent-executor"
+path = "src/bin/executor.rs"
+
+[[bin]]
+name = "cortexfs-agent-product-manager"
+path = "src/bin/productmanager.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+cortexfs-agent-sdk = { version = "0.1.20", path = "../cortexfs-agent-sdk" }

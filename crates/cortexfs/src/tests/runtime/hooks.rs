@@ -28,7 +28,7 @@ fn agent_hooks_run_in_order_and_receive_bounded_metadata() -> Result<(), Box<dyn
         &HookInvocation {
             phase: HookPhase::Pre,
             action: "model",
-            agent: "coder",
+            agent: "executor",
             run: "run-1",
             step: 2,
             tool: None,
@@ -55,7 +55,7 @@ fn agent_hooks_fail_closed_for_nonzero_exit() -> Result<(), Box<dyn std::error::
         &HookInvocation {
             phase: HookPhase::Post,
             action: "model",
-            agent: "coder",
+            agent: "executor",
             run: "run-1",
             step: 0,
             tool: None,

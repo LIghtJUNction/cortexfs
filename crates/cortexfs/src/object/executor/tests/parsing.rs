@@ -78,7 +78,7 @@ fn tool_call_arguments_reject_excessive_limits() {
 
 #[test]
 fn runtime_contract_describes_native_tsh_without_prompt_heuristics() {
-    let contract = agent_runtime_contract("coder");
+    let contract = agent_runtime_contract("executor");
 
     for required in [
         "`tsh` is always native",
@@ -151,7 +151,7 @@ fn passthrough_tool_gets_clean_runtime_environment() {
             .arg("--nocapture")
             .env("CORTEXFS_PASSTHROUGH_ENV_CHILD", "1")
             .env("CORTEXFS_SHOULD_NOT_LEAK", "secret")
-            .env("CTX_AGENT", "coder")
+            .env("CTX_AGENT", "executor")
             .output();
         assert!(matches!(output, Ok(ref output)
         if output.status.success()
@@ -166,7 +166,7 @@ fn passthrough_tool_gets_clean_runtime_environment() {
         &[
             OsString::from("-c"),
             OsString::from(
-                r#"[ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] && [ "$PATH" = "/usr/bin:/bin" ] && [ "$CTX_AGENT" = "coder" ]"#,
+                r#"[ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] && [ "$PATH" = "/usr/bin:/bin" ] && [ "$CTX_AGENT" = "executor" ]"#,
             ),
         ],
     );

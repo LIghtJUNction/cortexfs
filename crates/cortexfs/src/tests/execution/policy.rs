@@ -2,27 +2,27 @@
 fn policy_v0_allows_only_exact_rules() {
     let parsed = PolicyV0::parse(
         "\
-allow coder_t tool:fs.read execute
-allow coder_t model:debug/echo use
-allow coder_t shared:project-a read
+allow executor_t tool:fs.read execute
+allow executor_t model:debug/echo use
+allow executor_t shared:project-a read
 ",
     );
     let policy = ok!(parsed);
 
     assert!(policy.allows(
-        "coder_t",
+        "executor_t",
         PolicyObjectClass::Tool,
         "fs.read",
         PolicyPermission::Execute
     ));
     assert!(policy.allows(
-        "coder_t",
+        "executor_t",
         PolicyObjectClass::Model,
         "debug/echo",
         PolicyPermission::Use
     ));
     assert!(!policy.allows(
-        "coder_t",
+        "executor_t",
         PolicyObjectClass::Tool,
         "shell.exec",
         PolicyPermission::Execute
@@ -34,7 +34,7 @@ allow coder_t shared:project-a read
         PolicyPermission::Execute
     ));
     assert!(!policy.allows(
-        "coder_t",
+        "executor_t",
         PolicyObjectClass::Shared,
         "project-a",
         PolicyPermission::Write
@@ -45,10 +45,10 @@ allow coder_t shared:project-a read
 fn policy_v0_checks_child_authority_subset() {
     let parent = PolicyV0::parse(
         "\
-allow coder_t tool:fs.read execute
-allow coder_t model:debug/echo use
-allow coder_t shared:project-a read
-allow coder_t session:default resume
+allow executor_t tool:fs.read execute
+allow executor_t model:debug/echo use
+allow executor_t shared:project-a read
+allow executor_t session:default resume
 ",
     );
     let parent = ok!(parent);
@@ -61,7 +61,7 @@ allow reviewer_t shared:project-a read
 ",
     );
     let child = ok!(child);
-    assert!(child.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
+    assert!(child.is_authority_subset_of(&parent, "reviewer_t", "executor_t"));
     assert!(!child.is_exact_subset_of(&parent));
 
     let expanded_tool = PolicyV0::parse(
@@ -70,7 +70,7 @@ allow reviewer_t tool:shell.exec execute
 ",
     );
     let expanded_tool = ok!(expanded_tool);
-    assert!(!expanded_tool.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
+    assert!(!expanded_tool.is_authority_subset_of(&parent, "reviewer_t", "executor_t"));
 
     let wrong_subject = PolicyV0::parse(
         "\
@@ -78,29 +78,29 @@ allow other_t tool:fs.read execute
 ",
     );
     let wrong_subject = ok!(wrong_subject);
-    assert!(!wrong_subject.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
+    assert!(!wrong_subject.is_authority_subset_of(&parent, "reviewer_t", "executor_t"));
 }
 
 #[test]
 fn policy_v0_rejects_invalid_rules() {
     assert_eq!(
-        PolicyRule::parse("deny coder_t tool:fs.read execute"),
+        PolicyRule::parse("deny executor_t tool:fs.read execute"),
         Err(PolicyError::ExpectedAllow)
     );
     assert_eq!(
-        PolicyRule::parse("allow coder_t provider:openai use"),
+        PolicyRule::parse("allow executor_t provider:openai use"),
         Err(PolicyError::UnknownClass)
     );
     assert_eq!(
-        PolicyRule::parse("allow coder_t tool:fs.read use"),
+        PolicyRule::parse("allow executor_t tool:fs.read use"),
         Err(PolicyError::UnknownPermission)
     );
     assert_eq!(
-        PolicyRule::parse("allow coder_t tool:* execute"),
+        PolicyRule::parse("allow executor_t tool:* execute"),
         Err(PolicyError::InvalidName)
     );
     assert_eq!(
-        PolicyRule::parse("allow coder_t tool:fs.read execute extra"),
+        PolicyRule::parse("allow executor_t tool:fs.read execute extra"),
         Err(PolicyError::WrongFieldCount)
     );
 }

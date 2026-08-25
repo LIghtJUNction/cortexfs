@@ -228,7 +228,7 @@ mod tests {
             ("cap", "text".to_owned()),
             (
                 "policy",
-                "allow coder_t tool:example.echo execute\n".to_owned(),
+                "allow executor_t tool:example.echo execute\n".to_owned(),
             ),
         ]);
         write_manifest(
@@ -257,7 +257,7 @@ mod tests {
         )?;
         let package = root.path().join("package");
         let agent = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent"));
-        let reference = root.path().join("agent/coder.d");
+        let reference = root.path().join("agent/executor.d");
         let mut controls = BTreeMap::new();
         for name in [
             "owner", "uid", "gid", "groups", "label", "iso", "parent", "life", "root", "cwd",
@@ -278,7 +278,8 @@ mod tests {
         controls.insert("tools", "example.echo\n".to_owned());
         controls.insert(
             "policy",
-            "allow coder_t model:main use\nallow coder_t tool:example.echo execute\n".to_owned(),
+            "allow executor_t model:main use\nallow executor_t tool:example.echo execute\n"
+                .to_owned(),
         );
         let agent_manifest = package.join("agent.json");
         write_manifest(&agent_manifest, "agent", "fixture-agent", agent, &controls)?;

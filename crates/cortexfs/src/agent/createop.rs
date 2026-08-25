@@ -1154,7 +1154,7 @@ mod d_tests {
         };
         let ensured = crate::ensure_reference_tree(source.path());
         assert!(ensured.is_ok(), "{ensured:?}");
-        let control = source.path().join("agent/coder.d");
+        let control = source.path().join("agent/executor.d");
         assert!(fs::write(control.join("path"), format!("{parent_path}\n")).is_ok());
         assert!(fs::write(control.join("model"), "debug/echo\n").is_ok());
         assert!(fs::write(control.join("window"), "auto\n").is_ok());
@@ -1164,9 +1164,9 @@ mod d_tests {
         assert!(
             fs::write(
                 control.join("policy"),
-                "allow coder_t tool:agent.create execute\n\
-allow coder_t agent:worker create\n\
-allow coder_t agent:worker start\n",
+                "allow executor_t tool:agent.create execute\n\
+allow executor_t agent:worker create\n\
+allow executor_t agent:worker start\n",
             )
             .is_ok()
         );
@@ -1177,7 +1177,7 @@ allow coder_t agent:worker start\n",
         let result = create_child_context(
             source.path(),
             Path::new("/ctx"),
-            "coder",
+            "executor",
             "default",
             "path-run",
             "worker",
@@ -1206,15 +1206,15 @@ allow coder_t agent:worker start\n",
             return (None, None);
         };
         assert!(crate::ensure_reference_tree(source.path()).is_ok());
-        let control = source.path().join("agent/coder.d");
+        let control = source.path().join("agent/executor.d");
         assert!(fs::write(control.join("model"), "debug/echo\n").is_ok());
         assert!(fs::write(control.join("window"), parent_window).is_ok());
         assert!(
             fs::write(
                 control.join("policy"),
-                "allow coder_t tool:agent.create execute\n\
-allow coder_t agent:window-child create\n\
-allow coder_t agent:window-child start\n",
+                "allow executor_t tool:agent.create execute\n\
+allow executor_t agent:window-child create\n\
+allow executor_t agent:window-child start\n",
             )
             .is_ok()
         );
@@ -1228,7 +1228,7 @@ allow coder_t agent:window-child start\n",
         let result = create_child_context(
             source.path(),
             Path::new("/ctx"),
-            "coder",
+            "executor",
             "default",
             "window-run",
             "window-child",
@@ -1299,11 +1299,11 @@ allow coder_t agent:window-child start\n",
         assert!(source.is_ok(), "tempdir: {source:?}");
         let Ok(source) = source else { return };
         assert!(crate::ensure_reference_tree(source.path()).is_ok());
-        assert!(fs::write(source.path().join("agent/coder.d/model"), "debug/echo\n").is_ok());
+        assert!(fs::write(source.path().join("agent/executor.d/model"), "debug/echo\n").is_ok());
         let model_control = source.path().join("model/debug/echo.d");
         assert!(fs::create_dir_all(&model_control).is_ok());
         assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
-        let parent_view = crate::derive_agent_runtime_view(source.path(), "coder");
+        let parent_view = crate::derive_agent_runtime_view(source.path(), "executor");
         assert!(parent_view.is_ok(), "{parent_view:?}");
         let agent = source.path().join("agent/window-child.d");
         let home = source.path().join("home/1000/agent/window-child");
@@ -1311,7 +1311,7 @@ allow coder_t agent:window-child start\n",
         let zero = create_child_context(
             source.path(),
             Path::new("/ctx"),
-            "coder",
+            "executor",
             "default",
             "window-run",
             "window-child",
@@ -1328,7 +1328,7 @@ allow coder_t agent:window-child start\n",
         let unknown = create_child_context(
             source.path(),
             Path::new("/ctx"),
-            "coder",
+            "executor",
             "default",
             "window-run",
             "window-child",
@@ -1598,17 +1598,17 @@ allow coder_t agent:window-child start\n",
         let parent = format!("claim-parent-{fixture_id}");
         let child = format!("claim-child-{fixture_id}");
         let session = format!("claim-session-{fixture_id}");
-        let coder = crate::derive_agent_runtime_view(source, "coder").ok();
-        assert!(coder.is_some());
-        let Some(coder) = coder else { return };
+        let executor = crate::derive_agent_runtime_view(source, "executor").ok();
+        assert!(executor.is_some());
+        let Some(executor) = executor else { return };
         let parent_subject = format!("{parent}_t");
         let parent_label = format!("user_u:agent_r:{parent_subject}:s0");
         let policy = format!(
             "allow {parent_subject} tool:agent.create execute\nallow {parent_subject} agent:{child} create\nallow {parent_subject} agent:{child} start\nallow {parent_subject} model:debug/echo use\n"
         );
-        let owner_uid = coder.identity().uid().to_string();
-        let gid = coder.identity().gid().to_string();
-        let groups = coder
+        let owner_uid = executor.identity().uid().to_string();
+        let gid = executor.identity().gid().to_string();
+        let groups = executor
             .identity()
             .groups()
             .iter()

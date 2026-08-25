@@ -159,38 +159,42 @@ fn reference_tree_bootstrap_materializes_current_layout() {
 
     assert!(ensure_reference_tree(&root).is_ok());
 
-    assert_file_text(&root.join("agent").join("coder.d").join("model"), "main\n");
-    let coder_system = ok!(fs::read_to_string(
-        root.join("agent").join("coder.d").join("system.md")
+    assert_file_text(
+        &root.join("agent").join("executor.d").join("model"),
+        "main\n",
+    );
+    let executor_system = ok!(fs::read_to_string(
+        root.join("agent").join("executor.d").join("system.md")
     ));
-    assert!(coder_system.contains("default Architect -> coder/reviewer flow"));
-    assert!(coder_system.contains("fs.write"));
-    assert!(coder_system.contains("shell.exec"));
+    assert!(executor_system.contains("implementation and verification agent"));
+    assert!(executor_system.contains("fs.write"));
+    assert!(executor_system.contains("shell.exec"));
     let architect_system = ok!(fs::read_to_string(
         root.join("agent").join("architect.d").join("system.md")
     ));
     assert!(architect_system.contains("human role name is Architect"));
-    assert!(architect_system.contains("delegate implementation to `coder`"));
-    let reviewer_system = ok!(fs::read_to_string(
-        root.join("agent").join("reviewer.d").join("system.md")
+    assert!(architect_system.contains("delegate implementation and verification to `executor`"));
+    let product_system = ok!(fs::read_to_string(
+        root.join("agent")
+            .join("product-manager.d")
+            .join("system.md")
     ));
-    assert!(reviewer_system.contains("independent review agent"));
-    assert!(root.join("agent").join("worker.d").is_dir());
+    assert!(product_system.contains("clarify the user problem"));
     let prompt_template = fs::read_to_string(
         root.join("agent")
-            .join("coder.d")
+            .join("executor.d")
             .join("prompt.template.md"),
     );
     assert!(
         matches!(prompt_template, Ok(ref content) if content.contains("{{agent_instructions}}"))
     );
-    let agent_script = fs::read_to_string(root.join("agent").join("coder"));
+    let agent_script = fs::read_to_string(root.join("agent").join("executor"));
     assert!(
         matches!(agent_script, Ok(ref content) if content.contains("# cortexfs.object=agent\n")
-            && content.contains("# cortexfs.name=coder\n")
+            && content.contains("# cortexfs.name=executor\n")
             && content.contains("cortexfs-object-runner"))
     );
-    let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
+    let agent_policy = fs::read_to_string(root.join("agent").join("executor.d").join("policy"));
     assert!(matches!(agent_policy, Ok(ref content) if content.contains("model:main use")));
     assert!(matches!(
         agent_policy,

@@ -90,7 +90,7 @@ pub(super) fn config(api_base: String) -> DiscordConfig {
         application_id: "app".to_owned(),
         bot_token: "secret-token".to_owned(),
         agent_socket: "/tmp/unused-agent.sock".into(),
-        agent: "coder".to_owned(),
+        agent: "executor".to_owned(),
         session_prefix: "discord".to_owned(),
         cwd: None,
         channel: None,

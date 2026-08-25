@@ -12,19 +12,19 @@ repos:
 
       - id: cargo-fmt
         name: cargo fmt
-        entry: cargo fmt --all -- --check
+        entry: scripts/serialize-cargo.sh cargo fmt --all -- --check
         language: system
         pass_filenames: false
 
       - id: cargo-check
         name: cargo check
-        entry: cargo check --locked --workspace --all-targets --all-features
+        entry: scripts/serialize-cargo.sh cargo check --locked --workspace --all-targets --all-features
         language: system
         pass_filenames: false
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        entry: scripts/serialize-cargo.sh cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
         language: system
         pass_filenames: false
 

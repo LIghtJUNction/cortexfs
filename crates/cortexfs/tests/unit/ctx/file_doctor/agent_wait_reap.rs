@@ -9,7 +9,7 @@ fn create_child_channel(
     let session = fixture_path(
         root,
         &[
-            "home", "1000", "agent", "coder", "session", "default",
+            "home", "1000", "agent", "executor", "session", "default",
         ],
     );
     create_complete_session_layout(&session);
@@ -29,17 +29,17 @@ fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
     let root = clean_test_dir("ctx-agent-wait-reaps-dead-worker");
     let pid = std::process::id().to_string();
     assert!(ensure_reference_tree(&root).is_ok());
-    write_text_file(&root.join("agent/coder.d/pid"), &format!("{pid}\n"));
+    write_text_file(&root.join("agent/executor.d/pid"), &format!("{pid}\n"));
     let child = create_child_channel(&root, "work-123", "worker", "default", "active", "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder session:default run:r1\n",
+        "agent:executor session:default run:r1\n",
     );
     write_text_file(&root.join("agent/worker.d/status"), "dead\n");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     write_text_file(&root.join("agent/worker.d/pid"), "\n");
 
-    let rows = agent_child_rows(&root, "coder", Some("default"));
+    let rows = agent_child_rows(&root, "executor", Some("default"));
     assert!(matches!(
         rows,
         Ok(ref rows) if rows.contains(&AgentChildRow {
@@ -57,7 +57,7 @@ fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
         })
     ));
     assert_eq!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Ok(ExitCode::from(130))
     );
     assert!(matches!(
@@ -79,12 +79,12 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
         let child = create_child_channel(&root, "work-fast", agent, "default", "active", "");
         let control = root.join("agent").join(format!("{agent}.d"));
         assert!(fs::create_dir_all(&control).is_ok());
-        write_text_file(&control.join("parent"), "agent:coder session:default run:r1\n");
+        write_text_file(&control.join("parent"), "agent:executor session:default run:r1\n");
         write_text_file(&control.join("status"), "dead\n");
         write_text_file(&control.join("life"), "temp\n");
         write_text_file(&control.join("pid"), "\n");
 
-        let rows = agent_child_rows(&root, "coder", Some("default"));
+        let rows = agent_child_rows(&root, "executor", Some("default"));
         assert!(matches!(
             rows,
             Ok(ref rows) if rows.contains(&AgentChildRow {
@@ -102,7 +102,7 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
             })
         ));
         assert_eq!(
-            agent_wait(&root, "coder", Some("default"), "work-fast"),
+            agent_wait(&root, "executor", Some("default"), "work-fast"),
             Ok(ExitCode::from(130))
         );
         assert!(matches!(
@@ -130,7 +130,7 @@ fn agent_child_rows_default_missing_worker_model_to_default_worker_model() {
         "Done.\n",
     );
 
-    let rows = agent_child_rows(&root, "coder", Some("default"));
+    let rows = agent_child_rows(&root, "executor", Some("default"));
     assert!(matches!(
         rows,
         Ok(ref rows) if rows.contains(&AgentChildRow {
@@ -163,7 +163,7 @@ fn agent_child_rows_rejects_invalid_child_agent_metadata() {
     );
 
     assert!(matches!(
-        agent_child_rows(&root, "coder", Some("default")),
+        agent_child_rows(&root, "executor", Some("default")),
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid child context: invalid agent name"
@@ -185,7 +185,7 @@ fn agent_child_rows_rejects_mismatched_backing_parent() {
     write_text_file(&root.join("agent/worker.d/parent"), "agent:planner\n");
 
     assert!(matches!(
-        agent_child_rows(&root, "coder", Some("default")),
+        agent_child_rows(&root, "executor", Some("default")),
         Err(ref error)
             if error.code == 2
                 && error.message
@@ -207,7 +207,7 @@ fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
     );
 
     assert!(matches!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid child context: invalid session name"
@@ -228,15 +228,15 @@ fn agent_wait_rejects_mismatched_terminal_backing_parent() {
     );
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder session:other run:r1\n",
+        "agent:executor session:other run:r1\n",
     );
 
     assert!(matches!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Err(ref error)
             if error.code == 2
                 && error.message
-                    == "child work-123 backing parent mismatch for worker: agent:coder session:other run:r1"
+                    == "child work-123 backing parent mismatch for worker: agent:executor session:other run:r1"
     ));
 }
 
@@ -254,12 +254,12 @@ fn agent_wait_rejects_invalid_backing_lifecycle() {
     );
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder session:default run:r1\n",
+        "agent:executor session:default run:r1\n",
     );
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
     assert!(matches!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid agent life for worker: detached"
@@ -280,12 +280,12 @@ fn agent_wait_rejects_invalid_backing_model() {
     );
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder session:default run:r1\n",
+        "agent:executor session:default run:r1\n",
     );
     write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
 
     assert!(matches!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid agent model for worker: bad/model/name"
@@ -297,13 +297,13 @@ fn agent_wait_reaps_active_child_when_parent_session_is_omitted() {
     let root = clean_test_dir("ctx-wait-reaps-dead-no-session");
     assert!(ensure_reference_tree(&root).is_ok());
     let child = create_child_channel(&root, "work-123", "worker", "default", "active", "");
-    write_text_file(&root.join("agent/worker.d/parent"), "agent:coder run:r1\n");
+    write_text_file(&root.join("agent/worker.d/parent"), "agent:executor run:r1\n");
     write_text_file(&root.join("agent/worker.d/status"), "dead\n");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     write_text_file(&root.join("agent/worker.d/pid"), "\n");
 
     assert_eq!(
-        agent_wait(&root, "coder", Some("default"), "work-123"),
+        agent_wait(&root, "executor", Some("default"), "work-123"),
         Ok(ExitCode::from(130))
     );
     assert!(matches!(
@@ -323,13 +323,13 @@ fn agent_wait_reaps_active_child_when_backing_worker_pid_is_stale() {
     let child = create_child_channel(&root, "work-stale", "worker", "default", "active", "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
-        "agent:coder session:default run:r1\n",
+        "agent:executor session:default run:r1\n",
     );
     write_text_file(&root.join("agent/worker.d/status"), "busy\n");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     write_text_file(&root.join("agent/worker.d/pid"), "999999999\n");
 
-    let rows = agent_child_rows(&root, "coder", Some("default"));
+    let rows = agent_child_rows(&root, "executor", Some("default"));
     assert!(matches!(
         rows,
         Ok(ref rows) if rows.contains(&AgentChildRow {
@@ -347,7 +347,7 @@ fn agent_wait_reaps_active_child_when_backing_worker_pid_is_stale() {
         })
     ));
     assert_eq!(
-        agent_wait(&root, "coder", Some("default"), "work-stale"),
+        agent_wait(&root, "executor", Some("default"), "work-stale"),
         Ok(ExitCode::from(130))
     );
     assert!(matches!(

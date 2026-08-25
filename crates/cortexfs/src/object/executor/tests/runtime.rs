@@ -12,7 +12,7 @@ pub(super) fn test_prompt_context() -> AgentPromptContext {
 
 pub(super) fn test_agent_run_config() -> AgentModelRunConfig {
     AgentModelRunConfig {
-        agent: "coder".to_owned(),
+        agent: "executor".to_owned(),
         source: PathBuf::from("/tmp/cortexfs-test-source"),
         ctx_root: PathBuf::from("/tmp/cortexfs-test-ctx"),
         run: "r1".to_owned(),

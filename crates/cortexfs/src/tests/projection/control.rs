@@ -12,11 +12,11 @@ fn fuse_projection_reads_and_writes_control_files() {
     assert_eq!(projection.read_at("status", 128, 8), Ok(Vec::new()));
     assert!(
         projection
-            .write_control_file("agent/coder.d/cwd", "/work/project\n")
+            .write_control_file("agent/executor.d/cwd", "/work/project\n")
             .is_ok()
     );
     assert_eq!(
-        projection.read_to_string("agent/coder.d/cwd"),
+        projection.read_to_string("agent/executor.d/cwd"),
         Ok("/work/project\n".to_owned())
     );
 
@@ -26,19 +26,19 @@ fn fuse_projection_reads_and_writes_control_files() {
     );
     assert!(
         projection
-            .write_control_file_at("agent/coder.d/status", 0, b"busy\n")
+            .write_control_file_at("agent/executor.d/status", 0, b"busy\n")
             .is_ok()
     );
     assert_eq!(
-        projection.read_to_string("agent/coder.d/status"),
+        projection.read_to_string("agent/executor.d/status"),
         Ok("busy\n".to_owned())
     );
     assert_eq!(
-        projection.write_control_file_at("agent/coder.d/status", 1, b"idle\n"),
+        projection.write_control_file_at("agent/executor.d/status", 1, b"idle\n"),
         Err(FuseError::InvalidOffset)
     );
     assert_eq!(
-        projection.write_control_file_at("agent/coder.d/status", 0, &[0xff]),
+        projection.write_control_file_at("agent/executor.d/status", 0, &[0xff]),
         Err(FuseError::InvalidContent)
     );
     assert_eq!(
@@ -47,7 +47,7 @@ fn fuse_projection_reads_and_writes_control_files() {
     );
     assert_eq!(
         projection.write_control_file(
-            "agent/coder.d/cwd",
+            "agent/executor.d/cwd",
             &"x".repeat(MAX_FUSE_SMALL_WRITE_BYTES + 1)
         ),
         Err(FuseError::TooLarge)
@@ -70,19 +70,19 @@ fn fuse_projection_validates_agent_model_window_pair_atomically() {
         &providers.join("local.json"),
         r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large","tiny","unknown"],"model_limits":{"large":64,"tiny":16}}"#,
     );
-    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
-    let session = root.join("home/1000/agent/coder/session/default/messages.jsonl");
+    write_text_file(&root.join("agent/executor.d/model"), "local/large\n");
+    let session = root.join("home/1000/agent/executor/session/default/messages.jsonl");
     let session_before = fs::read(&session).ok();
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     assert!(
         projection
-            .write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"32\n", uid, gid)
+            .write_fuse_file_at_for_owner("agent/executor.d/window", 0, b"32\n", uid, gid)
             .is_ok()
     );
     assert_eq!(
         projection.write_fuse_file_at_for_owner(
-            "agent/coder.d/model",
+            "agent/executor.d/model",
             0,
             b"local/tiny\n",
             uid,
@@ -92,7 +92,7 @@ fn fuse_projection_validates_agent_model_window_pair_atomically() {
     );
     assert_eq!(
         projection.write_fuse_file_at_for_owner(
-            "agent/coder.d/model",
+            "agent/executor.d/model",
             0,
             b"local/unknown\n",
             uid,
@@ -102,35 +102,35 @@ fn fuse_projection_validates_agent_model_window_pair_atomically() {
     );
     assert!(
         projection
-            .write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"auto\n", uid, gid)
+            .write_fuse_file_at_for_owner("agent/executor.d/window", 0, b"auto\n", uid, gid)
             .is_ok()
     );
     assert_eq!(
-        projection.read_to_string("agent/coder.d/window"),
+        projection.read_to_string("agent/executor.d/window"),
         Ok("auto\n".to_owned())
     );
     assert_eq!(fs::read(&session).ok(), session_before);
     assert!(
         projection
-            .write_fuse_file_at_for_owner("agent/coder.d/model", 0, b"local/tiny\n", uid, gid,)
+            .write_fuse_file_at_for_owner("agent/executor.d/model", 0, b"local/tiny\n", uid, gid,)
             .is_ok()
     );
     assert_eq!(
-        projection.write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"17\n", uid, gid,),
+        projection.write_fuse_file_at_for_owner("agent/executor.d/window", 0, b"17\n", uid, gid,),
         Err(FuseError::InvalidContent)
     );
     assert!(
         projection
-            .write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"auto\n", uid, gid)
+            .write_fuse_file_at_for_owner("agent/executor.d/window", 0, b"auto\n", uid, gid)
             .is_ok()
     );
     assert!(
         projection
-            .write_fuse_file_at_for_owner("agent/coder.d/model", 0, b"local/unknown\n", uid, gid,)
+            .write_fuse_file_at_for_owner("agent/executor.d/model", 0, b"local/unknown\n", uid, gid,)
             .is_ok()
     );
     assert_eq!(
-        projection.write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"1\n", uid, gid,),
+        projection.write_fuse_file_at_for_owner("agent/executor.d/window", 0, b"1\n", uid, gid,),
         Err(FuseError::InvalidContent)
     );
 }
@@ -188,8 +188,8 @@ fn fuse_projection_serializes_concurrent_model_and_window_commits() -> Result<()
         &providers.join("local.json"),
         r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large","tiny"],"model_limits":{"large":64,"tiny":32}}"#,
     );
-    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
-    write_text_file(&root.join("agent/coder.d/window"), "64\n");
+    write_text_file(&root.join("agent/executor.d/model"), "local/large\n");
+    write_text_file(&root.join("agent/executor.d/window"), "64\n");
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
     let model_projection = projection.clone();
@@ -197,7 +197,7 @@ fn fuse_projection_serializes_concurrent_model_and_window_commits() -> Result<()
     let model = std::thread::spawn(move || {
         model_barrier.wait();
         model_projection.write_fuse_file_at_for_owner(
-            "agent/coder.d/model",
+            "agent/executor.d/model",
             0,
             b"local/tiny\n",
             1000,
@@ -209,7 +209,7 @@ fn fuse_projection_serializes_concurrent_model_and_window_commits() -> Result<()
     let window = std::thread::spawn(move || {
         window_barrier.wait();
         window_projection.write_fuse_file_at_for_owner(
-            "agent/coder.d/window",
+            "agent/executor.d/window",
             0,
             b"auto\n",
             1000,
@@ -225,8 +225,8 @@ fn fuse_projection_serializes_concurrent_model_and_window_commits() -> Result<()
         .map_err(|_panic| "window commit thread should not panic".to_owned())?;
     assert_eq!(window_result, Ok(()));
 
-    let model = projection.read_to_string("agent/coder.d/model");
-    let window = projection.read_to_string("agent/coder.d/window");
+    let model = projection.read_to_string("agent/executor.d/model");
+    let window = projection.read_to_string("agent/executor.d/window");
     match model_result {
         Ok(()) => {
             assert_eq!(model.as_deref(), Ok("local/tiny\n"));
@@ -249,15 +249,15 @@ fn fuse_projection_temp_window_write_uses_agent_pair_lock() {
         &providers.join("local.json"),
         r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large"],"model_limits":{"large":64}}"#,
     );
-    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
+    write_text_file(&root.join("agent/executor.d/model"), "local/large\n");
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
-    let temp = "agent/coder.d/.window.tmp-2-2-0";
+    let temp = "agent/executor.d/.window.tmp-2-2-0";
     assert!(
         projection
             .create_layout_file(temp, 1000, 1000, 0o600)
             .is_ok()
     );
-    let control_dir = fs::File::open(root.join("agent/coder.d"));
+    let control_dir = fs::File::open(root.join("agent/executor.d"));
     assert!(control_dir.is_ok());
     let lock = control_dir.and_then(|dir| {
         nix::fcntl::Flock::lock(dir, nix::fcntl::FlockArg::LockExclusive)
@@ -287,11 +287,11 @@ fn fuse_projection_temp_window_write_uses_agent_pair_lock() {
     );
     assert!(thread.join().is_ok());
     assert_eq!(
-        projection.rename_atomic_temp(temp, "agent/coder.d/window", 1000),
+        projection.rename_atomic_temp(temp, "agent/executor.d/window", 1000),
         Ok(())
     );
     assert_eq!(
-        projection.read_to_string("agent/coder.d/window"),
+        projection.read_to_string("agent/executor.d/window"),
         Ok("48\n".to_owned())
     );
 }
@@ -306,23 +306,23 @@ fn fuse_projection_revalidates_window_temp_at_rename_time() {
         &providers.join("local.json"),
         r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large","tiny"],"model_limits":{"large":64,"tiny":32}}"#,
     );
-    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
+    write_text_file(&root.join("agent/executor.d/model"), "local/large\n");
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
-    let temp = "agent/coder.d/.window.tmp-1-1-0";
+    let temp = "agent/executor.d/.window.tmp-1-1-0";
     assert!(projection.create_layout_file(temp, uid, gid, 0o600).is_ok());
     assert!(
         projection
             .write_fuse_file_at_for_owner(temp, 0, b"48\n", uid, gid)
             .is_ok()
     );
-    write_text_file(&root.join("agent/coder.d/model"), "local/tiny\n");
+    write_text_file(&root.join("agent/executor.d/model"), "local/tiny\n");
 
     assert_eq!(
-        projection.rename_atomic_temp(temp, "agent/coder.d/window", uid),
+        projection.rename_atomic_temp(temp, "agent/executor.d/window", uid),
         Err(FuseError::InvalidContent)
     );
     assert_eq!(
-        projection.read_to_string("agent/coder.d/window"),
+        projection.read_to_string("agent/executor.d/window"),
         Ok("auto\n".to_owned())
     );
 }
@@ -418,13 +418,13 @@ fn fuse_projection_does_not_virtualize_symlink_object_control_dir() {
     let outside = clean_test_dir("fuse-symlink-object-control-dir-outside");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
-    write_text_file(&root.join("agent").join("coder"), "plain executable\n");
-    assert!(symlink(&outside, root.join("agent").join("coder.d")).is_ok());
+    write_text_file(&root.join("agent").join("executor"), "plain executable\n");
+    assert!(symlink(&outside, root.join("agent").join("executor.d")).is_ok());
     let projection =
         FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
 
     assert_eq!(
-        projection.read_to_string("agent/coder"),
+        projection.read_to_string("agent/executor"),
         Ok("plain executable\n".to_owned())
     );
 }

@@ -22,7 +22,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   "additionalProperties": true
 }"#,
         cap: "tsh",
-        policy: "allow architect_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute\nallow worker_t tool:tsh execute",
+        policy: "allow architect_t tool:tsh execute\nallow executor_t tool:tsh execute\nallow product-manager_t tool:tsh execute",
     },
     ReferenceToolSpec {
         name: "fs.read",
@@ -40,23 +40,23 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.read",
-        policy: "allow architect_t tool:fs.read execute\nallow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute\nallow worker_t tool:fs.read execute",
+        policy: "allow architect_t tool:fs.read execute\nallow executor_t tool:fs.read execute\nallow product-manager_t tool:fs.read execute",
     },
     ReferenceToolSpec {
         name: "fs.list",
         wrapper_target: REFERENCE_OBJECT_RUNNER,
         description: "List bounded no-follow metadata in a visible directory.",
-        schema: tool::core::tools::FS_LIST_SCHEMA,
+        schema: cortexfs_tools::FS_LIST_SCHEMA,
         cap: "fs.list",
-        policy: "allow architect_t tool:fs.list execute\nallow coder_t tool:fs.list execute\nallow reviewer_t tool:fs.list execute\nallow worker_t tool:fs.list execute",
+        policy: "allow architect_t tool:fs.list execute\nallow executor_t tool:fs.list execute\nallow product-manager_t tool:fs.list execute",
     },
     ReferenceToolSpec {
         name: "fs.stat",
         wrapper_target: REFERENCE_OBJECT_RUNNER,
         description: "Read bounded no-follow metadata for a visible path.",
-        schema: tool::core::tools::FS_STAT_SCHEMA,
+        schema: cortexfs_tools::FS_STAT_SCHEMA,
         cap: "fs.stat",
-        policy: "allow architect_t tool:fs.stat execute\nallow coder_t tool:fs.stat execute\nallow reviewer_t tool:fs.stat execute\nallow worker_t tool:fs.stat execute",
+        policy: "allow architect_t tool:fs.stat execute\nallow executor_t tool:fs.stat execute\nallow product-manager_t tool:fs.stat execute",
     },
     ReferenceToolSpec {
         name: "fs.write",
@@ -75,7 +75,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.write",
-        policy: "allow coder_t tool:fs.write execute\nallow worker_t tool:fs.write execute",
+        policy: "allow executor_t tool:fs.write execute",
     },
     ReferenceToolSpec {
         name: "fs.replace",
@@ -95,7 +95,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.replace",
-        policy: "allow coder_t tool:fs.replace execute\nallow worker_t tool:fs.replace execute",
+        policy: "allow executor_t tool:fs.replace execute",
     },
     ReferenceToolSpec {
         name: "shell.exec",
@@ -113,7 +113,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "shell.exec",
-        policy: "allow coder_t tool:shell.exec execute\nallow worker_t tool:shell.exec execute",
+        policy: "allow executor_t tool:shell.exec execute",
     },
     ReferenceToolSpec {
         name: "tsh.config",
@@ -127,7 +127,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   "additionalProperties": true
 }"#,
         cap: "tsh.config",
-        policy: "allow architect_t tool:tsh.config execute\nallow coder_t tool:tsh.config execute\nallow reviewer_t tool:tsh.config execute",
+        policy: "allow architect_t tool:tsh.config execute\nallow executor_t tool:tsh.config execute",
     },
     ReferenceToolSpec {
         name: "agent.create",
@@ -135,7 +135,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         description: "Create one explicitly authorized owned child agent.",
         schema: agent::createop::AGENT_CREATE_SCHEMA,
         cap: "agent.create",
-        policy: "allow architect_t tool:agent.create execute\nallow coder_t tool:agent.create execute\nallow reviewer_t tool:agent.create execute",
+        policy: "allow architect_t tool:agent.create execute",
     },
     ReferenceToolSpec {
         name: "agent.update",
@@ -143,7 +143,7 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         description: "Replace one prompt control of the calling agent itself.",
         schema: agent::updateop::AGENT_UPDATE_SCHEMA,
         cap: "agent.update",
-        policy: "allow architect_t tool:agent.update execute\nallow coder_t tool:agent.update execute\nallow reviewer_t tool:agent.update execute\nallow worker_t tool:agent.update execute",
+        policy: "allow architect_t tool:agent.update execute\nallow executor_t tool:agent.update execute\nallow product-manager_t tool:agent.update execute",
     },
 ];
 

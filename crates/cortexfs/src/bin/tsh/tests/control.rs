@@ -17,7 +17,7 @@ fn tsh_forwards_run_control_socket_to_agent_update() {
             .arg("--nocapture")
             .env(UPDATE_CHILD, "1")
             .env("CORTEXFS_TSH_ROOT", &root)
-            .env("CTX_AGENT", "coder")
+            .env("CTX_AGENT", "executor")
             .env("CTX_SESSION", "live")
             .env("CTX_RUN_ID", "run-1")
             .env("CTX_SOURCE", &root)
@@ -37,7 +37,7 @@ fn tsh_forwards_run_control_socket_to_agent_update() {
 }
 
 fn write_coder_update_fixture(root: &Path) {
-    let control = root.join("agent").join("coder.d");
+    let control = root.join("agent").join("executor.d");
     let tool_control = root.join("tool").join("agent.update.d");
     assert!(fs::create_dir_all(&control).is_ok());
     assert!(fs::create_dir_all(&tool_control).is_ok());
@@ -48,11 +48,11 @@ fn write_coder_update_fixture(root: &Path) {
         ("gid", "1000\n"),
         ("groups", "1000\n"),
         ("perm", "rwx\n"),
-        ("label", "user_u:agent_r:coder_t:s0\n"),
+        ("label", "user_u:agent_r:executor_t:s0\n"),
         ("iso", "shared\n"),
         ("parent", "\n"),
         ("life", "owned\n"),
-        ("root", "/ctx/home/1000/agent/coder/root\n"),
+        ("root", "/ctx/home/1000/agent/executor/root\n"),
         ("cwd", "/workspace\n"),
         ("env", "\n"),
         ("model", "main\n"),
@@ -68,7 +68,7 @@ fn write_coder_update_fixture(root: &Path) {
     assert!(fs::create_dir_all(&model_control).is_ok());
     assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
     assert!(std::os::unix::fs::symlink("/ctx/model/local/chat", root.join("model/main")).is_ok());
-    let session = root.join("home/1000/agent/coder/session/live");
+    let session = root.join("home/1000/agent/executor/session/live");
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(session.join("current_run"), "run-1\n").is_ok());
     assert!(
@@ -89,7 +89,7 @@ fn write_coder_update_fixture(root: &Path) {
         )
         .is_ok()
     );
-    let policy = "allow coder_t model:main use\nallow coder_t tool:agent.update execute\n";
+    let policy = "allow executor_t model:main use\nallow executor_t tool:agent.update execute\n";
     assert!(fs::write(control.join("policy"), policy).is_ok());
     assert!(fs::write(tool_control.join("policy"), policy).is_ok());
     let tool = root.join("tool").join("agent.update");

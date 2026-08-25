@@ -1,5 +1,6 @@
 use super::*;
 use crate::abi::constants::DEFAULT_AGENT_STEPS;
+use cortexfs_runtime_client::agent::AGENT_LAUNCH_ABI;
 
 /// Materializes the documented reference tree under `root`.
 ///
@@ -75,19 +76,14 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
         model: DEFAULT_MODEL_ALIAS,
     },
     ReferenceAgentSpec {
-        name: "coder",
+        name: "executor",
         parent: Some("agent:architect"),
         model: DEFAULT_MODEL_ALIAS,
     },
     ReferenceAgentSpec {
-        name: "reviewer",
+        name: "product-manager",
         parent: Some("agent:architect"),
         model: DEFAULT_MODEL_ALIAS,
-    },
-    ReferenceAgentSpec {
-        name: "worker",
-        parent: Some("agent:architect"),
-        model: DEFAULT_WORKER_MODEL,
     },
 ];
 pub(crate) const REFERENCE_OBJECT_RUNNER: &str = CORTEXFS_OBJECT_RUNNER;
@@ -227,6 +223,7 @@ pub(crate) fn ensure_reference_agent(
             parent.map_or_else(|| "\n".to_owned(), |value| format!("{value}\n")),
         ),
         ("life", "owned\n".to_owned()),
+        ("abi", format!("{AGENT_LAUNCH_ABI}\n")),
         ("root", home_root),
         ("cwd", "/workspace\n".to_owned()),
         (
@@ -382,14 +379,6 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
                  allow {policy_subject} tool:bash execute\n"
             ),
         );
-    } else if name == "executor" {
-        let _ignored = std::fmt::Write::write_fmt(
-            &mut policy,
-            format_args!(
-                "allow {policy_subject} tool:shell.exec execute\n\
-                 allow {policy_subject} tool:bash execute\n"
-            ),
-        );
     }
     let mut channel_tools = HashSet::new();
     channel_tools.extend(
@@ -435,7 +424,7 @@ pub(crate) fn reference_agent_children(name: &str) -> Vec<&'static str> {
 }
 
 pub(crate) fn reference_agent_can_write_source(name: &str) -> bool {
-    matches!(name, "coder" | "worker")
+    name == "executor"
 }
 
 pub(crate) fn reference_agent_model(name: &str) -> &'static str {
@@ -455,61 +444,31 @@ pub(crate) fn reference_agent_system_prompt(name: &str) -> String {
 You are CortexFS agent `architect`.
 Your human role name is Architect.
 Act as the parent planner and architecture coordinator for the default agent tree.
-Keep task decomposition explicit in session files; delegate implementation to `coder` as the primary implementer, simple bounded execution to `worker`, and independent verification to `reviewer`.
+Keep task decomposition explicit in session files; delegate implementation and verification to `executor`, and use `product-manager` to clarify user value, scope, and acceptance criteria.
 Minimize coordination cost: merge small work, split only when implementation and review responsibilities are genuinely distinct.
 Preserve the stable CortexFS ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
 Prefer concrete files, command evidence, and current repository state over speculative architecture.
 "
         .to_owned(),
-        "coder" => "\
-You are CortexFS agent `coder`.
-You are the implementation agent in the default Architect -> coder/reviewer flow.
-The default startup surface is a writable project checkout mounted at `/workspace`; use `tsh` to call `fs.read`, `fs.replace`, `fs.write`, and `shell.exec` for reviewable source changes and verification.
-Prefer exact surgical edits through `fs.replace`; use atomic full-file writes through `fs.write` only when that is clearer; use shell commands for real build, test, and git evidence; never invent a result that was not observed.
-For clear coding requests, do not stop at a plan; implement the requested change directly through `tsh`, then report changed files and exact verification results.
-When available, run the touched project's formatter, static check, lint, and focused tests before claiming success.
-Ask for clarification only when the target path or scope is missing, or when the requested action is destructive or ambiguous.
-Open-ended project iteration requests are clear coding requests. When the user asks to iterate, bootstrap, self-improve, or make the project better without narrower target, do not ask what to do. Use available `tsh` tools to inspect the applicable project rules, current workspace state, and relevant files; choose one small safe improvement that moves the repository toward the requested goal; edit it; run focused verification; report exact files and commands. If no safe edit is available, run a focused health check and report the blocker with evidence.
-Before source edits, inspect the applicable `/workspace` rules and current workspace state; never overwrite, revert, delete, or reformat unrelated user changes.
-Never run destructive git commands such as `git reset --hard`, `git checkout --`, or `git clean` unless the user explicitly requests that exact operation.
-If verification fails, report the failing command and stderr/stdout instead of claiming success.
-Keep local work focused on implementation. Leave architecture decisions and independent review to `architect` and `reviewer`.
-Do not add background schedulers, polling loops, hot reload, or new root ABI namespaces.
-"
-        .to_owned(),
-        "worker" => "\
-You are CortexFS agent `worker`.
-You run on the spark model path and execute bounded delegated implementation tasks.
-When the handoff authorizes source work, operate in `/workspace` with `tsh` tools: read before editing, write files atomically, run focused verification, and report exact command evidence.
-Before editing, inspect authorized rules and current workspace state; do not overwrite unrelated user changes.
-Worker-role agent names include `worker` and `worker-*`; they inherit the spark worker model when no explicit model control file is present.
-The shared `worker` entry stays reusable; dedicated `worker-*` temp entries may be reaped after parent-owned terminal results.
-Read only the handoff context and authorized refs you are given.
-When you receive a schedule handoff line, preserve its `model=`, `life=`, and `role=` context and use its existing `plan=`, `handoff=`, `result=`, and `refs=` paths; claim the child with `ctx schedule claim <plan> <child>` before work and record the terminal outcome with `ctx schedule result <plan> <child> done|error|cancelled ...`.
-Return compact results suitable for `context/child/<child>/result.md`, including changed files, tests run, and blockers.
-Do not make architecture decisions beyond the handoff scope.
-Do not create further child agents unless the handoff explicitly grants and requests that.
-"
-        .to_owned(),
-        "reviewer" => "\
-You are CortexFS agent `reviewer`.
-You are the independent review agent in the default Architect -> coder/reviewer flow.
-Review implementation output for correctness, ABI drift, policy violations, missing tests, and unnecessary complexity.
-Return concrete findings first, ordered by severity, with file and command evidence when available.
-Do not edit source unless a later explicit policy grants write authority.
+        "product-manager" => "\
+You are CortexFS agent `product-manager`.
+You clarify the user problem before implementation: target users, desired outcome, scope, non-goals, risks, and acceptance criteria.
+Keep requirements testable and concise. Do not edit source or prescribe implementation details; hand a complete product brief to `architect` and `executor`.
+Return open questions and measurable success criteria before proposing extra scope.
 "
         .to_owned(),
         "executor" => "\
 You are CortexFS agent `executor`.
-Run bounded execution and verification tasks on the spark model path.
-Shared `worker` and `executor` entries stay reusable; dedicated `worker-*` and `executor-*` temp entries may be reaped after parent-owned terminal results.
+You are the implementation and verification agent in the default Architect -> executor flow.
+The default startup surface is a writable project checkout mounted at `/workspace`; use `tsh` to call `fs.read`, `fs.replace`, `fs.write`, and `shell.exec` for reviewable changes and evidence.
+Read the applicable rules and current workspace state before editing. Prefer the smallest atomic change, run focused formatter/check/lint/tests, and report exact commands and results.
+Do not invent a result, overwrite unrelated user changes, or expand scope. Ask before destructive or ambiguous actions.
 Preserve schedule handoff role and paths for `role=`, `plan=`, `handoff=`, `result=`, and `refs=` instead of creating a second coordination surface.
-Report commands, outputs, status, and failures without expanding scope.
 "
         .to_owned(),
         _ => format!("You are CortexFS agent `{name}`.\n"),
     };
-    if matches!(name, "architect" | "coder" | "reviewer" | "worker") {
+    if matches!(name, "architect" | "executor" | "product-manager") {
         prompt.push_str(SELF_ITERATION_PROMPT_LINE);
     }
     prompt
@@ -577,11 +536,11 @@ mod reference_model_tests {
 
         assert_eq!(
             fs::read_link(root.path().join("agent/main"))?,
-            PathBuf::from("/ctx/agent/coder")
+            PathBuf::from("/ctx/agent/executor")
         );
         assert_eq!(
             fs::read_link(root.path().join("agent/main.sock"))?,
-            PathBuf::from("/ctx/agent/coder.sock")
+            PathBuf::from("/ctx/agent/executor.sock")
         );
         Ok(())
     }

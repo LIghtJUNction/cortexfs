@@ -220,13 +220,13 @@ fn open_agent_home_fds(home_source: &Path) -> Result<(fs::File, fs::File), ExecE
 
 fn tsh_working_set_limit(tool_path: &ToolPath) -> usize {
     let Some(hit) = tool_path.find("tsh").ok().flatten() else {
-        return cortexfs::tool::core::tools::TshRuntimeConfig::default().max_loaded_tools;
+        return cortexfs_tools::TshRuntimeConfig::default().max_loaded_tools;
     };
     let path = hit.control_dir().join("config");
     let Ok(content) = read_small_plain_text_file(&path, MAX_RUNNER_CONTROL_BYTES, "runner") else {
-        return cortexfs::tool::core::tools::TshRuntimeConfig::default().max_loaded_tools;
+        return cortexfs_tools::TshRuntimeConfig::default().max_loaded_tools;
     };
-    cortexfs::tool::core::tools::parse_tsh_runtime_config(&content)
+    cortexfs_tools::parse_tsh_runtime_config(&content)
         .unwrap_or_default()
         .max_loaded_tools
 }

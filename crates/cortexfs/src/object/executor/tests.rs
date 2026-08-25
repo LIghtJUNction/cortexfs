@@ -133,7 +133,7 @@ pub(crate) fn short_unique_temp_path(name: &str) -> PathBuf {
 pub(crate) fn agent_tool_fixture(name: &str, tool: &str) -> std::io::Result<(PathBuf, PathBuf)> {
     let root = short_unique_temp_path(name);
     let _ignored = fs::remove_dir_all(&root);
-    let control = root.join("agent/coder.d");
+    let control = root.join("agent/executor.d");
     let tool_control = root.join("tool").join(format!("{tool}.d"));
     fs::create_dir_all(&control)?;
     fs::create_dir_all(&tool_control)?;
@@ -143,11 +143,11 @@ pub(crate) fn agent_tool_fixture(name: &str, tool: &str) -> std::io::Result<(Pat
         ("gid", "1000\n"),
         ("groups", "1000\n"),
         ("perm", "rwx\n"),
-        ("label", "user_u:agent_r:coder_t:s0\n"),
+        ("label", "user_u:agent_r:executor_t:s0\n"),
         ("iso", "shared\n"),
         ("parent", "\n"),
         ("life", "owned\n"),
-        ("root", "/ctx/home/1000/agent/coder/root\n"),
+        ("root", "/ctx/home/1000/agent/executor/root\n"),
         ("cwd", "/workspace\n"),
         ("env", "\n"),
         ("abi", "sdk-envelope-v1\n"),
@@ -182,7 +182,7 @@ pub(crate) fn agent_tool_fixture(name: &str, tool: &str) -> std::io::Result<(Pat
     )?;
     fs::write(
         control.join("policy"),
-        format!("allow coder_t model:main use\nallow coder_t tool:{tool} execute\n"),
+        format!("allow executor_t model:main use\nallow executor_t tool:{tool} execute\n"),
     )?;
     Ok((root, tool_control))
 }

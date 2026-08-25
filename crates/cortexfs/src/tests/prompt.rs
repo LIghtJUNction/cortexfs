@@ -221,7 +221,7 @@ fn agent_prompt_snapshot_dirs_reject_invalid_agent() {
 #[test]
 fn agent_prompt_run_snapshot_is_best_effort_when_missing() {
     let root = clean_test_dir("agent-prompt-run-snapshot-missing");
-    write_run_snapshot(&root, "coder", "rules", "skills");
+    write_run_snapshot(&root, "executor", "rules", "skills");
 }
 
 #[test]
