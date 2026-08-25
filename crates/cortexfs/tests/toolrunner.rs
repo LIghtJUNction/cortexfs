@@ -44,7 +44,9 @@ mod tests {
     }
 
     fn run_runner(path: &str, args: &[&str], run_id: &str) -> Result<Output, std::io::Error> {
-        Command::new(env!("CARGO_BIN_EXE_cortexfs-object-runner"))
+        let runner = std::env::var_os("CARGO_BIN_EXE_cortexfs-object-runner")
+            .ok_or_else(|| std::io::Error::other("missing object-runner binary"))?;
+        Command::new(runner)
             .arg(path)
             .args(args)
             .env_clear()
