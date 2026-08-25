@@ -86,7 +86,7 @@ build_release() {
     (
         cd "$ROOT"
         CARGO_TARGET_DIR="$(dirname "$target")" \
-            scripts/serialize-cargo.sh cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
+            scripts/serialize-cargo.sh cargo build --release --locked -p cortexfs -p cortexfs-mcp \
             -p cortexfs-channel-tools \
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
