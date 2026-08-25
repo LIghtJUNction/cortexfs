@@ -8,7 +8,7 @@ use super::{EmailConfig, EmailError, smtp};
 
 fn login(config: &EmailConfig) -> Result<imap::Session<imap::Connection>, EmailError> {
     let client = imap::ClientBuilder::new(&config.imap_host, config.imap_port)
-        .tls_kind(imap::TlsKind::Rust)
+        .tls_kind(imap::TlsKind::Native)
         .connect()
         .map_err(|error| EmailError::Imap(error.to_string()))?;
     client

@@ -7,7 +7,7 @@
 use std::{env, path::PathBuf, time::Duration};
 
 use cortexfs_paths::channel_driver_socket;
-use rumqttc::{MqttOptions, QoS, Transport};
+use rumqttc::{MqttOptions, QoS, TlsConfiguration, Transport};
 use url::Url;
 
 use crate::error::{Error, Result};
@@ -94,7 +94,7 @@ impl Config {
             options.set_credentials(username, password);
         }
         if self.broker.scheme() == "mqtts" {
-            options.set_transport(Transport::tls_with_default_config());
+            options.set_transport(Transport::tls_with_config(TlsConfiguration::Native));
         }
         Ok(options)
     }
