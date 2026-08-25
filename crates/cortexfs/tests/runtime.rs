@@ -186,11 +186,11 @@ mod tests {
         let agent_marker = root.path().join("agent-called");
         let provider_marker = root.path().join("provider-called");
         let ctx = env!("CARGO_BIN_EXE_ctx");
-        let runtime = env!("CARGO_BIN_EXE_cortexfs-agent-runtime");
+        let runtime = std::env::var("CARGO_BIN_EXE_cortexfs-agent-runtime")?;
         for program in [
             "/usr/bin/bwrap",
             "/usr/bin/systemd-socket-activate",
-            runtime,
+            runtime.as_str(),
         ] {
             require_program(Path::new(program))?;
         }
@@ -217,7 +217,8 @@ mod tests {
             "allow executor_t model:debug/echo use\nallow executor_t tool:tsh execute\n",
         )?;
 
-        let mut activation = spawn_activation(root.path(), &source, &socket, runtime, "executor")?;
+        let mut activation =
+            spawn_activation(root.path(), &source, &socket, runtime.as_str(), "executor")?;
         wait_for_socket(&mut activation, &socket)?;
         let mut stream = UnixStream::connect(&socket).map_err(|error| {
             let stderr = activation.terminate_with_stderr();
@@ -255,19 +256,19 @@ mod tests {
         let root = tempfile::tempdir()?;
         let source = root.path().join("source");
         let ctx = env!("CARGO_BIN_EXE_ctx");
-        let runtime = env!("CARGO_BIN_EXE_cortexfs-agent-runtime");
+        let runtime = std::env::var("CARGO_BIN_EXE_cortexfs-agent-runtime")?;
         for program in [
             "/usr/bin/bwrap",
             "/usr/bin/systemd-socket-activate",
-            runtime,
+            runtime.as_str(),
         ] {
             require_program(Path::new(program))?;
         }
         bootstrap_fixture(root.path(), ctx, &source)?;
         // Wrappers exec /ctx/bin/cortexfs-object-runner; plant the workspace-built
         // runner so envelope ABI matches this tree (system /usr/bin may lag).
-        let runner = env!("CARGO_BIN_EXE_cortexfs-object-runner");
-        fs::copy(runner, source.join("bin/cortexfs-object-runner"))?;
+        let runner = std::env::var("CARGO_BIN_EXE_cortexfs-object-runner")?;
+        fs::copy(&runner, source.join("bin/cortexfs-object-runner"))?;
         fs::set_permissions(
             source.join("bin/cortexfs-object-runner"),
             fs::Permissions::from_mode(0o755),
@@ -287,7 +288,7 @@ mod tests {
         for attempt in 1..=7 {
             let socket = root.path().join(format!("executor-{attempt}.sock"));
             let mut activation =
-                spawn_activation(root.path(), &source, &socket, runtime, "executor")?;
+                spawn_activation(root.path(), &source, &socket, runtime.as_str(), "executor")?;
             wait_for_socket(&mut activation, &socket)?;
             let mut stream = UnixStream::connect(&socket)?;
             writeln!(

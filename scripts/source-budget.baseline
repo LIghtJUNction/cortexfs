@@ -1,5 +1,5 @@
 # cortexfs source-budget baseline
-all=178052
+all=178053
 prod=123579
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
