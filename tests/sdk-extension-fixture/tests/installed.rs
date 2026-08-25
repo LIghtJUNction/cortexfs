@@ -235,7 +235,10 @@ mod tests {
             &manifest,
             "tool",
             "example.echo",
-            Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-tool")),
+            &PathBuf::from(
+                std::env::var_os("CARGO_BIN_EXE_cortexfs-sdk-fixture-tool")
+                    .ok_or("missing fixture tool binary")?,
+            ),
             &controls,
         )?;
         install_object(root.path(), &manifest, InstallTier::System)?;
@@ -256,7 +259,10 @@ mod tests {
             },
         )?;
         let package = root.path().join("package");
-        let agent = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent"));
+        let agent = PathBuf::from(
+            std::env::var_os("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent")
+                .ok_or("missing fixture agent binary")?,
+        );
         let reference = root.path().join("agent/executor.d");
         let mut controls = BTreeMap::new();
         for name in [
@@ -282,7 +288,7 @@ mod tests {
                 .to_owned(),
         );
         let agent_manifest = package.join("agent.json");
-        write_manifest(&agent_manifest, "agent", "fixture-agent", agent, &controls)?;
+        write_manifest(&agent_manifest, "agent", "fixture-agent", &agent, &controls)?;
         install_object(root.path(), &agent_manifest, InstallTier::System)?;
         assert!(inspect_object_layout(root.path(), ObjectClass::Agent, "fixture-agent").is_ok());
         Ok(root)
