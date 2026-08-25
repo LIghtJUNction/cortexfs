@@ -128,7 +128,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  writes bin/cortexfs.bootstrap.json with tree_version and migrations",
             "",
             "retired agents:",
-            "  base/executor/reviewer/worker are reported as would_skip and retained for manual review",
+            "  base/coder/reviewer/worker are reported as would_skip and retained for manual review",
             "  legacy trees have no manifest proving ownership and full control-tree integrity",
             "  bootstrap does not automatically delete retired objects or session history under home/",
             "",

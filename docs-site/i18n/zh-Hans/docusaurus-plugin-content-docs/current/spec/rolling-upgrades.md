@@ -34,6 +34,12 @@ bin/cortexfs.bootstrap.json
 未知或重复的历史审计条目既不授予权限，也不会被延续。实现不得在
 迁移与调和完成前，将同一标识符用于不同任务或报告尚未达成的目标版本。
 
+参考树版本 8 记录 `agent-permissions` 迁移；版本 9 记录
+`initial-agents` 拓扑迁移，并将受管的 `main` / `main.sock` 别名从旧
+`coder` 原子重定向到 `executor`。`architect` 与 `product-manager` 默认
+权限为 `r--`，`executor` 默认权限为 `rwx`；旧 `coder`、`reviewer` 与
+`worker` 对象仅保留供人工复核。
+
 ## 命令模式
 
 `ctx bootstrap` 在同一计划上有三种模式：

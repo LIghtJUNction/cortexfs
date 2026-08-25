@@ -69,11 +69,10 @@ use super::{
     run_secret_tool_command_with_timeout, secret_tool_dbus_address,
     serve_agent_executable_socket_stream_once, serve_unix_socket_listener_once,
     serve_unix_socket_stream_once, session_index_key_for_cwd, set_private_dir_permissions,
-    set_text_file_permissions, should_repair_reference_owner, snapshot_dirs,
-    socket_runtime_error_response, trajectory_from_session_dir, trajectory_from_session_jsonl,
-    update_session_index, update_session_index_with_keys, validate_context_pack_source,
-    validate_trajectory, write_run_snapshot, write_snapshot, write_text_file_if_absent,
-    write_trajectory_json,
+    set_text_file_permissions, snapshot_dirs, socket_runtime_error_response,
+    trajectory_from_session_dir, trajectory_from_session_jsonl, update_session_index,
+    update_session_index_with_keys, validate_context_pack_source, validate_trajectory,
+    write_run_snapshot, write_snapshot, write_text_file_if_absent, write_trajectory_json,
 };
 use crate::fuse::projection::core::fuse_readlink_error;
 use std::fs;

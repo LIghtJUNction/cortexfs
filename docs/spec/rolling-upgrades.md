@@ -39,9 +39,11 @@ MUST NOT reuse an identifier for different work or report a target version
 before its migrations and reconciliation have completed.
 
 Reference-tree version 8 records the `agent-permissions` migration and
-version 9 records the `initial-agents` topology migration. Architect and
-product-manager default to `r--`; executor defaults to `rwx`. Legacy coder,
-reviewer, and worker objects are retained only for manual review.
+version 9 records the `initial-agents` topology migration. It atomically
+retargets the managed `main` / `main.sock` aliases from legacy `coder` to
+`executor`. Architect and product-manager default to `r--`; executor defaults
+to `rwx`. Legacy coder, reviewer, and worker objects are retained only for
+manual review.
 
 ## Command modes
 

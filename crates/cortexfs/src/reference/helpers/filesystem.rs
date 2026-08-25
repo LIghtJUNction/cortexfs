@@ -78,7 +78,7 @@ pub(crate) fn chown_reference_home_entry(
     let metadata = fs::symlink_metadata(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
     if metadata.is_dir() {
         let directory = open_reference_dir(path)?;
-        chown_reference_open_entry(&directory, uid, gid)?;
+        chown_open_entry(&directory, uid, gid)?;
         return chown_reference_directory_symlinks(&directory, uid, gid);
     }
     if !metadata.is_file() {
@@ -86,14 +86,13 @@ pub(crate) fn chown_reference_home_entry(
     }
     let file =
         support::plain::open_plain_file(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    if !file
+    let metadata = file
         .metadata()
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?
-        .is_file()
-    {
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    if !metadata.is_file() {
         return Err(ReferenceTreeError::CannotCreate);
     }
-    chown_reference_open_entry(&file, uid, gid)
+    chown_open_entry(&file, uid, gid)
 }
 
 fn chown_reference_directory_symlinks(
@@ -128,11 +127,7 @@ fn chown_reference_directory_symlinks(
     Ok(())
 }
 
-fn chown_reference_open_entry(
-    file: &fs::File,
-    uid: u32,
-    gid: u32,
-) -> Result<(), ReferenceTreeError> {
+fn chown_open_entry(file: &fs::File, uid: u32, gid: u32) -> Result<(), ReferenceTreeError> {
     nix::unistd::fchown(
         file,
         Some(nix::unistd::Uid::from_raw(uid)),
@@ -156,11 +151,10 @@ pub(crate) fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeE
         .custom_flags(libc::O_NOFOLLOW)
         .open(path)
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    if !file
+    let metadata = file
         .metadata()
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?
-        .is_file()
-    {
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    if !metadata.is_file() {
         return Err(ReferenceTreeError::CannotCreate);
     }
     file.set_permissions(fs::Permissions::from_mode(0o755))
@@ -185,52 +179,53 @@ pub(crate) fn ensure_reference_socket(
             std::io::ErrorKind::AlreadyExists,
         ));
     }
-    if should_repair_reference_owner(nix::unistd::Uid::effective().as_raw()) {
+    if nix::unistd::Uid::effective().is_root() {
         chown_reference_entry(path, uid, gid)?;
     }
     Ok(())
 }
 
-/// Materializes reserved Agent aliases as links to canonical executable and socket paths.
 pub(crate) fn ensure_reference_agent_aliases(root: &Path) -> Result<(), ReferenceTreeError> {
     let parent = cortexfs_paths::agent_root_path(root);
-    let parent_dir = open_reference_dir(&parent)?;
+    let dir = open_reference_dir(&parent)?;
     for &(alias, target) in AGENT_ALIASES {
         let executable_target = cortexfs_paths::agent_path(&cortexfs_paths::ctx_root(), target);
-        ensure_reference_alias_entry(&parent_dir, alias, &executable_target)?;
+        ensure_alias(&parent, &dir, alias, &executable_target)?;
         let socket_target = cortexfs_paths::agent_socket_path(&cortexfs_paths::ctx_root(), target);
-        ensure_reference_alias_entry(&parent_dir, &format!("{alias}.sock"), &socket_target)?;
+        ensure_alias(&parent, &dir, &format!("{alias}.sock"), &socket_target)?;
     }
-    parent_dir
-        .sync_all()
+    dir.sync_all()
         .map_err(|_error| ReferenceTreeError::CannotLink)
 }
 
-fn ensure_reference_alias_entry(
+fn ensure_alias(
+    parent_path: &Path,
     parent: &fs::File,
     name: &str,
     target: &Path,
 ) -> Result<(), ReferenceTreeError> {
-    match support::receipt::receipt_at(parent, name, support::receipt::EntryKind::Symlink) {
-        Ok(Some(_)) => {
-            let current = nix::fcntl::readlinkat(parent, name)
-                .map(PathBuf::from)
-                .map_err(|_error| ReferenceTreeError::CannotLink)?;
-            (current == target)
-                .then_some(())
-                .ok_or(ReferenceTreeError::CannotLink)
-        }
-        Ok(None) => match nix::unistd::symlinkat(target, parent, name) {
-            Ok(()) => Ok(()),
-            Err(nix::errno::Errno::EEXIST) => Err(ReferenceTreeError::CannotLink),
-            Err(_error) => Err(ReferenceTreeError::CannotLink),
-        },
-        Err(_error) => Err(ReferenceTreeError::CannotLink),
+    let receipt = support::receipt::receipt_at(parent, name, support::receipt::EntryKind::Symlink)
+        .map_err(|_error| ReferenceTreeError::CannotLink)?;
+    if receipt.is_none() {
+        return nix::unistd::symlinkat(target, parent, name)
+            .map_err(|_error| ReferenceTreeError::CannotLink);
     }
-}
-
-pub(crate) const fn should_repair_reference_owner(effective_uid: u32) -> bool {
-    effective_uid == 0
+    let current = nix::fcntl::readlinkat(parent, name)
+        .map(PathBuf::from)
+        .map_err(|_error| ReferenceTreeError::CannotLink)?;
+    if current == target {
+        return Ok(());
+    }
+    let legacy = target.with_file_name(match name {
+        "main" => "coder",
+        "main.sock" => "coder.sock",
+        _ => return Err(ReferenceTreeError::CannotLink),
+    });
+    (current == legacy)
+        .then_some(())
+        .ok_or(ReferenceTreeError::CannotLink)?;
+    provider::replace_alias(parent_path, parent, name, target)
+        .map_err(|_error| ReferenceTreeError::CannotLink)
 }
 
 pub(crate) fn ensure_reference_model_alias(

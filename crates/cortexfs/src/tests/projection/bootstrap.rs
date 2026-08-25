@@ -52,13 +52,6 @@ fn reference_tree_bootstrap_repairs_plain_socket_placeholder_owner() {
 }
 
 #[test]
-fn reference_socket_owner_repair_requires_effective_root() {
-    assert!(should_repair_reference_owner(0));
-    assert!(!should_repair_reference_owner(1000));
-    assert!(!should_repair_reference_owner(u32::MAX));
-}
-
-#[test]
 fn reference_home_chown_rejects_symlinked_ancestor() {
     let root = clean_test_dir("reference-home-chown-ancestor");
     let external = clean_test_dir("reference-home-chown-external");

@@ -155,7 +155,14 @@ fn reference_tree_model_exec_is_readonly_metadata() {
 
 #[test]
 fn reference_tree_bootstrap_materializes_current_layout() {
+    use std::os::unix::fs::symlink;
     let root = clean_test_dir("reference-tree-current-layout");
+    ok!(fs::create_dir_all(root.join("agent")));
+    ok!(symlink("/ctx/agent/coder", root.join("agent/main")));
+    ok!(symlink(
+        "/ctx/agent/coder.sock",
+        root.join("agent/main.sock")
+    ));
 
     assert!(ensure_reference_tree(&root).is_ok());
 
