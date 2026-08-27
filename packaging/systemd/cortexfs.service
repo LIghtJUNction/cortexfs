@@ -25,7 +25,6 @@ TasksMax=64
 LimitNOFILE=2048
 OOMPolicy=stop
 MemoryAccounting=yes
-CPUAccounting=yes
 TasksAccounting=yes
 
 [Install]
