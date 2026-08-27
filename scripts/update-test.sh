@@ -103,6 +103,10 @@ assert_true 'uninitialized rustup shim is treated as missing Rust' \
     grep -Fq $'current=$(rust_version || true)' "$ROOT/scripts/install-linux.sh"
 assert_false 'updater does not call an undefined Rust audit' \
     grep -Fq '    audit_rust' "$ROOT/scripts/update-linux.sh"
+assert_true 'updater uses the defined bwrap check' \
+    grep -Fq '    check_bwrap' "$ROOT/scripts/update-linux.sh"
+assert_false 'updater does not call an undefined bwrap audit' \
+    grep -Fq '    audit_bwrap' "$ROOT/scripts/update-linux.sh"
 assert_true 'updater syntax' bash -n "$ROOT/scripts/update-linux.sh"
 assert_true 'updater tests syntax' bash -n "$ROOT/scripts/update-test.sh"
 printf '1..%d\n' "$PASSED"

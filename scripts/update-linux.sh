@@ -544,7 +544,7 @@ update_apply() {
     require_runtime_paths
     audit_fuse
     ensure_rust
-    audit_bwrap
+    check_bwrap
     ensure_mountpoint
 
     [[ $UPDATE_OWNER == source ]] || update_find_rollback_package
