@@ -35,7 +35,6 @@ TasksMax=128
 LimitNOFILE=1024
 OOMPolicy=stop
 MemoryAccounting=yes
-CPUAccounting=yes
 TasksAccounting=yes
 ReadWritePaths=/var/lib/cortexfs /run/cortexfs
 ReadOnlyPaths=/etc/cortexfs
