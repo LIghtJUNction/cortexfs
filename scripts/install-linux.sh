@@ -378,7 +378,7 @@ ensure_rust() {
     local current installer="$TEMP_DIR/rustup-init.sh"
     card "$([[ $LANGUAGE == zh ]] && printf '03 · Rust 工具链' || printf '03 · Rust toolchain')"
     if command -v rustc >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1; then
-        current=$(rust_version)
+        current=$(rust_version || true)
     fi
     if [[ -n $current ]] && version_ge "$current" "$MIN_RUST"; then
         info "Rust $current satisfies MSRV $MIN_RUST." "Rust $current 满足 MSRV $MIN_RUST。"

@@ -544,7 +544,6 @@ update_apply() {
     require_runtime_paths
     audit_fuse
     ensure_rust
-    audit_rust
     audit_bwrap
     ensure_mountpoint
 

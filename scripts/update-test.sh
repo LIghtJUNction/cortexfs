@@ -99,6 +99,10 @@ dirty_source_is_rejected() (
 )
 assert_false 'dirty source is rejected' dirty_source_is_rejected
 
+assert_true 'uninitialized rustup shim is treated as missing Rust' \
+    grep -Fq $'current=$(rust_version || true)' "$ROOT/scripts/install-linux.sh"
+assert_false 'updater does not call an undefined Rust audit' \
+    grep -Fq '    audit_rust' "$ROOT/scripts/update-linux.sh"
 assert_true 'updater syntax' bash -n "$ROOT/scripts/update-linux.sh"
 assert_true 'updater tests syntax' bash -n "$ROOT/scripts/update-test.sh"
 printf '1..%d\n' "$PASSED"
