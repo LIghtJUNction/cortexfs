@@ -24,7 +24,8 @@ mod tests {
           ]
         }"#,
         )?;
-        let output = Command::new(env!("CARGO_BIN_EXE_cortexfs-futureagi"))
+        let binary = std::env::var("CARGO_BIN_EXE_cortexfs-futureagi")?;
+        let output = Command::new(binary)
             .args(["export", "--trajectory"])
             .arg(&path)
             .arg("--include-context")
