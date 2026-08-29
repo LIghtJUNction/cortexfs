@@ -137,9 +137,9 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
     let source = root.join("source");
     fs::create_dir_all(source.join("tool"))?;
     config(&config_path, &observed)?;
-    let binary = Path::new(env!("CARGO_BIN_EXE_ctxmcp"));
+    let binary = PathBuf::from(std::env::var("CARGO_BIN_EXE_ctxmcp")?);
 
-    let listed = Command::new(binary)
+    let listed = Command::new(&binary)
         .args(["list", "--config"])
         .arg(&config_path)
         .args(["--server", "demo"])
@@ -160,7 +160,7 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
         Some("/usr/bin:/bin")
     );
 
-    let projected = Command::new(binary)
+    let projected = Command::new(&binary)
         .args(["project", "--config"])
         .arg(&config_path)
         .arg("--runtime-config")
