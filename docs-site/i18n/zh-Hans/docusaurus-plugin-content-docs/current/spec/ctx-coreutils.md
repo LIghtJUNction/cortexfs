@@ -79,6 +79,11 @@ ctx validate-name executor
 ctx doctor
 ```
 
+`ctx doctor` 为每项 ABI 检查打印一行状态（`ok`、`missing`、`invalid`、`stale`、
+`stale-user`、`unexpected`），任一失败则以非零退出。它会报告 `coder`、`worker`
+这类退役残留，但不会删除它们。它不检查 provider 凭据。见
+[getting-started.md](../getting-started.md#排查安装问题)。
+
 不要添加：
 
 ```text

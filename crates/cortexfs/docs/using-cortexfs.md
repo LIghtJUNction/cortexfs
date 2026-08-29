@@ -9,6 +9,12 @@ sidebar_label: Daily Usage
 The everyday CortexFS experience should feel like Unix: discover objects, read
 state, then execute files or connect to sockets when you need work done.
 
+For the short interactive path, run `ctx` in a project directory. It creates a
+fresh session with that directory mounted at `/workspace` and opens chat. Run
+`ctx resume` in the same directory to reopen its session, or pass
+`ctx resume executor --session SESSION` for an explicit session. `ctx status` is
+the explicit status command; `ctx help` and `ctx --help` show the CLI help.
+
 ## Find Available Objects
 
 ```bash
@@ -51,6 +57,16 @@ The reference tree provides `architect`, `executor`, and `product-manager`.
 `product-manager` use `agent:architect` as their parent. `executor` is the
 writable implementation and verification role; `product-manager` is read-only
 and turns user needs into measurable acceptance criteria.
+`agent/main` and `agent/main.sock` alias `executor`. Retired `base`, `coder`,
+`reviewer`, and `worker` names are leftover objects, not the managed tree.
+
+Those three roles are hosted agents: bootstrap writes an object-runner wrapper
+plus `system.md`. The packaged Agent SDK binaries
+`cortexfs-agent-architect`, `cortexfs-agent-executor`, and
+`cortexfs-agent-product-manager` are optional executables that print a
+role/mission/handoff envelope without calling a model. They are examples and
+drop-in `run` files, not the default `/ctx/agent/<name>` wrappers. See
+[One-file Extensions](extensions.md) and [Internal Architecture](internal-architecture.md).
 
 Bootstrap and inspect the reference source with:
 
@@ -61,16 +77,23 @@ ctx bootstrap --dry-run
 ```
 
 `ctx bootstrap` writes `bin/cortexfs.bootstrap.json` only when the schema,
-tree version, managed-agent list, or required migrations need refresh. Retired
-`base`, `coder`, `reviewer`, and `worker` objects are reported but retained for
-manual review because old installations have no manifest proving ownership and
-full control-tree integrity. A successful bootstrap makes the next `--check`
-clean.
+tree version, managed-agent list, or required migrations need refresh. Retired `base`, `coder`, `reviewer`, and `worker` objects are reported but
+retained for manual review because old installations have no manifest proving
+ownership and full control-tree integrity. A successful bootstrap makes the
+next `--check` clean.
 
-The default `executor.d/system.md` treats `executor` as the parent integrator:
+The default `executor.d/system.md` treats `executor` as the implementation and
+verification agent:
 independent implementation work should be a delegated `react` node in
-`context/plan.json`, delegated nodes that omit `agent` use `worker`, and
-delegated nodes that omit `session` use the current parent session name.
+`context/plan.json`. Name `agent` explicitly (`"agent": "executor"`) on those
+nodes. A delegated node that omits `agent` still defaults to `worker`
+(`DEFAULT_DELEGATED_AGENT` in `agent/schedule`); a node that omits `session`
+uses the current parent session name.
+
+`worker` is retired from the managed reference tree. Fresh bootstrap does not
+create `/ctx/agent/worker`. An implicit `worker` handoff therefore fails unless
+that leftover object still exists and the parent policy allows
+`agent:worker create`. Prefer naming `executor` in new plans.
 Advance one schedule step with:
 
 ```bash
@@ -116,9 +139,32 @@ ctx provider preset install anthropic
 ctx provider preset install google
 ```
 
+Provider authentication methods are declared alongside those presets. Inspect
+the methods without exposing credentials:
+
+```bash
+ctx provider auth methods codex
+```
+
+The output lists the method, OAuth flow, and logical slot. Credentials remain in
+the root-owned secret store; no identity tree is added to `/ctx`.
+
+The provider library resolves those declarations through one registry. OpenAI
+and Codex use the OpenAI-compatible adapter, Claude uses the Anthropic adapter,
+and a GitHub Copilot adapter can be registered with a host-owned OAuth client
+configuration. Login, device login, refresh, persistence, and model discovery
+run through the same adapter boundary and normalized credential/model shapes;
+the Agent does not branch on OAuth endpoints or API-key headers. Copilot's
+`--device` login displays its
+verification URI and user code, then polls with a bounded timeout.
+Host-configured providers can declare an OAuth `device` block with request,
+token, and verification endpoints; this keeps device-code flow provider-neutral
+without adding another `/ctx` namespace.
+
 Canonical short names remain `openai`, `anthropic`, and `google`. `gemini`
 aliases `google`. Additional OpenAI-compatible presets install under their
-explicit `name`.
+explicit `name`. The host-configured GitHub Copilot endpoint uses
+`github-copilot` and accepts `copilot` as an adapter alias.
 
 Model proxying is not an agent and is not written into provider JSON. The
 single global route table is:
@@ -166,11 +212,38 @@ ctx agent ps
 ctx agent stop reviewer
 ```
 
+Inspect or change the agent's coarse file/shell ceiling with normal Unix tools:
+
+```bash
+ls -l /ctx/agent/reviewer.d/perm
+chmod 400 /ctx/agent/reviewer.d/perm  # read tools only
+chmod 700 /ctx/agent/reviewer.d/perm  # read, write, and shell families
+```
+
+The marker adds a ceiling to existing mount, Linux, agent-policy, and
+tool-policy checks; it does not replace them.
+
 Host-side `agent.yaml` files (also `agent.yml` and `agent.json`) are
 authoring inputs. `ctx agent new --from` and `ctx agent apply --from`
 validate and materialize them into `agent/<name>.d/*`; runtime authority
 continues to come only from the discrete control files. A short `--from NAME`
 searches `.cortexfs/agents` and `~/.config/cortexfs/agents`.
+
+An Eve project can be used as the same authoring input without installing a
+Node runtime:
+
+```bash
+ctx agent new --from ./my-eve-agent
+ctx agent apply reviewer --from ./my-eve-agent
+```
+
+The importer reads bounded static `agent/instructions.md` and a literal
+`model: "provider/model"` from `agent/agent.ts`. It records the discovered Eve
+tools, skills, channels, subagents, and schedules in the agent description, but
+does not execute TypeScript, expose secrets, start an HTTP channel, or add a
+watcher. Eve capabilities remain source data until an explicitly governed
+CortexFS tool is installed and allowed by policy; this keeps the import
+reproducible at the Git/process refresh boundary.
 
 ```yaml
 schema: cortexfs.agent.profile/v1
@@ -200,6 +273,14 @@ Non-default models and non-`owned` lifecycles are visible in `ctx agent ps`.
 `ctx agent env NAME` prints the sandbox environment derived by
 `ctx agent start`, and `ctx agent children NAME` shows parent-side child state
 plus the backing worker `parent_session`, `model`, `life`, `status`, and `pid`.
+
+AGFS-style service composition uses the existing file ABI rather than another
+root namespace: use `shared/<space>/data` for durable values, the documented
+`shared/<space>/queue/{inbox,pending,lease,claimed,done,failed}` rename protocol
+for work, and bounded `fs.read`, `fs.list`, `fs.stat`, and `fs.write` tools for
+inspection and mutation. There is no resident plugin daemon, polling worker,
+or heartbeat namespace; commit facts and ordinary session/status files remain
+the source of truth.
 
 ## Submit Images And Other Files
 

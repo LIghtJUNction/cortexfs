@@ -62,20 +62,20 @@ still decide what a specific agent may execute.
 ## Usage
 
 ```bash
-agent.sh coder
-agent.sh coder "fix tests"
-agent.sh --chat coder
-agent.sh --attach coder
-agent.sh --watch coder
-agent.sh --session default coder
-agent.sh --resume coder
-agent.sh --history coder
-agent.sh --pack coder
-agent.sh --tools coder
-agent.sh --children coder
-agent.sh --cancel coder
-agent.sh --status coder
-agent.sh --raw coder "prompt"
+agent.sh executor
+agent.sh executor "fix tests"
+agent.sh --chat executor
+agent.sh --attach executor
+agent.sh --watch executor
+agent.sh --session default executor
+agent.sh --resume executor
+agent.sh --history executor
+agent.sh --pack executor
+agent.sh --tools executor
+agent.sh --children executor
+agent.sh --cancel executor
+agent.sh --status executor
+agent.sh --raw executor "prompt"
 ```
 
 With no prompt, `agent.sh AGENT` opens the agent chat UI through

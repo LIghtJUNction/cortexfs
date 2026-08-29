@@ -11,6 +11,7 @@ Stable root:
   model/
   agent/
   tool/
+  channel/
   home/
   shared/
     cortexfs-docs/
@@ -40,6 +41,7 @@ bin/     CortexFS ABI helper commands
 model/   system executable model entries, visible to all users by default
 agent/   system executable agent entries, visible to all users by default
 tool/    system executable tool entries, visible to all users by default
+channel/ channel drivers, global channel tools, and capability state
 home/    CortexFS home for Linux users
 shared/  shared space for users and agents
 ```
@@ -50,9 +52,13 @@ Resource tiers:
 /ctx/model              system models
 /ctx/agent              system agents
 /ctx/tool               system tools
+/ctx/channel/<name>     one channel instance and its tool directory
+/ctx/channel/<name>.d   channel id, driver, capabilities, status, and health
 /ctx/home/<uid>/model   user-specific models and aliases
 /ctx/home/<uid>/agent   user-specific agent state and user agents
 /ctx/home/<uid>/tool    user-specific tools
+/ctx/home/<uid>/channel/<name>   user channel tools overriding global tools
+/ctx/home/<uid>/channel/<name>.d user channel capability/state overrides
 ```
 
 The system tiers are durable shared resources. The user tiers are durable
@@ -63,9 +69,12 @@ tree.
 
 ## Stable Reference Tree
 
-This is the normative stable shape. Concrete object names such as `debug/echo`,
-`openai/gpt-5.6`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
-`project-a` are examples of valid entries.
+This is the normative stable shape. The managed reference agents are
+`architect`, `executor`, and `product-manager`; `agent/main` aliases
+`executor`. Concrete names such as `debug/echo`, `openai/gpt-5.6`, `base`,
+`coder`, `reviewer`, `worker`, `1000`, and `project-a` are examples of valid
+entries. Retired leftover objects may still appear until an operator removes
+them.
 
 ```text
 /ctx/
@@ -92,7 +101,9 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
         cap
         effort
         default
-        fallback
+        limit
+        recommended
+        compact
         session
         status
         log
@@ -105,12 +116,16 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
         cap
         effort
         default
-        fallback
+        limit
+        recommended
+        compact
         session
         status
         log
 
   agent/
+    main -> /ctx/agent/executor
+    main.sock -> /ctx/agent/executor.sock
     architect
     base.sock
     architect.d/
@@ -292,6 +307,20 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
       status
       log
 
+  channel/
+    discord/
+      tool/
+        channel.send
+        channel.reply
+        channel.react
+        discord.invoke
+    discord.d/
+      id
+      driver
+      cap
+      status
+      health
+
   home/
     1000/
       agent/
@@ -303,7 +332,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
               by-hash/
               by-uuid/
 
-        coder/
+        executor/
           root/
           session/
             index/
@@ -332,7 +361,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
           log
 
       agent/
-        coder/
+        executor/
           session/
             index/
               by-cwd/
@@ -353,8 +382,9 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
 `tool/<name>.d/origin` is an optional diagnostic file, not stable ABI. Strict
 clients must not depend on it.
 
-No other root entries are stable ABI. These are explicitly not root
-directories:
+No other root entries are stable ABI. The `channel/` entry above is the
+explicit communication-subsystem exception; the following remain explicitly
+not root directories:
 
 ```text
 provider/
@@ -396,6 +426,7 @@ The root rule:
 
 ```text
 root only contains stable object classes
+channel is a stable generic communication namespace, not a platform object tree
 root never mirrors provider, database, workflow, memory, or orchestration internals
 ```
 

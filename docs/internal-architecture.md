@@ -154,7 +154,9 @@ cortexfs-fuse             fuser projection only
 cortexfs (facade)         re-exports + optional features; bins depend on facade
         ▲
 bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel/evaluation adapters
+      cortexfs-agent-{architect,executor,product-manager}, cortexfs-futureagi
 sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
+app:  cortexfs-agents (official role binaries on agent-sdk), cortexfs-tools
 ```
 
 ### 3.2 Crate rules
@@ -175,6 +177,14 @@ sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 `cortexfs-futureagi` follows the evaluation-adapter row: it consumes an
 explicit ATIF projection, performs a one-shot export or request, and never
 creates a filesystem root, watcher, provider special case, or durable secret.
+
+`cortexfs-agents` is an application-layer crate on `cortexfs-agent-sdk`. It
+ships `cortexfs-agent-architect`, `cortexfs-agent-executor`, and
+`cortexfs-agent-product-manager`. Each binary reads one hosted envelope and
+emits a role/mission/handoff message; it does not replace the hosted
+object-runner loop that bootstrap installs under `/ctx/agent/<name>`.
+`cortexfs-tools` is the default filesystem/shell/tsh tool implementation crate
+and must not grow FUSE, provider HTTP, or agent-lifecycle dependencies.
 
 **MCP stays an adapter binary** (`cortexfs-mcp` / `ctxmcp`). It may call
 support helpers; it must not force a root ABI class.

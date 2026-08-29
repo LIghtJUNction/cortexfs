@@ -60,9 +60,11 @@ Session directories use ordinary files:
 
 ```text
 messages.jsonl  conversation messages
+raw             read-only ABI alias of messages.jsonl; preserves original JSONL history
 events.jsonl    tool calls, errors, and state changes
 latest.md       latest assistant text
 state           active, idle, done, error
+state.json      structured non-secret runtime projection (optional for legacy sessions)
 cwd             session working directory
 created_at      creation time
 updated_at      update time
@@ -71,6 +73,52 @@ AGENTS.md       optional run snapshot: effective merged AGENTS.md rules
 SKILLS.md       optional run snapshot: discovered skill metadata only
 context/        rebuildable prompt working set and derived context cache
 ```
+
+`raw` is deliberately a file in the session object rather than a second history
+store. Reading `/ctx/.../raw` returns the same durable message stream as
+`messages.jsonl`; compaction, prompt compilation, and model changes must never
+rewrite it. The projection is read-only and shares the backing stream, so it
+does not double memory or disk usage.
+
+For a session with model metadata, the read-only `raw` node also exposes:
+
+```text
+user.cortexfs.context_length           current raw token estimate
+user.cortexfs.context_recommended      recommended Agent working window
+user.cortexfs.context_compact_threshold compaction trigger
+user.cortexfs.context_max              trusted model hard maximum
+user.cortexfs.context_policy            model-metadata
+```
+
+The policy values come from `cortexfs-metadatas`; they describe the selected
+model, while `agent/<name>.d/window` and `agent/<name>.d/compact` hold the
+effective per-Agent choices. Missing model metadata is represented by
+`unknown`, never by a guessed zero.
+
+## Attach channel index
+
+Attachable frontends are indexed as filenames below the existing session
+index; this selector index is separate from the channel driver/tool root:
+
+```text
+private  /ctx/home/<uid>/agent/<agent>/session/index/channel/<channel_name>
+shared   /ctx/shared/<name>/agent/<agent>/session/index/channel/<channel_name>
+```
+
+`<channel_name>` is normalized as `transport[_instance]_<agent>_<session>`
+with underscores only, for example `terminal_coder_default` or
+`discord_primary_coder_discord_deadbeef`. A shared entry is prefixed with
+`shared_`. The file contains provider-neutral JSON describing the target
+agent/session and transport; credentials and external identities are never
+stored there. `ctx attach` reads this index, accepts an exact name or unique
+prefix, and uses the existing interaction socket for message channels or the
+existing PTY socket for terminal channels. `ctx agent attach` remains the
+explicit PTY operation.
+
+Older durable sessions without an index entry receive a terminal entry when
+`ctx attach` discovers them. The entry is written with the normal same-file
+atomic replacement rules, so every channel shown by `ctx attach` has a real
+filename that can also be listed with ordinary filesystem tools.
 
 `AGENTS.md` and `SKILLS.md` under the session directory are observability
 snapshots written when the agent runtime builds the prompt for a run. They are
@@ -102,11 +150,11 @@ Context runtime state stays under the session directory. Do not add
 Users can inspect history with ordinary file operations:
 
 ```bash
-ctx agent history coder
-ctx agent output coder
-less /ctx/home/$(id -u)/agent/coder/session/default/messages.jsonl
-cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
-cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+ctx agent history executor
+ctx agent output executor
+less /ctx/home/$(id -u)/agent/executor/session/default/messages.jsonl
+cat /ctx/home/$(id -u)/agent/executor/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/SKILLS.md
 ```
 
 If `--session` is omitted, client commands resolve `session/index/current`
@@ -128,11 +176,14 @@ session/
       <hash>
     by-uuid/
       <uuid>
+    channel/
+      <channel_name>
   default/
     messages.jsonl
     events.jsonl
     latest.md
     state
+    state.json
     cwd
     created_at
     updated_at
@@ -147,7 +198,16 @@ index/current         single value, current session name
 index/by-cwd/<hash>   single value, session name for that cwd
 index/by-hash/<hash>  single value, session name for that external hash
 index/by-uuid/<uuid>  single value, session name for that external uuid
+index/channel/<name>  provider-neutral JSON for an attachable frontend
 ```
+
+`index/channel/` is a read-oriented discovery directory. Its regular files
+are part of the durable session ABI and are visible through the existing
+`home/<uid>` or `shared/<name>` tree. Runtime channel registration creates or
+replaces them with the normal same-directory atomic rename rule. A channel
+record is not a submission endpoint: clients use its filename to select the
+existing agent/session socket, and must not put credentials or external
+identity secrets in the record.
 
 `index/by-cwd/<hash>`, `index/by-hash/<hash>`, and `index/by-uuid/<uuid>` are
 not symlinks. That keeps the ABI identical across mounts and different backing
@@ -158,7 +218,7 @@ Session garbage collection defaults to a no-write preview. Applying it with
 `RENAME_NOREPLACE` to
 `<CTX_HOME>/archived_sessions/<agent>/<session>` and removes exact
 references to that session from `index/list`, `index/by-cwd/`,
-`index/by-hash/`, and `index/by-uuid/`. The archive destination never
+`index/by-hash/`, `index/by-uuid/`, and `index/channel/`. The archive destination never
 overwrites an existing entry. Permanent deletion is opt-in and requires
 `--delete --yes`; `--delete` without `--yes` only changes the preview mode.
 `--archive-dir <absolute-path>` replaces the default archive root, must not
@@ -179,15 +239,18 @@ external home directory, not a new root ABI namespace. Destination conflicts
 or cross-filesystem renames fail without removing the live source, and no
 recursive copy fallback is allowed. This phase defines no restore command.
 
-Resume is not a root-level feature. Clients read the session index for the
-current agent:
+The short CLI exposes resume as a root-level client operation. `ctx resume`
+selects the session whose `workspace` file matches the caller's current host
+directory; `ctx resume <agent> --session <session>` selects an explicit
+session. The durable session index remains the source for the agent's current
+selection and fallback tooling:
 
 ```text
-/ctx/home/1000/agent/coder/session/index/list
-/ctx/home/1000/agent/coder/session/index/current
-/ctx/home/1000/agent/coder/session/index/by-cwd/<hash>
-/ctx/home/1000/agent/coder/session/index/by-hash/<hash>
-/ctx/home/1000/agent/coder/session/index/by-uuid/<uuid>
+/ctx/home/1000/agent/executor/session/index/list
+/ctx/home/1000/agent/executor/session/index/current
+/ctx/home/1000/agent/executor/session/index/by-cwd/<hash>
+/ctx/home/1000/agent/executor/session/index/by-hash/<hash>
+/ctx/home/1000/agent/executor/session/index/by-uuid/<uuid>
 ```
 
 Shared resume reads the matching index under `shared`. Temp sessions do not
@@ -208,4 +271,7 @@ The chroot root is only the runtime environment:
 Rebuilding the root, cleaning it, or switching runtime environment must not
 destroy session history.
 
-See `context-abi.md` for context packs, compression, swap, and dedup rules.
+Context-window limits, rebuildable prompt working sets, and context compaction
+rules are defined in [agent-runtime.md](agent-runtime.md#context-window-control).
+Child handoff channels and their durable result files are defined in
+[ctx-coreutils.md](ctx-coreutils.md#core-commands).

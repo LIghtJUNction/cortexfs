@@ -84,6 +84,12 @@ ctx validate-name executor
 ctx doctor
 ```
 
+`ctx doctor` prints one status line per ABI check (`ok`, `missing`, `invalid`,
+`stale`, `stale-user`, `unexpected`) and exits non-zero when any check fails.
+It reports retired leftover agents such as `coder` and `worker` without deleting
+them. It does not check provider credentials. See
+[getting-started.md](../getting-started.md#troubleshoot-the-install).
+
 Do not add:
 
 ```text

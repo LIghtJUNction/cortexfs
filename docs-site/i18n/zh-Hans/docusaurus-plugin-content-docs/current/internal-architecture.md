@@ -145,8 +145,10 @@ cortexfs-fuse             fuser projection only
         ▲
 cortexfs (facade)         re-exports + optional features; bins depend on facade
         ▲
-bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel adapters
+bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel/evaluation adapters
+      cortexfs-agent-{architect,executor,product-manager}, cortexfs-futureagi
 sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
+app:  cortexfs-agents（基于 agent-sdk 的官方角色二进制）、cortexfs-tools
 ```
 
 ### 3.2 Crate 规则
@@ -164,6 +166,16 @@ sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 
 **MCP 保持适配器二进制**（`cortexfs-mcp` / `ctxmcp`）。它可以调用 support helper，
 但不能强制形成新的根 ABI 类。
+
+`cortexfs-futureagi` 走 evaluation-adapter 这一行：消费显式 ATIF 投影，做一次性
+export 或请求，从不创建文件系统根、watcher、provider 特例或耐久密钥。
+
+`cortexfs-agents` 是位于 `cortexfs-agent-sdk` 之上的应用层 crate。它提供
+`cortexfs-agent-architect`、`cortexfs-agent-executor`、
+`cortexfs-agent-product-manager`。每个二进制读取一份托管封装并发出
+role/mission/handoff 消息；它不替换 bootstrap 安装在 `/ctx/agent/<name>` 下的
+object-runner 托管循环。`cortexfs-tools` 是默认文件系统/shell/tsh 工具实现 crate，
+不得增长 FUSE、provider HTTP 或 agent 生命周期依赖。
 
 **独立可用性（Pi 可组合性）：** 消费者必须能单独依赖 `cortexfs-protocol` 或
 `cortexfs-runtime-client`，而无需链接 `fuser`、parquet 或 channel 平台 SDK。

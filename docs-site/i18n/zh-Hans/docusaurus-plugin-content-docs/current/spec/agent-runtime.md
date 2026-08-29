@@ -181,6 +181,13 @@ HOME=/home/agent
 
 `.config`、`.cache`、`.bash_history` 这类 shell 状态应落在 agent home，不应落到项目工作区。
 
+除非显式挂载替换，`/tmp` 是上限 512 MiB 的私有沙箱 tmpfs，不是主机 `/tmp`。
+交互终端是 transient 用户 systemd 单元，硬 cgroup 上限见 `support::quota`：
+`MemoryMax=1G` / `CPUQuota=200%` / `TasksMax=256`。socket 激活的 agent runtime
+使用更严的 `512M` / `100%` / `128`，与打包的 `cortexfs-agent@.service` 一致。
+打包单元因 `CPUQuota=` 已隐含 CPU accounting，不再单独写 `CPUAccounting=`；
+`systemd-run --user` 终端仍会传入 `CPUAccounting=yes`。
+
 终端进程从空环境启动。CortexFS 仅通过沙箱启动器注入小型 allowlist：
 
 ```text

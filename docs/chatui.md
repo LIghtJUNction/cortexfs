@@ -18,9 +18,9 @@ Minimal Bash clients:
 
 ```bash
 printf '%s\n' '{"op":"send","id":"ui-1","session":"default","input":"hello"}' |
-  socat - UNIX-CONNECT:/ctx/agent/coder.sock
+  socat - UNIX-CONNECT:/ctx/agent/executor.sock
 printf '%s\n' '{"op":"tsh","id":"ui-tool-1","session":"default","args":["load","bash"]}' |
-  socat - UNIX-CONNECT:/ctx/agent/coder.sock
+  socat - UNIX-CONNECT:/ctx/agent/executor.sock
 ```
 
 Minimal Python client:
@@ -28,7 +28,7 @@ Minimal Python client:
 ```python
 import json, socket
 s = socket.socket(socket.AF_UNIX)
-s.connect("/ctx/agent/coder.sock")
+s.connect("/ctx/agent/executor.sock")
 s.sendall((json.dumps({"op": "send", "id": "py-1", "session": "default",
                        "input": "hello"}) + "\n").encode())
 s.shutdown(socket.SHUT_WR)

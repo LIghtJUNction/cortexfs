@@ -363,6 +363,11 @@ already running for that user. Socket-activated agent runtimes use a stricter
 `MemoryMax=512M` / `CPUQuota=100%` / `TasksMax=128` profile, matching the
 packaged `cortexfs-agent@.service` unit.
 
+Packaged unit files set `MemoryAccounting=yes` and `TasksAccounting=yes` next
+to those ceilings. They do not set `CPUAccounting=yes` because systemd turns
+CPU accounting on when `CPUQuota=` is present. Transient `systemd-run --user`
+terminals still pass `--property=CPUAccounting=yes` from `support::quota`.
+
 The terminal process starts from an empty environment. CortexFS injects only a
 small allowlist through the sandbox launcher:
 

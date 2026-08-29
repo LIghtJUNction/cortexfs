@@ -361,6 +361,29 @@ tests/mounts/cortexfs
 This directory is only a local test mount point. Do not put source, fixtures,
 or persistent data there.
 
+## Common Pitfalls
+
+- **Serial Cargo.** Use `scripts/serialize-cargo.sh` or `scripts/test.sh`. Do
+  not start a second `cargo`, Clippy, or test command while one is running.
+- **Source budget.** New production files are capped at 120 lines;
+  `scripts/source-budget.sh` is the gate. Do not copy snapshot numbers into
+  docs.
+- **Module names.** No `mod.rs`. New files under `crates/cortexfs/src` use a
+  single-token stem with no `-` or `_`. Add dependencies with `cargo add`, not
+  by editing manifests by hand. See [naming-guide.md](naming-guide.md).
+- **Layer edges.** `fuse` must not call `object::executor`; `support` must not
+  import `agent` or `runtime`. Prefer existing helpers in `support::plain`,
+  `support::path`, `support::process`, `support::control`, `support::layout`,
+  and `support::jsonl`.
+- **Docs copies.** `docs/` is canonical. `crates/cortexfs/docs/` is the
+  `include_str!` manual bundle for `ctx man`; keep those files in sync when you
+  edit a baked-in topic (`using-cortexfs`, `spec/agent-runtime`, `spec/root-abi`,
+  `spec/session-abi`, `spec/ctx-coreutils`, `spec/model-abi`,
+  `spec/tool-policy-abi`).
+- **Default agent is `executor`.** Examples that still say `coder` are stale.
+  Schedule nodes that omit `agent` still default to retired `worker`; name
+  `executor` in new `plan.json` files.
+
 ## Reference Projects and Similar Code (keyword checks)
 
 - [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)

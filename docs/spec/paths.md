@@ -25,9 +25,9 @@ One agent may have three different socket paths. They must not be conflated:
 
 | Role | Crate function | Example |
 | --- | --- | --- |
-| public client ABI | `agent_client_socket` | `/ctx/agent/coder.sock` |
-| private system runtime | `system_agent_runtime_socket` | `/run/cortexfs/agent/coder.sock` |
-| durable backing tree | `agent_backing_socket` | `/var/lib/cortexfs/storage/current/agent/coder.sock` |
+| public client ABI | `agent_client_socket` | `/ctx/agent/executor.sock` |
+| private system runtime | `system_agent_runtime_socket` | `/run/cortexfs/agent/executor.sock` |
+| durable backing tree | `agent_backing_socket` | `/var/lib/cortexfs/storage/current/agent/executor.sock` |
 
 The public client path is the channel adapter contract unless a deployment
 explicitly configures another runtime contract. A channel adapter must not
@@ -65,7 +65,7 @@ containing `index/`), not an individual session directory:
 ```rust
 use cortexfs_paths::{agent_sessions_path, ctx_root, session_channel_index_path, session_channel_path};
 
-let sessions = agent_sessions_path(&ctx_root(), "1000", "coder");
+let sessions = agent_sessions_path(&ctx_root(), "1000", "executor");
 let channels = session_channel_index_path(&sessions);
-let terminal = session_channel_path(&sessions, "terminal_coder_default");
+let terminal = session_channel_path(&sessions, "terminal_executor_default");
 ```

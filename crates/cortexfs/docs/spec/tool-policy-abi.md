@@ -239,6 +239,20 @@ dynamic-library ABI, but the current core does not load it; `load` and `pin`
 currently affect metadata context/cache and must not force terminal CLI
 commands to emit structured frames.
 
+Tool invoke customization uses `tool/<name>.d/invoke.strategy`:
+
+```text
+default   host selects CLI or SDK mode for the authorized call (default)
+cli       force terminal argv/stdin semantics (CTX_TOOL_MODE=cli)
+sdk       force structured Tool SDK JSONL semantics (CTX_TOOL_MODE=native)
+<name>    run tool/<name>.d/invoke.d/<name> when present
+```
+
+The host still evaluates policy, mounts, and `CTX_PATH` before any invoke.
+Custom invoke executables speak the same Tool SDK ABI as the default tool binary.
+The Tool SDK exposes `InvokeMode`, `invoke_mode_from_env()`, and related helpers
+for reading `CTX_TOOL_MODE`, `CTX_RUN_ID`, and `CTX_AUTHORIZED_OBJECT`.
+
 Executing a tool through `tsh` requires an agent terminal context so CortexFS
 can evaluate the agent identity, mounts, policy, and `CTX_PATH` together. A
 standalone human `tsh` process may discover tools and inspect metadata, but it
@@ -262,7 +276,8 @@ Because FUSE mounts generally cannot host a bound Unix socket directly, this
 entry aliases `/run/cortexfs/terminal/broker.sock`. The bounded broker protocol
 authenticates the peer and passes an accepted descriptor to `ctxterm`; raw PTY
 bytes begin only after the offer/prepared/accepted/commit transaction. Per-user
-terminal sockets and one-line mode prefixes are invalid.
+terminal sockets and one-line mode prefixes are invalid. See
+[terminal-broker.md](terminal-broker.md).
 
 Human clients should use:
 
@@ -374,7 +389,13 @@ Schema. It does not grant permission and is not a claim about result shape.
 Programmatic tool calling is **not enabled** in the current ABI. CortexFS must
 not advertise an OpenAI `programmatic_tool_calling` tool, set
 `allowed_callers`, or treat `schema` as an `output_schema`. The existing
-single-call host loop remains the only executable-agent tool protocol.
+single-call host loop remains the only executable-agent tool protocol. An
+OpenAI function call with an absent, null, or `{ "type": "direct" }` caller is
+an ordinary native call; `program` and unknown caller types fail closed as
+unsupported host-owned continuation. After a direct call executes, the next
+OpenAI Chat or Responses request replays one canonical assistant tool call and
+its ID-matched tool result. This protocol-native replay does not enable
+programmatic tool calling or bypass host authorization.
 
 Before enablement, a tool needs an explicit, default-deny programmatic
 declaration. The optional `tool/<name>.d/program` control is the tool author's
@@ -475,8 +496,8 @@ both constrain the final agent-visible tool set.
 MCP-originated tools use the same policy object class:
 
 ```text
-allow coder_t tool:github.search_issues execute
-allow coder_t tool:figma.get_file execute
+allow executor_t tool:github.search_issues execute
+allow executor_t tool:figma.get_file execute
 ```
 
 Tool lookup is strictly `CTX_PATH`:
@@ -584,7 +605,7 @@ Shared sessions are ordinary directories:
 ```text
 /ctx/shared/project-a/
   agent/
-    coder/
+    executor/
       session/
         design-review/
 ```
@@ -618,14 +639,14 @@ allow <subject_type> <object_class>:<object_name> <permission>
 Examples:
 
 ```text
-allow coder_t tool:fs.read execute
-allow coder_t tool:shell.exec execute
-allow coder_t model:openai/gpt-5.6 use
-allow coder_t shared:project-a read
-allow coder_t shared:project-a write
-allow coder_t network:default connect
-allow coder_t agent:reviewer create
-allow coder_t agent:reviewer start
+allow executor_t tool:fs.read execute
+allow executor_t tool:shell.exec execute
+allow executor_t model:openai/gpt-5.6 use
+allow executor_t shared:project-a read
+allow executor_t shared:project-a write
+allow executor_t network:default connect
+allow executor_t agent:reviewer create
+allow executor_t agent:reviewer start
 ```
 
 Rules:
@@ -658,23 +679,23 @@ network: connect
 Agent policy uses concrete names:
 
 ```text
-allow coder_t agent:reviewer create
-allow coder_t agent:reviewer start
+allow executor_t agent:reviewer create
+allow executor_t agent:reviewer start
 ```
 
 Do not add glob, inheritance, variables, or templates:
 
 ```text
-allow coder_t agent:* create
+allow executor_t agent:* create
 ```
 
 The only stable network object name is `default`:
 
 ```text
-allow coder_t network:default connect
+allow executor_t network:default connect
 ```
 
-Without `allow coder_t network:default connect`, there is no network access.
+Without `allow executor_t network:default connect`, there is no network access.
 
 Permission check order:
 
@@ -705,7 +726,7 @@ shared/<name>/agent/<agent>/session/<session>/events.jsonl
 Minimum event shape:
 
 ```json
-{"ts":"2026-06-22T12:00:00Z","type":"tool.call","agent":"coder","session":"default","object":"tool/fs.read","status":"ok"}
+{"ts":"2026-06-22T12:00:00Z","type":"tool.call","agent":"executor","session":"default","object":"tool/fs.read","status":"ok"}
 ```
 
 Policy decides whether sensitive content is logged. Default logging should
