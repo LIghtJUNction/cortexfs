@@ -1,17 +1,28 @@
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
-import {useCallback, useEffect, useState, type KeyboardEvent, type ReactElement} from 'react';
+import {useState, type KeyboardEvent, type ReactElement} from 'react';
 import '../css/mount.css';
 
-type RootId = 'status' | 'bin' | 'model' | 'agent' | 'tool' | 'home' | 'shared';
+type RootId =
+  | 'status'
+  | 'bin'
+  | 'model'
+  | 'agent'
+  | 'tool'
+  | 'channel'
+  | 'home'
+  | 'shared';
 
-type RootCopy = {
+type RootFact = {
   id: RootId;
-  role: string;
-  text: string;
   listing: string[];
   command: string;
+};
+
+type RootLocale = {
+  role: string;
+  text: string;
 };
 
 type Copy = {
@@ -26,14 +37,58 @@ type Copy = {
   prompt: string;
   install: string;
   spec: string;
-  roots: RootCopy[];
+  roots: Record<RootId, RootLocale>;
 };
+
+/** Stable root ABI facts shared across locales — keep aligned with docs/spec/root-abi.md. */
+const ROOTS: RootFact[] = [
+  {
+    id: 'status',
+    listing: ['ready', 'mount', 'policy', 'version'],
+    command: 'cat /ctx/status',
+  },
+  {
+    id: 'bin',
+    listing: ['ctx', 'tsh', 'ctxterm', 'ctxchat'],
+    command: 'ls /ctx/bin',
+  },
+  {
+    id: 'model',
+    listing: ['main', 'main.d/metadata', 'main.d/limit', 'main.d/cap'],
+    command: '/ctx/model/main',
+  },
+  {
+    id: 'agent',
+    listing: ['coder', 'coder.sock', 'reviewer', 'worker'],
+    command: 'ctx agent chat coder',
+  },
+  {
+    id: 'tool',
+    listing: ['fs.read', 'tsh', 'bash', 'agent.start'],
+    command: 'CTX_PATH=/ctx/tool tsh fs.read',
+  },
+  {
+    id: 'channel',
+    listing: ['slack', 'slack.d', 'discord', 'mqtt'],
+    command: 'ls /ctx/channel',
+  },
+  {
+    id: 'home',
+    listing: ['<uid>/model', '<uid>/agent/coder', '<uid>/tool', '<uid>/channel'],
+    command: 'ls /ctx/home/$UID/agent',
+  },
+  {
+    id: 'shared',
+    listing: ['cortexfs-docs/README.md', 'cortexfs-docs/man/', 'project-a/'],
+    command: 'ls /ctx/shared',
+  },
+];
 
 const zh: Copy = {
   description: '在浏览器里列出 /ctx：点选稳定根名称，查看路径、子项与可执行命令。',
   eyebrow: 'FUSE 挂载演示',
   title: '运行时，已挂载。',
-  lead: 'CortexFS 把 model、agent、tool 和持久 session 放在 /ctx。下面是一份可点选的目录：路径仍是路径，命令仍是命令。',
+  lead: 'CortexFS 把 model、agent、tool、channel 和持久 session 放在 /ctx。下面是一份可点选的目录：路径仍是路径，命令仍是命令。',
   listingLabel: '稳定根 ABI',
   inspectLabel: '对象检查器',
   childrenLabel: '目录',
@@ -41,64 +96,47 @@ const zh: Copy = {
   prompt: 'ls /ctx',
   install: '开始安装',
   spec: '阅读根 ABI',
-  roots: [
-    {
-      id: 'status',
+  roots: {
+    status: {
       role: '当前挂载状态',
       text: 'status 是挂载健康面：读它，确认 FUSE 会话是否仍在、策略是否已加载。',
-      listing: ['ready', 'mount', 'policy', 'version'],
-      command: 'cat /ctx/status',
     },
-    {
-      id: 'bin',
+    bin: {
       role: 'ABI 辅助命令',
       text: 'bin 放 CortexFS 自己的命令，而不是 host PATH。ctx、tsh、ctxterm 从这里被发现。',
-      listing: ['ctx', 'tsh', 'ctxterm', 'ctxchat'],
-      command: 'ls /ctx/bin',
     },
-    {
-      id: 'model',
+    model: {
       role: '纯推理文件',
       text: '读取得到元数据，执行完成一次推理。供应商连接留在统一模型 ABI 之后。',
-      listing: ['main', 'main.d/metadata', 'main.d/limit', 'main.d/cap'],
-      command: '/ctx/model/main',
     },
-    {
-      id: 'agent',
+    agent: {
       role: '受策略约束的编排者',
       text: 'Agent 以可执行对象和 socket 暴露。Linux 身份、mount、cwd、model 与 policy 共同限定权限。',
-      listing: ['coder', 'coder.sock', 'reviewer', 'worker'],
-      command: 'ctx agent chat coder',
     },
-    {
-      id: 'tool',
+    tool: {
       role: '可执行能力端点',
       text: 'tsh 只沿 CTX_PATH 发现 tool，不会回退到 host PATH。能力是文件，不是隐藏 RPC。',
-      listing: ['fs.read', 'tsh', 'bash', 'agent.start'],
-      command: 'CTX_PATH=/ctx/tool tsh fs.read',
     },
-    {
-      id: 'home',
+    channel: {
+      role: '通道驱动与工具',
+      text: 'channel/<name> 是一个通道实例及其工具目录；旁侧的 .d 目录保存 id、driver、能力与健康状态。',
+    },
+    home: {
       role: '按 Linux 用户隔离',
-      text: 'home/<uid> 保存用户级 model、agent、tool 与 session。原始 JSONL 在这里追加，prompt context 可重建。',
-      listing: ['<uid>/model', '<uid>/agent/coder', '<uid>/tool', '<uid>/agent/coder/session/default'],
-      command: 'ls /ctx/home/$UID/agent',
+      text: 'home/<uid> 保存用户级 model、agent、tool、channel 与 session。原始 JSONL 在这里追加，prompt context 可重建。',
     },
-    {
-      id: 'shared',
+    shared: {
       role: '共享工作区',
       text: 'shared 是用户与 agent 的共同空间：文档镜像、项目目录，以及需要越过 home 边界的文件。',
-      listing: ['cortexfs-docs/README.md', 'cortexfs-docs/man/', 'project-a/'],
-      command: 'ls /ctx/shared',
     },
-  ],
+  },
 };
 
 const en: Copy = {
   description: 'List /ctx in the browser: select a stable root, inspect its path, children, and a live command.',
   eyebrow: 'FUSE mount demo',
   title: 'Runtime, mounted.',
-  lead: 'CortexFS keeps models, agents, tools, and durable sessions under /ctx. This page is a clickable listing — paths stay paths, commands stay commands.',
+  lead: 'CortexFS keeps models, agents, tools, channels, and durable sessions under /ctx. This page is a clickable listing — paths stay paths, commands stay commands.',
   listingLabel: 'Stable root ABI',
   inspectLabel: 'Object inspector',
   childrenLabel: 'Listing',
@@ -106,57 +144,40 @@ const en: Copy = {
   prompt: 'ls /ctx',
   install: 'Install CortexFS',
   spec: 'Read the root ABI',
-  roots: [
-    {
-      id: 'status',
+  roots: {
+    status: {
       role: 'live mount health',
       text: 'status is the mount health surface: read it to confirm the FUSE session is up and policy is loaded.',
-      listing: ['ready', 'mount', 'policy', 'version'],
-      command: 'cat /ctx/status',
     },
-    {
-      id: 'bin',
+    bin: {
       role: 'ABI helper commands',
       text: 'bin holds CortexFS commands, not the host PATH. ctx, tsh, and ctxterm are discovered from here.',
-      listing: ['ctx', 'tsh', 'ctxterm', 'ctxchat'],
-      command: 'ls /ctx/bin',
     },
-    {
-      id: 'model',
+    model: {
       role: 'pure inference file',
       text: 'Read metadata; execute once for inference. Provider connections stay behind the unified model ABI.',
-      listing: ['main', 'main.d/metadata', 'main.d/limit', 'main.d/cap'],
-      command: '/ctx/model/main',
     },
-    {
-      id: 'agent',
+    agent: {
       role: 'policy-bound orchestrator',
       text: 'An agent is an executable object and a socket. Linux identity, mounts, cwd, model, and policy bound its authority.',
-      listing: ['coder', 'coder.sock', 'reviewer', 'worker'],
-      command: 'ctx agent chat coder',
     },
-    {
-      id: 'tool',
+    tool: {
       role: 'executable capability',
       text: 'tsh resolves tools only through CTX_PATH and never falls back to the host PATH. Capabilities are files, not hidden RPC.',
-      listing: ['fs.read', 'tsh', 'bash', 'agent.start'],
-      command: 'CTX_PATH=/ctx/tool tsh fs.read',
     },
-    {
-      id: 'home',
+    channel: {
+      role: 'channel drivers and tools',
+      text: 'channel/<name> is one channel instance and its tool directory; the sibling .d tree holds id, driver, capabilities, and health.',
+    },
+    home: {
       role: 'per-Linux-user isolation',
-      text: 'home/<uid> holds user models, agents, tools, and sessions. Raw JSONL appends here; prompt context rebuilds.',
-      listing: ['<uid>/model', '<uid>/agent/coder', '<uid>/tool', '<uid>/agent/coder/session/default'],
-      command: 'ls /ctx/home/$UID/agent',
+      text: 'home/<uid> holds user models, agents, tools, channels, and sessions. Raw JSONL appends here; prompt context rebuilds.',
     },
-    {
-      id: 'shared',
+    shared: {
       role: 'shared workspace',
       text: 'shared is the common floor for users and agents: documentation mirrors, project trees, and files that must cross home.',
-      listing: ['cortexfs-docs/README.md', 'cortexfs-docs/man/', 'project-a/'],
-      command: 'ls /ctx/shared',
     },
-  ],
+  },
 };
 
 function Listing({
@@ -168,52 +189,51 @@ function Listing({
   selected: RootId;
   onSelect: (id: RootId) => void;
 }): ReactElement {
-  const onKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      const ids = copy.roots.map((root) => root.id);
-      const index = ids.indexOf(selected);
-      if (event.key === 'ArrowDown' || event.key === 'j') {
-        event.preventDefault();
-        onSelect(ids[(index + 1) % ids.length]);
-      } else if (event.key === 'ArrowUp' || event.key === 'k') {
-        event.preventDefault();
-        onSelect(ids[(index - 1 + ids.length) % ids.length]);
-      } else if (event.key === 'Home') {
-        event.preventDefault();
-        onSelect(ids[0]);
-      } else if (event.key === 'End') {
-        event.preventDefault();
-        onSelect(ids[ids.length - 1]);
-      }
-    },
-    [copy.roots, onSelect, selected],
-  );
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const ids = ROOTS.map((root) => root.id);
+    const index = ids.indexOf(selected);
+    if (event.key === 'ArrowDown' || event.key === 'j') {
+      event.preventDefault();
+      onSelect(ids[(index + 1) % ids.length]);
+    } else if (event.key === 'ArrowUp' || event.key === 'k') {
+      event.preventDefault();
+      onSelect(ids[(index - 1 + ids.length) % ids.length]);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      onSelect(ids[0]);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      onSelect(ids[ids.length - 1]);
+    }
+  };
 
   return (
     <div
       aria-label={copy.listingLabel}
       className="cortexMountPageList"
       onKeyDown={onKeyDown}
-      role="group"
+      role="radiogroup"
       tabIndex={0}
     >
       <header>
         <span>{copy.listingLabel}</span>
         <code>$ {copy.prompt}</code>
       </header>
-      {copy.roots.map((root, index) => {
+      {ROOTS.map((root, index) => {
         const active = root.id === selected;
+        const locale = copy.roots[root.id];
         return (
           <button
-            aria-pressed={active}
+            aria-checked={active}
             className="cortexMountPageRow"
             key={root.id}
             onClick={() => onSelect(root.id)}
+            role="radio"
             type="button"
           >
             <b>{String(index + 1).padStart(2, '0')}</b>
             <code>{root.id}</code>
-            <span>{root.role}</span>
+            <span>{locale.role}</span>
           </button>
         );
       })}
@@ -221,15 +241,25 @@ function Listing({
   );
 }
 
-function Inspector({copy, root}: {copy: Copy; root: RootCopy}): ReactElement {
+function Inspector({
+  copy,
+  root,
+  locale,
+}: {
+  copy: Copy;
+  root: RootFact;
+  locale: RootLocale;
+}): ReactElement {
   return (
     <aside aria-label={copy.inspectLabel} className="cortexMountPageInspect">
       <header>
         <span>FUSE MOUNT</span>
         <strong>/ctx/{root.id}</strong>
-        <code>{root.role}</code>
+        <code>{locale.role}</code>
       </header>
-      <p aria-live="polite" key={root.id}>{root.text}</p>
+      <p aria-live="polite" key={root.id}>
+        {locale.text}
+      </p>
       <div>
         <span>{copy.childrenLabel}</span>
         <ul>
@@ -256,14 +286,8 @@ export default function MountPage(): ReactElement {
   const {i18n} = useDocusaurusContext();
   const copy = i18n.currentLocale === 'en' ? en : zh;
   const [selected, setSelected] = useState<RootId>('model');
-  const root = copy.roots.find((entry) => entry.id === selected) ?? copy.roots[2];
-
-  useEffect(() => {
-    document.documentElement.dataset.cortexMountPage = 'true';
-    return () => {
-      delete document.documentElement.dataset.cortexMountPage;
-    };
-  }, []);
+  const root = ROOTS.find((entry) => entry.id === selected) ?? ROOTS[0];
+  const locale = copy.roots[root.id];
 
   return (
     <Layout title={copy.eyebrow} description={copy.description}>
@@ -286,7 +310,7 @@ export default function MountPage(): ReactElement {
         <section className="cortexMountPageStage" aria-label={copy.inspectLabel}>
           <div className="container cortexMountPageGrid">
             <Listing copy={copy} onSelect={setSelected} selected={selected} />
-            <Inspector copy={copy} root={root} />
+            <Inspector copy={copy} locale={locale} root={root} />
           </div>
         </section>
       </main>

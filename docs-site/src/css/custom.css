@@ -24,6 +24,8 @@
   --cortex-mint: #2a8f73;
   --cortex-amber: #d28a28;
   --cortex-rose: #b65348;
+  --cortex-signal: #d8ff66;
+  --cortex-coal-deep: #111413;
   --cortex-motion: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -48,6 +50,8 @@
   --cortex-mint: #64c8a9;
   --cortex-amber: #efb75e;
   --cortex-rose: #e28175;
+  --cortex-signal: #d8ff66;
+  --cortex-coal-deep: #0a0c0b;
 }
 
 html {

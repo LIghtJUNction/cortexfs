@@ -34,7 +34,7 @@
 }
 
 .cortexMountPageHero h1 {
-  font-family: Georgia, "Times New Roman", ui-serif, serif;
+  font-family: var(--ifm-heading-font-family);
   font-size: clamp(48px, 5.4vw, 78px);
   font-weight: 600;
   letter-spacing: -0.015em;
@@ -153,19 +153,19 @@
   transform: translateX(2px);
 }
 
-.cortexMountPageRow[aria-pressed='true'] {
+.cortexMountPageRow[aria-checked='true'] {
   background: var(--cortex-ink);
   color: var(--cortex-paper-strong);
 }
 
-.cortexMountPageRow[aria-pressed='true'] b,
-.cortexMountPageRow[aria-pressed='true'] code,
-.cortexMountPageRow[aria-pressed='true'] span {
+.cortexMountPageRow[aria-checked='true'] b,
+.cortexMountPageRow[aria-checked='true'] code,
+.cortexMountPageRow[aria-checked='true'] span {
   color: var(--cortex-paper-strong);
 }
 
-.cortexMountPageRow[aria-pressed='true'] b {
-  color: #d8ff66;
+.cortexMountPageRow[aria-checked='true'] b {
+  color: var(--cortex-signal);
 }
 
 .cortexMountPageInspect {
@@ -189,7 +189,7 @@
 }
 
 .cortexMountPageInspect header strong {
-  font-family: Georgia, "Times New Roman", ui-serif, serif;
+  font-family: var(--ifm-heading-font-family);
   font-size: clamp(28px, 3vw, 38px);
   font-weight: 600;
   line-height: 1;
@@ -198,7 +198,7 @@
 .cortexMountPageInspect header code {
   background: transparent;
   border: 0;
-  color: #d8ff66;
+  color: var(--cortex-signal);
   font-size: 12px;
   font-weight: 900;
   padding: 0;
@@ -239,7 +239,7 @@
 }
 
 .cortexMountPageInspect pre {
-  background: #111413;
+  background: var(--cortex-coal-deep);
   border: 1px solid rgba(255, 253, 250, 0.12);
   border-radius: 8px;
   margin: 10px 0 0;
