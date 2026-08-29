@@ -35,7 +35,7 @@ cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
     -p cortexfs-channel-tools -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
     -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
     -p cortexfs-channel-voice -p cortexfs-channel-slack \
-    -p cortexfs-channel-mqtt
+    -p cortexfs-channel-mqtt -p cortexfs-futureagi
 
 %install
 install -d -m 0755 \
@@ -54,7 +54,8 @@ for binary in ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
     cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp \
-    cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager; do
+    cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager \
+    cortexfs-futureagi; do
     install -m 0755 "target/release/$binary" "%{buildroot}%{_bindir}/$binary"
 done
 for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
@@ -80,6 +81,7 @@ done
 install -m 0755 scripts/update-linux.sh %{buildroot}%{_prefix}/lib/cortexfs/update-linux
 install -m 0644 README.md %{buildroot}%{_datadir}/doc/cortexfs/README.md
 install -m 0644 docs/channels.md %{buildroot}%{_datadir}/doc/cortexfs/docs/channels.md
+install -m 0644 docs/futureagi.md %{buildroot}%{_datadir}/doc/cortexfs/docs/futureagi.md
 install -m 0644 LICENSE %{buildroot}%{_datadir}/licenses/cortexfs/LICENSE
 install -m 0644 docs/spec/*.md %{buildroot}%{_datadir}/doc/cortexfs/docs/spec/
 
@@ -117,6 +119,7 @@ fi
 %license %{_datadir}/licenses/cortexfs/LICENSE
 %doc %{_datadir}/doc/cortexfs/README.md
 %doc %{_datadir}/doc/cortexfs/docs/channels.md
+%doc %{_datadir}/doc/cortexfs/docs/futureagi.md
 %doc %{_datadir}/doc/cortexfs/docs/spec
 %{_bindir}/ctx
 %{_bindir}/ctxterm
@@ -140,6 +143,7 @@ fi
 %{_bindir}/cortexfs-agent-architect
 %{_bindir}/cortexfs-agent-executor
 %{_bindir}/cortexfs-agent-product-manager
+%{_bindir}/cortexfs-futureagi
 %dir %{_prefix}/lib/cortexfs
 %{_prefix}/lib/cortexfs/update-linux
 %{_prefix}/lib/systemd/system/cortexfs.service

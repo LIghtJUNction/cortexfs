@@ -60,7 +60,7 @@ build() {
         -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
         -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
         -p cortexfs-channel-voice -p cortexfs-channel-slack \
-        -p cortexfs-channel-mqtt
+        -p cortexfs-channel-mqtt -p cortexfs-futureagi
 }
 
 install_payload() {
@@ -79,7 +79,8 @@ install_payload() {
         cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp \
-        cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager; do
+        cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager \
+        cortexfs-futureagi; do
         install -m 0755 "$release/$binary" "$root/usr/bin/$binary"
     done
     for unit in cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket \
@@ -105,6 +106,8 @@ install_payload() {
         "$root/usr/share/doc/cortexfs/README.md"
     install -m 0644 "$srcdir/cortexfs-$pkgver/docs/channels.md" \
         "$root/usr/share/doc/cortexfs/docs/channels.md"
+    install -m 0644 "$srcdir/cortexfs-$pkgver/docs/futureagi.md" \
+        "$root/usr/share/doc/cortexfs/docs/futureagi.md"
     install -m 0644 "$srcdir/cortexfs-$pkgver/LICENSE" \
         "$root/usr/share/licenses/cortexfs/LICENSE"
     install -m 0644 "$srcdir/cortexfs-$pkgver"/docs/spec/*.md \

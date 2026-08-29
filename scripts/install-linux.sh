@@ -434,7 +434,7 @@ build_cortexfs() {
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
             -p cortexfs-channel-voice -p cortexfs-channel-slack \
-            -p cortexfs-channel-mqtt
+            -p cortexfs-channel-mqtt -p cortexfs-futureagi
     )
 }
 
@@ -442,7 +442,8 @@ expected_binaries() {
     printf '%s\n' ctx ctxterm ctxchat tsh cortexfs-mount cortexfs-object-runner \
         cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
-        cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
+        cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp \
+        cortexfs-futureagi
 }
 
 expected_units() {
@@ -529,8 +530,8 @@ ensure_mountpoint() {
 deploy() {
     local source=$1 snapshots=$2 binary unit stage
     card "$([[ $LANGUAGE == zh ]] && printf '05 · 原子部署' || printf '05 · Atomic deployment')"
-    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}" \
-        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp}"
+    say "Binaries: /usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp,cortexfs-futureagi}" \
+        "二进制：/usr/bin/{ctx,ctxterm,ctxchat,tsh,cortexfs-mount,cortexfs-object-runner,cortexfs-terminal-broker,cortexfs-agent-runtime,cortexfs-channel,cortexfs-channel-tool,cortexfs-channel-slack,cortexfs-channel-mqtt,ctxmcp,cortexfs-futureagi}"
     say "Units: /usr/lib/systemd/system/cortexfs*.{service,socket}" \
         "单元：/usr/lib/systemd/system/cortexfs*.{service,socket}"
     say "Preserved: /var/lib/cortexfs/{storage,secrets}, /etc/cortexfs/providers.d, existing *.env, and /ctx user state." \

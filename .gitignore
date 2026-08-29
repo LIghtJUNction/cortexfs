@@ -30,6 +30,9 @@
 .codegraph
 /.tokensave/
 /.omo/
+# Machine-local coding-agent state
+/.memsearch/
+/.pi/remote-pi/config.json
 /.codensity/
 SWAP.md
 scripts/__pycache__/

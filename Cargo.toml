@@ -20,6 +20,7 @@ members = [
     "crates/cortexfs-tool-sdk",
     "crates/cortexfs-tools",
     "crates/cortexfs-channel-tools",
+    "crates/cortexfs-futureagi",
     "tests/sdk-extension-fixture",
 ]
 resolver = "3"

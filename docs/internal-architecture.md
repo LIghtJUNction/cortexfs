@@ -127,7 +127,7 @@ Agent core
 Projection / application
   cortexfs-fuse                  fuser projection only
   cortexfs (facade)              re-exports + features; bins depend here
-  bins + channel-*               UX and platform adapters (pi-coding-agent / mom)
+  bins + channel-* + eval-*      UX, platform, and explicit evaluation adapters
 ```
 
 Dependency direction is strictly upward in this diagram: application may
@@ -153,7 +153,7 @@ cortexfs-fuse             fuser projection only
         ▲
 cortexfs (facade)         re-exports + optional features; bins depend on facade
         ▲
-bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel adapters
+bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel/evaluation adapters
 sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 ```
 
@@ -170,6 +170,11 @@ sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
 | `cortexfs-fuse` | `abi`, `support`, `fuser` | object executor, provider HTTP |
 | SDKs | `runtime-client` (+ minimal abi types) | full `cortexfs` monolith when avoidable |
 | `channel-*` | channel-sdk, runtime-client | fuse, object executor, provider registry |
+| evaluation adapters | facade/trajectory types, HTTP client | FUSE internals, runtime lifecycle, background upload |
+
+`cortexfs-futureagi` follows the evaluation-adapter row: it consumes an
+explicit ATIF projection, performs a one-shot export or request, and never
+creates a filesystem root, watcher, provider special case, or durable secret.
 
 **MCP stays an adapter binary** (`cortexfs-mcp` / `ctxmcp`). It may call
 support helpers; it must not force a root ABI class.

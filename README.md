@@ -82,6 +82,13 @@ embed/file/thread/component operations, and redacted errors.
 See [channels.md](docs/channels.md) and the
 [Channel ABI](docs/spec/channel-abi.md).
 
+## Evaluation
+
+The optional `cortexfs-futureagi` adapter turns a validated CortexFS ATIF
+trajectory into Future AGI evaluation inputs or submits it to a compatible
+Future AGI endpoint. It is explicit and one-shot: no background uploader and
+no additional filesystem ABI. See [Future AGI evaluation](docs/futureagi.md).
+
 ## Eve-compatible direction and Pi-level elegance
 
 CortexFS targets functional compatibility with platforms such as

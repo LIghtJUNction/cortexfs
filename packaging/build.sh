@@ -14,6 +14,7 @@ readonly BINARIES=(
     cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat
     cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp
     cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager
+    cortexfs-futureagi
 )
 readonly UNITS=(
     cortexfs.service cortexfs-agent@.service cortexfs-agent@.socket
@@ -91,7 +92,7 @@ build_release() {
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
             -p cortexfs-channel-voice -p cortexfs-channel-slack \
-            -p cortexfs-channel-mqtt -p cortexfs-agents --bins
+            -p cortexfs-channel-mqtt -p cortexfs-agents -p cortexfs-futureagi --bins
     )
 }
 
@@ -153,6 +154,7 @@ copy_payload() {
     install -m 0755 "$ROOT/scripts/update-linux.sh" "$destination/usr/lib/cortexfs/update-linux"
     install -m 0644 "$ROOT/README.md" "$destination/usr/share/doc/cortexfs/README.md"
     install -m 0644 "$ROOT/docs/channels.md" "$destination/usr/share/doc/cortexfs/docs/channels.md"
+    install -m 0644 "$ROOT/docs/futureagi.md" "$destination/usr/share/doc/cortexfs/docs/futureagi.md"
     install -m 0644 "$ROOT/LICENSE" "$destination/usr/share/licenses/cortexfs/LICENSE"
     install -m 0644 "$ROOT"/docs/spec/*.md \
         "$destination/usr/share/doc/cortexfs/docs/spec/"

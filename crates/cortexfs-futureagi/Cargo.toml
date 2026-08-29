@@ -1,0 +1,24 @@
+[package]
+name = "cortexfs-futureagi"
+description = "Future AGI evaluation adapter for CortexFS trajectories."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "cortexfs-futureagi"
+path = "src/main.rs"
+
+[dependencies]
+cortexfs = { version = "0.1.20", path = "../cortexfs" }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
