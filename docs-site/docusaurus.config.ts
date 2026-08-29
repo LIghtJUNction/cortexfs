@@ -92,6 +92,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/mount',
+          label: 'Mount',
+          position: 'left',
+        },
+        {
           type: 'localeDropdown',
           position: 'right',
         },
@@ -114,6 +119,7 @@ const config: Config = {
             {label: 'Design', to: '/docs/DESIGN'},
             {label: 'Root ABI', to: '/docs/spec/root-abi'},
             {label: 'Object ABI', to: '/docs/spec/object-abi'},
+            {label: 'Mount', to: '/mount'},
           ],
         },
         {

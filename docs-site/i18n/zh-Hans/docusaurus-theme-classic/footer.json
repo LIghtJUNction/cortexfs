@@ -35,6 +35,10 @@
     "message": "对象 ABI",
     "description": "The label of footer link with label=Object ABI linking to /docs/spec/object-abi"
   },
+  "link.item.label.Mount": {
+    "message": "挂载",
+    "description": "The label of footer link with label=Mount linking to /mount"
+  },
   "link.item.label.ctx coreutils": {
     "message": "ctx coreutils",
     "description": "The label of footer link with label=ctx coreutils linking to /docs/CTX"

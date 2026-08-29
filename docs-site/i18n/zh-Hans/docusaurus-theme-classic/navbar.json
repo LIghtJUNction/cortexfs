@@ -15,6 +15,10 @@
     "message": "agent.sh",
     "description": "Navbar item with label agent.sh"
   },
+  "item.label.Mount": {
+    "message": "挂载",
+    "description": "Navbar item with label Mount"
+  },
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"
