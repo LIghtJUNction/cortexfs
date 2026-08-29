@@ -153,18 +153,18 @@
   transform: translateX(2px);
 }
 
-.cortexMountPageRow[aria-selected='true'] {
+.cortexMountPageRow[aria-pressed='true'] {
   background: var(--cortex-ink);
   color: var(--cortex-paper-strong);
 }
 
-.cortexMountPageRow[aria-selected='true'] b,
-.cortexMountPageRow[aria-selected='true'] code,
-.cortexMountPageRow[aria-selected='true'] span {
+.cortexMountPageRow[aria-pressed='true'] b,
+.cortexMountPageRow[aria-pressed='true'] code,
+.cortexMountPageRow[aria-pressed='true'] span {
   color: var(--cortex-paper-strong);
 }
 
-.cortexMountPageRow[aria-selected='true'] b {
+.cortexMountPageRow[aria-pressed='true'] b {
   color: #d8ff66;
 }
 

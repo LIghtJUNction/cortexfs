@@ -194,7 +194,7 @@ function Listing({
       aria-label={copy.listingLabel}
       className="cortexMountPageList"
       onKeyDown={onKeyDown}
-      role="listbox"
+      role="group"
       tabIndex={0}
     >
       <header>
@@ -205,11 +205,10 @@ function Listing({
         const active = root.id === selected;
         return (
           <button
-            aria-selected={active}
+            aria-pressed={active}
             className="cortexMountPageRow"
             key={root.id}
             onClick={() => onSelect(root.id)}
-            role="option"
             type="button"
           >
             <b>{String(index + 1).padStart(2, '0')}</b>
@@ -230,7 +229,7 @@ function Inspector({copy, root}: {copy: Copy; root: RootCopy}): ReactElement {
         <strong>/ctx/{root.id}</strong>
         <code>{root.role}</code>
       </header>
-      <p key={root.id}>{root.text}</p>
+      <p aria-live="polite" key={root.id}>{root.text}</p>
       <div>
         <span>{copy.childrenLabel}</span>
         <ul>
