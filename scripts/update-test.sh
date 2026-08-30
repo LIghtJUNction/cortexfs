@@ -72,12 +72,14 @@ printf 'schema=1\nphase=prepared\n' >"$state"
 assert_eq prepared "$(update_state_field phase "$state")" 'transaction state uses fixed key lookup'
 
 active_units_include_primary() (
-    systemctl() {
-        printf '%s\n' \
-            'cortexfs.service loaded active running CortexFS' \
-            'cortexfs-agent.service loaded active running CortexFS agent'
-    }
-    update_active_units | grep -Fxq cortexfs.service
+    mock_bin=$TEST_TEMP/active-units-bin
+    mkdir -p "$mock_bin"
+    printf '%s\n' \
+        '#!/bin/sh' \
+        "printf '%s\\n' 'cortexfs.service loaded active running CortexFS' 'cortexfs-agent.service loaded active running CortexFS agent'" \
+        >"$mock_bin/systemctl"
+    chmod +x "$mock_bin/systemctl"
+    PATH="$mock_bin:$PATH" update_active_units | grep -Fxq cortexfs.service
 )
 assert_true 'active unit discovery includes the primary service' active_units_include_primary
 
