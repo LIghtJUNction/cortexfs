@@ -24,12 +24,12 @@ The same agent can have several paths. They are intentionally different:
 
 | Role | API | Example |
 | --- | --- | --- |
-| Public client ABI | agent_client_socket | /ctx/agent/coder.sock |
-| Private systemd listener | system_agent_runtime_socket | /run/cortexfs/agent/coder.sock |
-| Durable backing tree | agent_backing_socket | /var/lib/cortexfs/storage/current/agent/coder.sock |
-| User terminal ABI | session_terminal_path | /ctx/home/1000/agent/coder/session/default/terminal/main.sock |
-| Attach channel index | session_channel_index_path | /ctx/home/1000/agent/coder/session/index/channel |
-| Attach channel file | session_channel_path | /ctx/home/1000/agent/coder/session/index/channel/terminal_coder_default |
+| Public client ABI | agent_client_socket | /ctx/agent/executor.sock |
+| Private systemd listener | system_agent_runtime_socket | /run/cortexfs/agent/executor.sock |
+| Durable backing tree | agent_backing_socket | /var/lib/cortexfs/storage/current/agent/executor.sock |
+| User terminal ABI | session_terminal_path | /ctx/home/1000/agent/executor/session/default/terminal/main.sock |
+| Attach channel index | session_channel_index_path | /ctx/home/1000/agent/executor/session/index/channel |
+| Attach channel file | session_channel_path | /ctx/home/1000/agent/executor/session/index/channel/terminal_executor_default |
 | Terminal broker endpoint | BROKER_SOCKET | /run/cortexfs/terminal/broker.sock |
 
 An IM adapter normally reads its configured agent_socket from
@@ -61,12 +61,12 @@ use cortexfs_paths::{
 };
 
 let root = ctx_root();
-validate_component("coder")?;
-let socket = agent_socket_path(&root, "coder");
-let status = agent_control_file_path(&root, "coder", "status");
+validate_component("executor")?;
+let socket = agent_socket_path(&root, "executor");
+let status = agent_control_file_path(&root, "executor", "status");
 let model = model_path(&root, "openai", "gpt-5.6");
 let tool = tool_path(&root, "fs.read");
-let messages = session_file_path(&root, "1000", "coder", "default", "messages.jsonl");
+let messages = session_file_path(&root, "1000", "executor", "default", "messages.jsonl");
 ~~~
 
 Dynamic names are deliberately accepted as &str so the crate stays

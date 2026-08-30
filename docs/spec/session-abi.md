@@ -150,11 +150,11 @@ Context runtime state stays under the session directory. Do not add
 Users can inspect history with ordinary file operations:
 
 ```bash
-ctx agent history coder
-ctx agent output coder
-less /ctx/home/$(id -u)/agent/coder/session/default/messages.jsonl
-cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
-cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+ctx agent history executor
+ctx agent output executor
+less /ctx/home/$(id -u)/agent/executor/session/default/messages.jsonl
+cat /ctx/home/$(id -u)/agent/executor/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/executor/session/default/SKILLS.md
 ```
 
 If `--session` is omitted, client commands resolve `session/index/current`
@@ -246,11 +246,11 @@ session. The durable session index remains the source for the agent's current
 selection and fallback tooling:
 
 ```text
-/ctx/home/1000/agent/coder/session/index/list
-/ctx/home/1000/agent/coder/session/index/current
-/ctx/home/1000/agent/coder/session/index/by-cwd/<hash>
-/ctx/home/1000/agent/coder/session/index/by-hash/<hash>
-/ctx/home/1000/agent/coder/session/index/by-uuid/<uuid>
+/ctx/home/1000/agent/executor/session/index/list
+/ctx/home/1000/agent/executor/session/index/current
+/ctx/home/1000/agent/executor/session/index/by-cwd/<hash>
+/ctx/home/1000/agent/executor/session/index/by-hash/<hash>
+/ctx/home/1000/agent/executor/session/index/by-uuid/<uuid>
 ```
 
 Shared resume reads the matching index under `shared`. Temp sessions do not

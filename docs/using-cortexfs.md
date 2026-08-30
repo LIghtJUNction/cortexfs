@@ -57,6 +57,16 @@ The reference tree provides `architect`, `executor`, and `product-manager`.
 `product-manager` use `agent:architect` as their parent. `executor` is the
 writable implementation and verification role; `product-manager` is read-only
 and turns user needs into measurable acceptance criteria.
+`agent/main` and `agent/main.sock` alias `executor`. Retired `base`, `coder`,
+`reviewer`, and `worker` names are leftover objects, not the managed tree.
+
+Those three roles are hosted agents: bootstrap writes an object-runner wrapper
+plus `system.md`. The packaged Agent SDK binaries
+`cortexfs-agent-architect`, `cortexfs-agent-executor`, and
+`cortexfs-agent-product-manager` are optional executables that print a
+role/mission/handoff envelope without calling a model. They are examples and
+drop-in `run` files, not the default `/ctx/agent/<name>` wrappers. See
+[One-file Extensions](extensions.md) and [Internal Architecture](internal-architecture.md).
 
 Bootstrap and inspect the reference source with:
 
@@ -75,8 +85,15 @@ next `--check` clean.
 The default `executor.d/system.md` treats `executor` as the implementation and
 verification agent:
 independent implementation work should be a delegated `react` node in
-`context/plan.json`, delegated nodes that omit `agent` use `worker`, and
-delegated nodes that omit `session` use the current parent session name.
+`context/plan.json`. Name `agent` explicitly (`"agent": "executor"`) on those
+nodes. A delegated node that omits `agent` still defaults to `worker`
+(`DEFAULT_DELEGATED_AGENT` in `agent/schedule`); a node that omits `session`
+uses the current parent session name.
+
+`worker` is retired from the managed reference tree. Fresh bootstrap does not
+create `/ctx/agent/worker`. An implicit `worker` handoff therefore fails unless
+that leftover object still exists and the parent policy allows
+`agent:worker create`. Prefer naming `executor` in new plans.
 Advance one schedule step with:
 
 ```bash

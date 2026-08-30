@@ -277,6 +277,23 @@ tests/mounts/cortexfs
 
 该目录只作为本地测试挂载点，不得放置源码、fixture 或持久化数据。
 
+## 常见陷阱
+
+- **串行 Cargo。** 使用 `scripts/serialize-cargo.sh` 或 `scripts/test.sh`。不要在已有
+  `cargo`、Clippy 或测试命令运行时再启动第二个。
+- **源码预算。** 新增生产文件上限 120 行；`scripts/source-budget.sh` 是门控。不要把
+  快照数字抄进文档。
+- **模块名。** 不要使用 `mod.rs`。`crates/cortexfs/src` 下新文件用单 token stem，
+  不要 `-` 或 `_`。用 `cargo add` 加依赖，不要手改清单。见
+  [naming-guide.md](naming-guide.md)。
+- **分层边。** `fuse` 不得调用 `object::executor`；`support` 不得导入 `agent` 或
+  `runtime`。优先复用 `support::plain`、`support::path`、`support::process`、
+  `support::control`、`support::layout`、`support::jsonl`。
+- **文档副本。** `docs/` 是 canonical。`crates/cortexfs/docs/` 是 `ctx man` 的
+  `include_str!` 手册包；编辑已烘焙主题时必须同步这些文件。
+- **默认代理是 `executor`。** 仍写 `coder` 的示例已过时。省略 `agent` 的 schedule
+  节点仍默认退役的 `worker`；新的 `plan.json` 请显式写 `executor`。
+
 ## 参考项目与相近实现（关键词检索）
 
 - [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)

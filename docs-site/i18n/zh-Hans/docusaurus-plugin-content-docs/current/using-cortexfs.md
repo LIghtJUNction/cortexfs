@@ -44,6 +44,9 @@ echo "summarize this file" | /ctx/model/main
 参考树定义了 `architect`、`executor`、`product-manager`：
 
 `architect` 是根规划与协调代理；`executor` 和 `product-manager` 以 `agent:architect` 为父项。`executor` 负责可写的实现与验证，`product-manager` 负责澄清用户价值和验收标准且默认只读。
+`agent/main` 与 `agent/main.sock` 别名指向 `executor`。已退役的 `base`、`coder`、`reviewer`、`worker` 只是残留对象，不是受管树。
+
+这三个角色是托管代理：bootstrap 写入 object-runner 包装脚本加上 `system.md`。打包的 Agent SDK 二进制 `cortexfs-agent-architect`、`cortexfs-agent-executor`、`cortexfs-agent-product-manager` 是可选可执行文件，会打印 role/mission/handoff 封装且不调用模型。它们是示例和可替换的 `run` 文件，不是默认的 `/ctx/agent/<name>` 包装脚本。见 [One-file Extensions](extensions.md) 与 [内部架构](internal-architecture.md)。
 
 用以下命令启动并检查参考源：
 
@@ -55,7 +58,9 @@ ctx bootstrap --dry-run
 
 `ctx bootstrap` 仅在以下任一项发生变化时才写入 `bin/cortexfs.bootstrap.json`：架构、树版本、受管代理列表或需要刷新的迁移条目。已淘汰的 `base`、`coder`、`reviewer` 与 `worker` 对象仍会被报告并保留，供人工复核，因为旧安装没有所有权清单和完整控制树完整性证明。一次成功的 `bootstrap` 会让下一次 `--check` 结果干净。
 
-默认的 `executor.d/system.md` 会把 `executor` 视为父级整合方：独立实现工作应表现为 `context/plan.json` 中的委托 `react` 节点；若委托节点省略 `agent`，则默认 `worker`，若省略 `session`，则使用当前父会话名。用如下命令推进计划：
+默认的 `executor.d/system.md` 会把 `executor` 视为实现与验证代理：独立实现工作应表现为 `context/plan.json` 中的委托 `react` 节点。这些节点应显式写出 `agent`（`"agent": "executor"`）。委托节点若省略 `agent`，仍会默认成 `worker`（`agent/schedule` 中的 `DEFAULT_DELEGATED_AGENT`）；若省略 `session`，则使用当前父会话名。
+
+`worker` 已从受管参考树退役。全新 bootstrap 不会创建 `/ctx/agent/worker`。因此隐式 `worker` 交接会失败，除非该残留对象仍在，且父策略允许 `agent:worker create`。新计划请显式命名 `executor`。用如下命令推进计划：
 
 ```bash
 ctx schedule status home/1000/agent/executor/session/default/context/plan.json --done plan

@@ -38,9 +38,9 @@ agent policy decides whether execution is allowed
 
 ```text
 /ctx/agent/
-  coder
-  coder.sock
-  coder.d/
+  executor
+  executor.sock
+  executor.d/
     owner
     uid
     gid
@@ -228,7 +228,7 @@ An agent does not use the user's home directly:
 ```text
 /ctx/home/1000/
   agent/
-    coder/
+    executor/
       root/
       session/
       data/
@@ -241,8 +241,8 @@ An agent does not use the user's home directly:
 Recommended config:
 
 ```text
-/ctx/agent/coder.d/root = /ctx/home/1000/agent/coder/root
-/ctx/agent/coder.d/cwd  = /workspace
+/ctx/agent/executor.d/root = /ctx/home/1000/agent/executor/root
+/ctx/agent/executor.d/cwd  = /workspace
 ```
 
 Runtime environment:
@@ -252,8 +252,8 @@ CTX_ROOT=/ctx
 CTX_HOME=/ctx/home/1000
 HOME=/home/agent
 PATH=/usr/bin:/bin
-USER=coder
-LOGNAME=coder
+USER=executor
+LOGNAME=executor
 SHELL=/usr/bin/bash
 TERM=xterm-256color
 LANG=C.UTF-8
@@ -310,7 +310,7 @@ Example:
 
 ```text
 /ctx	/ctx	ro	rbind,nosuid,nodev
-/ctx/home/1000/agent/coder	/home/agent	rw	rbind,nosuid,nodev
+/ctx/home/1000/agent/executor	/home/agent	rw	rbind,nosuid,nodev
 /home/me/project	/work	rw	rbind,nosuid,nodev
 /ctx/shared/project-a	/shared/project-a	rw	rbind,nosuid,nodev
 /tmp	/tmp	rw	rbind,nosuid,nodev
@@ -372,13 +372,13 @@ The child appears as ordinary agent ABI:
 
 ```text
 agent:architect
-agent:coder
+agent:executor
 ```
 
 or, when needed:
 
 ```text
-agent:coder session:default run:01H...
+agent:executor session:default run:01H...
 ```
 
 Do not turn lineage into a separate tree.
@@ -508,7 +508,7 @@ lifecycle rules.
 Names should stay short:
 
 ```text
-coder
+executor
 reviewer
 planner
 runner

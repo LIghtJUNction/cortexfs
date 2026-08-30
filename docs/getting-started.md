@@ -58,6 +58,11 @@ only previously active CortexFS units, and restores the exact prior package if
 health verification fails. After the first successful ref update, plain
 `ctx update` reuses the recorded tracking ref.
 
+Run `ctx update` as a normal user with `sudo`, a controlling terminal, and
+`flock`. Do not run it as root. The first plan requires `--ref` or `--source`;
+`--yes` applies that pinned commit. Constraints and packaged binaries are in
+the [Linux packages guide](packaging.md).
+
 ## Start A Session
 
 The short interactive commands use the current folder as the workspace:
@@ -154,6 +159,35 @@ ctx agent start executor --session docs \
 `tsh` is not a host shell. It only looks up CortexFS tools through `CTX_PATH`,
 such as `/ctx/tool` and `/ctx/home/<uid>/tool`. `bash`, `tmux`, and `zellij`
 must also be visible as tools before they can run.
+
+## Troubleshoot The Install
+
+`ctx doctor` prints one status line per ABI check and exits non-zero when any
+check fails. Typical lines:
+
+```text
+ok root /ctx
+ok status
+ok agent
+ok agent/executor
+ok bootstrap tree_version=9 migrations=retired-agents,rolling-tree,agent-update,current-models,agent-permissions,initial-agents
+stale agent/coder (retired reference agent; run ctx bootstrap --check)
+missing bootstrap state (run ctx bootstrap)
+```
+
+| Symptom | What to do |
+| --- | --- |
+| `missing root /ctx` or `ctx status` fails | Start the mount: `sudo systemctl start cortexfs.service`. Native packages enable the unit but do not start it on first install. |
+| FUSE / `fusermount3` / `/dev/fuse` errors | Load the kernel module (`sudo modprobe fuse`) and install `fuse3` plus `pkg-config fuse3`. Containers need the FUSE device. |
+| bubblewrap too old | The installer and updater require `/usr/bin/bwrap` 0.10+. Upgrade through the distribution; CortexFS does not overwrite host `bwrap`. |
+| `stale` / `stale-user` `agent/coder` or `agent/worker` | Those names are retired leftovers. The managed tree is `architect`, `executor`, and `product-manager`. `agent/main` aliases `executor`. Run `ctx bootstrap --check`, then `ctx bootstrap` if you want the current tree. Do not set `agent/coder.d/model`. |
+| `ctx agent start` cannot talk to user systemd | The terminal path uses `systemd-run --user`. Log into a user session that has a user bus; lingering is a host policy, not a CortexFS ABI. |
+| `ctx update` refuses to run | Use a non-root login with `sudo`, `/dev/tty`, and `flock`. The installed helper is `/usr/lib/cortexfs/update-linux` and must stay root-owned. |
+| Interactive agent hits memory/CPU/task ceilings | Terminals use `MemoryMax=1G` / `CPUQuota=200%` / `TasksMax=256`. Socket-activated runtimes use `512M` / `100%` / `128`. See [Agent Runtime](spec/agent-runtime.md). |
+| Default chat talks to the wrong agent | The default is `executor`. Override with `CTX_DEFAULT_AGENT`. |
+
+`ctx doctor` checks ABI shape, not provider credentials. An `unconfigured`
+model still needs `ctx provider preset` and `ctx auth login`.
 
 ## Next Step
 

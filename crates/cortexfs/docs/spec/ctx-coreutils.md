@@ -84,6 +84,12 @@ ctx validate-name executor
 ctx doctor
 ```
 
+`ctx doctor` prints one status line per ABI check (`ok`, `missing`, `invalid`,
+`stale`, `stale-user`, `unexpected`) and exits non-zero when any check fails.
+It reports retired leftover agents such as `coder` and `worker` without deleting
+them. It does not check provider credentials. See
+[getting-started.md](../getting-started.md#troubleshoot-the-install).
+
 Do not add:
 
 ```text
@@ -109,11 +115,12 @@ ctx bootstrap --check [SOURCE]     report tree_version, missing agents, retired 
 ctx bootstrap --dry-run [SOURCE]   show ordered migrations and reconcile/state actions (no writes)
 ```
 
-Default bootstrap materializes `architect` / `executor` / `reviewer` / `worker`, writes
+Default bootstrap materializes `architect` / `executor` / `product-manager`, writes
 `bin/cortexfs.bootstrap.json` (`schema`, `tree_version`, `managed_agents`,
-`applied_migrations`) only when state differs. Retired `base` / `executor`
-objects are reported and retained for manual review because legacy
-trees have no manifest proving ownership and full control-tree integrity.
+`applied_migrations`) only when state differs. Retired `base` / `coder` /
+`reviewer` / `worker` objects are reported and retained for manual review
+because legacy trees have no manifest proving ownership and full control-tree
+integrity.
 Session history under `home/` is never deleted by bootstrap.
 
 Top-level agent session shortcuts follow the same current-session default as

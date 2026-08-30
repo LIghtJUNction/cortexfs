@@ -69,9 +69,12 @@ tree.
 
 ## Stable Reference Tree
 
-This is the normative stable shape. Concrete object names such as `debug/echo`,
-`openai/gpt-5.6`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
-`project-a` are examples of valid entries.
+This is the normative stable shape. The managed reference agents are
+`architect`, `executor`, and `product-manager`; `agent/main` aliases
+`executor`. Concrete names such as `debug/echo`, `openai/gpt-5.6`, `base`,
+`coder`, `reviewer`, `worker`, `1000`, and `project-a` are examples of valid
+entries. Retired leftover objects may still appear until an operator removes
+them.
 
 ```text
 /ctx/
@@ -121,8 +124,8 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
         log
 
   agent/
-    main -> /ctx/agent/coder
-    main.sock -> /ctx/agent/coder.sock
+    main -> /ctx/agent/executor
+    main.sock -> /ctx/agent/executor.sock
     architect
     base.sock
     architect.d/
@@ -329,7 +332,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
               by-hash/
               by-uuid/
 
-        coder/
+        executor/
           root/
           session/
             index/
@@ -358,7 +361,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
           log
 
       agent/
-        coder/
+        executor/
           session/
             index/
               by-cwd/
