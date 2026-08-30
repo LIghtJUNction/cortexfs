@@ -245,7 +245,7 @@ update_build_package() {
 update_active_units() {
     systemctl list-units --all --state=active --type=service --type=socket \
         'cortexfs*' --no-legend --plain 2>/dev/null |
-        awk '$1 ~ /^cortexfs[-A-Za-z0-9@.]+\.(service|socket)$/ { print $1 }' | sort -u
+        awk '$1 ~ /^cortexfs[-A-Za-z0-9@.]*\.(service|socket)$/ { print $1 }' | sort -u
 }
 
 update_installed_version() {
