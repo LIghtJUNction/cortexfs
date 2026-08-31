@@ -35,7 +35,7 @@ cargo build --release --locked -p cortexfs --bins -p cortexfs-mcp --bin ctxmcp \
     -p cortexfs-channel-tools -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
     -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
     -p cortexfs-channel-voice -p cortexfs-channel-slack \
-    -p cortexfs-channel-mqtt -p cortexfs-futureagi
+    -p cortexfs-channel-mqtt -p cortexfs-agents -p cortexfs-futureagi
 
 %install
 install -d -m 0755 \

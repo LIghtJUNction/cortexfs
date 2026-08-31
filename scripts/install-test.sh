@@ -193,10 +193,14 @@ package_payload_lists_match() (
     export CORTEXFS_PACKAGE_LIB=1
     # shellcheck disable=SC1090,SC1091 # The package script is sourced only in this subshell.
     source "$ROOT/packaging/build.sh"
-    diff -u <(printf '%s\n' "${BINARIES[@]}" | sort) <(expected_binaries | sort)
+    diff -u <(printf '%s\n' "${BINARIES[@]}" | sort) <(expected_binaries | sort) &&
     diff -u <(printf '%s\n' "${UNITS[@]}" | sort) <(expected_units | sort)
 )
 assert_true "source and native package payload lists agree" package_payload_lists_match
+assert_true "source build includes official role agents" \
+    grep -Fq -- '-p cortexfs-agents' "$ROOT/scripts/install-linux.sh"
+assert_true "RPM build includes official role agents" \
+    grep -Fq -- '-p cortexfs-agents' "$ROOT/packaging/rpm/cortexfs.spec"
 
 assert_true "POSIX entrypoint syntax" sh -n "$ROOT/scripts/install.sh"
 assert_true "Bash installer syntax" bash -n "$ROOT/scripts/install-linux.sh"

@@ -434,7 +434,7 @@ build_cortexfs() {
             -p cortexfs-channel-nostr -p cortexfs-channel-amqp \
             -p cortexfs-channel-wecom-ws -p cortexfs-channel-wechat \
             -p cortexfs-channel-voice -p cortexfs-channel-slack \
-            -p cortexfs-channel-mqtt -p cortexfs-futureagi
+            -p cortexfs-channel-mqtt -p cortexfs-agents -p cortexfs-futureagi
     )
 }
 
@@ -443,6 +443,7 @@ expected_binaries() {
         cortexfs-terminal-broker cortexfs-agent-runtime cortexfs-auth-runner cortexfs-channel cortexfs-channel-tool cortexfs-channel-nostr \
         cortexfs-channel-amqp cortexfs-channel-wecom-ws cortexfs-channel-wechat \
         cortexfs-channel-voice cortexfs-channel-slack cortexfs-channel-mqtt ctxmcp \
+        cortexfs-agent-architect cortexfs-agent-executor cortexfs-agent-product-manager \
         cortexfs-futureagi
 }
 
