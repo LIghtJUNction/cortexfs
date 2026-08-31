@@ -19,21 +19,21 @@ The API separates the three important agent socket roles:
 use cortexfs_paths::{agent_backing_socket, agent_client_socket, system_agent_runtime_socket};
 use std::path::Path;
 
-assert_eq!(agent_client_socket("coder"), Path::new("/ctx/agent/coder.sock"));
+assert_eq!(agent_client_socket("executor"), Path::new("/ctx/agent/executor.sock"));
 assert_eq!(
-    system_agent_runtime_socket("coder"),
-    Path::new("/run/cortexfs/agent/coder.sock")
+    system_agent_runtime_socket("executor"),
+    Path::new("/run/cortexfs/agent/executor.sock")
 );
 assert_eq!(
-    agent_backing_socket(Path::new("/var/lib/cortexfs/storage/current"), "coder"),
-    Path::new("/var/lib/cortexfs/storage/current/agent/coder.sock")
+    agent_backing_socket(Path::new("/var/lib/cortexfs/storage/current"), "executor"),
+    Path::new("/var/lib/cortexfs/storage/current/agent/executor.sock")
 );
 ```
 
 The public client endpoint for a system agent is
-`agent_client_socket("coder")`, which returns `/ctx/agent/coder.sock`.
-`system_agent_runtime_socket("coder")` returns the private systemd listener
-path `/run/cortexfs/agent/coder.sock`; it is lifecycle data, not a user or
+`agent_client_socket("executor")`, which returns `/ctx/agent/executor.sock`.
+`system_agent_runtime_socket("executor")` returns the private systemd listener
+path `/run/cortexfs/agent/executor.sock`; it is lifecycle data, not a user or
 channel configuration value.
 
 Attachable terminal, web, and IM frontends are ordinary files below the
@@ -43,9 +43,9 @@ copying `index/channel` literals:
 ```rust
 use cortexfs_paths::{session_channel_index_path, session_channel_path};
 
-let sessions = Path::new("/ctx/home/1000/agent/coder/session");
+let sessions = Path::new("/ctx/home/1000/agent/executor/session");
 let channels = session_channel_index_path(sessions);
-let terminal = session_channel_path(sessions, "terminal_coder_default");
+let terminal = session_channel_path(sessions, "terminal_executor_default");
 ```
 
 Channel paths use the same ABI crate:

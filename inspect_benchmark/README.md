@@ -13,7 +13,12 @@ cd /home/lightjunction/Documents/GITHUB/cortexfs/inspect_benchmark
 
 ## 全角色系统评测
 
-默认按顺序测试 `architect`、`coder`、`reviewer` 和 `worker`，避免并发负载污染基线：
+默认按顺序测试 `architect`、`coder`、`reviewer` 和 `worker`。这是
+`inspect_benchmark/agent_benchmark/system.py` 的 `DEFAULT_AGENTS` allowlist，
+不是 CortexFS 受管参考树。`coder`、`reviewer`、`worker` 是退役残留；受管树是
+`architect`、`executor`、`product-manager`。传入 allowlist 之外的名字（包括
+`executor`）会报 `unknown benchmark agent`。评测前这些 leftover 角色必须已有
+canonical listener；benchmark 不会执行 `ctx agent start`。
 
 以下命令从仓库根目录执行：
 
@@ -30,6 +35,8 @@ cd /home/lightjunction/Documents/GITHUB/cortexfs/inspect_benchmark
   --timeout 180 \
   --output-dir results
 ```
+
+`--agents` 只能从 `architect` / `coder` / `reviewer` / `worker` 中选择。
 
 运行前必须已有可用的 canonical agent listener。benchmark 会在创建输出目录和发送请求前依次要求：
 
@@ -61,6 +68,8 @@ results/<run-id>/report.md
 ./inspect_benchmark/run_benchmark.sh ctx coder
 ./inspect_benchmark/run_benchmark.sh ctx reviewer --limit 2
 ```
+
+`ctx` 子命令未传角色名时默认 `coder`（见 `run_benchmark.sh`）。这不是受管默认代理；日常 `/ctx` 默认是 `executor`。
 
 如果已经执行 `cd inspect_benchmark`，对应命令应写为：
 

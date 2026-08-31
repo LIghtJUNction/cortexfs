@@ -164,6 +164,8 @@ missing bootstrap state (run ctx bootstrap)
 | FUSE / `fusermount3` / `/dev/fuse` 错误 | 加载内核模块（`sudo modprobe fuse`），并安装 `fuse3` 与 `pkg-config fuse3`。容器需要 FUSE 设备。 |
 | bubblewrap 过旧 | 安装器与更新器要求 `/usr/bin/bwrap` 0.10+。通过发行版升级；CortexFS 不会覆盖主机 `bwrap`。 |
 | `stale` / `stale-user` 的 `agent/coder` 或 `agent/worker` | 这些名字是退役残留。受管树是 `architect`、`executor`、`product-manager`。`agent/main` 别名指向 `executor`。先 `ctx bootstrap --check`，需要当前树时再 `ctx bootstrap`。不要设置 `agent/coder.d/model`。 |
+| 源码安装器仍提示 `agent/coder.d/model` | `scripts/install-linux.sh` 的可选 provider/IM 引导仍会启动残留的 `coder` 并写入其 model 控制。应绑定 `agent/executor.d/model`，频道指向 `/ctx/agent/main.sock` 或 `/ctx/agent/executor.sock`。 |
+| `ctx update` 之后缺少 `/ctx` | 更新器只重启事务前已活动的单元，并包含精确的 `cortexfs.service` 名字。如果挂载在事务前就是未活动，请执行 `sudo systemctl start cortexfs.service`。 |
 | `ctx agent start` 连不上 user systemd | 终端路径使用 `systemd-run --user`。请登录到有 user bus 的用户会话；linger 是主机策略，不是 CortexFS ABI。 |
 | `ctx update` 拒绝运行 | 用非 root 登录，并具备 `sudo`、`/dev/tty` 和 `flock`。已安装 helper 是 `/usr/lib/cortexfs/update-linux`，必须保持 root 所有。 |
 | 交互代理碰到内存/CPU/任务上限 | 终端使用 `MemoryMax=1G` / `CPUQuota=200%` / `TasksMax=256`。socket 激活的 runtime 使用 `512M` / `100%` / `128`。见 [Agent Runtime](spec/agent-runtime.md)。 |

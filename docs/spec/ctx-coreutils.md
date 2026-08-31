@@ -519,7 +519,8 @@ An applied update MUST:
 4. cache the exact installed package (or exact source-install payload) before
    replacement;
 5. record the active CortexFS service and socket units plus the selected storage
-   generation;
+   generation (the filter matches the exact `cortexfs.service` mount unit as well
+   as hyphenated `cortexfs-*` service and socket names);
 6. suppress package-script restarts, install the package, restore only the
    previously active units, and verify those units, `/ctx`, and `ctx status`;
 7. reinstall the cached package and restore the prior storage generation if a
