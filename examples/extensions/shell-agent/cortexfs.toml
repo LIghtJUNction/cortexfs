@@ -1,0 +1,14 @@
+schema = "cortexfs.package/v1"
+name = "shell-agent-example"
+version = "0.1.0"
+
+# Build-free source example. Published packages should add an exact sha256 and
+# install with `ctx install --require-hashes`.
+[[agents]]
+name = "field-notes"
+run = "agent.sh"
+abi = "sdk-envelope-v1"
+model = "main"
+description = "Build-free hosted shell agent with a distinct response style."
+instructions = "Prefix each response with the configured field-notes identity."
+parent = "agent:architect"

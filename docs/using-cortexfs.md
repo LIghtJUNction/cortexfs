@@ -419,6 +419,53 @@ message to `ctx agent send executor --session default`. Use
 executor` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
 private chat database.
 
+## Compose agents from shell
+
+`examples/agent-pipeline.sh` composes the current architect, executor, and
+product-manager sockets without adding `/ctx/workflow`, a queue, or a resident
+coordinator. Bind every listener to the same host repository before the run;
+`--cwd` names the sandbox path, while the explicit rw mount identifies the
+shared host tree:
+
+```bash
+REPO=$(pwd -P)
+for role in architect executor product-manager; do
+  ctx agent start "$role" --session default \
+    --no-default-workspace --mount "$REPO" /workspace rw --cwd /workspace
+  ctx ping "agent/$role"
+done
+```
+
+```bash
+CTX_BIN=ctx ./examples/agent-pipeline.sh \
+  --max-rounds 2 \
+  -- "fix the parser and prove the regression test"
+```
+
+The architect plans once. The executor and product-manager then iterate for at
+most three explicit implementation/review rounds. Override `--coder` and
+`--reviewer` when a deployment uses different role names. The reviewer's first
+non-empty line is a machine-readable
+`PASS` or `CHANGES`; `PASS` exits zero, exhausted `CHANGES` exits one, and an
+invalid verdict exits 65; a failed `ctx` stage propagates its original exit
+status. Before the first send, the script reads each role's existing `cwd` and `mount`
+controls and aborts unless all three contracts are non-empty and byte-identical;
+it never assumes that the shell's current directory reaches an already-running
+listener. Every stage uses a durable, caller-owned session name under the
+existing agent ABI. The omitted prefix defaults to a fresh timestamp/PID name.
+Passing `--session-prefix NAME` explicitly resumes those durable plan/code/review
+sessions when the prefix already exists. Output is never silently used after
+truncation: the sink retains at most `CTX_PIPELINE_MAX_STAGE_BYTES + 1`, drains
+the producer to preserve its real exit status, and fails the stage on overflow
+without returning a partial result.
+
+Use `scripts/agent-pipeline-smoke.sh` for the provider-free mock-CLI black-box
+test. The build-free hosted agent in `examples/extensions/shell-agent/` is a
+second onboarding smoke: it implements `sdk-envelope-v1` in POSIX shell plus
+`jq`, while CortexFS retains lifecycle, policy, session, and socket authority.
+Use the Rust Agent SDK instead when tool continuation or typed host APIs are
+needed.
+
 ## Installed Multi-Turn Smoke
 
 After installation, the minimal multi-turn smoke should use the existing
