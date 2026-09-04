@@ -354,6 +354,44 @@ fn parses_unified_auth_commands() {
 }
 
 #[test]
+fn auth_login_without_provider_opens_the_selector() {
+    assert!(matches!(
+        cmd!("auth", "login"),
+        Ok(Command::Auth(ProviderArgs::LoginSelect))
+    ));
+}
+
+#[test]
+fn login_selector_includes_configured_custom_provider() {
+    let root = clean_test_dir("ctx-auth-login-custom-provider");
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(
+        fs::write(
+            root.join("local.json"),
+            r#"{"name":"local","base_url":"http://127.0.0.1:8317/v1","auth":[{"type":"api_key","slot":"default"}]}"#,
+        )
+        .is_ok()
+    );
+
+    let options = login_options_from_dir(&root).unwrap_or_default();
+
+    assert!(options.iter().any(|option| {
+        option.provider == "local" && option.method.method == cortexfs::AuthMethod::ApiKey
+    }));
+}
+
+#[test]
+fn login_selector_uses_the_explicit_numbered_choice() {
+    let root = clean_test_dir("ctx-auth-login-choice");
+    let options = login_options_from_dir(&root).unwrap_or_default();
+    let mut output = Vec::new();
+
+    let selected = prompt_login_choice(std::io::Cursor::new("2\n"), &mut output, &options);
+
+    assert_eq!(selected, Ok(Some(1)));
+}
+
+#[test]
 fn parses_provider_preset_commands() {
     assert!(matches!(
         cmd!("provider", "preset", "list"),

@@ -17,7 +17,7 @@ mod tests {
             &path,
             r#"{
           "schema_version":"ATIF-v1.7",
-          "agent":{"name":"cortexfs","version":"0.1.20"},
+          "agent":{"name":"cortexfs","version":"0.1.21"},
           "steps":[
             {"step_id":1,"source":"user","message":"Inspect this run."},
             {"step_id":2,"source":"agent","message":"The run is healthy.","observation":{"results":[{"content":"ok"}]}}

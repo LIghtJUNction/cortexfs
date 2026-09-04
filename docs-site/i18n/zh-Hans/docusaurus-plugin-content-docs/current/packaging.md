@@ -30,7 +30,7 @@ Fedora/RHEL 与 openSUSE/SLES。安装包包含发布二进制文件、systemd �
 路径。
 
 使用系统原生包管理器安装生成的包。文件名使用 `Cargo.toml` 中的 workspace 版本
-（当前为 `0.1.20`）：
+（当前为 `0.1.21`）：
 
 ```bash
 # Debian 或 Ubuntu

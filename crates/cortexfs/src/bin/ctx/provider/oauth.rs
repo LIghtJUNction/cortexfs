@@ -124,7 +124,7 @@ fn oauth_registry(
     let registry = cortexfs::configured_registry(
         provider,
         &config.base_url,
-        config.auth_methods(),
+        config.auth_methods()?,
         config.oauth.clone(),
     )
     .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;

@@ -13,8 +13,19 @@ pub(crate) struct CtxProviderConfig {
 }
 
 impl CtxProviderConfig {
-    pub(crate) fn auth_methods(&self) -> Vec<cortexfs::ProviderAuthConfig> {
-        cortexfs::effective_auth_methods(&self.auth, self.oauth.is_some())
+    pub(crate) fn auth_methods(&self) -> Result<Vec<cortexfs::ProviderAuthConfig>, CliError> {
+        if self.auth.iter().any(|method| !method.is_valid())
+            || self
+                .auth
+                .iter()
+                .any(|method| method.method == cortexfs::AuthMethod::OAuth && self.oauth.is_none())
+        {
+            return Err(CliError::usage("invalid provider auth config"));
+        }
+        Ok(cortexfs::effective_auth_methods(
+            &self.auth,
+            self.oauth.is_some(),
+        ))
     }
 }
 
@@ -158,10 +169,29 @@ pub(crate) fn read_provider_config_from_dir(
     provider: &str,
     dir: &Path,
 ) -> Result<CtxProviderConfig, CliError> {
+    read_provider_configs_from_dir(dir)?
+        .into_iter()
+        .find_map(|(name, config)| (name == provider).then_some(config))
+        .ok_or_else(|| CliError::usage(format!("missing provider: {provider}")))
+}
+
+pub(crate) fn read_provider_configs_from_dir(
+    dir: &Path,
+) -> Result<Vec<(String, CtxProviderConfig)>, CliError> {
+    match fs::symlink_metadata(dir) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot inspect provider config dir: {error}"
+            )));
+        }
+        Ok(_metadata) => {}
+    }
     let directory = open_provider_config_dir(dir)?;
     let entries = fs::read_dir(proc_fd_path(&directory)).map_err(|error| {
         CliError::unavailable(format!("cannot read provider config dir: {error}"))
     })?;
+    let mut configs = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
             CliError::unavailable(format!("cannot read provider config: {error}"))
@@ -180,13 +210,20 @@ pub(crate) fn read_provider_config_from_dir(
         let content = read_provider_config_file_at(&directory, file_name)?;
         let config = serde_json::from_str::<CtxProviderConfig>(&content)
             .map_err(|error| CliError::usage(format!("invalid provider config: {error}")))?;
-        if cortexfs::provider_name_from_config(&config.base_url, config.name.as_deref()).as_deref()
-            == Ok(provider)
-        {
-            return Ok(config);
-        }
+        let provider =
+            cortexfs::provider_name_from_config(&config.base_url, config.name.as_deref())
+                .map_err(|_error| CliError::usage("invalid provider config"))?;
+        configs.push((provider, config));
     }
-    Err(CliError::usage(format!("missing provider: {provider}")))
+    configs.sort_by(|left, right| left.0.cmp(&right.0));
+    if configs
+        .iter()
+        .zip(configs.iter().skip(1))
+        .any(|(left, right)| left.0 == right.0)
+    {
+        return Err(CliError::usage("duplicate provider config"));
+    }
+    Ok(configs)
 }
 
 pub(crate) fn read_provider_config_file_at(

@@ -33,7 +33,7 @@ spec and rebuild from the source archive, which keeps the RPM path suitable for
 Fedora/RHEL build services.
 
 Install the resulting package with the native package manager. Filenames use
-the workspace version from `Cargo.toml` (currently `0.1.20`):
+the workspace version from `Cargo.toml` (currently `0.1.21`):
 
 ```bash
 # Debian or Ubuntu
