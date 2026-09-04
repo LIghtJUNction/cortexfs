@@ -1,4 +1,11 @@
-use crate::*;
+use std::io::Read;
+use std::path::Path;
+
+use crate::{
+    CliError, MAX_PROVIDER_SECRET_STDIN_BYTES, PROVIDER_CONFIG_DIR, print_line,
+    read_provider_config_from_dir,
+};
+use cortexfs::cli::input::read_limited_input_text;
 
 pub(super) mod socket;
 
@@ -18,8 +25,12 @@ pub(crate) fn provider_api_key_login(
             "provider does not accept API-key authentication",
         ));
     }
-    let key = read_provider_secret_stdin_limited(reader, MAX_PROVIDER_SECRET_STDIN_BYTES)
-        .map_err(|_error| CliError::unavailable("cannot read API key from stdin"))?;
+    let key = read_limited_input_text(
+        reader,
+        MAX_PROVIDER_SECRET_STDIN_BYTES,
+        "provider secret stdin exceeds limit",
+    )
+    .map_err(|_error| CliError::unavailable("cannot read API key from stdin"))?;
     let key = key.trim_end_matches(['\r', '\n']);
     if key.is_empty() {
         return Err(CliError::usage(

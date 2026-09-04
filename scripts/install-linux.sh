@@ -640,10 +640,10 @@ bind_default_agent_model() {
     if [[ -z $model ]]; then
         model=$(default_model_for_provider "$provider") || return 0
     fi
-    sudo ctx agent start coder --session default >/dev/null 2>&1 || true
-    sudo ctx set "agent/coder.d/model" "$provider/$model"
-    info "Bound agent/coder.d/model to $provider/$model." \
-        "已将 agent/coder.d/model 绑定到 $provider/$model。"
+    sudo ctx agent start executor --session default >/dev/null 2>&1 || true
+    sudo ctx set "agent/executor.d/model" "$provider/$model"
+    info "Bound agent/executor.d/model to $provider/$model." \
+        "已将 agent/executor.d/model 绑定到 $provider/$model。"
 }
 
 install_channel_env() {
@@ -656,7 +656,7 @@ install_channel_env() {
 
 enable_im_services() {
     local unit
-    sudo ctx agent start coder --session default >/dev/null 2>&1 || true
+    sudo ctx agent start executor --session default >/dev/null 2>&1 || true
     for unit in "$@"; do
         sudo systemctl enable --now "$unit"
         systemctl is-active --quiet "$unit" ||
@@ -669,8 +669,8 @@ configure_im_telegram() {
     read_secret "Telegram bot token: " ||
         die "No Telegram token was entered." "未输入 Telegram token。"
     install_channel_env /etc/cortexfs/channels/telegram.env \
-        "CORTEXFS_AGENT=coder" \
-        "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock" \
+        "CORTEXFS_AGENT=executor" \
+        "CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock" \
         "CORTEXFS_CHANNEL_ID=telegram.primary" \
         "CORTEXFS_TELEGRAM_TOKEN=$SECRET_VALUE"
     SECRET_VALUE=''
@@ -690,8 +690,8 @@ configure_im_discord() {
     sudo tee /etc/cortexfs/channels/discord.toml >/dev/null <<EOF
 application_id = "$app_id"
 bot_token = "$SECRET_VALUE"
-agent_socket = "/ctx/agent/coder.sock"
-agent = "coder"
+agent_socket = "/ctx/agent/executor.sock"
+agent = "executor"
 session_prefix = "discord"
 EOF
     sudo chmod 600 /etc/cortexfs/channels/discord.toml
@@ -709,8 +709,8 @@ configure_im_slack() {
     bot=$SECRET_VALUE
     SECRET_VALUE=''
     install_channel_env /etc/cortexfs/channels/slack-driver.env \
-        "CORTEXFS_AGENT=coder" \
-        "CORTEXFS_AGENT_SOCKET=/ctx/agent/coder.sock" \
+        "CORTEXFS_AGENT=executor" \
+        "CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock" \
         "CORTEXFS_CHANNEL_ID=slack.primary"
     install_channel_env /etc/cortexfs/channels/slack.env \
         "CORTEXFS_SLACK_APP_TOKEN=$app" \
@@ -859,8 +859,8 @@ finish() {
     say "Future host updates: ctx update --ref main, then ctx update --ref main --yes." \
         "后续主机更新：先运行 ctx update --ref main，再运行 ctx update --ref main --yes。"
     if ((FIRST_INSTALL)); then
-        say "Next: ctx doctor · ctx set agent/coder.d/model PROVIDER/MODEL · cortexfs-channel list" \
-            "下一步：ctx doctor · ctx set agent/coder.d/model PROVIDER/MODEL · cortexfs-channel list"
+        say "Next: ctx doctor · ctx set agent/executor.d/model PROVIDER/MODEL · cortexfs-channel list" \
+            "下一步：ctx doctor · ctx set agent/executor.d/model PROVIDER/MODEL · cortexfs-channel list"
     fi
 }
 

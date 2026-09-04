@@ -60,6 +60,10 @@ assert_false 'package cannot write provider configuration' \
 assert_false 'package cannot write storage contents' \
     update_path_allowed var/lib/cortexfs/storage/generations/active/bin/ctx
 assert_false 'package cannot add unrelated executables' update_path_allowed usr/bin/curl
+for path in ../usr/bin/ctx usr/share/doc/cortexfs/../../../../etc/passwd \
+    usr/share/doc/cortexfs/.. usr/lib/.build-id/.. usr/bin/cortexfs-helper/..; do
+    assert_false "package cannot traverse a parent: $path" update_path_allowed "$path"
+done
 assert_false 'service startup retains the rollback generation' \
     grep -Fq -- 'storage update --prune' "$ROOT/packaging/systemd/cortexfs.service"
 assert_true 'Debian package scripts support updater-owned restarts' \

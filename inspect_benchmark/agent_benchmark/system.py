@@ -3,6 +3,7 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -184,7 +185,9 @@ def _open_dir(path: Path) -> int:
 
 def _read_at(directory: int, name: str, *, missing: str | None = None) -> str:
     try:
-        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        descriptor = os.open(
+            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+        )
     except FileNotFoundError:
         if missing is not None:
             return missing
@@ -595,7 +598,13 @@ def _timing(values: list[float]) -> dict[str, float | None]:
 def _nonnegative_number(value: object, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
         raise ValueError(f"invalid benchmark metric {field}")
-    return value * 1.0
+    try:
+        number = float(value)
+    except OverflowError as error:
+        raise ValueError(f"invalid benchmark metric {field}") from error
+    if not math.isfinite(number):
+        raise ValueError(f"invalid benchmark metric {field}")
+    return number
 
 
 def _nonnegative_count(value: object, field: str) -> int:
@@ -2138,7 +2147,7 @@ def _comparison_fingerprint(configuration: dict[str, object]) -> str:
 
 
 def _read_json_object(path: Path, limit: int = 1024 * 1024) -> dict[str, Any]:
-    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as error:

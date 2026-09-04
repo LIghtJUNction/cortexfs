@@ -17,7 +17,10 @@ pub fn open_regular_file_no_follow(
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | extra_flags,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | extra_flags,
         nix::sys::stat::Mode::empty(),
     )?;
     let file = std::fs::File::from(file_fd);

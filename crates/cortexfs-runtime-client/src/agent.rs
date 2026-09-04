@@ -1,11 +1,4 @@
 //! Hosted-agent invocation wire contract shared by runtime SDK.
-//!
-//! The design is aligned to newline-delimited JSON request payloads that are common
-//! across MCP and filesystem server implementations, especially when the transport is
-//! stdio or local Unix socket.
-//! - [MCP Go SDK newline-delimited stdio note](https://github.com/orgs/modelcontextprotocol/discussions/364)
-//! - [rust-fs-mcp runtime architecture](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md)
-//! - [modelcontextprotocol/servers#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 
 use crate::interaction::InteractionOrigin;
 use serde::{Deserialize, Serialize};
@@ -18,12 +11,6 @@ pub use wire::read_agent_invocation;
 ///
 /// This string is checked for inbound envelope compatibility before dispatch,
 /// preventing implicit fallback to legacy ad-hoc command payloads.
-///
-/// Reference:
-/// - MCP fileserver compatibility issues: [#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-/// - MCP payload size edge cases: [#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [rust-fs-mcp protocol lifecycle](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
-/// - [MCP newline-delimited stdio model](https://github.com/orgs/modelcontextprotocol/discussions/364)
 pub const AGENT_INVOCATION_SCHEMA: &str = "cortexfs.agent-invocation/v1";
 
 /// Marker selecting the ABI for SDK-hosted agent launches.
@@ -38,17 +25,10 @@ pub fn is_agent_launch_abi(value: &str) -> bool {
 /// Entry argument shared by host and envelope-mode child processes.
 pub const AGENT_ENVELOPE_ARG: &str = "--cortexfs-sdk-envelope-v1";
 
-/// Maximum JSON-encoded invocation payload bytes (excluding newline framing).
-///
-/// Similar limits can be found in:
-/// - [modelcontextprotocol/servers filesystem line size concerns](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [mark3labs/mcp-filesystem-server path validation and transport](https://github.com/mark3labs/mcp-filesystem-server)
+/// Maximum JSON-encoded invocation frame bytes, including its trailing newline.
 pub const MAX_AGENT_INVOCATION_BYTES: usize = 1024 * 1024;
 
 /// Maximum bytes retained for history/context snapshots in an invocation payload.
-///
-/// Context size limits here follow packetized JSON-RPC processing patterns; common practice is shown below:
-/// - [Rust MCP filesystem truncation flag](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l557)
 pub const MAX_AGENT_CONTEXT_BYTES: usize = 64 * 1024;
 
 /// Maximum legal zero-based invocation step in one hosted-agent run.
@@ -56,17 +36,10 @@ pub const MAX_AGENT_CONTEXT_BYTES: usize = 64 * 1024;
 /// This includes the final assistant-completion step and is not a tool-call
 /// count. The host may invoke every step from zero through this value; after
 /// the final step, no further tool continuation is allowed.
-///
-/// Related implementations:
-/// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-/// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
 pub const MAX_AGENT_STEPS: u8 = 64;
 
 /// Nullable container that keeps `serde_json`-compatible optional fields
 /// explicit while preserving envelope-shape invariants during decoding.
-///
-/// Similar approach:
-/// - [modelcontextprotocol/rust-sdk stdio transport framing](https://github.com/modelcontextprotocol/rust-sdk)
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(transparent)]
 struct Nullable<T>(Option<T>);

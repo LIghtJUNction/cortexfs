@@ -150,6 +150,41 @@ pub(crate) fn fs_write_tool_writes_file_content() {
 }
 
 #[test]
+pub(crate) fn fs_mutations_reject_missing_or_non_string_content() {
+    let path = std::env::temp_dir().join(format!("cortexfs-fs-input-{}", std::process::id()));
+    let tools: [(&dyn cortexfs_tool_sdk::Tool, &str); 2] =
+        [(&FsWriteTool, "content"), (&FsReplaceTool, "new")];
+    for (tool, field) in tools {
+        for value in [
+            None,
+            Some(serde_json::json!(null)),
+            Some(serde_json::json!(1)),
+        ] {
+            assert!(fs::write(&path, "stored").is_ok());
+            let mut input = serde_json::json!({"path": path, "old": "stored"});
+            if let Some(value) = value {
+                assert_eq!(
+                    input
+                        .as_object_mut()
+                        .map(|map| map.insert(field.to_owned(), value)),
+                    Some(None)
+                );
+            }
+            let invocation = ToolInvocation::new("r1", input.to_string());
+            let mut output = Vec::new();
+            assert!(run_tool(tool, &invocation, &mut output).is_ok());
+            assert!(String::from_utf8_lossy(&output).contains(r#""code":"EINVAL""#));
+            assert_eq!(fs::read_to_string(&path).unwrap_or_default(), "stored");
+        }
+        let input = serde_json::json!({"path": path, "old": "stored", field: ""});
+        let invocation = ToolInvocation::new("r1", input.to_string());
+        assert!(run_tool(tool, &invocation, &mut Vec::new()).is_ok());
+        assert_eq!(fs::read_to_string(&path).unwrap_or_default(), "");
+    }
+    let _ignored = fs::remove_file(path);
+}
+
+#[test]
 pub(crate) fn fs_write_tool_replaces_symlink_without_writing_target() {
     let dir =
         std::env::temp_dir().join(format!("cortexfs-fs-write-symlink-{}", std::process::id()));
@@ -268,18 +303,17 @@ pub(crate) fn fs_write_tool_rejects_symlink_intermediate_parent() {
 #[test]
 pub(crate) fn fs_replace_tool_handles_unique_and_ambiguous_text_spans() {
     let tool = FsReplaceTool;
-    for (label, before, expected, output_text) in [
-        ("unique", "before old after", "before new after", "replaced"),
-        ("ambiguous", "old old", "old old", r#""code":"EINVAL""#),
+    for (before, old, expected, output_text) in [
+        ("before old after", "old", "before new after", "replaced"),
+        ("old old", "old", "old old", r#""code":"EINVAL""#),
+        ("aaa", "aa", "aaa", r#""code":"EINVAL""#),
+        ("哈哈哈", "哈哈", "哈哈哈", r#""code":"EINVAL""#),
     ] {
-        let path = std::env::temp_dir().join(format!(
-            "cortexfs-fs-replace-{label}-{}",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("cortexfs-fs-replace-{}", std::process::id()));
         assert!(fs::write(&path, before).is_ok());
         let invocation = ToolInvocation::new(
             "r1",
-            format!(r#"{{"path":"{}","old":"old","new":"new"}}"#, path.display()),
+            serde_json::json!({"path": path, "old": old, "new": "new"}).to_string(),
         );
         let mut output = Vec::new();
         assert!(run_tool(&tool, &invocation, &mut output).is_ok());

@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
     use cortexfs_protocol::{
-        BridgePath, Content, ContextOwnership, Message, ModelEvent, ModelRequest, NativeRequest,
-        ProtocolError, ToolDefinition, WireProtocol, decode_model_request, decode_native_request,
-        decode_response_events, encode_model_request, encode_response_events, transcode_request,
-        transcode_response,
+        BridgePath, Content, ContextOwnership, EventStatus, Message, ModelEvent, ModelRequest,
+        NativeRequest, ProtocolError, ToolDefinition, WireProtocol, decode_model_request,
+        decode_native_request, decode_response_events, encode_model_request,
+        encode_response_events, transcode_request, transcode_response,
     };
     use serde_json::json;
     use std::borrow::Cow;
@@ -224,6 +224,66 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn response_conversion_preserves_terminal_status() -> Result<(), Box<dyn std::error::Error>> {
+        for status in [EventStatus::Ok, EventStatus::Error, EventStatus::Cancelled] {
+            let events = [
+                ModelEvent::Start {
+                    run: "run".to_owned(),
+                    model: "model".to_owned(),
+                },
+                ModelEvent::Done {
+                    run: "run".to_owned(),
+                    status,
+                },
+            ];
+            for (source, _) in cases() {
+                let input = encode_response_events(source, &events)?;
+                for (target, _) in cases() {
+                    let converted = transcode_response(source, target, &input)?;
+                    let decoded = decode_response_events(target, &converted.bytes)?;
+                    assert!(
+                        matches!(decoded.last(), Some(ModelEvent::Done { status: actual, .. })
+                        if *actual == status),
+                        "{source}->{target}: {decoded:?}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn responses_native_failure_status_is_not_success() -> Result<(), Box<dyn std::error::Error>> {
+        for (native, status) in [
+            ("completed", EventStatus::Ok),
+            ("failed", EventStatus::Error),
+            ("incomplete", EventStatus::Error),
+            ("cancelled", EventStatus::Cancelled),
+        ] {
+            let input = json!({"id": "run", "model": "model", "output": [], "status": native});
+            let events = decode_response_events(
+                WireProtocol::OpenAiResponses,
+                &serde_json::to_vec(&input)?,
+            )?;
+            assert!(
+                matches!(events.last(), Some(ModelEvent::Done { status: actual, .. })
+                if *actual == status)
+            );
+            let encoded = encode_response_events(WireProtocol::OpenAiResponses, &events)?;
+            let value: serde_json::Value = serde_json::from_slice(&encoded)?;
+            assert_eq!(
+                value.get("status").and_then(serde_json::Value::as_str),
+                Some(if native == "incomplete" {
+                    "failed"
+                } else {
+                    native
+                })
+            );
+        }
+        Ok(())
     }
 
     #[test]

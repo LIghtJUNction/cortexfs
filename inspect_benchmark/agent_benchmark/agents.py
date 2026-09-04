@@ -908,7 +908,7 @@ def in_process_openai_agent() -> Agent:
 @agent
 def ctx_cli_agent(
     ctx_path: str = "/usr/bin/ctx",
-    agent_name: str = "coder",
+    agent_name: str = "executor",
     session_prefix: str = "inspect",
     timeout: float = 180.0,
     retain_frames: bool = False,

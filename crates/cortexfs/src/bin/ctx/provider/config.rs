@@ -1,4 +1,12 @@
-use crate::*;
+use std::fs;
+use std::io::{self, Read, Write};
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::{
+    CliError, create_exclusive_file_at, open_plain_directory, proc_fd_path, temp_file_name,
+};
 
 pub(crate) const PROVIDER_CONFIG_DIR: &str = cortexfs::SYSTEM_PROVIDER_CONFIG_DIR;
 const MAX_CTX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
@@ -233,7 +241,10 @@ pub(crate) fn read_provider_config_file_at(
     let file_fd = nix::fcntl::openat(
         parent_dir,
         file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(|error| CliError::unavailable(format!("cannot read provider config: {error}")))?;
@@ -253,7 +264,10 @@ pub(crate) fn read_provider_config_file(path: &Path) -> Result<String, CliError>
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(|error| {

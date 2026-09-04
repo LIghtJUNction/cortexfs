@@ -18,7 +18,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
     events.push(ModelEvent::Done {
         run,
-        status: EventStatus::Ok,
+        status: match map.get("status").and_then(Value::as_str) {
+            Some("failed" | "incomplete") => EventStatus::Error,
+            Some("cancelled") => EventStatus::Cancelled,
+            _ => EventStatus::Ok,
+        },
     });
     Ok(events)
 }
@@ -80,6 +84,14 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
     let mut root = Map::from_iter([
         (String::from("id"), json!(summary.run)),
         (String::from("model"), json!(summary.model)),
+        (
+            String::from("status"),
+            json!(match summary.status {
+                EventStatus::Ok => "completed",
+                EventStatus::Error => "failed",
+                EventStatus::Cancelled => "cancelled",
+            }),
+        ),
         (String::from("output"), Value::Array(output)),
     ]);
     if let Some(usage) = summary.usage {

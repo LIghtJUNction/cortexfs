@@ -1,3 +1,22 @@
+const IMPLICIT_WORKER_SCHEDULE: &str = r#"
+{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [
+    {
+      "id": "implement",
+      "kind": "react",
+      "child": "work-123",
+      "handoff": "Task: implement the next slice\n",
+      "max_steps": 8,
+      "requires": [
+        {"class": "tool", "name": "fs.read", "permission": "execute"}
+      ]
+    }
+  ]
+}
+"#;
+
 #[test]
 fn agent_schedule_accepts_bounded_dag_react_plan_with_parent_permissions() {
     let policy = ok!(PolicyV0::parse(
@@ -51,24 +70,7 @@ allow planner_t agent:worker create
 allow planner_t tool:fs.read execute
 "
     ));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "implement",
-      "kind": "react",
-      "child": "work-123",
-      "handoff": "Task: implement the next slice\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "tool", "name": "fs.read", "permission": "execute"}
-      ]
-    }
-  ]
-}
-"#;
+    let schedule = IMPLICIT_WORKER_SCHEDULE;
 
     let nodes = ok!(ready_agent_schedule_nodes(
         schedule,
@@ -102,24 +104,7 @@ allow planner_t tool:fs.read execute
 #[test]
 fn agent_schedule_requires_worker_create_for_implicit_worker_handoff() {
     let policy = ok!(PolicyV0::parse("allow planner_t tool:fs.read execute\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "implement",
-      "kind": "react",
-      "child": "work-123",
-      "handoff": "Task: implement the next slice\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "tool", "name": "fs.read", "permission": "execute"}
-      ]
-    }
-  ]
-}
-"#;
+    let schedule = IMPLICIT_WORKER_SCHEDULE;
 
     let report = inspect_agent_schedule_json(schedule, "planner_t", &policy);
     assert_eq!(
@@ -305,49 +290,10 @@ allow planner_t agent:worker create
 allow planner_t agent:executor create
 "
     ));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "plan",
-      "kind": "dag",
-      "agent": "planner",
-      "requires": [
-        {"class": "tool", "name": "fs.read", "permission": "execute"}
-      ]
-    },
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "deps": ["plan"],
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    },
-    {
-      "id": "execute",
-      "kind": "dag",
-      "agent": "executor",
-      "child": "exec-123",
-      "session": "run-123",
-      "handoff": "Task: execute the accepted plan\n",
-      "deps": ["plan"],
-      "requires": [
-        {"class": "agent", "name": "executor", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let schedule = delegated_schedule("plan");
 
     let ready = ok!(ready_agent_schedule_nodes(
-        schedule,
+        &schedule,
         "planner_t",
         &policy,
         &[]
@@ -363,7 +309,7 @@ allow planner_t agent:executor create
     assert!(first.deps().is_empty());
 
     let ready = ok!(ready_agent_schedule_nodes(
-        schedule,
+        &schedule,
         "planner_t",
         &policy,
         &["plan"]
@@ -386,7 +332,7 @@ allow planner_t agent:executor create
     assert_eq!(execute.child_session(), Some("run-123"));
 
     let ready = ok!(ready_agent_schedule_nodes(
-        schedule,
+        &schedule,
         "planner_t",
         &policy,
         &["plan", "review", "execute"]

@@ -1,9 +1,38 @@
-use super::*;
+use super::{
+    AgentFrameBatch, MAX_AGENT_EXECUTABLE_FRAME_BYTES, MAX_AGENT_EXECUTABLE_STDERR_BYTES,
+    MAX_SOCKET_RUNTIME_EVENTS_BYTES, MAX_SOCKET_RUNTIME_OUTPUT_BYTES, SOCKET_RUN_CONTROL_PATH,
+    SocketDebugTiming, agent_executable_socket_command, agent_run_cancelled,
+    apply_socket_debug_timing_env, event_type, handle_socket_request, handle_socket_send,
+    is_socket_debug_timing_frame, message_event_text, open_agent_executable_no_follow,
+    record_tool_approval_frames, socket_debug_timing_from_frame, terminate_agent_process_group,
+    write_optional_socket_debug_timing_frame, write_socket_frame, write_socket_runtime_response,
+};
 use crate::support::atomic::atomic_replace_text_with_mode;
+use crate::support::columnar;
+use crate::support::plain::open_plain_directory;
+use crate::{
+    AgentApprovalMode, AgentExecutableSocketRuntime, AgentStopHandler, ChildContextStatus,
+    ChildLifecycle, MAX_AGENT_STDOUT_QUEUE_FRAMES, MAX_HISTORY_MESSAGES_CHARS, SocketRequest,
+    SocketRuntimeError, SocketRuntimeResponse, SocketSendOutcome, SocketSessionRecordError,
+    SocketSessionScope, agent, agent_step_limit, child_handoff_receipt, default_agent_tool_context,
+    derive_agent_runtime_view, finish_child_result_exclusive, inspect_event_stream_jsonl,
+    is_object_name, object, parse_socket_request_frame, prepare_owned_durable_session,
+    record_tool_execution_result_to_session, resolve_agent_runtime_control_dir, runtime,
+    set_session_runtime_observation, validate_agent_bootstrap_control_content,
+};
 use cortexfs_runtime_client::interaction::InteractionOrigin;
+use serde_json::Value;
+use std::collections::HashSet;
 use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 mod approval;
 mod delivery;
@@ -1270,7 +1299,7 @@ pub(crate) fn run_agent_executable_streaming(
         .ok_or(SocketRuntimeError::CannotRunAgent)?;
     let stderr_reader = thread::spawn(move || read_agent_executable_stderr_limited(stderr));
     let (stdout_sender, stdout_receiver) = mpsc::sync_channel(MAX_AGENT_STDOUT_QUEUE_FRAMES);
-    let reader = thread::spawn(move || {
+    let mut reader = Some(thread::spawn(move || {
         let mut stdout = BufReader::new(stdout);
         while let Some(line) = read_agent_executable_frame_line(&mut stdout)? {
             if stdout_sender.send(line).is_err() {
@@ -1278,14 +1307,23 @@ pub(crate) fn run_agent_executable_streaming(
             }
         }
         Ok::<(), SocketRuntimeError>(())
-    });
+    }));
     let mut frames = Vec::new();
     let mut frame_bytes = 0usize;
     let session_dir = runtime.session_root.join(request.session);
     let mut cancelled = false;
     let mut saw_agent_frame = false;
     let mut yielded_tool_call = None;
+    let mut cancel_check = Instant::now();
     loop {
+        if cancel_check.elapsed() >= Duration::from_millis(100) {
+            cancel_check = Instant::now();
+            if agent_run_cancelled(&session_dir, request.cancellation_id) {
+                cancelled = true;
+                terminate_agent_process_group(&mut child);
+                break;
+            }
+        }
         match stdout_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(line) => {
                 if line.trim().is_empty() {
@@ -1349,26 +1387,32 @@ pub(crate) fn run_agent_executable_streaming(
                 frame_bytes = next_frame_bytes;
                 frames.push(line);
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => match reader.join() {
-                Ok(Ok(())) => break,
-                Ok(Err(error)) => {
-                    terminate_agent_process_group(&mut child);
-                    let _ignored = child.wait();
-                    return Err(error);
-                }
-                Err(_error) => {
-                    terminate_agent_process_group(&mut child);
-                    let _ignored = child.wait();
-                    return Err(SocketRuntimeError::CannotReadFrame);
-                }
-            },
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if agent_run_cancelled(&session_dir, request.cancellation_id) {
-                    cancelled = true;
-                    terminate_agent_process_group(&mut child);
-                    break;
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                match reader.take().map(thread::JoinHandle::join) {
+                    Some(Ok(Ok(()))) | None => {
+                        if child
+                            .try_wait()
+                            .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+                            .is_some()
+                            && stderr_reader.is_finished()
+                        {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    Some(Ok(Err(error))) => {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(error);
+                    }
+                    Some(Err(_error)) => {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::CannotReadFrame);
+                    }
                 }
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
     }
     let status = child
@@ -1599,10 +1643,13 @@ pub(crate) fn prompt_quoted(value: &str) -> String {
 mod completion_tests {
     use super::*;
     use crate::reference::bootstrap::ensure_runtime_models_from;
+    use crate::{AgentUnixIdentity, MountTable, RunEnvironment, ensure_reference_tree};
     use std::ffi::OsString;
-    use std::io;
+    use std::io::{self, Read};
     use std::net::{Shutdown, TcpListener};
     use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+    use std::{env, fs};
 
     #[test]
     fn provider_network_denial_names_the_required_policy_permission() {

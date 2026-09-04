@@ -8,46 +8,15 @@ use super::{
 };
 use crate::interaction::InteractionOrigin;
 
-/// Maximum bytes read for a single invocation frame (payload + trailing newline).
-///
-/// Keeping this explicit limits allocator growth under malformed peer behavior.
-/// Maximum bytes read for one invocation, including its newline.
-///
-/// Similar protocol framing:
-/// - [Rust FS MCP architecture: stdin line-by-line JSON-RPC](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
-/// - [modelcontextprotocol/go-sdk discussion on newline transport](https://github.com/orgs/modelcontextprotocol/discussions/364)
+/// Read one byte beyond the frame limit to detect oversized input.
 const MAX_AGENT_INVOCATION_READ: u64 = 1024 * 1024 + 1;
 
-/// Maximum byte budget for the tool result payload.
-///
-/// This protects host memory from oversized tool observations.
 /// Maximum result bytes carried in one tool observation.
-///
-/// Truncation strategy parallels:
-/// - [rust-fs-mcp truncation metrics](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l557)
-/// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 const MAX_OBSERVATION_BYTES: usize = 16 * 1024;
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 
-/// Reads and validates one newline-terminated invocation envelope frame from a stream.
-///
-/// Compatibility strategy:
-/// - Read exactly one frame per line, with `read_to_end` plus hard size limits to
-///   block sticky frames and oversized payload stalls.
-/// - Reject immediately on frame length or newline checks that do not match, returning
-///   `InvalidFrame` before protocol state is perturbed.
-/// - Validate each field (`schema` / `step` / context limits / observation) as the
-///   smallest reusable safety envelope.
-///
-/// Issue and implementation references:
-/// - [modelcontextprotocol/servers#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [modelcontextprotocol/servers#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-/// - [modelcontextprotocol/servers#3505](https://github.com/modelcontextprotocol/servers/pull/3505)
-/// - [modelcontextprotocol/servers#3402](https://github.com/modelcontextprotocol/servers/issues/3402)
-/// - [modelcontextprotocol/go-sdk discussion #364](https://github.com/orgs/modelcontextprotocol/discussions/364)
-/// - [rust-fs-mcp line based dispatch](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
-/// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
-/// - [modelcontextprotocol/python-sdk issue #262](https://github.com/modelcontextprotocol/python-sdk/issues/262)
+/// Reads one newline-terminated invocation frame through EOF, within the byte limit.
+/// Rejects extra frames, unknown fields, invalid context sizes and observations.
 pub fn read_agent_invocation(
     reader: impl Read,
 ) -> Result<AgentInvocationEnvelope, RuntimeClientError> {
@@ -108,21 +77,7 @@ fn invalid_origin(origin: &InteractionOrigin) -> bool {
         })
 }
 
-/// Returns whether a tool observation violates the wire contract.
-///
-/// Validation guardrails:
-/// - `tool_call_id` and tool names must not use confusing suffixes.
-/// - `status` must be either `ok` or `error`.
-/// - Empty names and oversized content are rejected to avoid downstream injection
-///   and parse ambiguity.
-///
-/// Reference implementations:
-/// - [modelcontextprotocol/servers pull #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
-/// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
-/// - [mark3labs/mcp-filesystem-server main branch](https://github.com/mark3labs/mcp-filesystem-server)
-/// - [OpenAI Codex tool_call_id mismatch issue #8479](https://github.com/openai/codex/issues/8479)
-/// - [modelcontextprotocol/servers pull #4523](https://github.com/modelcontextprotocol/servers/pull/4523)
-/// - [modelcontextprotocol/python-sdk PR #1655](https://github.com/modelcontextprotocol/python-sdk/pull/1655)
+/// Checks observation identity, completion status and content size.
 fn invalid_observation(value: &AgentToolObservation) -> bool {
     !valid_name(value.tool_call_id())
         || !valid_name(value.name())
@@ -130,18 +85,8 @@ fn invalid_observation(value: &AgentToolObservation) -> bool {
         || value.content().len() > MAX_OBSERVATION_BYTES
 }
 
-/// Returns whether a tool-call identifier or tool name is canonical.
-///
-/// This rule follows the MCP filesystem requirement that tool names remain parseable and
-/// traceable.
-/// - Empty names and overlong names are rejected.
-/// - Special characters are forbidden in first position to avoid path and namespace ambiguity.
-/// - `.sock` and `.d` suffixes are explicitly rejected to avoid filesystem-style collisions.
-///
-/// Related implementations:
-/// - [rust-fs-mcp tool naming in response and catalog](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l556)
-/// - [Model Context Protocol schema tooling naming fields](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-06-18/schema.ts)
-/// - [OpenAI Codex tool call matching issue #2550](https://github.com/microsoft/autogen/issues/2550)
+/// Accepts canonical tool-call identifiers and tool names up to 255 bytes.
+/// Names start with an ASCII letter or digit and cannot end in `.sock` or `.d`.
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 255
