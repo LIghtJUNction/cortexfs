@@ -4,7 +4,7 @@
 文件 / 模块 / 函数命名约定见 docs/naming-guide.md（`crates/cortexfs/src` 新模块用内核风格单 token 文件名，禁止 `-`/`_` 作模块 stem，禁止 `mod.rs`；函数仍 `snake_case` 且宜短）。
 模块依赖只允许同层或向下（见 internal-architecture.md §4）；禁止 fuse→executor、support→agent/runtime、library→bin。库内新增错误不要用 `Result<_, String>`；进程本地可用 `ExecError` 一类 shell，稳定领域失败用 enum + Display + Error。
 开发触发事件以 Git commit 为唯一边界；不要新增后台监听、轮询或热加载子命令。
-Git 分支约定：默认和当前工作均留在 `main`；除非用户明确要求，否则不得创建或切换分支；若用户明确要求使用其他分支，任务结束前须切回 `main`，除非用户另有说明。
+Git 分支约定：`main` 是默认集成分支；代码修改通常在描述任务的独立分支上完成，并通过 PR 交付。用户授权修改代码后，可按任务需要创建或切换工作分支、提交修改、推送该分支并创建 PR，无需重复确认这些常规步骤；用户另有明确指示时遵从其要求。操作前检查工作区，保留用户已有修改，不覆盖或丢弃无关工作。任务结束时可留在交付分支，并报告分支及 PR 链接，无需强制切回 `main`。直接推送 `main`、强制推送或合并 PR 须获得用户对该动作的明确授权；本约定不替代工具和平台的权限或审批要求。
 文件系统 ABI 只使用当前规范里的短单数顶层目录；不要新增 chan/job/hook/workflow 这类第二套提交或编排入口。
 统一提交语义是：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读取结果，向 audit 追加事实。
 
