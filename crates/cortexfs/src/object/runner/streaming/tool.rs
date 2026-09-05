@@ -34,10 +34,11 @@ impl OpenAiToolCallStream {
                 self.index = Some(index);
             }
         }
-        if let Some(id) = delta.id {
+        // Empty continuation fields are placeholders, not new identities.
+        if let Some(id) = delta.id.filter(|id| !id.is_empty()) {
             self.id = Some(id);
         }
-        if let Some(name) = delta.name {
+        if let Some(name) = delta.name.filter(|name| !name.is_empty()) {
             self.name = Some(name);
         }
         self.arguments.push_str(&delta.arguments);

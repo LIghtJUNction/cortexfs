@@ -1,3 +1,4 @@
+use crate::render::{clip, render_message};
 use crate::{History, HistorySelection, Message};
 
 /// Built-in summarizer that joins omitted messages as bullet lines.
@@ -10,7 +11,7 @@ impl Summarizer for DefaultSummarizer {
     fn summarize(&self, messages: &[Message]) -> Result<String, Self::Error> {
         Ok(messages
             .iter()
-            .map(|message| format!("- {}: {}", message.role(), message.content().trim()))
+            .map(render_message)
             .collect::<Vec<_>>()
             .join("\n"))
     }
@@ -81,28 +82,26 @@ pub fn render_selection(
     let recent = selection
         .messages()
         .iter()
-        .map(|message| format!("- {}: {}", message.role(), message.content().trim()))
+        .map(render_message)
         .collect::<Vec<_>>()
         .join("\n");
-    let prefix = summary
-        .map(|value| format!("Summary of earlier context:\n{}\n\n", value.trim()))
+    let recent = clip(&recent, max_chars);
+    // A replaceable compactor may return an arbitrarily long summary. It must
+    // never overwrite the newest observations or exceed the shared byte limit.
+    let heading = "Summary of earlier context:\n";
+    let available = max_chars.saturating_sub(recent.len() + heading.len() + 2);
+    let summary = summary
+        .map(|value| clip(value.trim(), available))
         .unwrap_or_default();
-    let text = clip(&format!("{prefix}{recent}"), max_chars);
+    let summarized = !summary.is_empty();
+    let text = if summarized {
+        format!("{heading}{summary}\n\n{recent}")
+    } else {
+        recent
+    };
     CompactedHistory {
         text,
         omitted: selection.omitted(),
-        summarized: summary.is_some(),
+        summarized,
     }
-}
-
-fn clip(value: &str, max_chars: usize) -> String {
-    if value.len() <= max_chars {
-        return value.to_owned();
-    }
-    let marker = "\n[context truncated]\n";
-    let mut end = max_chars.saturating_sub(marker.len());
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    format!("{}{marker}", value.get(..end).unwrap_or_default())
 }

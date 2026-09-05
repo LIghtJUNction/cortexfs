@@ -6,8 +6,6 @@ use crate::{RuntimeClientError, interaction};
 
 mod duplex;
 
-use duplex::send_json_stream;
-
 pub(super) const MAX_SESSION_FRAME_BYTES: usize = 256 * 1024;
 pub(super) const MAX_SESSION_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -22,7 +20,7 @@ pub struct SessionSendRequest<'a> {
     pub input: &'a str,
 }
 
-/// Sends one session request and returns the runtime's canonical JSONL events.
+/// Sends one session request and returns canonical JSONL events.
 pub fn send(
     socket: &Path,
     request: SessionSendRequest<'_>,
@@ -35,11 +33,11 @@ pub fn send(
     Ok(frames)
 }
 
-/// Sends one session request and invokes the callback for each event frame.
+/// Sends one session request and calls `on_frame` for each event.
 pub fn send_stream<F, E>(
     socket: &Path,
     request: SessionSendRequest<'_>,
-    on_frame: F,
+    mut on_frame: F,
 ) -> Result<(), E>
 where
     F: FnMut(&str) -> Result<(), E>,
@@ -59,14 +57,14 @@ where
     if frame.len() > MAX_SESSION_FRAME_BYTES {
         return Err(E::from(RuntimeClientError::InvalidRequest));
     }
-    send_json_stream(socket, &frame, on_frame)
+    duplex::send_json_stream_with(socket, &frame, |_stream, line| on_frame(line))
 }
 
-/// Sends one provider-neutral interaction request through the agent socket.
+/// Sends one provider-neutral interaction request through the Agent socket.
 pub fn send_interaction_stream<F, E>(
     socket: &Path,
     request: interaction::InteractionRequest,
-    on_frame: F,
+    mut on_frame: F,
 ) -> Result<(), E>
 where
     F: FnMut(&str) -> Result<(), E>,
@@ -78,10 +76,10 @@ where
         .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
     let frame = serde_json::to_string(&frame)
         .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
-    send_json_stream(socket, &frame, on_frame)
+    duplex::send_json_stream_with(socket, &frame, |_stream, line| on_frame(line))
 }
 
-/// Sends an interaction request and normalizes executable-agent events.
+/// Sends a request and normalizes executable-Agent events.
 pub fn send_interaction_events<F, E>(
     socket: &Path,
     request: interaction::InteractionRequest,
@@ -100,7 +98,7 @@ where
     })
 }
 
-/// Sends an interaction request and answers runtime commands on the same socket.
+/// Sends a request and answers runtime commands on the same socket.
 #[expect(
     clippy::pattern_type_mismatch,
     reason = "match ergonomics keep borrowed interaction events readable"
@@ -146,18 +144,17 @@ where
 }
 
 fn validate(request: &SessionSendRequest<'_>) -> Result<(), RuntimeClientError> {
-    if request.scope != "private" && request.scope != "shared" && request.scope != "temp" {
+    if !matches!(request.scope, "private" | "shared" | "temp") {
         return Err(RuntimeClientError::InvalidRequest);
     }
-    let fields = [
+    if [
         request.request_id,
         request.session,
         request.scope,
         request.input,
-    ];
-    if fields
-        .iter()
-        .any(|field| field.is_empty() || field.contains('\0'))
+    ]
+    .iter()
+    .any(|field| field.is_empty() || field.contains('\0'))
         || request.cwd.is_some_and(|value| value.contains('\0'))
         || request.workspace.is_some_and(|value| value.contains('\0'))
     {

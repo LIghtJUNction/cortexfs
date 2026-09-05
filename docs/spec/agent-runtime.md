@@ -343,8 +343,26 @@ Every sandbox also applies host isolation flags before process mounts:
 --new-session
 --cap-drop ALL
 --unshare-uts
---hostname cortexfs
 ```
+
+The private UTS namespace inherits its initial hostname; the launcher does not
+call `sethostname`. The packaged service denies `sethostname`, `setdomainname`,
+and `syslog` with `SystemCallFilter`, including inside child namespaces.
+A fixed cosmetic hostname is not an isolation requirement.
+
+The privileged launcher needs an unmasked parent procfs: `ProcSubset=pid`,
+`ProtectHostname`, `ProtectKernelTunables`, and `ProtectKernelLogs` mount masks
+prevent a non-root Bubblewrap child from mounting its private `/proc`. The
+service therefore uses `ProcSubset=all`, disables those three mount-mask
+options, and removes `CAP_SYSLOG`. `ProtectProc=invisible`, `NoNewPrivileges`,
+read-only system paths, cgroup bounds, and the child's private PID/UTS/proc
+namespaces and dropped capabilities remain in force.
+
+This is not equivalent parent-process hardening: the trusted root launcher has
+more procfs visibility, and its compromise remains a host-level risk. Do not
+load arbitrary harness extensions into that process. Further separation of
+privileged launch from untrusted execution needs its own authority and threat
+review, not another inherited procfs mask that prevents sandbox startup.
 
 Interactive terminals launched by `ctx agent start` are transient user systemd
 units with hard cgroup ceilings (see `support::quota`):

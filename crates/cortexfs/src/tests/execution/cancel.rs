@@ -79,7 +79,7 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
     for after_delta in [
         "sleep 5",
         "exec 1>&-\nsleep 5",
-        "/usr/bin/timeout 5 /usr/bin/yes ''",
+        "/usr/bin/timeout --foreground 5 /usr/bin/yes ''",
         "sleep 5 >/dev/null &\nexit 0",
     ] {
         let root = reference_tree("agent-partial-delta-cancel");

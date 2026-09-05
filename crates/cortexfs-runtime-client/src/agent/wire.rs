@@ -1,22 +1,18 @@
 use std::io::Read;
 
-use crate::RuntimeClientError;
+use crate::{RuntimeClientError, interaction::InteractionOrigin};
 
 use super::{
     AGENT_INVOCATION_SCHEMA, AgentInvocationEnvelope, AgentToolObservation,
     MAX_AGENT_CONTEXT_BYTES, MAX_AGENT_INVOCATION_BYTES, MAX_AGENT_STEPS,
 };
-use crate::interaction::InteractionOrigin;
 
-/// Read one byte beyond the frame limit to detect oversized input.
 const MAX_AGENT_INVOCATION_READ: u64 = 1024 * 1024 + 1;
 
-/// Maximum result bytes carried in one tool observation.
 const MAX_OBSERVATION_BYTES: usize = 16 * 1024;
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 
-/// Reads one newline-terminated invocation frame through EOF, within the byte limit.
-/// Rejects extra frames, unknown fields, invalid context sizes and observations.
+/// Reads and validates one bounded, newline-terminated invocation frame.
 pub fn read_agent_invocation(
     reader: impl Read,
 ) -> Result<AgentInvocationEnvelope, RuntimeClientError> {
@@ -77,7 +73,6 @@ fn invalid_origin(origin: &InteractionOrigin) -> bool {
         })
 }
 
-/// Checks observation identity, completion status and content size.
 fn invalid_observation(value: &AgentToolObservation) -> bool {
     !valid_name(value.tool_call_id())
         || !valid_name(value.name())
@@ -85,8 +80,6 @@ fn invalid_observation(value: &AgentToolObservation) -> bool {
         || value.content().len() > MAX_OBSERVATION_BYTES
 }
 
-/// Accepts canonical tool-call identifiers and tool names up to 255 bytes.
-/// Names start with an ASCII letter or digit and cannot end in `.sock` or `.d`.
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 255

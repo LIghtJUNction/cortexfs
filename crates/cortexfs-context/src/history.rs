@@ -62,7 +62,7 @@ impl History {
         let mut selected = Vec::new();
         let mut used = 0_usize;
         for message in self.messages.iter().rev() {
-            let line = render::render_message(message);
+            let line = crate::render::render_message(message);
             let needed = line.len() + usize::from(!selected.is_empty());
             if used.saturating_add(needed) > max_chars {
                 break;

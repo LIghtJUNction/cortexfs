@@ -29,20 +29,6 @@ pub(crate) fn require_child_context_files(child_dir: &Path) -> Result<(), ChildC
     Ok(())
 }
 
-pub(crate) fn require_agent_schedule_parent_context(
-    parent_session_dir: &Path,
-) -> Result<(), AgentScheduleRecordError> {
-    for file in SESSION_REQUIRED_FILES {
-        if !is_plain_existing_file(&parent_session_dir.join(file)) {
-            return Err(AgentScheduleRecordError::MissingParentSession);
-        }
-    }
-    if !is_plain_existing_dir(&parent_session_dir.join("context")) {
-        return Err(AgentScheduleRecordError::MissingParentSession);
-    }
-    Ok(())
-}
-
 pub(crate) fn agent_schedule_child_record_error(
     error: ChildContextRecordError,
 ) -> AgentScheduleRecordError {
@@ -86,7 +72,8 @@ pub(crate) fn schedule_child_context_matches(
         .join(child_name);
     match child_dir.symlink_metadata() {
         Ok(metadata) if metadata.is_dir() => {
-            require_agent_schedule_child_context_files(&child_dir)?;
+            require_child_context_files(&child_dir)
+                .map_err(|_error| AgentScheduleRecordError::CannotRecord)?;
             if read_child_schedule_file(&child_dir, "agent")? != format!("{child_agent}\n")
                 || read_child_schedule_file(&child_dir, "session")? != format!("{child_session}\n")
                 || read_child_schedule_file(&child_dir, "handoff.md")?
@@ -105,22 +92,6 @@ pub(crate) fn schedule_child_context_matches(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(_error) => Err(AgentScheduleRecordError::CannotRecord),
     }
-}
-
-pub(crate) fn require_agent_schedule_child_context_files(
-    child_dir: &Path,
-) -> Result<(), AgentScheduleRecordError> {
-    for file in CHILD_RESULT_REQUIRED_FILES {
-        if !is_plain_existing_file(&child_dir.join(file)) {
-            return Err(AgentScheduleRecordError::CannotRecord);
-        }
-    }
-    for dir in CHILD_RESULT_REQUIRED_DIRS {
-        if !is_plain_existing_dir(&child_dir.join(dir)) {
-            return Err(AgentScheduleRecordError::CannotRecord);
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn read_child_schedule_file(

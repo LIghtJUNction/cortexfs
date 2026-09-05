@@ -18,13 +18,6 @@
 )]
 #![expect(clippy::module_inception, reason = "allow submodule self name")]
 
-use std::env;
-use std::ffi::OsString;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
-
 use cortexfs::{
     AgentExecutableSocketRuntime, AgentStopHandler, MountTable, NetworkConnectAuthority,
     PreparedAgentStop, RunEnvironment, SocketPeerPolicy, SocketRuntimeError,
@@ -33,47 +26,49 @@ use cortexfs::{
 };
 use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
+use std::{
+    env,
+    ffi::OsString,
+    fs, io,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 const DEFAULT_SOURCE: &str = cortexfs_paths::SYSTEM_STORAGE_CURRENT;
 const BWRAP_PROGRAM: &str = cortexfs::support::command::BWRAP;
 const RUN_CONTROL_DIR: &str = cortexfs_paths::SYSTEM_CONTROL_DIR;
 
-pub(crate) use cortexfs::cli::stderr;
-pub(crate) use stderr::*;
+use cortexfs::cli::stderr::write_error;
 
 pub(crate) fn main() -> ExitCode {
-    match run(env::args_os().skip(1).collect()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            let _ignored = write_error(&format!("cortexfs-agent-runtime: {error}"));
-            ExitCode::from(2)
-        }
+    if let Err(error) = run(env::args_os().skip(1).collect()) {
+        let _ignored = write_error(&format!("cortexfs-agent-runtime: {error}"));
+        return ExitCode::from(2);
     }
+    ExitCode::SUCCESS
 }
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let mut config = RuntimeConfig::parse(args)?;
     config.source = cortexfs::pin_storage_source(&config.source)
         .map_err(|error| format!("invalid source root: {error}"))?;
-    match config.mode {
-        RuntimeMode::PrepareSocketAlias => {
-            return cortexfs::agent::launch::prepare_system_agent_alias(
-                &config.source,
-                &config.agent,
-            )
-            .map(|_changed| ())
-            .map_err(|error| format!("prepare socket alias: {error}"));
-        }
-        RuntimeMode::CleanupSocketAlias => {
-            return cortexfs::agent::launch::cleanup_system_agent_alias(
-                &config.source,
-                &config.agent,
-            )
-            .map(|_changed| ())
-            .map_err(|error| format!("cleanup socket alias: {error}"));
-        }
-        RuntimeMode::Serve => {}
-    }
+    let (action, result) = match config.mode {
+        RuntimeMode::Serve => return serve(&config),
+        RuntimeMode::PrepareSocketAlias => (
+            "prepare",
+            cortexfs::agent::launch::prepare_system_agent_alias(&config.source, &config.agent),
+        ),
+        RuntimeMode::CleanupSocketAlias => (
+            "cleanup",
+            cortexfs::agent::launch::cleanup_system_agent_alias(&config.source, &config.agent),
+        ),
+    };
+    result
+        .map(|_changed| ())
+        .map_err(|error| format!("{action} socket alias: {error}"))
+}
+
+fn serve(config: &RuntimeConfig) -> Result<(), String> {
     let view = derive_agent_runtime_view(&config.source, &config.agent)
         .map_err(|error| format!("agent view {}: {}", error.errno(), config.agent))?;
     let mut listenfd = ListenFd::from_env();
@@ -85,29 +80,25 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
             "missing systemd Unix listener fd; start via cortexfs-agent@.socket".to_owned(),
         );
     };
-
     let session_root =
         cortexfs_paths::agent_sessions_from_home_path(view.ctx_home(), view.agent_name());
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid_or_root(view.identity().uid());
-    let runtime_model = runtime_model(&config.source, view.model());
+    let model = view.model();
     let network_allowed = authorize_network_connect(
         "default",
         NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
     )
     .is_ok();
-    let mut runtime_env = view.env().to_vec();
-    if runtime_model != view.model() {
-        runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
-    }
-    runtime_env.extend(provider_runtime_env(&config.source, &runtime_model)?);
-    let agent_executable =
+    let mut env = view.env().to_vec();
+    env.extend(provider_runtime_env(&config.source, model)?);
+    let executable =
         cortexfs::agent::resolve_agent_loop_executable_for_agent(&config.source, &config.agent)
             .map_err(|_error| "cannot resolve agent loop executable".to_owned())?;
     let control_dir = Path::new(RUN_CONTROL_DIR);
     #[expect(
         clippy::create_dir,
-        reason = "single private leaf must not recursively create or traverse parents"
+        reason = "single private leaf does not traverse parents"
     )]
     match fs::create_dir(control_dir) {
         Ok(()) => {}
@@ -118,30 +109,34 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         .map_err(|error| format!("cannot open run control directory: {error}"))?;
     fchmod(&control_fd, Mode::from_bits_truncate(0o711))
         .map_err(|error| format!("cannot secure run control directory: {error}"))?;
-    let stop = RuntimeStopHandler {
-        source: config.source.clone(),
-        owner_uid: view.owner(),
-        runtime_agent: view.agent_name().to_owned(),
+    let stop = RuntimeStopHandler(
+        config.source.clone(),
+        view.owner(),
+        view.agent_name().to_owned(),
+    );
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &config.source,
+        source_root: &config.source,
+        identity: view.identity(),
+        env: &env,
+        session_root: &session_root,
+        default_cwd: &default_cwd,
+        model: Some(model),
+        network_allowed,
+        agent_name: view.agent_name(),
+        agent_executable: &executable,
+        environment: runtime_agent_environment(view.mount_table(), control_dir),
     };
-    let result = serve_agent_executable_socket_listener_once_with_stop(
+    // Keep v1 one-shot admission until session ownership and cancellation routing
+    // are independent of the per-Agent current-session index.
+    serve_agent_executable_socket_listener_once_with_stop(
         &listener,
         Some(peer_policy),
-        AgentExecutableSocketRuntime {
-            ctx_root: &config.source,
-            source_root: &config.source,
-            identity: view.identity(),
-            env: &runtime_env,
-            session_root: &session_root,
-            default_cwd: &default_cwd,
-            model: Some(&runtime_model),
-            network_allowed,
-            agent_name: view.agent_name(),
-            agent_executable: &agent_executable,
-            environment: runtime_agent_environment(view.mount_table(), control_dir),
-        },
+        runtime,
         Some(&stop),
-    );
-    result.map(|_response| ()).map_err(|error| {
+    )
+    .map(|_response| ())
+    .map_err(|error| {
         format!(
             "socket runtime {} {error:?}: {}",
             error.errno(),
@@ -149,15 +144,8 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         )
     })
 }
-
-struct RuntimeStopHandler {
-    source: PathBuf,
-    owner_uid: u32,
-    runtime_agent: String,
-}
-
+struct RuntimeStopHandler(PathBuf, u32, String);
 struct RuntimePreparedStop(cortexfs::agent::stop::StopPlan);
-
 impl AgentStopHandler for RuntimeStopHandler {
     fn preflight(
         &self,
@@ -165,16 +153,13 @@ impl AgentStopHandler for RuntimeStopHandler {
         peer_uid: u32,
     ) -> Result<Box<dyn PreparedAgentStop>, SocketRuntimeError> {
         let context = cortexfs::agent::stop::StopContext {
-            source: self.source.clone(),
-            owner_uid: self.owner_uid,
+            source: self.0.clone(),
+            owner_uid: self.1,
             peer_uid,
-            runtime_agent: self.runtime_agent.clone(),
+            runtime_agent: self.2.clone(),
         };
         cortexfs::agent::stop::plan_stop(&context, agent)
-            .map(|plan| {
-                let prepared: Box<dyn PreparedAgentStop> = Box::new(RuntimePreparedStop(plan));
-                prepared
-            })
+            .map(|plan| -> Box<dyn PreparedAgentStop> { Box::new(RuntimePreparedStop(plan)) })
             .map_err(|error| {
                 let _ignored =
                     write_error(&format!("cortexfs-agent-runtime: stop preflight: {error}"));
@@ -182,14 +167,12 @@ impl AgentStopHandler for RuntimeStopHandler {
             })
     }
 }
-
 impl PreparedAgentStop for RuntimePreparedStop {
     fn execute(self: Box<Self>) -> Result<(), SocketRuntimeError> {
         cortexfs::agent::stop::execute_stop(self.0)
             .map_err(|_error| SocketRuntimeError::PostAcceptStop)
     }
 }
-
 pub(crate) fn runtime_agent_environment<'a>(
     mount_table: &'a MountTable,
     control_dir: &'a Path,
@@ -200,11 +183,6 @@ pub(crate) fn runtime_agent_environment<'a>(
         control_dir: Some(control_dir),
     }
 }
-
-pub(crate) fn runtime_model(_source: &Path, requested_model: &str) -> String {
-    requested_model.to_owned()
-}
-
 fn provider_runtime_env(source: &Path, model: &str) -> Result<Vec<(String, String)>, String> {
     if cortexfs::selected_model_provider(source, model).as_deref() == Some("codex") {
         let credential = cortexfs::resolve_codex_system()
@@ -232,7 +210,6 @@ fn provider_runtime_env(source: &Path, model: &str) -> Result<Vec<(String, Strin
         String::new(),
     ))
 }
-
 fn secret_runtime_env(
     token: String,
     provider: String,
@@ -248,89 +225,67 @@ fn secret_runtime_env(
     .map(|(name, value)| (name.to_owned(), value))
     .to_vec()
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeMode {
     Serve,
     PrepareSocketAlias,
     CleanupSocketAlias,
 }
-
 #[derive(Debug, Eq, PartialEq)]
 struct RuntimeConfig {
     source: PathBuf,
     agent: String,
     mode: RuntimeMode,
 }
-
 impl RuntimeConfig {
     fn parse(args: Vec<OsString>) -> Result<Self, String> {
-        let mut source = PathBuf::from(DEFAULT_SOURCE);
-        let mut agent = None;
-        let mut positional_agent = false;
-        let mut mode = RuntimeMode::Serve;
+        let mut config = Self {
+            source: PathBuf::from(DEFAULT_SOURCE),
+            agent: String::new(),
+            mode: RuntimeMode::Serve,
+        };
+        let mut agent_set = false;
+        let mut positional = false;
         let mut values = args.into_iter();
-
         while let Some(value) = values.next() {
             if value == "--source" || value == "-s" {
-                let Some(next) = values.next() else {
-                    return Err("--source requires a path".to_owned());
-                };
-                source = PathBuf::from(next);
-                continue;
-            }
-            if value == "--agent" || value == "-a" {
-                let Some(next) = values.next() else {
-                    return Err("--agent requires a name".to_owned());
-                };
-                agent = Some(os_string(next)?);
-                continue;
-            }
-            if value == "--prepare-socket-alias" {
-                if mode != RuntimeMode::Serve {
+                config.source = PathBuf::from(values.next().ok_or("--source requires a path")?);
+            } else if value == "--agent" || value == "-a" {
+                config.agent = os_string(values.next().ok_or("--agent requires a name")?)?;
+                agent_set = true;
+            } else if value == "--prepare-socket-alias" || value == "--cleanup-socket-alias" {
+                if config.mode != RuntimeMode::Serve {
                     return Err("runtime modes are mutually exclusive".to_owned());
                 }
-                mode = RuntimeMode::PrepareSocketAlias;
-                continue;
-            }
-            if value == "--cleanup-socket-alias" {
-                if mode != RuntimeMode::Serve {
-                    return Err("runtime modes are mutually exclusive".to_owned());
-                }
-                mode = RuntimeMode::CleanupSocketAlias;
-                continue;
-            }
-            if value == "--help" || value == "-h" {
+                config.mode = if value == "--prepare-socket-alias" {
+                    RuntimeMode::PrepareSocketAlias
+                } else {
+                    RuntimeMode::CleanupSocketAlias
+                };
+            } else if value == "--help" || value == "-h" {
                 return Err(usage());
+            } else if !agent_set {
+                config.agent = os_string(value)?;
+                agent_set = true;
+                positional = true;
+            } else {
+                return Err("unexpected extra argument".to_owned());
             }
-            if agent.is_none() {
-                agent = Some(os_string(value)?);
-                positional_agent = true;
-                continue;
-            }
-            return Err("unexpected extra argument".to_owned());
         }
-
-        let Some(agent) = agent else {
+        if !agent_set {
             return Err(usage());
-        };
-        if mode != RuntimeMode::Serve && positional_agent {
+        }
+        if config.mode != RuntimeMode::Serve && positional {
             return Err("internal socket alias modes require --agent".to_owned());
         }
-        Ok(Self {
-            source,
-            agent,
-            mode,
-        })
+        Ok(config)
     }
 }
-
 pub(crate) fn os_string(value: OsString) -> Result<String, String> {
     value
         .into_string()
         .map_err(|value| format!("arguments must be valid UTF-8: {}", value.to_string_lossy()))
 }
-
 pub(crate) fn usage() -> String {
     "usage: cortexfs-agent-runtime [--source CTX_SOURCE] --agent AGENT [--prepare-socket-alias|--cleanup-socket-alias]".to_owned()
 }

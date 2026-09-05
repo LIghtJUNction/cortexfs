@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::runtime::record::{
-    read_child_schedule_status, require_agent_schedule_parent_context,
+    agent_schedule_child_record_error, read_child_schedule_status, require_parent_session_context,
     schedule_child_context_matches,
 };
 use crate::{
@@ -20,7 +20,8 @@ pub fn completed_agent_schedule_nodes_from_parent_context(
 ) -> Result<Vec<String>, AgentScheduleRecordError> {
     let nodes = agent_schedule_nodes(schedule_json, parent_subject, parent_policy)
         .map_err(AgentScheduleRecordError::InvalidSchedule)?;
-    require_agent_schedule_parent_context(parent_session_dir)?;
+    require_parent_session_context(parent_session_dir)
+        .map_err(agent_schedule_child_record_error)?;
 
     let known = nodes
         .iter()

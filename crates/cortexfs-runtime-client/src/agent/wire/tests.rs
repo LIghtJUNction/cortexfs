@@ -1,6 +1,5 @@
 use super::*;
 
-/// Builds an invocation fixture with stable schema + optional observation object.
 fn frame(step: u8, observation: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "schema": AGENT_INVOCATION_SCHEMA,
@@ -13,14 +12,12 @@ fn frame(step: u8, observation: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// Parses one fixture frame by appending the newline delimiter required by the wire parser.
 fn parse(value: &serde_json::Value) -> Result<AgentInvocationEnvelope, RuntimeClientError> {
     let mut bytes = serde_json::to_vec(value).map_err(|_error| RuntimeClientError::InvalidFrame)?;
     bytes.push(b'\n');
     read_agent_invocation(bytes.as_slice())
 }
 
-/// Accepts initial frame without observation and continuation frame with observation.
 #[test]
 fn accepts_exact_initial_and_continuation_frames() {
     let initial = parse(&frame(0, &serde_json::Value::Null));
@@ -72,7 +69,6 @@ fn accepts_bounded_channel_origin_in_envelope() {
     );
 }
 
-/// Rejects a frame missing the trailing newline and reject concatenated multi-frame blobs.
 #[test]
 fn rejects_noncanonical_framing() {
     let encoded = serde_json::to_vec(&frame(0, &serde_json::Value::Null)).unwrap_or_default();
@@ -109,7 +105,6 @@ fn invocation_limit_includes_the_newline() -> Result<(), serde_json::Error> {
     Ok(())
 }
 
-/// Rejects unknown JSON fields, step mismatch, and unexpected step-observation pairing.
 #[test]
 fn rejects_unknown_fields_and_invalid_step_observations() {
     let mut unknown = frame(0, &serde_json::Value::Null);
@@ -134,7 +129,6 @@ fn rejects_unknown_fields_and_invalid_step_observations() {
     }
 }
 
-/// Rejects malformed observation identity, status and truncated payload edges.
 #[test]
 fn rejects_invalid_observation_identity_status_and_size() {
     for (id, name, status, content) in [
