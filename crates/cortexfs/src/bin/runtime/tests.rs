@@ -127,6 +127,10 @@ fn packaged_socket_unit_preserves_safe_service_lifecycle() -> Result<(), Box<dyn
         "ProtectHostname=no",
         "SystemCallFilter=~sethostname setdomainname syslog",
         "ProcSubset=all",
+        "ProtectProc=invisible",
+        "ProtectKernelTunables=no",
+        "ProtectKernelLogs=no",
+        "CapabilityBoundingSet=~CAP_SYSLOG",
     ] {
         let key = directive.split('=').next().ok_or("missing directive key")?;
         assert_eq!(

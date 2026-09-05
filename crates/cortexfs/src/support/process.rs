@@ -18,8 +18,8 @@ pub fn bwrap_process_setup_args() -> Vec<String> {
         "--new-session".to_owned(),
         "--cap-drop".to_owned(),
         "ALL".to_owned(),
-        // Do not call sethostname: systemd's inherited ProtectHostname filter
-        // also covers child UTS namespaces. Isolation does not require renaming.
+        // The inherited syscall filter also covers child UTS namespaces.
+        // Isolation does not require calling sethostname to rename them.
         "--unshare-uts".to_owned(),
         "--proc".to_owned(),
         "/proc".to_owned(),
