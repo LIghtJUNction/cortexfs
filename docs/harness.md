@@ -84,3 +84,7 @@ No speed, cost, or quality win is claimed by this architecture change.
    projection, and independently selected extension fixtures.
 5. Retain raw results and clearly distinguish live-model evidence, deterministic
    fixture evidence, untested surfaces, and planned work.
+
+The [2026-09-05 live validation report](reports/2026-09-05-harness-validation.md)
+records the deployed revision, successful checks, failed experiments, and the
+remaining mounted Tool SDK and large-history-row gaps.

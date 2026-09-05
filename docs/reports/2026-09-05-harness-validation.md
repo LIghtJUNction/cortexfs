@@ -10,12 +10,13 @@ of Pi feature parity. See [harness.md](../harness.md) for replacement boundaries
 - Development stayed on `main`; implementation commits were pushed to origin.
 - Server: the explicitly requested SSH host `DmitUbuntu`, Ubuntu 26.04, with
   verified existing host key. Production mount remains `/ctx`.
-- Deployed package: `0.1.21`, source commit `597e3c49c4bf`. Production Rust
-  executables are from `fa6ada751e6e`; the later commit changes unit settings,
-  their tests, and documentation, not production Rust behavior.
+- Deployed package: `0.1.21`, source and executable commit `a6f6977fb13b`.
+  The final sync includes concurrently merged security fixes `b6395c2d` (#144).
+  That combined tree passed serial tests and workspace Clippy, was rebuilt in
+  release mode, and repeated the real tool/compaction checks before acceptance.
 - Private receipts, executable/package hashes, raw requests, responses, failed
   attempts, and configuration snapshots are retained under server directory
-  `/var/lib/cortexfs/deploy/`; the final receipt directory is `597e3c49c4bf/`.
+  `/var/lib/cortexfs/deploy/`; the final receipt directory is `a6f6977fb13b/`.
   Credentials and raw private traces are not published in this repository.
 
 ## Changes actually delivered
@@ -46,10 +47,10 @@ of Pi feature parity. See [harness.md](../harness.md) for replacement boundaries
 | Serial repository gates | format, source budget, check, Clippy, tests pass | implementation commit hooks and retained local logs |
 | Context regression | two new tests fail before fix; six context behavior tests pass in release afterward | `compact-release-before.log`, `compact-release-after.log` in private checkpoint |
 | SSE regression | accumulator fails on empty identity continuations before fix; four selected stream tests pass afterward | `sse-regression-before.log`, `sse-regression-after.log` |
-| Real model + FUSE tools | three dependent calls: read `37/harbor`, write `74/HARBOR`, independently read result | `597e3c49c4bf/live-tools/`, terminal status `ok`, 43 frames, 12.262 s |
+| Real model + FUSE tools | three dependent calls: read `37/harbor`, write `74/HARBOR`, independently read result | `a6f6977fb13b/live-tools/`, terminal status `ok`, 48 frames, 11.885 s |
 | Policy enforcement | denied until both caller and target policies permit the isolated test label | preceding failed attempts retained; no wildcard grants added |
-| Custom compactor + continuation | old `CHECKPOINT` and compactor-only marker recalled in the next turn | `597e3c49c4bf/live-compact/`, 3.540 s seed and 2.522 s recall |
-| Durable history | exact byte prefix retained across compaction | 11,776 bytes before, 12,119 after; prefix assertion passes |
+| Custom compactor + continuation | old `CHECKPOINT` and compactor-only marker recalled in the next turn | `a6f6977fb13b/live-compact/`, 4.147 s seed and 3.336 s recall |
+| Durable history | exact byte prefix retained across compaction | 11,776 bytes before, 12,239 after; prefix assertion passes |
 | Component replacement | custom `loop.d/fixture` executes and yields a declared native call | `sdk-proof.jsonl`; complete custom-tool sequence does **not** pass |
 | Deployment health | FUSE ready, 8/8 entries loaded, coder ping succeeds, Discord and socket services active | final health files and systemd checks |
 
@@ -82,8 +83,10 @@ without introducing new wildcard authority.
 - **External Tool SDK through FUSE:** the SDK fixture installs and its receipt
   verifies; its backing executable is ELF. The mounted entry is a gate wrapper.
   A custom loop reaches `example.echo`, but the execution path invokes the
-  reference runner and reports an unimplemented tool/empty SDK output. Native
-  SDK fixture tests are not evidence that this mounted path works. Fixing this
+  reference runner and reports an unimplemented tool/empty SDK output. That
+  failed fixture is recorded under `597e3c49c4bf/sdk-proof.jsonl`; no full mounted
+  SDK-tool success is claimed after the final sync. Native SDK fixture tests
+  are not evidence that this mounted path works. Fixing this
   must preserve receipt binding and authority; do not bypass the FUSE gate.
 - Persistent interaction v2, durable per-session concurrent ownership/replay,
   arbitrary runtime-loaded policy evaluators, and a universal component loader
