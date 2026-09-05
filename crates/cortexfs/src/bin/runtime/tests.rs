@@ -103,7 +103,12 @@ fn packaged_socket_unit_preserves_safe_service_lifecycle() -> Result<(), Box<dyn
             "NoNewPrivileges=yes",
             "PrivateTmp=yes",
             "RestrictNamespaces=mnt ipc net pid uts user cgroup",
-            "ProtectHostname=yes",
+            "ProtectHostname=no",
+            "SystemCallFilter=~sethostname setdomainname syslog",
+            "ProtectKernelTunables=no",
+            "ProtectKernelLogs=no",
+            "CapabilityBoundingSet=~CAP_SYSLOG",
+            "ProcSubset=all",
         ],
     );
     let (unit, body) = service
@@ -119,7 +124,9 @@ fn packaged_socket_unit_preserves_safe_service_lifecycle() -> Result<(), Box<dyn
     assert!(!body.contains("StartLimitIntervalSec"));
     for directive in [
         "RestrictNamespaces=mnt ipc net pid uts user cgroup",
-        "ProtectHostname=yes",
+        "ProtectHostname=no",
+        "SystemCallFilter=~sethostname setdomainname syslog",
+        "ProcSubset=all",
     ] {
         let key = directive.split('=').next().ok_or("missing directive key")?;
         assert_eq!(

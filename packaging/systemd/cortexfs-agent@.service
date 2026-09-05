@@ -17,8 +17,15 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateDevices=yes
 ProtectClock=yes
-ProtectHostname=yes
-ProtectKernelLogs=yes
+# An unmasked parent procfs is required for rootless bwrap's private /proc.
+# Deny hostname changes without ProtectHostname's incompatible mount masks.
+ProtectHostname=no
+SystemCallFilter=~sethostname setdomainname syslog
+ProtectKernelTunables=no
+ProtectKernelLogs=no
+CapabilityBoundingSet=~CAP_SYSLOG
+ProcSubset=all
+ProtectProc=invisible
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
