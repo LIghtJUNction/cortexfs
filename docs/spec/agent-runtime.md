@@ -343,8 +343,12 @@ Every sandbox also applies host isolation flags before process mounts:
 --new-session
 --cap-drop ALL
 --unshare-uts
---hostname cortexfs
 ```
+
+The private UTS namespace inherits its initial hostname; the launcher does not
+call `sethostname`. This keeps the parent service's `ProtectHostname=yes`
+syscall protection intact: inherited seccomp filters also apply inside child
+namespaces. A fixed cosmetic hostname is not an isolation requirement.
 
 Interactive terminals launched by `ctx agent start` are transient user systemd
 units with hard cgroup ceilings (see `support::quota`):

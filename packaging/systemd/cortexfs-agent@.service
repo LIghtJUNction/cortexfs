@@ -17,9 +17,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateDevices=yes
 ProtectClock=yes
-# bwrap sets a hostname only after entering its own UTS namespace. A parent
-# sethostname seccomp deny would also block that isolated child operation.
-ProtectHostname=no
+ProtectHostname=yes
 ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes

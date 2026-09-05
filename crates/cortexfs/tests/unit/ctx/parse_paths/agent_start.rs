@@ -259,7 +259,7 @@ fn agent_start_builds_sandboxed_terminal_command() {
     assert!(bwrap.contains(&"--new-session".to_owned()));
     assert!(contains_arg_pair(&bwrap, "--cap-drop", "ALL"));
     assert!(bwrap.contains(&"--unshare-uts".to_owned()));
-    assert!(contains_arg_pair(&bwrap, "--hostname", "cortexfs"));
+    assert!(!bwrap.iter().any(|arg| arg == "--hostname"));
     assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
     assert!(contains_empty_startup_bind(&bwrap, "/etc/profile"));
     assert!(contains_empty_startup_bind(&bwrap, "/etc/bash.bashrc"));

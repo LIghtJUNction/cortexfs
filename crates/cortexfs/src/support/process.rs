@@ -8,7 +8,7 @@ use std::{
 
 /// Ordered bubblewrap isolation and process mounts after namespace flags.
 ///
-/// Isolation flags (`--as-pid-1`, `--new-session`, `--cap-drop ALL`, hostname)
+/// Isolation flags (`--as-pid-1`, `--new-session`, `--cap-drop ALL`, private UTS)
 /// apply to every `CortexFS` sandbox so agents cannot inherit host session
 /// leadership or residual capabilities.
 #[must_use]
@@ -18,9 +18,9 @@ pub fn bwrap_process_setup_args() -> Vec<String> {
         "--new-session".to_owned(),
         "--cap-drop".to_owned(),
         "ALL".to_owned(),
+        // Do not call sethostname: systemd's inherited ProtectHostname filter
+        // also covers child UTS namespaces. Isolation does not require renaming.
         "--unshare-uts".to_owned(),
-        "--hostname".to_owned(),
-        "cortexfs".to_owned(),
         "--proc".to_owned(),
         "/proc".to_owned(),
         "--dev".to_owned(),
