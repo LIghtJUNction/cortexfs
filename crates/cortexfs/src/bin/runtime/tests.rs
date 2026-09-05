@@ -103,6 +103,7 @@ fn packaged_socket_unit_preserves_safe_service_lifecycle() -> Result<(), Box<dyn
             "NoNewPrivileges=yes",
             "PrivateTmp=yes",
             "RestrictNamespaces=mnt ipc net pid uts user cgroup",
+            "ProtectHostname=no",
         ],
     );
     let (unit, body) = service
