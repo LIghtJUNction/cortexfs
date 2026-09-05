@@ -75,13 +75,7 @@ pub(super) fn handle(
             if !config
                 .hub
                 .complete_command(request_id, command_id, result.clone())
-                && !driverprogress::complete(
-                    commands,
-                    request_id,
-                    session,
-                    command_id,
-                    result.clone(),
-                )
+                && !commands.complete(request_id, session, command_id, result.clone())
             {
                 output::send(writer, &driverhandle::error(Some(request_id.clone())))?;
             }

@@ -56,7 +56,7 @@ pub(super) fn send(
 }
 
 pub(super) fn close(writer: &Arc<Mutex<UnixStream>>, commands: &driverprogress::CommandBroker) {
-    driverprogress::reject_all(commands);
+    commands.reject_all();
     let _ignored = writer.lock().map(|stream| stream.shutdown(Shutdown::Both));
 }
 

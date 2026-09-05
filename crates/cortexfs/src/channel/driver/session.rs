@@ -10,7 +10,7 @@ use super::{
     DriverConfig, DriverError, reader,
     worker::{self, WorkerDone},
 };
-use crate::channel::driverhandle;
+use crate::channel::{driverhandle, driverprogress::CommandBroker};
 
 mod features;
 mod input;
@@ -30,7 +30,7 @@ pub(super) fn serve(stream: UnixStream, config: &DriverConfig) -> Result<(), Dri
     let mut handshake = false;
     let (events, incoming) = mpsc::sync_channel(64);
     let reader = reader::spawn(reader_stream, events.clone());
-    let commands = super::new_broker();
+    let commands = CommandBroker::default();
     let mut features = features::DriverFeatures::default();
     let mut active = BTreeMap::new();
     while let Ok(event) = incoming.recv() {
