@@ -48,7 +48,7 @@ unmount_fuse() {
 
 cleanup() {
     local status=$?
-    CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent stop coder >/dev/null 2>&1 || true
+    CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent stop executor >/dev/null 2>&1 || true
     unmount_fuse
     if [ -n "${mount_pid:-}" ]; then
         kill "$mount_pid" >/dev/null 2>&1 || true
@@ -197,18 +197,18 @@ printf 'ready\n' >"$model_control/status"
 printf '\n' >"$model_control/log"
 : >"$root/model/smoke/fuse-selfedit"
 chmod 755 "$root/model/smoke/fuse-selfedit"
-printf '%s\n' "$model_name" >"$root/agent/coder.d/model"
-printf 'CTX_ROOT=/ctx\nCTX_PROVIDER_CONFIG_DIR=/ctx/shared/providers.d\n' >"$root/agent/coder.d/env"
-cat >"$root/agent/coder.d/policy" <<'POLICY'
-allow coder_t model:smoke/fuse-selfedit use
-allow coder_t tool:tsh execute
-allow coder_t tool:fs.read execute
-allow coder_t tool:fs.write execute
-allow coder_t tool:fs.replace execute
-allow coder_t tool:shell.exec execute
-allow coder_t network:default connect
+printf '%s\n' "$model_name" >"$root/agent/executor.d/model"
+printf 'CTX_ROOT=/ctx\nCTX_PROVIDER_CONFIG_DIR=/ctx/shared/providers.d\n' >"$root/agent/executor.d/env"
+cat >"$root/agent/executor.d/policy" <<'POLICY'
+allow executor_t model:smoke/fuse-selfedit use
+allow executor_t tool:tsh execute
+allow executor_t tool:fs.read execute
+allow executor_t tool:fs.write execute
+allow executor_t tool:fs.replace execute
+allow executor_t tool:shell.exec execute
+allow executor_t network:default connect
 POLICY
-session_root="$root/home/$(id -u)/agent/coder/session"
+session_root="$root/home/$(id -u)/agent/executor/session"
 session_dir="$session_root/fuse"
 context_dir="$session_dir/context"
 mkdir -p \
@@ -276,7 +276,7 @@ if ! findmnt "$mountpoint" >/dev/null 2>&1; then
 fi
 
 CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" doctor >/dev/null
-CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent start coder \
+CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent start executor \
     --session fuse \
     --cwd /workspace \
     --no-default-workspace \
@@ -286,11 +286,11 @@ CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent start coder \
     exit 1
 }
 
-output=$(CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent send coder \
+output=$(CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent send executor \
     --session fuse \
     --raw \
     'improve the mounted CortexFS source fixture and verify it')
-CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent stop coder >/dev/null 2>&1 || true
+CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent stop executor >/dev/null 2>&1 || true
 
 case "$output" in
 *"fuse-mounted agent source edit complete"*'"status":"ok"'*) ;;
@@ -304,6 +304,6 @@ rustc --test "$workspace/src/lib.rs" -o "$workspace/fuse-selfedit-test"
 "$workspace/fuse-selfedit-test" >/dev/null
 grep -q 'user dirty change' "$workspace/README.md"
 uid=$(id -u)
-grep -q 'fuse-mounted agent source edit complete' "$root/home/$uid/agent/coder/session/fuse/messages.jsonl"
-grep -q '^done$' "$root/home/$uid/agent/coder/session/fuse/state"
+grep -q 'fuse-mounted agent source edit complete' "$root/home/$uid/agent/executor/session/fuse/messages.jsonl"
+grep -q '^done$' "$root/home/$uid/agent/executor/session/fuse/state"
 printf 'agent FUSE smoke passed\n'

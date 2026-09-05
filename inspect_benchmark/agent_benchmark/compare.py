@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from .agents import sanitize
-from .system import OutputDirectory, _sanitized_dict
+from .system import OutputDirectory, _nonnegative_number, _sanitized_dict
 
 MAX_SUMMARY_BYTES = 1024 * 1024
 MAX_REVIEW_BYTES = 1024 * 1024
@@ -29,7 +29,7 @@ class _DuplicateKeyError(ValueError):
 
 
 def _read_regular_bytes(path: Path, limit: int, kind: str) -> bytes:
-    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as error:
@@ -278,12 +278,6 @@ def _verify_external_review(
     }
 
 
-def _number(value: object, field: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"missing numeric metric: {field}")
-    return value * 1.0
-
-
 def _mapping(value: object, field: str) -> Mapping[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"missing metric object: {field}")
@@ -294,7 +288,7 @@ def _metric(summary: Mapping[str, object], *path: str) -> float:
     value: object = summary
     for part in path:
         value = _mapping(value, ".".join(path)).get(part)
-    return _number(value, ".".join(path))
+    return _nonnegative_number(value, ".".join(path))
 
 
 def _optional_metric(summary: Mapping[str, object], *path: str) -> float | None:

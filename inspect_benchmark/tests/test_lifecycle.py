@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import multiprocessing
 import os
 import sys
 import tempfile
@@ -49,6 +50,7 @@ _stub_inspect()
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 agents = importlib.import_module("agent_benchmark.agents")
 system = importlib.import_module("agent_benchmark.system")
+compare = importlib.import_module("agent_benchmark.compare")
 
 
 class FakeStream:
@@ -1024,6 +1026,50 @@ class LifecycleSystemTests(unittest.TestCase):
             system.main()
         output.assert_not_called()
         sampling.assert_not_called()
+
+
+class EvidenceInputTests(unittest.TestCase):
+    def test_metrics_reject_nonfinite_negative_and_overflowing_values(self) -> None:
+        for value in (float("nan"), float("inf"), -float("inf"), 10**400, -1, True):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "latency"):
+                    system._nonnegative_number(value, "latency")
+                with self.assertRaisesRegex(ValueError, "latency"):
+                    compare._metric({"latency": value}, "latency")
+        self.assertEqual(compare._metric({"latency": 1.5}, "latency"), 1.5)
+
+    def test_evidence_readers_reject_fifos_without_waiting_for_a_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fifo = root / "input"
+            os.mkfifo(fifo)
+            directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                for reader in (
+                    lambda: system._read_at(directory, "input"),
+                    lambda: system._read_json_object(fifo),
+                    lambda: compare._load_summary(fifo),
+                ):
+                    def read() -> None:
+                        try:
+                            reader()
+                        except ValueError:
+                            return
+                        raise AssertionError("FIFO was accepted")
+
+                    process = multiprocessing.get_context("fork").Process(target=read)
+                    process.start()
+                    try:
+                        process.join(timeout=2)
+                        self.assertFalse(process.is_alive(), "FIFO read blocked")
+                        self.assertEqual(process.exitcode, 0)
+                    finally:
+                        if process.is_alive():
+                            process.terminate()
+                        process.join()
+                        process.close()
+            finally:
+                os.close(directory)
 
 
 if __name__ == "__main__":

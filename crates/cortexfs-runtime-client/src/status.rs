@@ -42,9 +42,12 @@ pub fn status(socket: &Path, session: &str) -> Result<RuntimeStatus, RuntimeClie
     if session.is_empty() || session.contains('\0') {
         return Err(RuntimeClientError::InvalidRequest);
     }
+    let frame = json!({"op": "status", "session": session}).to_string();
+    if u64::try_from(frame.len()).unwrap_or(u64::MAX) >= MAX_STATUS_FRAME_BYTES {
+        return Err(RuntimeClientError::InvalidRequest);
+    }
     let mut stream =
         UnixStream::connect(socket).map_err(|_error| RuntimeClientError::CannotConnect)?;
-    let frame = json!({"op": "status", "session": session}).to_string();
     stream
         .write_all(frame.as_bytes())
         .and_then(|()| stream.write_all(b"\n"))

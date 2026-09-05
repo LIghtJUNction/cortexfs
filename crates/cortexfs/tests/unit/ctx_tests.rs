@@ -39,7 +39,7 @@ use super::{
     prompt_login_choice,
     ProviderPreset, provider_preset, read_agent_processes, read_ctx_status, read_file_to_string,
     read_oauth_callback_request_from_reader, read_optional_trimmed, read_provider_config_file,
-    read_provider_config_from_dir, read_provider_secret_stdin_limited, read_status_agent_processes,
+    read_provider_config_from_dir, read_status_agent_processes,
     record_agent_start_state, remove_stale_socket, remove_temp_agent_object,
     render_agent_event_lines, render_agent_process_tree, render_agent_status_lines,
     require_agent_mount, require_cli_name, require_session_name, resolve_abi_path,

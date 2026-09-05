@@ -15,16 +15,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             block_events(&mut events, &run, block)?;
         }
     }
-    let status = map
-        .get("stop_reason")
-        .and_then(Value::as_str)
-        .map_or(EventStatus::Ok, |reason| {
-            if reason == "error" {
-                EventStatus::Error
-            } else {
-                EventStatus::Ok
-            }
-        });
+    let status = match map.get("stop_reason").and_then(Value::as_str) {
+        Some("error") => EventStatus::Error,
+        Some("cancelled") => EventStatus::Cancelled,
+        _ => EventStatus::Ok,
+    };
     if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {
         events.push(ModelEvent::Usage {
             run: run.clone(),

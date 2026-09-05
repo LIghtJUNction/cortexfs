@@ -32,10 +32,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_status_session_before_connecting() {
-        assert_eq!(
-            status::status(std::path::Path::new("/missing.sock"), ""),
-            Err(RuntimeClientError::InvalidRequest)
-        );
+    fn rejects_invalid_status_session_before_connecting() {
+        for session in [String::new(), "\0".to_owned(), "x".repeat(256 * 1024)] {
+            assert_eq!(
+                status::status(std::path::Path::new("/missing.sock"), &session),
+                Err(RuntimeClientError::InvalidRequest)
+            );
+        }
     }
 }

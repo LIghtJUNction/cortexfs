@@ -22,7 +22,7 @@ pub fn is_agent_launch_abi(value: &str) -> bool {
 /// Entry argument shared by host and envelope-mode child processes.
 pub const AGENT_ENVELOPE_ARG: &str = "--cortexfs-sdk-envelope-v1";
 
-/// Maximum JSON-encoded invocation payload bytes, excluding newline framing.
+/// Maximum JSON-encoded invocation frame bytes, including its trailing newline.
 pub const MAX_AGENT_INVOCATION_BYTES: usize = 1024 * 1024;
 
 /// Maximum bytes retained for each invocation context snapshot.

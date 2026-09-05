@@ -52,16 +52,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                 }
             }
         }
-        let status = candidate
-            .get("finishReason")
-            .and_then(Value::as_str)
-            .map_or(EventStatus::Ok, |reason| {
-                if reason == "SAFETY" {
-                    EventStatus::Error
-                } else {
-                    EventStatus::Ok
-                }
-            });
+        let status = match candidate.get("finishReason").and_then(Value::as_str) {
+            Some("SAFETY" | "ERROR") => EventStatus::Error,
+            Some("CANCELLED") => EventStatus::Cancelled,
+            _ => EventStatus::Ok,
+        };
         events.push(ModelEvent::Done {
             run: run.clone(),
             status,

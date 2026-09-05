@@ -58,10 +58,10 @@ impl Tool for FsWriteTool {
         output: &mut ToolEmitter<&mut dyn Write>,
     ) -> ToolResult<()> {
         let path = invocation.string_field("path").unwrap_or_default();
-        let content = invocation.string_field("content").unwrap_or_default();
         if path.is_empty() {
             return Err(ToolError::invalid("missing path"));
         }
+        let content = invocation.required_string_field("content")?;
         write_text_file_atomic(Path::new(&path), &content)
             .map_err(|_error| ToolError::denied("write failed"))?;
         output
@@ -89,10 +89,10 @@ impl Tool for FsReplaceTool {
     ) -> ToolResult<()> {
         let path = invocation.string_field("path").unwrap_or_default();
         let old = invocation.string_field("old").unwrap_or_default();
-        let new = invocation.string_field("new").unwrap_or_default();
         if path.is_empty() {
             return Err(ToolError::invalid("missing path"));
         }
+        let new = invocation.required_string_field("new")?;
         replace_exactly_once(Path::new(&path), &old, &new)
             .map_err(|error| fs_replace_tool_error(&error))?;
         output

@@ -138,7 +138,7 @@ smoke_failed=0
 
 cleanup() {
     local status=$?
-    "$repo_root/target/debug/ctx" --root "$root" agent stop coder >/dev/null 2>&1 || true
+    "$repo_root/target/debug/ctx" --root "$root" agent stop executor >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ] && [ "$smoke_failed" -eq 0 ] && [ "${CORTEXFS_KEEP_LIVE_SMOKE:-0}" != 1 ]; then
         rm -rf "$root" "$workspace"
         return
@@ -197,11 +197,11 @@ assert_session_recorded() {
     local latest
     local history
     uid=$(id -u)
-    latest=$("$repo_root/target/debug/ctx" --root "$root" agent output coder --session live)
-    history=$("$repo_root/target/debug/ctx" --root "$root" agent history coder --session live)
+    latest=$("$repo_root/target/debug/ctx" --root "$root" agent output executor --session live)
+    history=$("$repo_root/target/debug/ctx" --root "$root" agent history executor --session live)
     grep -q "$expected" <<<"$latest"
     grep -q "$expected" <<<"$history"
-    grep -q '^done$' "$root/home/$uid/agent/coder/session/live/state"
+    grep -q '^done$' "$root/home/$uid/agent/executor/session/live/state"
 }
 
 cargo build --locked -p cortexfs \
@@ -214,7 +214,7 @@ cargo run --locked -p cortexfs --bin ctx --all-features -- bootstrap "$root" >/d
 cp "$repo_root/target/debug/cortexfs-object-runner" "$root/bin/cortexfs-object-runner"
 cp "$repo_root/target/debug/tsh" "$root/bin/tsh"
 chmod 755 "$root/bin/cortexfs-object-runner" "$root/bin/tsh"
-grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/agent/coder"
+grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/agent/executor"
 for tool in fs.read fs.write shell.exec tsh.config; do
     grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/tool/$tool"
 done
@@ -254,23 +254,23 @@ node -e 'let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data
 EOF
 chmod 755 "$root/model/debug/ollama-live"
 
-printf 'debug/ollama-live\n' >"$root/agent/coder.d/model"
-cat >"$root/agent/coder.d/policy" <<'EOF'
-allow coder_t model:debug/ollama-live use
-allow coder_t tool:tsh execute
-allow coder_t tool:fs.read execute
-allow coder_t tool:fs.write execute
-allow coder_t tool:shell.exec execute
-allow coder_t network:default connect
+printf 'debug/ollama-live\n' >"$root/agent/executor.d/model"
+cat >"$root/agent/executor.d/policy" <<'EOF'
+allow executor_t model:debug/ollama-live use
+allow executor_t tool:tsh execute
+allow executor_t tool:fs.read execute
+allow executor_t tool:fs.write execute
+allow executor_t tool:shell.exec execute
+allow executor_t network:default connect
 EOF
-cat >"$root/agent/coder.d/mount" <<EOF
+cat >"$root/agent/executor.d/mount" <<EOF
 $root	/ctx	rw	rbind,nosuid,nodev
 $workspace	/workspace	rw	rbind,nosuid,nodev
 EOF
 
 "$repo_root/target/debug/ctx" \
     --root "$root" \
-    agent start coder \
+    agent start executor \
     --session live \
     --cwd /workspace \
     --no-default-workspace >/tmp/cortexfs-agent-live-start.log 2>&1 || {
@@ -282,7 +282,7 @@ EOF
 if ! output=$(
     "$repo_root/target/debug/ctx" \
         --root "$root" \
-        agent send coder \
+        agent send executor \
         --session live \
         --raw \
         'improve the CortexFS source fixture and verify it' 2>"$send_log"
@@ -294,7 +294,7 @@ if ! output=$(
     cat "$send_log" >&2
     exit 1
 fi
-"$repo_root/target/debug/ctx" --root "$root" agent stop coder >/dev/null 2>&1 || true
+"$repo_root/target/debug/ctx" --root "$root" agent stop executor >/dev/null 2>&1 || true
 case "$output" in
 *"source self-improvement live complete"*'"status":"ok"'*) ;;
 *)

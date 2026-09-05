@@ -1,4 +1,12 @@
-use crate::*;
+use std::fmt::Write as FmtWrite;
+use std::io::{self, IsTerminal, Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, fs};
+
+use crate::{CliError, ctx_home, open_plain_file_parent_dir};
+use cortexfs::{ToolPath, is_object_name, support::terminal::terminal_safe_text};
 
 pub(crate) const MAX_CTX_FILE_CHECK_BYTES: u64 = 1024 * 1024;
 
@@ -60,7 +68,10 @@ pub(crate) fn open_plain_read_file(path: &Path) -> Result<fs::File, CliError> {
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))?;
@@ -81,7 +92,7 @@ pub(crate) fn open_executable_no_follow(path: &Path) -> Result<fs::File, CliErro
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_NONBLOCK,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(|error| CliError::unavailable(format!("cannot open {}: {error}", path.display())))?;

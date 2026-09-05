@@ -86,6 +86,26 @@ fn rejects_noncanonical_framing() {
 }
 
 #[test]
+fn invocation_limit_includes_the_newline() -> Result<(), serde_json::Error> {
+    let mut bytes = serde_json::to_vec(&frame(0, &serde_json::Value::Null))?;
+    bytes.resize(MAX_AGENT_INVOCATION_BYTES - 1, b' ');
+    bytes.push(b'\n');
+    assert!(read_agent_invocation(bytes.as_slice()).is_ok());
+    bytes.insert(0, b' ');
+    assert_eq!(
+        read_agent_invocation(bytes.as_slice()),
+        Err(RuntimeClientError::InvalidFrame)
+    );
+    bytes.remove(0);
+    bytes.push(b' ');
+    assert_eq!(
+        read_agent_invocation(bytes.as_slice()),
+        Err(RuntimeClientError::InvalidFrame)
+    );
+    Ok(())
+}
+
+#[test]
 fn rejects_unknown_fields_and_invalid_step_observations() {
     let mut unknown = frame(0, &serde_json::Value::Null);
     assert!(unknown.as_object_mut().is_some_and(|object| {

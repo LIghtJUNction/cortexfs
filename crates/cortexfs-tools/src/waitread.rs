@@ -30,12 +30,6 @@ pub(crate) fn take_finished(
     buffer.as_ref().is_some_and(|value| value.len() > limit)
 }
 
-pub(crate) fn join_reader(reader: Option<JoinHandle<Vec<u8>>>, buffer: Option<Vec<u8>>) -> Vec<u8> {
-    buffer
-        .or_else(|| reader.and_then(|handle| handle.join().ok()))
-        .unwrap_or_default()
-}
-
 pub(crate) fn sleep_tick() {
     thread::sleep(std::time::Duration::from_millis(50));
 }

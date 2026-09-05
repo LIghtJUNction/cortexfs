@@ -44,8 +44,9 @@ process)
     --solver agent_benchmark/in_process_openai_agent "$@"
   ;;
 ctx)
-  AGENT_NAME="${1:-executor}"
-  if [[ $# -gt 0 ]]; then
+  AGENT_NAME=executor
+  if [[ $# -gt 0 && $1 != -* ]]; then
+    AGENT_NAME=$1
     shift
   fi
   exec "$INSPECT" eval agent_benchmark/tasks.py@agent_benchmark \
