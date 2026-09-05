@@ -40,10 +40,14 @@ fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
     assert_eq!(delta.name.as_deref(), Some("tsh"));
     assert_eq!(delta.arguments, r#"{"args""#);
     stream.push(delta);
-    if let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(
-        r#"data: {"choices":[{"delta":{"tool_calls":[{"type":"function","function":{"arguments":":[\"tools\"]}"}}]}}]}"#,
-    )?
-    .event {
+    // Compatible gateways repeat empty identity fields on continuation chunks.
+    for line in [
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"","type":"function","function":{"name":"","arguments":":[\"tools\"]}"}}]}}]}"#,
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"","function":{"arguments":""}}]}}]}"#,
+    ] {
+        let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(line)?.event else {
+            return Err("expected tool call delta".into());
+        };
         stream.push(delta);
     }
 
@@ -54,7 +58,7 @@ fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
                 .to_owned()
         )
     );
-    for id in ["", r#""id":"call/invalid","#] {
+    for id in ["", r#""id":"","#, r#""id":"call/invalid","#] {
         let line = format!(
             r#"data: {{"choices":[{{"delta":{{"tool_calls":[{{{id}"function":{{"name":"tsh","arguments":"{{\"args\":[\"tools\"]}}"}}}}]}}}}]}}"#
         );
