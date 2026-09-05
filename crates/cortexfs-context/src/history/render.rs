@@ -1,5 +1,6 @@
 use super::{EMPTY_HISTORY, HistorySelection, RenderedHistory};
-use crate::message::Message;
+use crate::Message;
+use crate::render::{clip, render_message};
 
 impl HistorySelection {
     /// Returns selected messages in durable order.
@@ -46,23 +47,8 @@ impl RenderedHistory {
     }
 }
 
-pub(super) fn render_message(message: &Message) -> String {
-    format!("- {}: {}", message.role(), message.content().trim())
-}
-
 fn warning(max_chars: usize) -> String {
     format!(
         "WARNING: historical messages exceeded the {max_chars} character budget; oldest messages were omitted.\n\n"
     )
-}
-
-fn clip(value: &str, max_chars: usize) -> String {
-    if value.len() <= max_chars {
-        return value.to_owned();
-    }
-    let mut end = max_chars;
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    value.get(..end).unwrap_or_default().to_owned()
 }

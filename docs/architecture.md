@@ -81,9 +81,9 @@ Pi’s stack is `ai → agent-core → coding-agent (+ tui)`. CortexFS maps the 
 gravity onto Rust crates and processes:
 
 ```text
-Application / UX     ctx, tsh, ctxchat, ctxterm, channel adapters, web hosts
-        ▲
-Agent core           agent runtime + object runner (loop, tools, policy gate)
+Application / UX     Channel Masters: ctx, terminals, IM/web hosts + adapters
+        ▲              cortexfs.interaction/v2 (v1 one-request compatibility)
+Agent core           Agent Session Slaves + object runner (loop, tools, policy)
         ▲
 Protocol / AI        cortexfs-protocol, provider registry, model projections
         ▲
@@ -94,7 +94,7 @@ Foundation           abi types, support fs/jsonl/layout, module contract, paths
 | --- | --- | --- |
 | `cortexfs-protocol` | `pi-ai` | provider-neutral request/event IR; no HTTP, secrets, or loop |
 | `cortexfs-module` + runner loop | `pi-agent-core` | lifecycle, capabilities, turn/tool mechanics |
-| `cortexfs-runtime-client` | agent event/API surface | `cortexfs.interaction/v1` for every frontend |
+| `cortexfs-runtime-client` | agent event/API surface | multiplexed `cortexfs.interaction/v2`; compatible one-request v1 |
 | `ctx` / terminals / channels | `pi-coding-agent` / `pi-mom` | sessions, UX modes, platform adapters |
 | FUSE `/ctx` projection | *(CortexFS-specific)* | inspectable object classes; not an AI DB mirror |
 
@@ -137,7 +137,10 @@ hooks pre.d/post.d               → metadata-only gates around model actions
 `loop` never grants capability. A custom name selects `loop.d/<name>` when present;
 otherwise the hint is passed to the default agent executable through
 `CTX_AGENT_LOOP`. Compaction rebuilds prompt context only; durable
-`messages.jsonl` stays untouched.
+`messages.jsonl` stays untouched. Rendering preserves the selected recent
+observations before assigning remaining UTF-8 byte budget to a summary,
+including output from a custom compactor. A summary may be omitted when no
+space remains. The delivery and replacement matrix is in [harness.md](harness.md).
 
 Everything else is layered outside that loop:
 
@@ -204,8 +207,9 @@ Concrete surfaces already in the tree:
 cortexfs.module.socket/v1     process-isolated module lifecycle
 Tool SDK / Agent SDK          one executable capability or agent step
 cortexfs.package/v1           authoring input → ordinary agent/tool objects
-cortexfs.interaction/v1       every frontend speaks the same request/event facts
-cortexfs.channel.socket/v1    platform adapters stay outside the agent loop
+cortexfs.interaction/v2       typed target contract; persistent runtime not activated
+cortexfs.interaction/v1       compatible one-request frontend mode
+cortexfs.channel.socket/v1    lower platform adapters stay outside the agent loop
 skills / AGENTS.md / rules    disposable context inputs, never authority
 MCP via ctxmcp                ordinary tools; never a root class
 ```
@@ -224,7 +228,7 @@ CortexFS uses four different identities. They must not be collapsed into an
 | --- | --- | --- |
 | Definition | `agent/<name>` + `agent/<name>.d/` | reference tree |
 | Runtime instance | supervisor unit + invocation receipt | runtime/supervisor |
-| Session | `home/<uid>/agent/<name>/session/<session>/` | durable files |
+| Session | `home/<uid>/agent/<name>/session/<session>/` | durable files; one active Session Slave writer |
 | Run | entropy-backed run id in session events | session recorder |
 
 The definition says how an Agent may run. A runtime instance says which
@@ -247,13 +251,38 @@ entries or aliases used to discover those transports. Socket presence does not
 define object identity, session durability, or process ownership.
 
 Frontend interaction uses the existing Agent/session socket as its canonical
-runtime boundary. `cortexfs-runtime-client` names that logical contract
-`cortexfs.interaction/v1`; terminal, web, and IM clients share request/event
-semantics and correlation ids. `cortexfs-channels` has a separate
+runtime boundary. Every terminal, web, or IM frontend has the process role
+Channel Master; each logical session has one active, single-writer Agent Session
+Slave. Multiple peer masters may attach to one slave, and one local Unix-stream
+connection may multiplex several logical attachments:
+
+```text
+platform adapter <-> cortexfs.channel.socket/v1 <-> Channel Master
+Channel Master   <-> cortexfs.interaction/v2    <-> Agent Session Slave
+                                                --> durable session files
+```
+
+`cortexfs-runtime-client` owns the neutral asynchronous request/event contract,
+handshake, correlations, attachment cursors, and replay. Version 1 remains the
+compatible one-request `send`/`resume`/`status`/`cancel` mode. Master and slave
+depend only on that protocol, never on each other's implementation, and the
+slave never reverse-dials a master. The current per-Agent runtime may host many
+isolated slaves; later process isolation does not change the ABI.
+
+The Agent Session Slave owns authorization, the bounded mailbox, ordering,
+idempotency, durable append, and observer fan-out. It holds an exclusive
+runtime-private session lock before writing, fails closed on conflicting
+ownership, and publishes durable events only after append. Live deltas and
+approval/input commands go only to the run's origin attachment; authorized
+observers receive durable sequenced facts. Unix peers authenticate with
+`SO_PEERCRED`, and reconnect resumes at the last processed sequence with
+at-least-once delivery.
+
+`cortexfs-channels` retains the independently versioned lower
 `cortexfs.channel.socket/v1` driver boundary for platform lifecycle, delivery,
-receipts, live effects, and tool control. The `/ctx/channel/<name>` tree
-exposes only generic channel state and tools; platform-specific message types
-do not cross the Agent boundary.
+receipts, live effects, and tool control. The `/ctx/channel/<name>` tree exposes
+only generic channel state and tools; platform-specific message types do not
+cross the Agent boundary.
 
 Heavy or OS-specific transports remain external processes on that boundary.
 For example, `cortexfs-channel-nostr` owns relay WebSockets and NIP-04/NIP-17
@@ -299,9 +328,10 @@ single-line `state` file remains the lifecycle compatibility surface; the
 optional `state.json` file is a structured, non-secret view of status, phase,
 run, step, selected model, context revision, and stable error code. Runtime
 transitions update both through the existing atomic file replacement helper.
-Clients inspect that projection through the agent/session socket's `status`
-request and replay facts through `resume`; no watcher or second root control
-plane is introduced.
+Clients inspect that projection through a v2 attachment's `status` request and
+replay durable facts from its `session_seq` cursor. Compatible v1 clients retain
+one-request `status` and `resume`; no watcher or second root control plane is
+introduced.
 
 During a hosted Agent step, `context_revision` is a length-delimited SHA-256
 digest of the bounded history, tool context, and previous observation inputs.

@@ -703,39 +703,99 @@ mod permission_tests {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
 
-    fn root(name: &str) -> PathBuf {
-        env::temp_dir().join(format!("cfs-session-{name}-{}", std::process::id()))
+    macro_rules! assert_ok {
+        ($($result:expr),+ $(,)?) => {
+            $(assert!($result.is_ok());)+
+        };
+    }
+
+    struct Fixture {
+        root: PathBuf,
+        uid: u32,
+        gid: u32,
+    }
+
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = env::temp_dir().join(format!("cfs-session-{name}-{}", std::process::id()));
+            let _ignored = fs::remove_dir_all(&root);
+            Self {
+                root,
+                uid: nix::unistd::geteuid().as_raw(),
+                gid: nix::unistd::getegid().as_raw(),
+            }
+        }
+
+        fn prepare(&self, session: &str) -> Result<OwnedSessionPreparation, String> {
+            prepare_owned_durable_session(
+                &self.root,
+                session,
+                "/workspace",
+                None,
+                SocketSessionScope::Private,
+                self.uid,
+                self.gid,
+            )
+        }
+    }
+
+    impl std::ops::Deref for Fixture {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            &self.root
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ignored = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn mode(path: &Path) -> Option<u32> {
+        fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .ok()
+    }
+
+    fn owner_mode(path: &Path) -> Option<(u32, u32, u32)> {
+        fs::metadata(path)
+            .map(|metadata| {
+                (
+                    metadata.uid(),
+                    metadata.gid(),
+                    metadata.permissions().mode() & 0o777,
+                )
+            })
+            .ok()
+    }
+
+    fn text(path: &Path) -> Option<String> {
+        fs::read_to_string(path).ok()
     }
 
     #[test]
     fn late_invalid_entry_performs_zero_preflight_mutation() {
-        let root = root("late-invalid");
-        let _ignored = fs::remove_dir_all(&root);
-        assert!(fs::create_dir_all(&root).is_ok());
-        assert!(fs::write(root.join("a"), "a").is_ok());
-        assert!(fs::set_permissions(root.join("a"), fs::Permissions::from_mode(0o644)).is_ok());
-        let socket = root.join("z");
-        let listener = UnixListener::bind(&socket);
-        assert!(listener.is_ok());
-
-        assert!(plan_session_permissions(&root, PreflightRoot::Session).is_err());
-        assert_eq!(
-            fs::metadata(root.join("a"))
-                .map(|m| m.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
+        let root = Fixture::new("late-invalid");
+        assert_ok!(
+            fs::create_dir_all(&*root),
+            fs::write(root.join("a"), "a"),
+            fs::set_permissions(root.join("a"), fs::Permissions::from_mode(0o644)),
         );
+        let listener = UnixListener::bind(root.join("z"));
+        assert!(listener.is_ok());
+        assert!(plan_session_permissions(&root, PreflightRoot::Session).is_err());
+        assert_eq!(mode(&root.join("a")), Some(0o644));
         drop(listener);
-        let _ignored = fs::remove_dir_all(root);
     }
 
     #[test]
     fn same_type_replacement_conflicts_at_execution() {
-        let root = root("replacement");
-        let _ignored = fs::remove_dir_all(&root);
-        assert!(fs::create_dir_all(&root).is_ok());
+        let root = Fixture::new("replacement");
+        assert_ok!(fs::create_dir_all(&*root));
         let file = root.join("state");
-        assert!(fs::write(&file, "old").is_ok());
+        assert_ok!(fs::write(&file, "old"));
         let plan = plan_session_permissions(&root, PreflightRoot::Session);
         assert!(plan.is_ok());
         let Ok(mut plan) = plan else {
@@ -746,212 +806,134 @@ mod permission_tests {
             .position(|entry| entry.path == file)
             .map(|index| plan.remove(index));
         assert!(receipt.is_some());
-        assert!(fs::remove_file(&file).is_ok());
-        assert!(fs::write(&file, "new").is_ok());
+        assert_ok!(fs::remove_file(&file), fs::write(&file, "new"));
         let Some(receipt) = receipt else {
             return;
         };
-        assert!(
-            execute_permission_receipt(
-                &receipt,
-                nix::unistd::geteuid().as_raw(),
-                nix::unistd::getegid().as_raw()
-            )
-            .is_err()
-        );
-        let _ignored = fs::remove_dir_all(root);
+        assert!(execute_permission_receipt(&receipt, root.uid, root.gid).is_err());
     }
 
     #[test]
     fn exact_session_modes_overlay_and_noninterference() {
-        let base = root("scope");
+        let base = Fixture::new("scope");
         let session = base.join("selected");
         let other = base.join("other");
-        let _ignored = fs::remove_dir_all(&base);
-        assert!(fs::create_dir_all(session.join("workspace-overlay")).is_ok());
-        assert!(fs::create_dir_all(session.join("context/workspace-overlay")).is_ok());
-        assert!(fs::create_dir_all(&other).is_ok());
+        assert_ok!(
+            fs::create_dir_all(session.join("workspace-overlay")),
+            fs::create_dir_all(session.join("context/workspace-overlay")),
+            fs::create_dir_all(&other),
+        );
         let selected = session.join("state");
         let top_overlay = session.join("workspace-overlay/keep");
         let nested_overlay = session.join("context/workspace-overlay/state");
         let untouched = other.join("state");
         for path in [&selected, &top_overlay, &nested_overlay, &untouched] {
-            assert!(fs::write(path, "state").is_ok());
-            assert!(fs::set_permissions(path, fs::Permissions::from_mode(0o644)).is_ok());
+            assert_ok!(
+                fs::write(path, "state"),
+                fs::set_permissions(path, fs::Permissions::from_mode(0o644)),
+            );
         }
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-
-        assert!(repair_agent_session_permissions(&session, uid, gid).is_ok());
-
-        assert_eq!(
-            fs::metadata(&selected)
-                .map(|m| m.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o600)
-        );
-        assert_eq!(
-            fs::metadata(&nested_overlay)
-                .map(|m| m.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o600)
-        );
-        assert_eq!(
-            fs::metadata(&top_overlay)
-                .map(|m| m.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
-        );
-        assert_eq!(
-            fs::metadata(&untouched)
-                .map(|m| m.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
-        );
+        assert!(repair_agent_session_permissions(&session, base.uid, base.gid).is_ok());
+        assert_eq!(mode(&selected), Some(0o600));
+        assert_eq!(mode(&nested_overlay), Some(0o600));
+        assert_eq!(mode(&top_overlay), Some(0o644));
+        assert_eq!(mode(&untouched), Some(0o644));
         let metadata = fs::metadata(selected);
-        assert!(metadata.is_ok_and(|m| m.uid() == uid && m.gid() == gid));
-        let _ignored = fs::remove_dir_all(base);
+        assert!(metadata.is_ok_and(|value| value.uid() == base.uid && value.gid() == base.gid));
     }
 
     #[test]
     fn exact_session_terminal_symlink_is_excluded() {
-        let base = root("terminal-excluded");
+        let base = Fixture::new("terminal-excluded");
         let session = base.join("selected");
         let target = base.join("terminal-target");
-        let _ignored = fs::remove_dir_all(&base);
-        assert!(fs::create_dir_all(&session).is_ok());
-        assert!(fs::create_dir_all(&target).is_ok());
-        assert!(fs::write(target.join("main.sock"), "keep").is_ok());
-        assert!(
-            fs::set_permissions(target.join("main.sock"), fs::Permissions::from_mode(0o644))
-                .is_ok()
+        assert_ok!(
+            fs::create_dir_all(&session),
+            fs::create_dir_all(&target),
+            fs::write(target.join("main.sock"), "keep"),
+            fs::set_permissions(target.join("main.sock"), fs::Permissions::from_mode(0o644)),
+            std::os::unix::fs::symlink(&target, session.join("terminal")),
         );
-        assert!(std::os::unix::fs::symlink(&target, session.join("terminal")).is_ok());
-
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-        assert!(repair_agent_session_permissions(&session, uid, gid).is_ok());
-        assert_eq!(
-            fs::metadata(target.join("main.sock"))
-                .map(|m| m.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
-        );
-        let _ignored = fs::remove_dir_all(base);
+        assert!(repair_agent_session_permissions(&session, base.uid, base.gid).is_ok());
+        assert_eq!(mode(&target.join("main.sock")), Some(0o644));
     }
 
     #[test]
     fn session_store_excludes_each_session_terminal_only() {
-        let base = root("store-terminal-excluded");
+        let base = Fixture::new("store-terminal-excluded");
         let session = base.join("selected");
         let target = base.with_extension("terminal-target");
-        let _ignored = fs::remove_dir_all(&base);
         let _ignored = fs::remove_dir_all(&target);
-        assert!(fs::create_dir_all(base.join("index")).is_ok());
-        assert!(fs::create_dir_all(&session).is_ok());
-        assert!(fs::create_dir_all(&target).is_ok());
-        assert!(fs::write(base.join("index/list"), "").is_ok());
-        assert!(fs::write(target.join("main.sock"), "keep").is_ok());
-        assert!(
-            fs::set_permissions(target.join("main.sock"), fs::Permissions::from_mode(0o644))
-                .is_ok()
+        assert_ok!(
+            fs::create_dir_all(base.join("index")),
+            fs::create_dir_all(&session),
+            fs::create_dir_all(&target),
+            fs::write(base.join("index/list"), ""),
+            fs::write(target.join("main.sock"), "keep"),
+            fs::set_permissions(target.join("main.sock"), fs::Permissions::from_mode(0o644)),
+            std::os::unix::fs::symlink(&target, session.join("terminal")),
         );
-        assert!(std::os::unix::fs::symlink(&target, session.join("terminal")).is_ok());
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-
-        assert!(repair_agent_session_root_permissions(&base, uid, gid).is_ok());
-        assert_eq!(
-            fs::metadata(target.join("main.sock"))
-                .map(|metadata| metadata.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
-        );
-        let _ignored = fs::remove_dir_all(base);
+        assert!(repair_agent_session_root_permissions(&base, base.uid, base.gid).is_ok());
+        assert_eq!(mode(&target.join("main.sock")), Some(0o644));
         let _ignored = fs::remove_dir_all(target);
     }
 
     #[test]
     fn session_store_rejects_nested_terminal_without_mutation() {
-        let base = root("store-nested-terminal");
+        let base = Fixture::new("store-nested-terminal");
         let session = base.join("selected");
         let target = base.with_extension("nested-target");
-        let _ignored = fs::remove_dir_all(&base);
         let _ignored = fs::remove_dir_all(&target);
-        assert!(fs::create_dir_all(base.join("index")).is_ok());
-        assert!(fs::create_dir_all(session.join("context")).is_ok());
-        assert!(fs::create_dir_all(&target).is_ok());
-        assert!(fs::write(base.join("index/list"), "").is_ok());
+        assert_ok!(
+            fs::create_dir_all(base.join("index")),
+            fs::create_dir_all(session.join("context")),
+            fs::create_dir_all(&target),
+            fs::write(base.join("index/list"), ""),
+        );
         let unchanged = session.join("state");
-        assert!(fs::write(&unchanged, "state").is_ok());
-        assert!(fs::set_permissions(&unchanged, fs::Permissions::from_mode(0o644)).is_ok());
-        assert!(std::os::unix::fs::symlink(&target, session.join("context/terminal")).is_ok());
-
-        assert!(
-            repair_agent_session_root_permissions(
-                &base,
-                nix::unistd::geteuid().as_raw(),
-                nix::unistd::getegid().as_raw(),
-            )
-            .is_err()
+        assert_ok!(
+            fs::write(&unchanged, "state"),
+            fs::set_permissions(&unchanged, fs::Permissions::from_mode(0o644)),
+            std::os::unix::fs::symlink(&target, session.join("context/terminal")),
         );
-        assert_eq!(
-            fs::metadata(unchanged)
-                .map(|metadata| metadata.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
-        );
-        let _ignored = fs::remove_dir_all(base);
+        assert!(repair_agent_session_root_permissions(&base, base.uid, base.gid).is_err());
+        assert_eq!(mode(&unchanged), Some(0o644));
         let _ignored = fs::remove_dir_all(target);
     }
 
     #[test]
     fn nested_terminal_symlink_is_rejected() {
-        let base = root("nested-terminal");
+        let base = Fixture::new("nested-terminal");
         let session = base.join("selected");
         let target = base.join("terminal-target");
-        let _ignored = fs::remove_dir_all(&base);
-        assert!(fs::create_dir_all(session.join("context")).is_ok());
-        assert!(fs::create_dir_all(&target).is_ok());
-        assert!(std::os::unix::fs::symlink(&target, session.join("context/terminal")).is_ok());
-
+        assert_ok!(
+            fs::create_dir_all(session.join("context")),
+            fs::create_dir_all(&target),
+            std::os::unix::fs::symlink(&target, session.join("context/terminal")),
+        );
         assert!(plan_session_permissions(&session, PreflightRoot::Session).is_err());
-        let _ignored = fs::remove_dir_all(base);
     }
 
     #[test]
     fn missing_session_prepares_and_original_record_preserves_current_run_owner() {
-        let session_root = root("current-run-owner");
+        let session_root = Fixture::new("current-run-owner");
         let session = session_root.join("fresh");
-        let _ignored = fs::remove_dir_all(&session_root);
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-        let preparation = prepare_owned_durable_session(
-            &session_root,
-            "fresh",
-            "/workspace",
-            None,
-            SocketSessionScope::Private,
-            uid,
-            gid,
-        );
+        let preparation = session_root.prepare("fresh");
         assert!(preparation.is_ok());
         let Ok(preparation) = preparation else {
             return;
         };
-        for (path, mode) in [
-            (session_root.clone(), 0o700),
+        for (path, expected_mode) in [
+            (session_root.root.clone(), 0o700),
             (session_root.join("index"), 0o700),
             (session_root.join("index/list"), 0o600),
             (session.clone(), 0o700),
         ] {
-            assert!(fs::metadata(path).is_ok_and(|metadata| {
-                metadata.uid() == uid
-                    && metadata.gid() == gid
-                    && metadata.permissions().mode() & 0o777 == mode
-            }));
+            assert_eq!(
+                owner_mode(&path),
+                Some((session_root.uid, session_root.gid, expected_mode))
+            );
         }
-
         assert!(
             record_socket_send_to_session(
                 &session,
@@ -966,33 +948,25 @@ mod permission_tests {
             )
             .is_ok()
         );
-
-        let metadata = fs::metadata(session.join("current_run"));
-        assert!(metadata.is_ok_and(|value| {
-            value.uid() == uid && value.gid() == gid && value.permissions().mode() & 0o777 == 0o600
-        }));
         assert_eq!(
-            fs::read_to_string(session.join("current_run"))
-                .ok()
-                .as_deref(),
-            Some("run\n")
+            owner_mode(&session.join("current_run")),
+            Some((session_root.uid, session_root.gid, 0o600))
         );
-        let _ignored = fs::remove_dir_all(session_root);
+        assert_eq!(text(&session.join("current_run")).as_deref(), Some("run\n"));
     }
 
     #[test]
     fn root_runtime_repairs_private_agent_home_traversal_boundary()
     -> Result<(), Box<dyn std::error::Error>> {
-        let base = root("agent-home-owner");
+        let base = Fixture::new("agent-home-owner");
         let shared_parent = base.join("home/1000/agent");
         let agent_home = shared_parent.join("example-echo");
         let session_root = agent_home.join("session");
-        let _ignored = fs::remove_dir_all(&base);
-        assert!(fs::create_dir_all(&agent_home).is_ok());
-        assert!(fs::set_permissions(&shared_parent, fs::Permissions::from_mode(0o755)).is_ok());
-        assert!(fs::set_permissions(&agent_home, fs::Permissions::from_mode(0o700)).is_ok());
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
+        assert_ok!(
+            fs::create_dir_all(&agent_home),
+            fs::set_permissions(&shared_parent, fs::Permissions::from_mode(0o755)),
+            fs::set_permissions(&agent_home, fs::Permissions::from_mode(0o700)),
+        );
         assert!(
             prepare_owned_durable_session(
                 &session_root,
@@ -1000,84 +974,50 @@ mod permission_tests {
                 "/workspace",
                 None,
                 SocketSessionScope::Private,
-                uid,
-                gid,
+                base.uid,
+                base.gid,
             )
             .is_ok()
         );
         for path in [&agent_home, &session_root, &session_root.join("live-sdk")] {
             let metadata = fs::symlink_metadata(path)?;
             assert!(!metadata.file_type().is_symlink());
-            assert_eq!((metadata.uid(), metadata.gid()), (uid, gid));
+            assert_eq!((metadata.uid(), metadata.gid()), (base.uid, base.gid));
             assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
         }
         let metadata = fs::metadata(shared_parent)?;
-        assert_eq!((metadata.uid(), metadata.gid()), (uid, gid));
+        assert_eq!((metadata.uid(), metadata.gid()), (base.uid, base.gid));
         assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
-        let _ignored = fs::remove_dir_all(base);
         Ok(())
     }
 
     #[test]
     fn failed_preflight_leaves_start_controls_unchanged_and_retryable() {
-        let base = root("repair-failure");
+        let base = Fixture::new("repair-failure");
         let session = base.join("retry");
-        let _ignored = fs::remove_dir_all(&base);
-        assert!(fs::create_dir_all(&session).is_ok());
-        assert!(fs::write(session.join("events.jsonl"), "before\n").is_ok());
-        assert!(fs::write(session.join("current_run"), "old\n").is_ok());
+        assert_ok!(
+            fs::create_dir_all(&session),
+            fs::write(session.join("events.jsonl"), "before\n"),
+            fs::write(session.join("current_run"), "old\n"),
+        );
         let socket = session.join("z-invalid");
         let listener = UnixListener::bind(&socket);
         assert!(listener.is_ok());
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-
-        assert!(
-            prepare_owned_durable_session(
-                &base,
-                "retry",
-                "/workspace",
-                None,
-                SocketSessionScope::Private,
-                uid,
-                gid,
-            )
-            .is_err()
-        );
+        assert!(base.prepare("retry").is_err());
         assert_eq!(
-            fs::read_to_string(session.join("events.jsonl"))
-                .ok()
-                .as_deref(),
+            text(&session.join("events.jsonl")).as_deref(),
             Some("before\n")
         );
-        assert_eq!(
-            fs::read_to_string(session.join("current_run"))
-                .ok()
-                .as_deref(),
-            Some("old\n")
-        );
+        assert_eq!(text(&session.join("current_run")).as_deref(), Some("old\n"));
         drop(listener);
-        assert!(fs::remove_file(socket).is_ok());
-        assert!(
-            prepare_owned_durable_session(
-                &base,
-                "retry",
-                "/workspace",
-                None,
-                SocketSessionScope::Private,
-                uid,
-                gid,
-            )
-            .is_ok()
-        );
-        let _ignored = fs::remove_dir_all(base);
+        assert_ok!(fs::remove_file(socket));
+        assert!(base.prepare("retry").is_ok());
     }
 
     #[test]
     fn shared_record_keeps_shared_layout_outside_private_prepare() {
-        let session_root = root("shared-semantics");
+        let session_root = Fixture::new("shared-semantics");
         let session = session_root.join("shared");
-        let _ignored = fs::remove_dir_all(&session_root);
         assert!(
             ensure_durable_session_layout(
                 &session_root,
@@ -1089,13 +1029,12 @@ mod permission_tests {
             .is_ok()
         );
         let marker = session.join("shared-marker");
-        assert!(fs::write(&marker, "shared\n").is_ok());
-        assert!(fs::set_permissions(&marker, fs::Permissions::from_mode(0o640)).is_ok());
-        let before = fs::metadata(&marker)
-            .map(|value| (value.uid(), value.gid(), value.permissions().mode() & 0o777))
-            .ok();
+        assert_ok!(
+            fs::write(&marker, "shared\n"),
+            fs::set_permissions(&marker, fs::Permissions::from_mode(0o640)),
+        );
+        let before = owner_mode(&marker);
         assert!(!session.join("current_run").exists());
-
         let request = SocketRequest::Send {
             id: "run".to_owned(),
             session: "shared".to_owned(),
@@ -1118,37 +1057,17 @@ mod permission_tests {
             })
         });
         assert!(run.as_deref().is_some_and(|run| run != "run"));
-
+        assert_eq!(owner_mode(&marker), before);
         assert_eq!(
-            fs::metadata(&marker)
-                .map(|value| (value.uid(), value.gid(), value.permissions().mode() & 0o777))
-                .ok(),
-            before
-        );
-        assert_eq!(
-            fs::read_to_string(session.join("current_run"))
-                .ok()
-                .as_deref(),
+            text(&session.join("current_run")).as_deref(),
             run.as_ref().map(|run| format!("{run}\n")).as_deref()
         );
-        let _ignored = fs::remove_dir_all(session_root);
     }
 
     #[test]
     fn prepared_token_rejects_session_mismatch_and_current_run_replacement() {
-        let root = root("prepared-token");
-        let _ignored = fs::remove_dir_all(&root);
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-        let preparation = prepare_owned_durable_session(
-            &root,
-            "one",
-            "/workspace",
-            None,
-            SocketSessionScope::Private,
-            uid,
-            gid,
-        );
+        let root = Fixture::new("prepared-token");
+        let preparation = root.prepare("one");
         assert!(preparation.is_ok());
         assert!(
             ensure_durable_session_layout(
@@ -1167,42 +1086,31 @@ mod permission_tests {
             write_current_run_session_file(&root.join("two"), "run\n", Some(&preparation)).is_err()
         );
         let current_run = root.join("one/current_run");
-        assert!(fs::remove_file(&current_run).is_ok());
-        assert!(fs::write(&current_run, "replacement\n").is_ok());
+        assert_ok!(
+            fs::remove_file(&current_run),
+            fs::write(&current_run, "replacement\n"),
+        );
         assert!(
             write_current_run_session_file(&root.join("one"), "run\n", Some(&preparation)).is_err()
         );
-        let _ignored = fs::remove_dir_all(root);
     }
 
     #[test]
     fn session_store_repair_keeps_archive_sentinel_mode() {
-        let base = root("session-store-archive-sentinel");
-        let _ignored = fs::remove_dir_all(&base);
-        assert!(fs::create_dir_all(base.join("index")).is_ok());
+        let base = Fixture::new("session-store-archive-sentinel");
+        assert_ok!(fs::create_dir_all(base.join("index")));
         let archive = base.join(".archive");
-        assert!(fs::create_dir_all(archive.join("old-session")).is_ok());
+        assert_ok!(fs::create_dir_all(archive.join("old-session")));
         let archive_sentinel = archive.join("old-session/sentinel");
-        assert!(fs::write(&archive_sentinel, "old").is_ok());
-        assert!(fs::set_permissions(&archive_sentinel, fs::Permissions::from_mode(0o644)).is_ok());
         let selected = base.join("selected");
-        assert!(fs::create_dir_all(&selected).is_ok());
-        assert!(fs::write(selected.join("state"), "state").is_ok());
-        let uid = nix::unistd::geteuid().as_raw();
-        let gid = nix::unistd::getegid().as_raw();
-        assert!(repair_agent_session_root_permissions(&base, uid, gid).is_ok());
-        assert_eq!(
-            fs::metadata(selected.join("state"))
-                .map(|metadata| metadata.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o600)
+        assert_ok!(
+            fs::write(&archive_sentinel, "old"),
+            fs::set_permissions(&archive_sentinel, fs::Permissions::from_mode(0o644)),
+            fs::create_dir_all(&selected),
+            fs::write(selected.join("state"), "state"),
         );
-        assert_eq!(
-            fs::metadata(&archive_sentinel)
-                .map(|metadata| metadata.permissions().mode() & 0o777)
-                .ok(),
-            Some(0o644)
-        );
-        let _ignored = fs::remove_dir_all(base);
+        assert!(repair_agent_session_root_permissions(&base, base.uid, base.gid).is_ok());
+        assert_eq!(mode(&selected.join("state")), Some(0o600));
+        assert_eq!(mode(&archive_sentinel), Some(0o644));
     }
 }

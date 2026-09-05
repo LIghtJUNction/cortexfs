@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::runtime::record::{
-    agent_schedule_child_record_error, require_agent_schedule_parent_context,
+    agent_schedule_child_record_error, require_parent_session_context,
     schedule_child_handoff_materialized,
 };
 use crate::support::atomic::atomic_replace_text;
@@ -27,7 +27,8 @@ pub fn record_agent_schedule_to_parent_context(
     if !report.is_ok() {
         return Err(AgentScheduleRecordError::InvalidSchedule(report));
     }
-    require_agent_schedule_parent_context(parent_session_dir)?;
+    require_parent_session_context(parent_session_dir)
+        .map_err(agent_schedule_child_record_error)?;
     atomic_replace_text(
         &parent_session_dir.join("context").join("plan.json"),
         &ensure_trailing_newline(schedule_json),
@@ -52,7 +53,8 @@ pub fn record_ready_agent_schedule_child_handoffs_to_parent_context(
         &session,
     )
     .map_err(AgentScheduleRecordError::InvalidSchedule)?;
-    require_agent_schedule_parent_context(parent_session_dir)?;
+    require_parent_session_context(parent_session_dir)
+        .map_err(agent_schedule_child_record_error)?;
 
     let mut recorded = Vec::new();
     for handoff in handoffs {

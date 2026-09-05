@@ -7,14 +7,6 @@ use crate::{RuntimeClientError, interaction};
 
 use super::{MAX_SESSION_FRAME_BYTES, MAX_SESSION_RESPONSE_BYTES};
 
-pub(super) fn send_json_stream<F, E>(socket: &Path, frame: &str, mut on_frame: F) -> Result<(), E>
-where
-    F: FnMut(&str) -> Result<(), E>,
-    E: From<RuntimeClientError>,
-{
-    send_json_stream_with(socket, frame, |_stream, line| on_frame(line))
-}
-
 pub(super) fn send_json_stream_with<F, E>(
     socket: &Path,
     frame: &str,

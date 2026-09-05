@@ -1,7 +1,5 @@
-use serde::{Deserialize, Serialize};
-
 use super::InteractionCommand;
-
+use serde::{Deserialize, Serialize};
 /// Runtime-to-client events normalized across terminal, web, and channels.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

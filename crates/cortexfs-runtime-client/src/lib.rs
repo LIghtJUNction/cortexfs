@@ -4,7 +4,7 @@ pub mod session;
 pub mod status;
 pub use session::SessionSendRequest;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -57,8 +57,7 @@ pub fn fresh_request_id(prefix: &str) -> Result<String, RuntimeClientError> {
 pub enum RequestFrame {
     #[serde(rename = "ping")]
     Ping {
-        /// Deprecated compatibility input. The runtime ignores this field and
-        /// newly generated frames omit it.
+        /// Deprecated compatibility input; ignored and omitted by new frames.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
         request_id: String,
@@ -68,8 +67,7 @@ pub enum RequestFrame {
     },
     #[serde(rename = "agent.create")]
     CreateChild {
-        /// Deprecated compatibility input. The runtime ignores this field and
-        /// newly generated frames omit it.
+        /// Deprecated compatibility input; ignored and omitted by new frames.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
         request_id: String,
@@ -91,8 +89,7 @@ pub enum RequestFrame {
     },
     #[serde(rename = "agent.update")]
     UpdatePrompt {
-        /// Deprecated compatibility input. The runtime ignores this field and
-        /// newly generated frames omit it.
+        /// Deprecated compatibility input; ignored and omitted by new frames.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
         request_id: String,
@@ -107,10 +104,7 @@ pub enum RequestFrame {
 /// Maximum accepted `agent.update` prompt-control payload in bytes.
 pub const MAX_SELF_UPDATE_CONTENT_BYTES: usize = 8 * 1024;
 
-/// Returns whether a control file may be self-updated through `agent.update`.
-///
-/// Only authority-free prompt controls are eligible; every other agent
-/// control stays host-owned.
+/// Returns whether an authority-free prompt control may be self-updated.
 #[must_use]
 pub fn is_agent_prompt_control(name: &str) -> bool {
     matches!(name, "system.md" | "prompt.template.md")
@@ -187,6 +181,28 @@ impl RequestFrame {
     }
 }
 
+pub(crate) fn read_frame<T: DeserializeOwned>(
+    stream: UnixStream,
+    max: u64,
+    timeout: Duration,
+) -> Result<T, RuntimeClientError> {
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|_error| RuntimeClientError::CannotRead)?;
+    let mut bytes = Vec::new();
+    BufReader::new(stream)
+        .take(max + 1)
+        .read_until(b'\n', &mut bytes)
+        .map_err(|_error| RuntimeClientError::CannotRead)?;
+    if bytes.is_empty()
+        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max
+        || bytes.last() != Some(&b'\n')
+    {
+        return Err(RuntimeClientError::InvalidFrame);
+    }
+    serde_json::from_slice(&bytes).map_err(|_error| RuntimeClientError::InvalidFrame)
+}
+
 pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, RuntimeClientError> {
     let mut stream =
         UnixStream::connect(socket).map_err(|_error| RuntimeClientError::CannotConnect)?;
@@ -194,26 +210,15 @@ pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, Run
     stream
         .write_all(b"\n")
         .map_err(|_error| RuntimeClientError::CannotWrite)?;
-    stream
-        .set_read_timeout(Some(if cfg!(test) {
+    let response = read_frame(
+        stream,
+        MAX_FRAME_BYTES,
+        if cfg!(test) {
             Duration::from_millis(100)
         } else {
             Duration::from_secs(5)
-        }))
-        .map_err(|_error| RuntimeClientError::CannotRead)?;
-    let mut bytes = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_FRAME_BYTES + 1)
-        .read_until(b'\n', &mut bytes)
-        .map_err(|_error| RuntimeClientError::CannotRead)?;
-    if bytes.is_empty()
-        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_FRAME_BYTES
-        || bytes.last() != Some(&b'\n')
-    {
-        return Err(RuntimeClientError::InvalidFrame);
-    }
-    let response: ResponseFrame =
-        serde_json::from_slice(&bytes).map_err(|_error| RuntimeClientError::InvalidFrame)?;
+        },
+    )?;
     let response_id = match response {
         ResponseFrame::Pong { ref request_id, .. }
         | ResponseFrame::Error { ref request_id, .. }
@@ -406,27 +411,23 @@ pub fn create_child_from_environment(
 pub fn ping_from_environment(
     agent: &str,
 ) -> Result<Option<RuntimeSourceReceipt>, RuntimeClientError> {
-    let socket = env::var_os("CTX_CONTROL_SOCKET");
-    match socket {
-        None => Ok(None),
-        Some(socket) => {
-            let session =
-                env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
-            let run =
-                env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
-            let step = env::var("CTX_AGENT_STEP")
-                .ok()
-                .and_then(|value| value.parse::<u8>().ok());
-            ping(
-                &PathBuf::from(socket),
-                "",
-                &startup_ping_request_id(&run, step),
-                agent,
-                &session,
-                &run,
-            )
-        }
-    }
+    let Some(socket) = env::var_os("CTX_CONTROL_SOCKET") else {
+        return Ok(None);
+    };
+    let session =
+        env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+    let run = env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+    let step = env::var("CTX_AGENT_STEP")
+        .ok()
+        .and_then(|value| value.parse::<u8>().ok());
+    ping(
+        &PathBuf::from(socket),
+        "",
+        &startup_ping_request_id(&run, step),
+        agent,
+        &session,
+        &run,
+    )
 }
 
 fn startup_ping_request_id(run: &str, step: Option<u8>) -> String {
@@ -453,19 +454,32 @@ mod tests {
         }
     }
 
-    fn response(bytes: Vec<u8>) -> Result<ResponseFrame, RuntimeClientError> {
+    type TestServer = (
+        tempfile::TempDir,
+        PathBuf,
+        thread::JoinHandle<Option<RequestFrame>>,
+    );
+
+    fn server(response: Vec<u8>) -> Result<TestServer, RuntimeClientError> {
         let root = tempfile::tempdir().map_err(|_error| RuntimeClientError::CannotConnect)?;
         let socket = root.path().join("control.sock");
         let listener =
             UnixListener::bind(&socket).map_err(|_error| RuntimeClientError::CannotConnect)?;
         let server = thread::spawn(move || {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-            let mut request_bytes = Vec::new();
-            let _ignored = BufReader::new(&mut stream).read_until(b'\n', &mut request_bytes);
-            let _ignored = stream.write_all(&bytes);
+            let (mut stream, _) = listener.accept().ok()?;
+            let mut bytes = Vec::new();
+            BufReader::new(&mut stream)
+                .read_until(b'\n', &mut bytes)
+                .ok()?;
+            let frame = serde_json::from_slice(&bytes).ok()?;
+            let _ignored = stream.write_all(&response);
+            Some(frame)
         });
+        Ok((root, socket, server))
+    }
+
+    fn response(bytes: Vec<u8>) -> Result<ResponseFrame, RuntimeClientError> {
+        let (_root, socket, server) = server(bytes)?;
         let result = request(&socket, &ping_frame());
         let _ignored = server.join();
         result
@@ -497,7 +511,6 @@ mod tests {
         );
     }
 
-    /// 验证 `fresh_request_id` 约束字符集、长度、前缀及不稳定前缀拒绝逻辑。
     #[test]
     fn fresh_request_ids_are_legal_and_distinct() -> Result<(), RuntimeClientError> {
         let first = fresh_request_id("tsh-cache")?;
@@ -513,7 +526,6 @@ mod tests {
         Ok(())
     }
 
-    /// 拒绝超长响应与缺失 newline 的 framing，保持 `MAX_FRAME_BYTES` 与 `read_until` 语义严格。
     #[test]
     fn rejects_oversized_and_missing_newline() {
         let mut oversized = vec![b'x'; usize::try_from(MAX_FRAME_BYTES).unwrap_or(16_384)];
@@ -525,7 +537,6 @@ mod tests {
         );
     }
 
-    /// 通过不回包场景验证 `read_timeout_is_bounded` 在 test/非 test 分支都不漏读阻塞。
     #[test]
     fn read_timeout_is_bounded() -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
@@ -544,30 +555,11 @@ mod tests {
         Ok(())
     }
 
-    /// 校验 `create_child` 的请求-响应一一对应，尤其 `life/path` 关键字段映射。
     #[test]
-    fn create_child_response_has_exact_parity() {
-        let root = tempfile::tempdir().ok();
-        assert!(root.is_some());
-        let Some(root) = root else { return };
-        let socket = root.path().join("control.sock");
-        let listener = UnixListener::bind(&socket).ok();
-        assert!(listener.is_some());
-        let Some(listener) = listener else { return };
-        let server = thread::spawn(move || {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-            let mut bytes = Vec::new();
-            let _ignored = BufReader::new(&mut stream).read_until(b'\n', &mut bytes);
-            let frame = serde_json::from_slice::<RequestFrame>(&bytes);
-            assert!(matches!(
-                frame,
-                Ok(RequestFrame::CreateChild { life, path, .. })
-                    if life == "temp" && path.as_deref() == Some("/ctx/home/1000/tool")
-            ));
-            let _ignored = stream.write_all(b"{\"type\":\"agent.created\",\"request_id\":\"request-1\",\"result\":{\"child\":\"c\",\"child_session\":\"s\",\"pid\":42}}\n");
-        });
+    fn create_child_response_has_exact_parity() -> Result<(), RuntimeClientError> {
+        let (_root, socket, server) = server(
+            b"{\"type\":\"agent.created\",\"request_id\":\"request-1\",\"result\":{\"child\":\"c\",\"child_session\":\"s\",\"pid\":42}}\n".to_vec(),
+        )?;
         let result = create_child(
             &socket,
             "token",
@@ -582,7 +574,11 @@ mod tests {
             "input",
             "temp",
         );
-        assert!(server.join().is_ok());
+        assert!(matches!(
+            server.join(),
+            Ok(Some(RequestFrame::CreateChild { life, path, .. }))
+                if life == "temp" && path.as_deref() == Some("/ctx/home/1000/tool")
+        ));
         assert_eq!(
             result,
             Ok(CreateChildResult {
@@ -591,9 +587,9 @@ mod tests {
                 pid: 42
             })
         );
+        Ok(())
     }
 
-    /// 严格检查 `window` 的可选数值语义，缺省、显式与非法值三种边界都应被约束。
     #[test]
     fn create_child_window_wire_is_numeric_optional_and_strict()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -645,31 +641,10 @@ mod tests {
         Ok(())
     }
 
-    /// 校验 `update_prompt` 的请求-响应一一对应，尤其 control/content 关键字段映射。
     #[test]
-    fn update_prompt_response_has_exact_parity() {
-        let root = tempfile::tempdir().ok();
-        assert!(root.is_some());
-        let Some(root) = root else { return };
-        let socket = root.path().join("control.sock");
-        let listener = UnixListener::bind(&socket).ok();
-        assert!(listener.is_some());
-        let Some(listener) = listener else { return };
-        let server = thread::spawn(move || {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-            let mut bytes = Vec::new();
-            let _ignored = BufReader::new(&mut stream).read_until(b'\n', &mut bytes);
-            let frame = serde_json::from_slice::<RequestFrame>(&bytes);
-            assert!(matches!(
-                frame,
-                Ok(RequestFrame::UpdatePrompt { control, content, .. })
-                    if control == "system.md" && content == "iterate\n"
-            ));
-            let _ignored =
-                stream.write_all(b"{\"type\":\"agent.updated\",\"request_id\":\"request-1\"}\n");
-        });
+    fn update_prompt_response_has_exact_parity() -> Result<(), RuntimeClientError> {
+        let (_root, socket, server) =
+            server(b"{\"type\":\"agent.updated\",\"request_id\":\"request-1\"}\n".to_vec())?;
         let result = update_prompt(
             &socket,
             "token",
@@ -680,11 +655,16 @@ mod tests {
             "system.md",
             "iterate\n",
         );
-        assert!(server.join().is_ok());
+        assert!(matches!(
+            server.join(),
+            Ok(Some(RequestFrame::UpdatePrompt {
+                control, content, ..
+            })) if control == "system.md" && content == "iterate\n"
+        ));
         assert_eq!(result, Ok(()));
+        Ok(())
     }
 
-    /// 非 prompt 控制名与超界内容都必须在连接任何 socket 之前 fail closed。
     #[test]
     fn illegal_update_prompt_fails_before_connect() {
         for (control, content) in [
@@ -708,7 +688,6 @@ mod tests {
         }
     }
 
-    /// 以零窗口作为非法输入，验证在连接前快速失败，避免下游 socket 错误泄漏语义。
     #[test]
     fn zero_window_fails_before_connect() {
         assert_eq!(
@@ -730,14 +709,12 @@ mod tests {
         );
     }
 
-    /// 在局部子进程里复现无 socket 环境，保持与主进程调用一致的闭环行为。
     #[test]
     #[ignore = "subprocess entrypoint for environment isolation"]
     fn socketless_environment_is_inert_subprocess() {
         assert_eq!(ping_from_environment("agent"), Ok(None));
     }
 
-    /// 子进程级别复用 socketless 环境语义，避免环境脏状态污染主测试进程。
     #[test]
     fn socketless_environment_is_inert() -> Result<(), Box<dyn std::error::Error>> {
         let status = Command::new(env::current_exe()?)
