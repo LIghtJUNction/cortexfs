@@ -22,7 +22,9 @@ ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-RestrictNamespaces=yes
+# The runtime delegates isolation to bwrap; denying namespace creation prevents
+# even its startup handshake. Keep the required namespace kinds explicit.
+RestrictNamespaces=mnt ipc net pid uts user cgroup
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes

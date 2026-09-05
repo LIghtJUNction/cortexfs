@@ -102,6 +102,7 @@ fn packaged_socket_unit_preserves_safe_service_lifecycle() -> Result<(), Box<dyn
             "OOMPolicy=stop",
             "NoNewPrivileges=yes",
             "PrivateTmp=yes",
+            "RestrictNamespaces=mnt ipc net pid uts user cgroup",
         ],
     );
     let (unit, body) = service
@@ -115,6 +116,7 @@ fn packaged_socket_unit_preserves_safe_service_lifecycle() -> Result<(), Box<dyn
         1
     );
     assert!(!body.contains("StartLimitIntervalSec"));
+    assert!(!body.lines().any(|line| line == "RestrictNamespaces=yes"));
     Ok(())
 }
 #[test]
