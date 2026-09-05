@@ -4,8 +4,7 @@ use std::{
 };
 
 use cortexfs_channels::{
-    ChannelActions, ChannelCommandResult, ChannelEffect, ChannelFrame, ChannelFrameBody,
-    MessageTarget,
+    ChannelActions, ChannelEffect, ChannelFrame, ChannelFrameBody, MessageTarget,
 };
 
 mod command;
@@ -13,10 +12,6 @@ mod interaction;
 mod writer;
 
 pub(super) use command::CommandBroker;
-
-pub(super) fn new_broker() -> CommandBroker {
-    CommandBroker::default()
-}
 
 pub(super) struct DriverProgress<'a> {
     writer: writer::Output<'a>,
@@ -81,11 +76,7 @@ impl<'a> DriverProgress<'a> {
             target: self.target.clone(),
             effect,
         });
-        self.write(&frame);
-    }
-
-    fn write(&mut self, frame: &ChannelFrame) -> bool {
-        self.writer.write(frame)
+        self.writer.write(&frame);
     }
 }
 
@@ -101,18 +92,4 @@ const fn all_actions() -> ChannelActions {
         unpin: true,
         redact: true,
     }
-}
-
-pub(super) fn complete(
-    commands: &CommandBroker,
-    request_id: &str,
-    session: &str,
-    command_id: &str,
-    result: ChannelCommandResult,
-) -> bool {
-    interaction::complete(commands, request_id, session, command_id, result)
-}
-
-pub(super) fn reject_all(commands: &CommandBroker) {
-    interaction::reject_all(commands);
 }

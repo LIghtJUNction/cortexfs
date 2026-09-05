@@ -70,7 +70,3 @@ pub(super) fn write(stream: &mut UnixStream, frame: &ChannelFrame) -> Result<(),
     stream.write_all(&frame.encode().map_err(DriverError::Frame)?)?;
     stream.flush().map_err(DriverError::Io)
 }
-
-pub(super) fn new_broker() -> driverprogress::CommandBroker {
-    driverprogress::new_broker()
-}
