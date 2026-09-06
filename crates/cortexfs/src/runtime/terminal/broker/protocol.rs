@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const BROKER_ABI: &str = "cortexfs.terminal-broker/v1";
-pub const BROKER_SOCKET: &str = "/run/cortexfs/terminal/broker.sock";
+pub use crate::abi::constants::BROKER_SOCKET;
 pub const MAX_BROKER_FRAME_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

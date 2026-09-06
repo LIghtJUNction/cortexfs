@@ -50,6 +50,7 @@ The default timeout is 3,600 seconds **per Cargo invocation**, including compile
 time and lock wait. Use `--timeout 6600` for a cold workspace build. A timeout or
 interrupt terminates the invocation's process group and retains a failed report.
 Durations measure the test/build command; they are not agent inference latency.
+While waiting, the runner prints elapsed time and raw-log byte count every 30 seconds.
 
 Exit codes: `0` means all selected contracts have passing evidence; `1` means a
 test, timeout, compilation, or required-evidence failure; `2` means invalid setup
@@ -73,6 +74,7 @@ Cargo exits successfully. An invocation with zero passing tests also fails.
 | `recording` | Terminal facts affect only their run; replay/idempotency; tool success and denial become observations | Durable session recorder |
 | `ownership` | Both cancellation/completion orderings, concurrent finishers, fault rollback preserves replacements | Receipt-bound session operations |
 | `sockets` | Actual socket reads, peer rejection before mutation, idle timeout, cancellation index checks | One-request v1 socket service |
+| `aliases` | Exact broker target, legacy compatibility, owner checks and path rejection | FUSE projection methods; no mounted filesystem required |
 | `senders` | Telegram/Discord/Slack actor identity; default-deny routes | Channel event adapters |
 | `routing` | Rejected users never dispatch; allowed users retain distinct sessions | Host bridge |
 | `schedule` | Delegated work selects the installed executor and requires its create authority | Schedule validation |

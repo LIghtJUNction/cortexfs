@@ -1,7 +1,7 @@
 use cortexfs_channels::{ChannelCodec, ChannelIncoming, platform::mattermost::MattermostCodec};
 use reqwest::blocking::Client;
 
-use crate::channel::bridge::AgentChannelBridge;
+use crate::channel::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 use super::{MattermostConfig, MattermostError, api};
 
@@ -33,7 +33,8 @@ pub(super) fn handle_event(
     if sender == Some(user_id) || !config.accepts(target.conversation.as_str()) {
         return Ok(());
     }
-    let outbound = bridge.handle_incoming(incoming)?;
-    api::send(client, config, MattermostCodec.encode(&outbound)?)?;
+    if let Some(outbound) = ChannelBridgeError::consume_denied(bridge.handle_incoming(incoming))? {
+        api::send(client, config, MattermostCodec.encode(&outbound)?)?;
+    }
     Ok(())
 }
