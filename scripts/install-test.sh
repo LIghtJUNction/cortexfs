@@ -208,7 +208,7 @@ assert_false "Wildcard cannot authorize Discord execution" im_sender_ids Discord
 assert_false "Quoted input cannot inject Discord TOML" im_sender_ids Discord '123"'
 assert_false "Slack room IDs cannot authorize senders" im_sender_ids Slack C123
 read_im_senders() {
-    ALLOWED_SENDERS=$sender_ids
+    export ALLOWED_SENDERS=$sender_ids
 }
 for channel in telegram slack; do
     : >"$sudo_log"
