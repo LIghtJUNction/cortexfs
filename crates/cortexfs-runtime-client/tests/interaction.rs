@@ -159,6 +159,111 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn typed_input_rejects_broken_or_incomplete_streams() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use cortexfs_runtime_client::{
+            RuntimeClientError, interaction::MAX_INTERACTION_FRAME_BYTES,
+        };
+        let done = b"{\"type\":\"done\",\"status\":\"ok\"}\n";
+        let cases = [
+            (Vec::new(), false),
+            (b"{\"type\":\"done\"}".to_vec(), false),
+            (b"{\"type\":\"done\"}\n".to_vec(), true),
+            (b"{\"type\":\"error\"}\n".to_vec(), true),
+            (b"\xff\n".to_vec(), false),
+            ([b"invalid\n".as_slice(), done].concat(), false),
+            ([b"{}\n".as_slice(), done].concat(), false),
+            ([b"{\"type\":\"delta\"}\n".as_slice(), done].concat(), false),
+            (
+                b"{\"type\":\"done\",\"request_id\":\"other\"}\n".to_vec(),
+                false,
+            ),
+            (b"{\"type\":\"start\",\"run\":\"r\"}\n".to_vec(), false),
+            (
+                b"{\"type\":\"error\",\"recoverable\":true}\n".to_vec(),
+                false,
+            ),
+            (
+                b"{\"type\":\"error\",\"message\":\"denied\"}\n".to_vec(),
+                true,
+            ),
+            ([b"{\"type\":\"usage\"}\n".as_slice(), done].concat(), true),
+            (
+                [
+                    vec![b' '; MAX_INTERACTION_FRAME_BYTES - done.len()],
+                    done.to_vec(),
+                ]
+                .concat(),
+                true,
+            ),
+            (
+                [
+                    vec![b' '; MAX_INTERACTION_FRAME_BYTES + 1 - done.len()],
+                    done.to_vec(),
+                ]
+                .concat(),
+                false,
+            ),
+        ];
+        for (bytes, valid) in cases {
+            for commands in [false, true] {
+                let response = bytes.clone();
+                let (_root, socket, server) =
+                    socket_server(move |stream, _| stream.write_all(&response))?;
+                let request = terminal_input("boundary");
+                let receive = |_| Ok::<(), RuntimeClientError>(());
+                let result = if commands {
+                    session::send_interaction_events_with_commands(
+                        &socket,
+                        request,
+                        receive,
+                        |_| Ok(InteractionResult::Accepted),
+                    )
+                } else {
+                    session::send_interaction_events(&socket, request, receive)
+                };
+                join_server(server)?;
+                assert_eq!(
+                    result,
+                    if valid {
+                        Ok(())
+                    } else {
+                        Err(RuntimeClientError::InvalidFrame)
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_frame_fails_before_peer_closes() -> Result<(), Box<dyn std::error::Error>> {
+        use cortexfs_runtime_client::{
+            RuntimeClientError, interaction::MAX_INTERACTION_FRAME_BYTES,
+        };
+        use std::io::Read;
+        let (_root, socket, server) = socket_server(|stream, _| {
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+            stream.write_all(&vec![b' '; MAX_INTERACTION_FRAME_BYTES + 1])?;
+            assert_eq!(
+                stream.read(&mut [0])?,
+                0,
+                "client must close on frame overflow"
+            );
+            Ok(())
+        })?;
+        let mut received = false;
+        let result = session::send_interaction_stream(&socket, terminal_input("boundary"), |_| {
+            received = true;
+            Ok::<(), RuntimeClientError>(())
+        });
+        join_server(server)?;
+        assert_eq!(result, Err::<(), _>(RuntimeClientError::InvalidFrame));
+        assert!(!received, "oversized frame must not reach the callback");
+        Ok(())
+    }
+
     fn durable_v2() -> InteractionV2Frame {
         InteractionV2Frame {
             abi: INTERACTION_V2_ABI.to_owned(),

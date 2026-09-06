@@ -1,0 +1,221 @@
+{
+  "schema": "cortexfs.harness-suite/v1",
+  "suites": [
+    {
+      "id": "wire",
+      "title": "Invocation framing and ordered interaction events",
+      "cargo_args": [
+        "-p",
+        "cortexfs-runtime-client",
+        "--all-targets"
+      ],
+      "fixtures": [
+        "crates/cortexfs-runtime-client/src/agent/wire/tests.rs",
+        "crates/cortexfs-runtime-client/tests/interaction.rs"
+      ],
+      "required_tests": [
+        "agent::wire::tests::accepts_exact_initial_and_continuation_frames",
+        "agent::wire::tests::rejects_noncanonical_framing",
+        "agent::wire::tests::rejects_unknown_fields_and_invalid_step_observations",
+        "agent::wire::tests::rejects_invalid_observation_identity_status_and_size",
+        "tests::interaction_stream_preserves_wire_events_and_commands",
+        "tests::typed_input_rejects_broken_or_incomplete_streams",
+        "tests::oversized_frame_fails_before_peer_closes"
+      ]
+    },
+    {
+      "id": "context",
+      "title": "Hard UTF-8 budgets, output reservation and durable history",
+      "cargo_args": [
+        "-p",
+        "cortexfs-context",
+        "--test",
+        "behavior"
+      ],
+      "fixtures": [
+        "crates/cortexfs-context/tests/behavior.rs"
+      ],
+      "required_tests": [
+        "tests::summary_cannot_displace_the_latest_observation",
+        "tests::tiny_utf8_budgets_are_hard_limits",
+        "tests::context_budget_reserves_output_tokens"
+      ]
+    },
+    {
+      "id": "authority",
+      "title": "Policy, mounts and Linux identity constrain tool execution",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "tests::authority::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/tests/authority.rs"
+      ],
+      "required_tests": [
+        "tests::authority::tool_execution_authority_requires_all_layers",
+        "tests::authority::prompt_skill_and_mcp_config_cannot_grant_tool_execution",
+        "tests::authority::tool_execution_authority_checks_linux_identity_mode_bits",
+        "tests::authority::tool_lookup_rejects_executable_symlink"
+      ]
+    },
+    {
+      "id": "cancellation",
+      "title": "Owned child cancellation and authority attenuation",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "tests::child::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/tests/child.rs"
+      ],
+      "required_tests": [
+        "tests::child::owned_child_cancellation_records_state_and_events_without_deleting_history",
+        "tests::child::owned_child_cancellation_rejects_symlink_history_files",
+        "tests::child::child_agent_authority_rejects_identity_group_policy_and_mount_expansion"
+      ]
+    },
+    {
+      "id": "recording",
+      "title": "Run-bound terminal facts, replay and tool observations",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "tests::recording::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/tests/recording/session.rs",
+        "crates/cortexfs/src/tests/recording/indexed.rs",
+        "crates/cortexfs/src/tests/recording/tool.rs"
+      ],
+      "required_tests": [
+        "tests::recording::session::agent_terminal_frames_end_only_the_matching_active_run",
+        "tests::recording::indexed::indexed_cancel_uses_canonical_run_for_state_and_events",
+        "tests::recording::indexed::indexed_socket_send_claims_one_id_once_across_concurrent_runtimes",
+        "tests::recording::indexed::indexed_socket_send_rejects_conflicting_payload_without_changes",
+        "tests::recording::tool::tool_result_recorder_appends_inspectable_tool_message_and_event",
+        "tests::recording::tool::tool_denial_recorder_makes_permission_failure_inspectable"
+      ]
+    },
+    {
+      "id": "ownership",
+      "title": "Cancellation/completion races and receipt-bound rollback",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "tests::session::child::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/tests/session/child.rs"
+      ],
+      "required_tests": [
+        "tests::session::child::stop_lease_linearizes_cancel_before_completion",
+        "tests::session::child::stop_lease_preserves_completion_that_committed_first",
+        "tests::session::child::child_handoff_fault_matrix_leaves_no_partial_channel_or_staging",
+        "tests::session::child::child_handoff_receipt_does_not_remove_replacement",
+        "tests::session::child::concurrent_finishers_never_mix_terminal_payloads"
+      ]
+    },
+    {
+      "id": "sockets",
+      "title": "Real Unix socket peer rejection and idle-client bounds",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "tests::socket::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/tests/socket/listener.rs",
+        "crates/cortexfs/src/tests/socket/frames.rs"
+      ],
+      "required_tests": [
+        "tests::socket::listener::socket_stream_runtime_serves_one_frame_with_peer_credentials",
+        "tests::socket::listener::socket_stream_runtime_denies_wrong_peer_before_mutating_session",
+        "tests::socket::listener::socket_stream_runtime_times_out_idle_client_before_mutating_session",
+        "tests::socket::frames::socket_runtime_cancel_rejects_symlink_current_index"
+      ]
+    },
+    {
+      "id": "sdk",
+      "title": "Installed Agent/Tool SDK process lifecycle and two-call loop",
+      "cargo_args": [
+        "-p",
+        "cortexfs-sdk-extension-fixture",
+        "--test",
+        "installed"
+      ],
+      "fixtures": [
+        "tests/sdk-extension-fixture/tests/installed.rs",
+        "tests/sdk-extension-fixture/src/agent.rs",
+        "tests/sdk-extension-fixture/src/tool.rs"
+      ],
+      "required_tests": [
+        "tests::installed_sdks_run_two_declared_native_tool_calls",
+        "tests::installed_agent_cli_rejects_legacy_argv_and_stdin",
+        "tests::installed_tool_cli_error_emits_canonical_jsonl_and_exits_one",
+        "tests::installed_tool_cli_rejects_oversized_stdin_before_jsonl"
+      ]
+    },
+    {
+      "id": "senders",
+      "title": "Channel event actor identity and default-deny routes",
+      "cargo_args": [
+        "-p",
+        "cortexfs-channels",
+        "--lib"
+      ],
+      "fixtures": [
+        "crates/cortexfs-channels/src/tests.rs",
+        "crates/cortexfs-channels/src/tests/identity.rs"
+      ],
+      "required_tests": [
+        "tests::route_keeps_threads_and_request_ids_stable",
+        "tests::identity::telegram_never_uses_chat_or_forwarded_subject_as_sender",
+        "tests::identity::telegram_anonymous_events_have_no_user_actor",
+        "tests::identity::discord_events_distinguish_actor_from_message_author",
+        "tests::identity::slack_edits_authorize_editor_and_never_fall_back_to_author",
+        "tests::identity::slack_deletes_never_authorize_the_previous_message_author"
+      ]
+    },
+    {
+      "id": "routing",
+      "title": "Host authorization and sender-isolated sessions",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "channel::tests::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/channel/tests.rs"
+      ],
+      "required_tests": [
+        "channel::tests::unauthorized_senders_never_reach_agent_or_progress",
+        "channel::tests::bridge_reuses_socket_sessions_and_returns_assistant_text"
+      ]
+    },
+    {
+      "id": "schedule",
+      "title": "Delegated executor defaults and handoff authority",
+      "cargo_args": [
+        "-p",
+        "cortexfs",
+        "--lib",
+        "tests::schedule::validation::rules::"
+      ],
+      "fixtures": [
+        "crates/cortexfs/src/tests/schedule/validation/rules.rs"
+      ],
+      "required_tests": [
+        "tests::schedule::validation::rules::agent_schedule_defaults_delegated_nodes_to_executor_agent",
+        "tests::schedule::validation::rules::agent_schedule_requires_executor_create_for_implicit_handoff"
+      ]
+    }
+  ]
+}

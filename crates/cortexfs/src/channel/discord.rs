@@ -6,6 +6,7 @@ use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 #[derive(Clone)]
 pub struct DiscordConfig {
+    pub allowed_senders: Vec<String>,
     pub application_id: String,
     pub bot_token: String,
     pub agent_socket: PathBuf,
@@ -22,6 +23,7 @@ pub struct DiscordConfig {
 impl std::fmt::Debug for DiscordConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiscordConfig")
+            .field("allowed_senders", &self.allowed_senders)
             .field("application_id", &self.application_id)
             .field("bot_token", &"[redacted]")
             .field("agent_socket", &self.agent_socket)

@@ -1,4 +1,4 @@
-const IMPLICIT_WORKER_SCHEDULE: &str = r#"
+const IMPLICIT_DELEGATED_SCHEDULE: &str = r#"
 {
   "version": 1,
   "mode": "dag-react",
@@ -63,14 +63,14 @@ allow planner_t session:default write
 }
 
 #[test]
-fn agent_schedule_defaults_delegated_nodes_to_worker_agent() {
+fn agent_schedule_defaults_delegated_nodes_to_executor_agent() {
     let policy = ok!(PolicyV0::parse(
         "\
-allow planner_t agent:worker create
+allow planner_t agent:executor create
 allow planner_t tool:fs.read execute
 "
     ));
-    let schedule = IMPLICIT_WORKER_SCHEDULE;
+    let schedule = IMPLICIT_DELEGATED_SCHEDULE;
 
     let nodes = ok!(ready_agent_schedule_nodes(
         schedule,
@@ -82,7 +82,7 @@ allow planner_t tool:fs.read execute
     let Some(node) = nodes.first() else {
         return;
     };
-    assert_eq!(node.agent(), "worker");
+    assert_eq!(node.agent(), "executor");
     assert_eq!(node.child(), Some("work-123"));
     assert_eq!(node.child_session(), None);
 
@@ -96,15 +96,15 @@ allow planner_t tool:fs.read execute
     let Some(handoff) = ready.first() else {
         return;
     };
-    assert_eq!(handoff.agent(), "worker");
+    assert_eq!(handoff.agent(), "executor");
     assert_eq!(handoff.child(), "work-123");
     assert_eq!(handoff.session(), "feature");
 }
 
 #[test]
-fn agent_schedule_requires_worker_create_for_implicit_worker_handoff() {
+fn agent_schedule_requires_executor_create_for_implicit_handoff() {
     let policy = ok!(PolicyV0::parse("allow planner_t tool:fs.read execute\n"));
-    let schedule = IMPLICIT_WORKER_SCHEDULE;
+    let schedule = IMPLICIT_DELEGATED_SCHEDULE;
 
     let report = inspect_agent_schedule_json(schedule, "planner_t", &policy);
     assert_eq!(
@@ -112,7 +112,7 @@ fn agent_schedule_requires_worker_create_for_implicit_worker_handoff() {
         &[AgentScheduleIssue::PermissionNotGranted {
             node: "implement".to_owned(),
             class: "agent".to_owned(),
-            name: "worker".to_owned(),
+            name: "executor".to_owned(),
             permission: "create".to_owned()
         }]
     );

@@ -146,8 +146,8 @@ shared   /ctx/shared/<name>/agent/<agent>/session/index/channel/<channel_name>
 ```
 
 `<channel_name>` is normalized as `transport[_instance]_<agent>_<session>`
-with underscores only, for example `terminal_coder_default` or
-`discord_primary_coder_discord_deadbeef`. A shared entry is prefixed with
+with underscores only, for example `terminal_executor_default` or
+`discord_primary_executor_discord_deadbeef`. A shared entry is prefixed with
 `shared_`. The file contains provider-neutral JSON describing the target
 agent/session and transport; credentials and external identities are never
 stored there. `ctx attach` reads this index, accepts an exact name or unique

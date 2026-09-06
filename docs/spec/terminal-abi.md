@@ -57,17 +57,21 @@ meta.json is the complete inspectable record:
 
 ~~~json
 {
-  "id": "terminal-coder-default",
-  "agent": "coder",
+  "id": "terminal-executor-default",
+  "agent": "executor",
   "session": "default",
   "owner": "1000",
   "cwd": "/workspace",
   "command": ["/ctx/bin/tsh"],
   "state": "running",
-  "socket": "/ctx/agents/coder/default/terminal/main.sock",
+  "socket": "/run/cortexfs/terminal/broker.sock",
   "created_at": 1735689600
 }
 ~~~
+
+`socket` is a locator, not identity. After `ctx agent start`, it records the
+root-owned broker path from `runtime/terminal/broker.rs`. The session-visible
+alias is `/ctx/home/<uid>/agent/executor/session/default/terminal/main.sock`.
 
 state is the canonical short text projection; status is a compatibility alias.
 Implementations may use created, running, exited, or error. owner and cwd are

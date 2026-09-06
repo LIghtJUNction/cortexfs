@@ -292,7 +292,9 @@ tests/mounts/cortexfs
 - **文档副本。** `docs/` 是 canonical。`crates/cortexfs/docs/` 是 `ctx man` 的
   `include_str!` 手册包；编辑已烘焙主题时必须同步这些文件。
 - **默认代理是 `executor`。** 仍写 `coder` 的示例已过时。省略 `agent` 的 schedule
-  节点仍默认退役的 `worker`；新的 `plan.json` 请显式写 `executor`。
+  节点仍默认退役的 `worker`；新的 `plan.json` 请显式写 `executor`。源码安装器和
+  可选 provider/IM 引导已使用 `executor`；应绑定 `agent/executor.d/model`，
+  默认代理端点使用 `/ctx/agent/main.sock`。
 
 ## 参考项目与相近实现（关键词检索）
 

@@ -31,11 +31,12 @@ impl ChannelCodec for TelegramCodec {
             .get("chat")
             .ok_or_else(|| ChannelError::Protocol("telegram chat is missing".to_owned()))?;
         let conversation = ConversationId::new(scalar(chat.get("id"), "chat.id")?)?;
-        let sender_id = message
+        let Some(from) = message
             .get("from")
-            .map(|from| scalar(from.get("id"), "from.id"))
-            .transpose()?
-            .unwrap_or_else(|| conversation.to_string());
+            .filter(|_| message.get("sender_chat").is_none())
+        else {
+            return Ok(None);
+        };
         Ok(Some(InboundMessage {
             id,
             target: MessageTarget {
@@ -51,7 +52,7 @@ impl ChannelCodec for TelegramCodec {
                     .map(|value| scalar(Some(value), "reply_to_message.message_id"))
                     .transpose()?,
             },
-            sender: participant(message.get("from"), sender_id),
+            sender: participant(Some(from), scalar(from.get("id"), "from.id")?),
             body: text(message.get("text").or_else(|| message.get("caption")))?,
             timestamp_ms: timestamp_ms(message.get("date")),
             metadata: std::collections::BTreeMap::new(),

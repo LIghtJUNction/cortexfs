@@ -3,10 +3,6 @@
     "message": "当前版本",
     "description": "The label for version current"
   },
-  "sidebar.docs.category.Further Reading": {
-    "message": "拓展阅读",
-    "description": "The label for category 'Further Reading' in sidebar 'docs'"
-  },
   "sidebar.docs.category.Specification": {
     "message": "规范",
     "description": "The label for category 'Specification' in sidebar 'docs'"
@@ -39,12 +35,32 @@
     "message": "聊天界面 ABI",
     "description": "The label for the doc item 'Chat UI ABI' in sidebar 'docs', linking to the doc chatui"
   },
-  "sidebar.docs.doc.AIMock Testing": {
-    "message": "AIMock 测试",
-    "description": "The label for the doc item 'AIMock Testing' in sidebar 'docs', linking to the doc aimock-testing"
-  },
   "sidebar.docs.doc.Verus Proofs": {
     "message": "Verus 证明",
     "description": "The label for the doc item 'Verus Proofs' in sidebar 'docs', linking to the doc proofs/verus"
+  },
+  "sidebar.docs.category.Get Started": {
+    "message": "开始使用",
+    "description": "The label for category 'Get Started' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Build & Evaluate": {
+    "message": "开发与评估",
+    "description": "The label for category 'Build & Evaluate' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Architecture": {
+    "message": "架构设计",
+    "description": "The label for category 'Architecture' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Client Reference": {
+    "message": "客户端参考",
+    "description": "The label for category 'Client Reference' in sidebar 'docs'"
+  },
+  "sidebar.docs.link.Find a guide": {
+    "message": "查找使用指南",
+    "description": "The label for link 'Find a guide' in sidebar 'docs'"
+  },
+  "sidebar.docs.doc.Provider Mock Tests": {
+    "message": "供应商模拟测试",
+    "description": "The label for the doc item 'Provider Mock Tests' in sidebar 'docs'"
   }
 }

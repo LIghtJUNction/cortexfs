@@ -17,7 +17,9 @@ impl InteractionRequest {
                 workspace,
                 ..
             } => {
-                valid(scope)?;
+                if !matches!(scope.as_str(), "private" | "shared" | "temp") {
+                    return Err("scope");
+                }
                 if input.contains('\0') || origin.transport.is_empty() {
                     return Err("input");
                 }

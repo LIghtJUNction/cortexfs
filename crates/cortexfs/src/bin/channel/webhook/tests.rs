@@ -76,7 +76,7 @@ fn webhook_routes_provider_event_through_the_common_bridge()
     };
     let bridge = AgentChannelBridge::new(
         agent_socket,
-        ChannelSessionRoute::new("executor", "im")?,
+        ChannelSessionRoute::new("executor", "im")?.with_allowed_senders(["u".to_owned()]),
         None,
     );
     let client = reqwest::blocking::Client::new();

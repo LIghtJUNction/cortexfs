@@ -79,6 +79,7 @@ fn context(message: &Value, channel: ChannelId) -> Result<ChannelEventContext, C
         },
         participant: message
             .get("from")
+            .filter(|_| message.get("sender_chat").is_none())
             .map(|from| scalar(from.get("id"), "from.id"))
             .transpose()?
             .map(|id| participant(message.get("from"), id)),
@@ -104,6 +105,7 @@ fn context_from_reaction(
         },
         participant: reaction
             .get("user")
+            .filter(|_| reaction.get("actor_chat").is_none())
             .map(|user| scalar(user.get("id"), "user.id"))
             .transpose()?
             .map(|id| participant(reaction.get("user"), id)),

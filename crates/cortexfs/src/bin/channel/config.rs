@@ -20,6 +20,7 @@ pub enum ConfigError {
 }
 #[derive(Clone, Debug)]
 pub struct CommonConfig {
+    pub allowed_senders: Vec<String>,
     pub socket: PathBuf,
     pub agent: String,
     pub prefix: String,
@@ -470,6 +471,7 @@ fn common() -> Result<CommonConfig, ConfigError> {
         ));
     }
     Ok(CommonConfig {
+        allowed_senders: list("CORTEXFS_CHANNEL_ALLOWED_SENDERS"),
         socket,
         agent,
         prefix: optional("CORTEXFS_CHANNEL_SESSION_PREFIX", "im"),

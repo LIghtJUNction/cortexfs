@@ -121,7 +121,6 @@ copy_source_tree() {
         --exclude=./.bash_history \
         --exclude=./agent.sh \
         --exclude=./dist \
-        --exclude=./inspect_benchmark \
         --exclude=./node_modules \
         --exclude=./docs-site \
         --exclude=./docs/assets \

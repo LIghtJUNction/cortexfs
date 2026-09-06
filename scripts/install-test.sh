@@ -201,15 +201,44 @@ read_secret() {
 enable_im_services() {
     printf '%s\n' "$@" >>"$sudo_log"
 }
+assert_eq 123,456 "$(im_sender_ids Telegram ' 123, 456 ')" "Telegram IDs are normalized"
+assert_eq '' "$(im_sender_ids Discord '')" "Empty sender lists deny everyone"
+assert_false "Usernames cannot authorize Telegram execution" im_sender_ids Telegram @trusted
+assert_false "Wildcard cannot authorize Discord execution" im_sender_ids Discord '*'
+assert_false "Quoted input cannot inject Discord TOML" im_sender_ids Discord '123"'
+assert_false "Slack room IDs cannot authorize senders" im_sender_ids Slack C123
+read_im_senders() {
+    export ALLOWED_SENDERS=$sender_ids
+}
 for channel in telegram slack; do
     : >"$sudo_log"
+    sender_ids=123,456
+    [[ $channel == slack ]] && sender_ids=U123,W456
     "configure_im_$channel"
     assert_true "$channel routes messages to executor" \
         grep -Fxq CORTEXFS_AGENT=executor "$sudo_log"
     assert_true "$channel uses the executor socket" \
         grep -Fxq CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock "$sudo_log"
+    assert_true "$channel restricts agent access to selected senders" \
+        grep -Fxq "CORTEXFS_CHANNEL_ALLOWED_SENDERS=$sender_ids" "$sudo_log"
 done
-unset -f install_channel_env read_secret enable_im_services
+discord_capture="$TEST_TEMP/discord.toml"
+sudo() {
+    [[ $1 != tee ]] || cat >"$discord_capture"
+}
+read() {
+    printf -v "${@: -1}" '%s' 123456
+}
+sender_ids=123,456
+configure_im_discord
+assert_true "Discord TOML contains exact allowed user IDs" \
+    grep -Fxq 'allowed_senders = ["123","456"]' "$discord_capture"
+sender_ids=''
+configure_im_discord
+assert_true "Discord empty sender list stays fail-closed" \
+    grep -Fxq 'allowed_senders = []' "$discord_capture"
+unset -f read
+unset -f install_channel_env read_secret enable_im_services read_im_senders
 unset -f sudo
 
 package_payload_lists_match() (

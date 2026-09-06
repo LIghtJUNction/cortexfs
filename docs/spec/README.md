@@ -15,6 +15,7 @@ The stable shape is:
   model/
   agent/
   tool/
+  channel/
   home/
   shared/
 ```

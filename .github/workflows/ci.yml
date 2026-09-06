@@ -56,6 +56,9 @@ jobs:
           bash scripts/install-test.sh
           bash scripts/update-test.sh
 
+      - name: Check harness evidence runner
+        run: python3 -m unittest discover -s evals/harness -p 'test_*.py' -v
+
   rust:
     name: rust
     runs-on: ubuntu-latest
@@ -123,7 +126,30 @@ jobs:
           sudo setpriv --reuid=1000 --regid=1000 --clear-groups env \
             PATH="$PATH" HOME="$HOME" CARGO_HOME="$CARGO_HOME" \
             CARGO_TARGET_DIR="$CARGO_TARGET_DIR" TMPDIR="$TMPDIR" \
-            cargo test --locked --workspace --all-targets --all-features -- --test-threads=1
+            CORTEXFS_CARGO_LOCK="$CARGO_TARGET_DIR/.cortexfs-cargo.lock" \
+            python3 evals/harness/run.py --workspace --timeout 6500 \
+            --output "$CARGO_TARGET_DIR/harness-evaluation"
+
+      - name: Prepare harness evidence
+        if: always()
+        run: |
+          evidence=/tmp/cortexfs-test-target/harness-evaluation
+          if sudo test -d "$evidence"; then
+            sudo tar -C "$evidence" -czf "$RUNNER_TEMP/harness-evaluation.tar.gz" .
+            sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/harness-evaluation.tar.gz"
+            if sudo test -f "$evidence/report.md"; then
+              sudo cat "$evidence/report.md" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+      - name: Upload harness evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: harness-evaluation
+          path: ${{ runner.temp }}/harness-evaluation.tar.gz
+          if-no-files-found: warn
+          retention-days: 14
 
   docs:
     name: docs

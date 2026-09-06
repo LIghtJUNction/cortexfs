@@ -58,5 +58,9 @@
   "copyright": {
     "message": "Copyright © 2026 CortexFS.",
     "description": "The footer copyright"
+  },
+  "link.item.label.Handbook": {
+    "message": "使用手册",
+    "description": "The label of footer link with label=Handbook linking to /handbook"
   }
 }

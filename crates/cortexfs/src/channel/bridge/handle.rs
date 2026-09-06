@@ -15,6 +15,7 @@ impl AgentChannelBridge {
         sink: &mut S,
     ) -> Result<OutboundMessage, ChannelBridgeError> {
         let inbound = self.bind_message(inbound);
+        self.route.authorize_sender(Some(&inbound.sender.id))?;
         inbound.body.validate()?;
         sink.begin(&inbound);
         if let Some(reply) = super::slash::reply(self, &inbound) {

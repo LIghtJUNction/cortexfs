@@ -43,6 +43,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_session_scope_before_connecting() {
+        use cortexfs_runtime_client::interaction::{InteractionOrigin, InteractionRequest};
         let result = session::send(
             std::path::Path::new("/missing.sock"),
             SessionSendRequest {
@@ -53,6 +54,31 @@ mod tests {
                 workspace: None,
                 input: "hello",
             },
+        );
+        assert_eq!(result, Err(RuntimeClientError::InvalidRequest));
+        let mut request = InteractionRequest::input(
+            "id",
+            "session",
+            "hello",
+            InteractionOrigin {
+                transport: "terminal".into(),
+                ..InteractionOrigin::default()
+            },
+        );
+        for scope in ["private", "shared", "temp", "unknown"] {
+            if let InteractionRequest::Input {
+                scope: ref mut value,
+                ..
+            } = request
+            {
+                *value = scope.into();
+            }
+            assert_eq!(request.validate().is_ok(), scope != "unknown");
+        }
+        let result = session::send_interaction_stream(
+            std::path::Path::new("/missing.sock"),
+            request,
+            |_| Ok::<(), RuntimeClientError>(()),
         );
         assert_eq!(result, Err(RuntimeClientError::InvalidRequest));
     }

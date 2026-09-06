@@ -1,3 +1,4 @@
+import {roots} from '../data/roots';
 import {
   useCallback,
   useEffect,
@@ -32,24 +33,24 @@ const glyphs: Record<CortexCurtainMode, string[]> = {
     'exec → JSONL',
     'pure inference',
     'stdin · stdout',
-    'gpt-5.6-sol',
+    'provider-neutral',
     'read → metadata',
     'run → inference',
     'route stays behind ABI',
     'one-shot executable',
     'status · log',
-    'kimi-k3',
+    'one model ABI',
     '/ctx/model',
   ],
   agent: [
-    '/ctx/agent/coder',
-    'coder.sock',
+    '/ctx/agent/executor',
+    'executor.sock',
     'policy-bound',
     'uid · gid · mode',
     'mount · cwd',
     'model · policy',
-    'ctx agent start coder',
-    'ctx agent chat coder',
+    'ctx agent start executor',
+    'ctx agent chat executor',
     'orchestrator',
     'socket JSONL',
     'visible tools',
@@ -79,7 +80,7 @@ const glyphs: Record<CortexCurtainMode, string[]> = {
     'latest.md',
     'state · cwd',
     '/ctx/home/<uid>',
-    'agent/coder/session',
+    'agent/executor/session',
     'raw history durable',
     'prompt disposable',
     'default/messages.jsonl',
@@ -225,7 +226,7 @@ export default function CortexCurtain({copy}: {copy: CortexCurtainCopy}): ReactE
         </div>
         <div className="cortexCurtainRoots">
           <span>{copy.rootLabel}</span>
-          <code>status · bin · model · agent · tool · home · shared</code>
+          <code>{roots.join(' · ')}</code>
         </div>
       </div>
       <div className="cortexCurtainControls" role="group" aria-label={copy.selectorLabel}>

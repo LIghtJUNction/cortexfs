@@ -6,7 +6,7 @@ use crate::{RuntimeClientError, interaction};
 
 mod duplex;
 
-pub(super) const MAX_SESSION_FRAME_BYTES: usize = 256 * 1024;
+pub(super) const MAX_SESSION_FRAME_BYTES: usize = interaction::MAX_INTERACTION_FRAME_BYTES;
 pub(super) const MAX_SESSION_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Stable `send` request fields for an agent session socket.
@@ -54,9 +54,6 @@ where
         "input": request.input,
     })
     .to_string();
-    if frame.len() > MAX_SESSION_FRAME_BYTES {
-        return Err(E::from(RuntimeClientError::InvalidRequest));
-    }
     duplex::send_json_stream_with(socket, &frame, |_stream, line| on_frame(line))
 }
 
@@ -80,6 +77,7 @@ where
 }
 
 /// Sends a request and normalizes executable-Agent events.
+/// Input streams must finish with `done` or a nonrecoverable error.
 pub fn send_interaction_events<F, E>(
     socket: &Path,
     request: interaction::InteractionRequest,
@@ -89,13 +87,7 @@ where
     F: FnMut(interaction::InteractionEvent) -> Result<(), E>,
     E: From<RuntimeClientError>,
 {
-    let request_id = request.request_id().to_owned();
-    send_interaction_stream(socket, request, |frame| {
-        if let Some(event) = interaction::interaction_event_from_agent_frame(&request_id, frame) {
-            on_event(event)?;
-        }
-        Ok::<(), E>(())
-    })
+    send_events_with(socket, request, |_stream, event| on_event(event))
 }
 
 /// Sends a request and answers runtime commands on the same socket.
@@ -116,15 +108,7 @@ where
 {
     let request_id = request.request_id().to_owned();
     let session = request.session().unwrap_or("default").to_owned();
-    let frame = interaction::InteractionFrame::request(request)
-        .encode()
-        .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
-    let frame =
-        String::from_utf8(frame).map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
-    duplex::send_json_stream_with(socket, frame.trim_end_matches('\n'), |stream, raw| {
-        let Some(event) = interaction::interaction_event_from_agent_frame(&request_id, raw) else {
-            return Ok(());
-        };
+    send_events_with(socket, request, |stream, event| {
         on_event(event.clone())?;
         if let interaction::InteractionEvent::Command { command_id, .. } = &event {
             let result = on_command(&event)?;
@@ -143,18 +127,64 @@ where
     })
 }
 
+fn send_events_with<F, E>(
+    socket: &Path,
+    request: interaction::InteractionRequest,
+    mut on_event: F,
+) -> Result<(), E>
+where
+    F: FnMut(&mut std::os::unix::net::UnixStream, interaction::InteractionEvent) -> Result<(), E>,
+    E: From<RuntimeClientError>,
+{
+    let request_id = request.request_id().to_owned();
+    let input = matches!(request, interaction::InteractionRequest::Input { .. });
+    let mut complete = !input;
+    let frame = interaction::InteractionFrame::request(request)
+        .encode()
+        .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
+    let frame = std::str::from_utf8(&frame)
+        .map_err(|_error| E::from(RuntimeClientError::InvalidRequest))?;
+    duplex::send_json_stream_with(socket, frame.trim_end_matches('\n'), |stream, raw| {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|_error| E::from(RuntimeClientError::InvalidFrame))?;
+        let kind = value
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| E::from(RuntimeClientError::InvalidFrame))?;
+        if input
+            && value
+                .get("request_id")
+                .is_some_and(|id| id.as_str() != Some(request_id.as_str()))
+        {
+            return Err(E::from(RuntimeClientError::InvalidFrame));
+        }
+        if let Some(event) = interaction::interaction_event_from_agent_frame(&request_id, raw) {
+            complete |= matches!(
+                event,
+                interaction::InteractionEvent::Done { .. }
+                    | interaction::InteractionEvent::Error {
+                        retryable: false,
+                        ..
+                    }
+            );
+            on_event(stream, event)?;
+        } else if matches!(kind, "delta" | "tool_call" | "approval_request") {
+            return Err(E::from(RuntimeClientError::InvalidFrame));
+        }
+        Ok(())
+    })?;
+    complete
+        .then_some(())
+        .ok_or_else(|| E::from(RuntimeClientError::InvalidFrame))
+}
+
 fn validate(request: &SessionSendRequest<'_>) -> Result<(), RuntimeClientError> {
     if !matches!(request.scope, "private" | "shared" | "temp") {
         return Err(RuntimeClientError::InvalidRequest);
     }
-    if [
-        request.request_id,
-        request.session,
-        request.scope,
-        request.input,
-    ]
-    .iter()
-    .any(|field| field.is_empty() || field.contains('\0'))
+    if [request.request_id, request.session, request.input]
+        .iter()
+        .any(|field| field.is_empty() || field.contains('\0'))
         || request.cwd.is_some_and(|value| value.contains('\0'))
         || request.workspace.is_some_and(|value| value.contains('\0'))
     {

@@ -46,9 +46,11 @@ Their stable `/ctx` paths may be aliases to endpoints under `/run`, and their
 absence never deletes the Agent definition or a private/shared session.
 
 The packaged `cortexfs-agent@.socket` is ordered after and restart-coupled to
-`cortexfs.service`. Package upgrades also start only the agent socket instances
-explicitly enabled through `sockets.target.wants`; an upgrade therefore does
-not leave an enabled chat endpoint inactive after the FUSE mount restarts.
+`cortexfs.service`. `ctx update` restores `cortexfs.service` itself when that
+unit was active before the transaction. Package upgrades also start only the
+agent socket instances explicitly enabled through `sockets.target.wants`; an
+upgrade therefore does not leave an enabled chat endpoint inactive after the
+FUSE mount restarts.
 
 ## Runtime Surfaces
 

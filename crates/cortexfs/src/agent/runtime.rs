@@ -77,41 +77,84 @@ pub enum AgentRuntimeViewError {
     InvalidControlFile(String),
 }
 
+macro_rules! borrowed_getters {
+    ($( $(#[$doc:meta])* $field:ident: $ty:ty; )*) => {
+        $(
+            $(#[$doc])*
+            #[must_use]
+            pub fn $field(&self) -> &$ty {
+                &self.$field
+            }
+        )*
+    };
+}
+
+macro_rules! copied_getters {
+    ($( $(#[$doc:meta])* $field:ident: $ty:ty; )*) => {
+        $(
+            $(#[$doc])*
+            #[must_use]
+            pub const fn $field(&self) -> $ty {
+                self.$field
+            }
+        )*
+    };
+}
+
 impl AgentRuntimeView {
-    /// Returns the agent object name.
-    #[must_use]
-    pub fn agent_name(&self) -> &str {
-        &self.agent_name
+    borrowed_getters! {
+        /// Returns the agent object name.
+        agent_name: str;
+        /// Returns the control directory that produced this view.
+        control_dir: Path;
+        /// Returns `CTX_ROOT`.
+        ctx_root: Path;
+        /// Returns `CTX_HOME`.
+        ctx_home: Path;
+        /// Returns the agent `HOME`.
+        home: Path;
+        /// Returns the full label control value.
+        label: str;
+        /// Returns the v0 policy subject used for effective-authority checks.
+        policy_subject: str;
+        /// Returns the isolation profile.
+        iso: str;
+        /// Returns the chroot root from `root`.
+        root: Path;
+        /// Returns the startup cwd inside the chroot.
+        cwd: Path;
+        /// Returns the computed environment in process insertion order.
+        env: [(String, String)];
+        /// Returns the selected model object name.
+        model: str;
+        /// Returns the configured provider-neutral behavior loop.
+        loop_kind: AgentLoop;
     }
 
-    /// Returns the control directory that produced this view.
-    #[must_use]
-    pub fn control_dir(&self) -> &Path {
-        &self.control_dir
-    }
-
-    /// Returns `CTX_ROOT`.
-    #[must_use]
-    pub fn ctx_root(&self) -> &Path {
-        &self.ctx_root
-    }
-
-    /// Returns `CTX_HOME`.
-    #[must_use]
-    pub fn ctx_home(&self) -> &Path {
-        &self.ctx_home
-    }
-
-    /// Returns the agent `HOME`.
-    #[must_use]
-    pub fn home(&self) -> &Path {
-        &self.home
-    }
-
-    /// Returns the owning Linux uid from `owner`.
-    #[must_use]
-    pub const fn owner(&self) -> u32 {
-        self.owner
+    copied_getters! {
+        /// Returns the owning Linux uid from `owner`.
+        owner: u32;
+        /// Returns the coarse `r/w/x` file and shell permission ceiling.
+        permissions: AgentPermissions;
+        /// Returns the stable lifecycle value.
+        lifecycle: ChildLifecycle;
+        /// Returns the trusted hard limit for the selected model independently of
+        /// the Agent's durable and effective window selections.
+        model_limit: ModelContextLimit;
+        /// Returns the model metadata recommendation before Agent overrides.
+        model_recommended: ModelContextLimit;
+        /// Returns the model metadata compaction threshold before Agent overrides.
+        model_compact: ModelContextLimit;
+        /// Returns the durable Agent window setting.
+        window_setting: AgentWindowSetting;
+        /// Returns the effective token window after model-limit resolution.
+        effective_window: AgentEffectiveWindow;
+        /// Returns the durable Agent compaction setting.
+        compact_setting: AgentWindowSetting;
+        /// Returns the effective compaction threshold.
+        effective_compact: AgentEffectiveWindow;
+        /// Returns the hosted direct-native approval mode.
+        approval: AgentApprovalMode;
     }
 
     /// Returns the runtime Linux identity from `uid/gid/groups`.
@@ -120,58 +163,10 @@ impl AgentRuntimeView {
         &self.identity
     }
 
-    /// Returns the coarse `r/w/x` file and shell permission ceiling.
-    #[must_use]
-    pub const fn permissions(&self) -> AgentPermissions {
-        self.permissions
-    }
-
-    /// Returns the full label control value.
-    #[must_use]
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    /// Returns the v0 policy subject used for effective-authority checks.
-    #[must_use]
-    pub fn policy_subject(&self) -> &str {
-        &self.policy_subject
-    }
-
-    /// Returns the isolation profile.
-    #[must_use]
-    pub fn iso(&self) -> &str {
-        &self.iso
-    }
-
     /// Returns the optional parent reference.
     #[must_use]
     pub fn parent(&self) -> Option<&str> {
         self.parent.as_deref()
-    }
-
-    /// Returns the stable lifecycle value.
-    #[must_use]
-    pub const fn lifecycle(&self) -> ChildLifecycle {
-        self.lifecycle
-    }
-
-    /// Returns the chroot root from `root`.
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    /// Returns the startup cwd inside the chroot.
-    #[must_use]
-    pub fn cwd(&self) -> &Path {
-        &self.cwd
-    }
-
-    /// Returns the computed environment in process insertion order.
-    #[must_use]
-    pub fn env(&self) -> &[(String, String)] {
-        &self.env
     }
 
     /// Returns the derived `CTX_PATH` tool lookup path.
@@ -186,61 +181,6 @@ impl AgentRuntimeView {
         &self.mount_table
     }
 
-    /// Returns the selected model object name.
-    #[must_use]
-    pub fn model(&self) -> &str {
-        &self.model
-    }
-
-    /// Returns the trusted hard limit for the selected model independently of
-    /// the Agent's durable and effective window selections.
-    #[must_use]
-    pub const fn model_limit(&self) -> ModelContextLimit {
-        self.model_limit
-    }
-
-    /// Returns the model metadata recommendation before Agent overrides.
-    #[must_use]
-    pub const fn model_recommended(&self) -> ModelContextLimit {
-        self.model_recommended
-    }
-
-    /// Returns the model metadata compaction threshold before Agent overrides.
-    #[must_use]
-    pub const fn model_compact(&self) -> ModelContextLimit {
-        self.model_compact
-    }
-
-    /// Returns the durable Agent window setting.
-    #[must_use]
-    pub const fn window_setting(&self) -> AgentWindowSetting {
-        self.window_setting
-    }
-
-    /// Returns the effective token window after model-limit resolution.
-    #[must_use]
-    pub const fn effective_window(&self) -> AgentEffectiveWindow {
-        self.effective_window
-    }
-
-    /// Returns the durable Agent compaction setting.
-    #[must_use]
-    pub const fn compact_setting(&self) -> AgentWindowSetting {
-        self.compact_setting
-    }
-
-    /// Returns the effective compaction threshold.
-    #[must_use]
-    pub const fn effective_compact(&self) -> AgentEffectiveWindow {
-        self.effective_compact
-    }
-
-    /// Returns the configured provider-neutral behavior loop.
-    #[must_use]
-    pub fn loop_kind(&self) -> &AgentLoop {
-        &self.loop_kind
-    }
-
     /// Returns the parsed v0 policy.
     #[must_use]
     pub const fn policy(&self) -> &PolicyV0 {
@@ -251,12 +191,6 @@ impl AgentRuntimeView {
     #[must_use]
     pub const fn declared_tools(&self) -> &BTreeSet<String> {
         &self.declared_tools
-    }
-
-    /// Returns the hosted direct-native approval mode.
-    #[must_use]
-    pub const fn approval(&self) -> AgentApprovalMode {
-        self.approval
     }
 }
 

@@ -1,16 +1,17 @@
-use std::io::{BufRead, BufReader, Write};
+use serde_json::Value;
+use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use cortexfs_channels::{
     Attachment, ChannelActions, ChannelCapabilities, ChannelCommandResult, ChannelControlAction,
-    ChannelEffect, ChannelEventContext, ChannelFrame, ChannelFrameBody, ChannelId,
+    ChannelEffect, ChannelError, ChannelEventContext, ChannelFrame, ChannelFrameBody, ChannelId,
     ChannelIncomingEvent, ChannelRuntimeEvent, ChannelSessionRoute, ConversationId,
     DeliveryReceipt, InboundMessage, MessageBody, MessageTarget, Participant,
 };
 
-use super::bridge::AgentChannelBridge;
-use super::bridge::ChannelProgressSink;
+use super::bridge::{AgentChannelBridge, ChannelBridgeError, ChannelProgressSink};
 use super::{
     driver::{DriverConfig, DriverHub},
     driverhandle,
@@ -29,6 +30,10 @@ impl ChannelProgressSink for ProgressProbe {
         self.starts += 1;
     }
 
+    fn begin_event(&mut self, _target: &MessageTarget) {
+        self.starts += 1;
+    }
+
     fn delta(&mut self, text: &str) {
         self.deltas.push(text.to_owned());
     }
@@ -42,72 +47,134 @@ impl ChannelProgressSink for ProgressProbe {
     }
 }
 
+fn target(channel: &str, conversation: &str) -> Result<MessageTarget, ChannelError> {
+    Ok(MessageTarget {
+        channel: ChannelId::new(channel)?,
+        conversation: ConversationId::new(conversation)?,
+        thread: None,
+        reply_to: None,
+    })
+}
+
+fn message(
+    id: &str,
+    target: MessageTarget,
+    sender: &str,
+    text: &str,
+) -> Result<InboundMessage, ChannelError> {
+    Ok(InboundMessage {
+        id: id.to_owned(),
+        target,
+        sender: Participant {
+            id: sender.to_owned(),
+            ..Participant::default()
+        },
+        body: MessageBody::text(text)?,
+        timestamp_ms: None,
+        metadata: std::collections::BTreeMap::new(),
+    })
+}
+
+fn bridge(socket: impl Into<PathBuf>) -> Result<AgentChannelBridge, ChannelError> {
+    Ok(AgentChannelBridge::new(
+        socket,
+        ChannelSessionRoute::new("executor", "im")?
+            .with_allowed_senders(["user-1", "user-2", "user-event"].map(str::to_owned)),
+        None,
+    ))
+}
+
+fn driver(root: &Path, channel: ChannelId, bridge: AgentChannelBridge) -> DriverConfig {
+    DriverConfig {
+        socket: root.join("channel.sock"),
+        channel,
+        bridge,
+        hub: DriverHub::default(),
+    }
+}
+
+fn read_line(reader: &mut impl BufRead) -> io::Result<String> {
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    Ok(line)
+}
+
+fn reply_once(
+    socket: &Path,
+    reply: &'static [u8],
+) -> io::Result<thread::JoinHandle<io::Result<String>>> {
+    let listener = UnixListener::bind(socket)?;
+    Ok(thread::spawn(move || {
+        let (mut stream, _) = listener.accept()?;
+        let request = read_line(&mut BufReader::new(&mut stream))?;
+        stream.write_all(reply)?;
+        Ok(request)
+    }))
+}
+
 #[test]
 fn bridge_reuses_socket_sessions_and_returns_assistant_text()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let socket = root.path().join("agent.sock");
     let listener = UnixListener::bind(&socket)?;
-    let server = thread::spawn(move || -> Result<(), std::io::Error> {
-        let (mut stream, _) = listener.accept()?;
-        let mut frame = String::new();
-        BufReader::new(&mut stream).read_line(&mut frame)?;
-        let attachment_seen =
-            serde_json::from_str::<serde_json::Value>(&frame).is_ok_and(|value| {
-                value
-                    .pointer("/payload/value/event/attachments/0/url")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("https://example.test/image.png")
-            });
-        let channel_seen = serde_json::from_str::<serde_json::Value>(&frame).is_ok_and(|value| {
-            value
+    let server = thread::spawn(move || -> io::Result<()> {
+        let mut previous_session = None;
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept()?;
+            let frame = read_line(&mut BufReader::new(&mut stream))?;
+            let value: Value = serde_json::from_str(&frame)
+                .map_err(|_error| io::Error::other("invalid agent session frame"))?;
+            let attachment_seen = value
+                .pointer("/payload/value/event/attachments/0/url")
+                .is_some_and(|url| url == "https://example.test/image.png");
+            let channel_seen = value
                 .pointer("/payload/value/origin/endpoint")
-                .and_then(serde_json::Value::as_str)
-                == Some("telegram.primary")
-        });
-        if !frame.contains("\"abi\":\"cortexfs.interaction/v1\"")
-            || !frame.contains("\"transport\":\"channel\"")
-            || !attachment_seen
-            || !channel_seen
-        {
-            return Err(std::io::Error::other("invalid agent session frame"));
-        }
-        stream.write_all(
+                .is_some_and(|channel| channel == "telegram.primary");
+            if !frame.contains("\"abi\":\"cortexfs.interaction/v1\"")
+                || !frame.contains("\"transport\":\"channel\"")
+                || !attachment_seen
+                || !channel_seen
+            {
+                return Err(io::Error::other("invalid agent session frame"));
+            }
+            let session = value.pointer("/payload/value/session").cloned();
+            if session.is_none() || session == previous_session {
+                return Err(io::Error::other("authorized senders share a session"));
+            }
+            previous_session = session;
+            stream.write_all(
             b"{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"pong\"}]}\n{\"type\":\"done\",\"status\":\"ok\"}\n",
-        )
+        )?;
+        }
+        Ok(())
     });
     let bridge = AgentChannelBridge::new_with_channel(
         socket,
-        ChannelSessionRoute::new("executor", "im")?,
+        ChannelSessionRoute::new("executor", "im")?
+            .with_allowed_senders(["user-1", "user-2", "user-event"].map(str::to_owned))
+            .with_identity_isolation(),
         None,
         ChannelId::new("telegram.primary")?,
     );
-    let reply = bridge.handle(InboundMessage {
-        id: "message-1".to_owned(),
-        target: MessageTarget {
-            channel: ChannelId::new("telegram")?,
-            conversation: ConversationId::new("chat-1")?,
-            thread: None,
-            reply_to: None,
-        },
-        sender: Participant::default(),
-        body: MessageBody::with_attachments(
+    for sender in ["user-1", "user-2"] {
+        let mut inbound = message("message-1", target("telegram", "chat-1")?, sender, "ping")?;
+        inbound.body = MessageBody::with_attachments(
             "ping",
             vec![Attachment {
                 url: "https://example.test/image.png".to_owned(),
                 name: Some("image.png".to_owned()),
                 mime: Some("image/png".to_owned()),
             }],
-        )?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    })?;
+        )?;
+        let reply = bridge.handle(inbound)?;
+        assert_eq!(reply.body.text, "pong");
+        assert_eq!(reply.target.channel.as_str(), "telegram.primary");
+        assert_eq!(reply.target.reply_to, Some("message-1".to_owned()));
+    }
     server
         .join()
         .map_err(|error| format!("server panicked: {error:?}"))??;
-    assert_eq!(reply.body.text, "pong");
-    assert_eq!(reply.target.channel.as_str(), "telegram.primary");
-    assert_eq!(reply.target.reply_to, Some("message-1".to_owned()));
     Ok(())
 }
 
@@ -115,29 +182,17 @@ fn bridge_reuses_socket_sessions_and_returns_assistant_text()
 fn bridge_forwards_stream_events_to_progress_sink() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let socket = root.path().join("agent.sock");
-    let listener = UnixListener::bind(&socket)?;
-    let server = thread::spawn(move || -> Result<(), std::io::Error> {
-        let (mut stream, _) = listener.accept()?;
-        let mut frame = String::new();
-        BufReader::new(&mut stream).read_line(&mut frame)?;
-        stream.write_all(
-            b"{\"type\":\"delta\",\"text\":\"pong\"}\n{\"type\":\"done\",\"status\":\"ok\"}\n",
-        )
-    });
-    let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("executor", "im")?, None);
-    let inbound = InboundMessage {
-        id: "message-2".to_owned(),
-        target: MessageTarget {
-            channel: ChannelId::new("discord")?,
-            conversation: ConversationId::new("channel-1")?,
-            thread: None,
-            reply_to: None,
-        },
-        sender: Participant::default(),
-        body: MessageBody::text("ping")?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    };
+    let server = reply_once(
+        &socket,
+        b"{\"type\":\"delta\",\"text\":\"pong\"}\n{\"type\":\"done\",\"status\":\"ok\"}\n",
+    )?;
+    let bridge = bridge(socket)?;
+    let inbound = message(
+        "message-2",
+        target("discord", "channel-1")?,
+        "user-1",
+        "ping",
+    )?;
     let mut probe = ProgressProbe::default();
     let reply = bridge.handle_with_progress(inbound, &mut probe)?;
     server
@@ -155,39 +210,26 @@ fn bridge_returns_safe_progress_error_without_provider_details()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let socket = root.path().join("agent.sock");
-    let listener = UnixListener::bind(&socket)?;
-    let server = thread::spawn(move || -> Result<(), std::io::Error> {
-        let (mut stream, _) = listener.accept()?;
-        let mut frame = String::new();
-        BufReader::new(&mut stream).read_line(&mut frame)?;
-        stream.write_all(
+    let server = reply_once(&socket,
             b"{\"type\":\"delta\",\"text\":\"sensitive partial output\"}\n{\"type\":\"error\",\"recoverable\":false,\"message\":\"sk-secret-provider-detail\"}\n{\"type\":\"done\",\"status\":\"error\"}\n",
-        )
-    });
-    let bridge = AgentChannelBridge::new(socket, ChannelSessionRoute::new("executor", "im")?, None);
-    let inbound = InboundMessage {
-        id: "message-3".to_owned(),
-        target: MessageTarget {
-            channel: ChannelId::new("discord")?,
-            conversation: ConversationId::new("channel-1")?,
-            thread: None,
-            reply_to: None,
-        },
-        sender: Participant::default(),
-        body: MessageBody::text("ping")?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    };
+    )?;
+    let bridge = bridge(socket)?;
+    let inbound = message(
+        "message-3",
+        target("discord", "channel-1")?,
+        "user-1",
+        "ping",
+    )?;
     let mut probe = ProgressProbe::default();
     let Err(error) = bridge.handle_with_progress(inbound, &mut probe) else {
-        return Err(std::io::Error::other("agent error was not returned").into());
+        return Err(io::Error::other("agent error was not returned").into());
     };
     server
         .join()
         .map_err(|error| format!("server panicked: {error:?}"))??;
-    assert!(matches!(error, super::bridge::ChannelBridgeError::Agent(_)));
+    assert!(matches!(error, ChannelBridgeError::Agent(_)));
     let Some(message) = probe.error else {
-        return Err(std::io::Error::other("progress error was not delivered").into());
+        return Err(io::Error::other("progress error was not delivered").into());
     };
     assert!(!message.contains("sk-secret-provider-detail"));
     assert!(message.contains("model/tool loop"));
@@ -199,44 +241,19 @@ fn bridge_returns_safe_progress_error_without_provider_details()
 fn driver_streams_effects_before_final_delivery() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let agent_socket = root.path().join("agent.sock");
-    let agent_listener = UnixListener::bind(&agent_socket)?;
-    let agent = thread::spawn(move || -> Result<(), std::io::Error> {
-        let (mut stream, _) = agent_listener.accept()?;
-        let mut request = String::new();
-        BufReader::new(&mut stream).read_line(&mut request)?;
-        stream.write_all(
+    let agent = reply_once(&agent_socket,
             b"{\"type\":\"delta\",\"run\":\"run-1\",\"text\":\"pong\"}\n{\"type\":\"done\",\"run\":\"run-1\",\"status\":\"ok\"}\n",
-        )
-    });
-    let bridge = AgentChannelBridge::new(
-        agent_socket,
-        ChannelSessionRoute::new("executor", "im")?,
-        None,
-    );
+    )?;
+    let bridge = bridge(agent_socket)?;
     let channel = ChannelId::new("telegram")?;
-    let config = DriverConfig {
-        socket: root.path().join("channel.sock"),
-        channel: channel.clone(),
-        bridge,
-        hub: DriverHub::default(),
-    };
+    let config = driver(root.path(), channel.clone(), bridge);
     let (mut runtime, mut adapter) = UnixStream::pair()?;
-    let inbound = InboundMessage {
-        id: "message-4".to_owned(),
-        target: MessageTarget {
-            channel,
-            conversation: ConversationId::new("chat-1")?,
-            thread: None,
-            reply_to: None,
-        },
-        sender: Participant {
-            id: "user-1".to_owned(),
-            ..Participant::default()
-        },
-        body: MessageBody::text("ping")?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    };
+    let inbound = message(
+        "message-4",
+        target(channel.as_str(), "chat-1")?,
+        "user-1",
+        "ping",
+    )?;
     let (response, close) = driverhandle::handle(
         ChannelFrame::new(ChannelFrameBody::Inbound {
             event_id: "event-1".to_owned(),
@@ -246,15 +263,9 @@ fn driver_streams_effects_before_final_delivery() -> Result<(), Box<dyn std::err
         &mut runtime,
     );
     let mut reader = BufReader::new(&mut adapter);
-    let mut effect = String::new();
-    reader.read_line(&mut effect)?;
-    assert!(effect.contains("\"typing\""));
-    effect.clear();
-    reader.read_line(&mut effect)?;
-    assert!(effect.contains("\"preview\""));
-    effect.clear();
-    reader.read_line(&mut effect)?;
-    assert!(effect.contains("\"active\":false"));
+    assert!(read_line(&mut reader)?.contains("\"typing\""));
+    assert!(read_line(&mut reader)?.contains("\"preview\""));
+    assert!(read_line(&mut reader)?.contains("\"active\":false"));
     assert!(!close);
     assert!(matches!(
         response.map(|frame| frame.frame),
@@ -262,7 +273,7 @@ fn driver_streams_effects_before_final_delivery() -> Result<(), Box<dyn std::err
     ));
     agent
         .join()
-        .map_err(|_error| std::io::Error::other("agent panicked"))??;
+        .map_err(|_error| io::Error::other("agent panicked"))??;
     Ok(())
 }
 
@@ -271,44 +282,12 @@ fn driver_routes_non_message_event_with_structured_payload()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let agent_socket = root.path().join("agent.sock");
-    let listener = UnixListener::bind(&agent_socket)?;
-    let agent = thread::spawn(move || -> Result<(), std::io::Error> {
-        let (mut stream, _) = listener.accept()?;
-        let mut request = String::new();
-        BufReader::new(&mut stream).read_line(&mut request)?;
-        let event_seen = serde_json::from_str::<serde_json::Value>(&request).is_ok_and(|value| {
-            value
-                .pointer("/payload/value/event/type")
-                .and_then(serde_json::Value::as_str)
-                == Some("reaction")
-        });
-        stream.write_all(
-            b"{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"seen\"}]}\n{\"type\":\"done\",\"status\":\"ok\"}\n",
-        )?;
-        if !event_seen {
-            return Err(std::io::Error::other(format!(
-                "structured event was not forwarded: {request}"
-            )));
-        }
-        Ok(())
-    });
+    let agent = reply_once(&agent_socket,
+        b"{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"seen\"}]}\n{\"type\":\"done\",\"status\":\"ok\"}\n",
+    )?;
     let channel = ChannelId::new("telegram")?;
-    let target = MessageTarget {
-        channel: channel.clone(),
-        conversation: ConversationId::new("chat-event")?,
-        thread: None,
-        reply_to: None,
-    };
-    let config = DriverConfig {
-        socket: root.path().join("channel.sock"),
-        channel,
-        bridge: AgentChannelBridge::new(
-            agent_socket,
-            ChannelSessionRoute::new("executor", "im")?,
-            None,
-        ),
-        hub: DriverHub::default(),
-    };
+    let target = target(channel.as_str(), "chat-event")?;
+    let config = driver(root.path(), channel, bridge(agent_socket)?);
     let (mut runtime, _adapter) = UnixStream::pair()?;
     let event = ChannelIncomingEvent::Reaction {
         context: ChannelEventContext {
@@ -348,9 +327,20 @@ fn driver_routes_non_message_event_with_structured_payload()
             ..target
         }
     );
-    agent
+    let request = agent
         .join()
-        .map_err(|error| std::io::Error::other(format!("agent panicked: {error:?}")))??;
+        .map_err(|error| io::Error::other(format!("agent panicked: {error:?}")))??;
+    let event_seen = serde_json::from_str::<Value>(&request).is_ok_and(|value| {
+        value
+            .pointer("/payload/value/event/type")
+            .and_then(Value::as_str)
+            == Some("reaction")
+    });
+    if !event_seen {
+        return Err(
+            io::Error::other(format!("structured event was not forwarded: {request}")).into(),
+        );
+    }
     Ok(())
 }
 
@@ -360,18 +350,16 @@ fn driver_round_trips_runtime_command_on_the_channel_socket()
     let root = tempfile::tempdir()?;
     let agent_socket = root.path().join("agent.sock");
     let agent_listener = UnixListener::bind(&agent_socket)?;
-    let agent = thread::spawn(move || -> Result<(), std::io::Error> {
+    let agent = thread::spawn(move || -> io::Result<()> {
         let (mut stream, _) = agent_listener.accept()?;
-        let mut request = String::new();
-        BufReader::new(&mut stream).read_line(&mut request)?;
+        let _request = read_line(&mut BufReader::new(&mut stream))?;
         stream.write_all(
             br#"{"type":"approval_request","run":"run-2","id":"call-2","name":"fs.write","args":{}}
 "#,
         )?;
-        let mut result = String::new();
-        BufReader::new(&mut stream).read_line(&mut result)?;
+        let result = read_line(&mut BufReader::new(&mut stream))?;
         if !result.contains("\"accepted\"") {
-            return Err(std::io::Error::other("command result was not accepted"));
+            return Err(io::Error::other("command result was not accepted"));
         }
         stream.write_all(
             b"{\"type\":\"delta\",\"run\":\"run-2\",\"text\":\"done\"}\n{\"type\":\"done\",\"run\":\"run-2\",\"status\":\"ok\"}\n",
@@ -379,34 +367,15 @@ fn driver_round_trips_runtime_command_on_the_channel_socket()
         Ok(())
     });
     let channel = ChannelId::new("telegram")?;
-    let target = MessageTarget {
-        channel: channel.clone(),
-        conversation: ConversationId::new("chat-2")?,
-        thread: None,
-        reply_to: None,
-    };
-    let route = ChannelSessionRoute::new("executor", "im")?;
+    let target = target(channel.as_str(), "chat-2")?;
+    let route = ChannelSessionRoute::new("executor", "im")?
+        .with_allowed_senders(["user-1", "user-2", "user-event"].map(str::to_owned));
     let bridge = AgentChannelBridge::new(agent_socket, route.clone(), None);
-    let config = DriverConfig {
-        socket: root.path().join("channel.sock"),
-        channel,
-        bridge,
-        hub: DriverHub::default(),
-    };
+    let config = driver(root.path(), channel, bridge);
     let (runtime, adapter) = UnixStream::pair()?;
     let mut adapter_writer = adapter.try_clone()?;
     let server = thread::spawn(move || super::driver::serve_once(runtime, &config));
-    let inbound = InboundMessage {
-        id: "event-2".to_owned(),
-        target: target.clone(),
-        sender: Participant {
-            id: "user-2".to_owned(),
-            ..Participant::default()
-        },
-        body: MessageBody::text("approve")?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    };
+    let inbound = message("event-2", target.clone(), "user-2", "approve")?;
     let request_id = route.request_id_for(&inbound);
     let frame = ChannelFrame::new(ChannelFrameBody::Inbound {
         event_id: "event-2".to_owned(),
@@ -414,12 +383,8 @@ fn driver_round_trips_runtime_command_on_the_channel_socket()
     });
     adapter_writer.write_all(&frame.encode()?)?;
     let mut reader = BufReader::new(adapter);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    assert!(line.contains("\"typing\""));
-    line.clear();
-    reader.read_line(&mut line)?;
-    assert!(line.contains("\"command\""));
+    assert!(read_line(&mut reader)?.contains("\"typing\""));
+    assert!(read_line(&mut reader)?.contains("\"command\""));
     let session = route.session_for(&target);
     let result = ChannelFrame::new(ChannelFrameBody::CommandResult {
         request_id,
@@ -429,18 +394,17 @@ fn driver_round_trips_runtime_command_on_the_channel_socket()
     });
     adapter_writer.write_all(&result.encode()?)?;
     for expected in ["preview", "\"active\":false", "deliver"] {
-        line = String::new();
-        reader.read_line(&mut line)?;
+        let line = read_line(&mut reader)?;
         assert!(line.contains(expected), "missing {expected}: {line}");
     }
     drop(reader);
     drop(adapter_writer);
     server
         .join()
-        .map_err(|_error| std::io::Error::other("driver panicked"))??;
+        .map_err(|_error| io::Error::other("driver panicked"))??;
     agent
         .join()
-        .map_err(|_error| std::io::Error::other("agent panicked"))??;
+        .map_err(|_error| io::Error::other("agent panicked"))??;
     Ok(())
 }
 
@@ -449,16 +413,11 @@ fn driver_accepts_unsolicited_status_and_receipt_frames() -> Result<(), Box<dyn 
 {
     let root = tempfile::tempdir()?;
     let channel = ChannelId::new("telegram")?;
-    let config = DriverConfig {
-        socket: root.path().join("channel.sock"),
-        channel: channel.clone(),
-        bridge: AgentChannelBridge::new(
-            root.path().join("agent.sock"),
-            ChannelSessionRoute::new("executor", "im")?,
-            None,
-        ),
-        hub: DriverHub::default(),
-    };
+    let config = driver(
+        root.path(),
+        channel.clone(),
+        bridge(root.path().join("agent.sock"))?,
+    );
     let (_runtime, mut adapter) = UnixStream::pair()?;
     for frame in [
         ChannelFrame::new(ChannelFrameBody::Event {
@@ -469,12 +428,7 @@ fn driver_accepts_unsolicited_status_and_receipt_frames() -> Result<(), Box<dyn 
             receipt: DeliveryReceipt {
                 channel,
                 message_id: "message-1".to_owned(),
-                target: MessageTarget {
-                    channel: ChannelId::new("telegram")?,
-                    conversation: ConversationId::new("chat-1")?,
-                    thread: None,
-                    reply_to: None,
-                },
+                target: target("telegram", "chat-1")?,
                 timestamp_ms: None,
             },
         }),
@@ -500,23 +454,14 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
 {
     let root = tempfile::tempdir()?;
     let channel = ChannelId::new("discord")?;
-    let hub = DriverHub::default();
-    let bridge = AgentChannelBridge::new(
-        root.path().join("agent.sock"),
-        ChannelSessionRoute::new("executor", "im")?,
-        None,
+    let adapter_config = driver(
+        root.path(),
+        channel.clone(),
+        bridge(root.path().join("agent.sock"))?,
     );
-    let adapter_config = DriverConfig {
-        socket: root.path().join("channel.sock"),
-        channel: channel.clone(),
-        bridge: bridge.clone(),
-        hub: hub.clone(),
-    };
     let control_config = DriverConfig {
         socket: root.path().join("control.sock"),
-        channel: channel.clone(),
-        bridge,
-        hub,
+        ..adapter_config.clone()
     };
     let (mut adapter, adapter_runtime) = UnixStream::pair()?;
     let adapter_thread =
@@ -540,12 +485,8 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
         .encode()?,
     )?;
     let mut adapter_reader = BufReader::new(adapter.try_clone()?);
-    let mut line = String::new();
-    adapter_reader.read_line(&mut line)?;
-    assert!(line.contains("connected"));
-    line.clear();
-    adapter_reader.read_line(&mut line)?;
-    assert!(line.contains("connected"));
+    assert!(read_line(&mut adapter_reader)?.contains("connected"));
+    assert!(read_line(&mut adapter_reader)?.contains("connected"));
 
     let (mut control, control_runtime) = UnixStream::pair()?;
     let control_thread =
@@ -558,15 +499,8 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
         .encode()?,
     )?;
     let mut control_reader = BufReader::new(control.try_clone()?);
-    line.clear();
-    control_reader.read_line(&mut line)?;
-    assert!(line.contains("connected"));
-    let target = MessageTarget {
-        channel,
-        conversation: ConversationId::new("room-1")?,
-        thread: None,
-        reply_to: None,
-    };
+    assert!(read_line(&mut control_reader)?.contains("connected"));
+    let target = target(channel.as_str(), "room-1")?;
     control.write_all(
         &ChannelFrame::new(ChannelFrameBody::ControlRequest {
             request_id: "control-1".to_owned(),
@@ -577,46 +511,33 @@ fn driver_control_request_reaches_the_registered_adapter() -> Result<(), Box<dyn
         })
         .encode()?,
     )?;
-    line.clear();
-    control_reader.read_line(&mut line)?;
+    let line = read_line(&mut control_reader)?;
     assert!(line.contains("control_response"));
     assert!(line.contains("\"accepted\":true"));
-    line.clear();
-    adapter_reader.read_line(&mut line)?;
+    let line = read_line(&mut adapter_reader)?;
     assert!(line.contains("\"effect\""), "adapter frame: {line}");
     drop(control_reader);
     drop(control);
     control_thread
         .join()
-        .map_err(|error| std::io::Error::other(format!("control driver panicked: {error:?}")))??;
+        .map_err(|error| io::Error::other(format!("control driver panicked: {error:?}")))??;
     drop(adapter_reader);
     drop(adapter);
     adapter_thread
         .join()
-        .map_err(|error| std::io::Error::other(format!("adapter driver panicked: {error:?}")))??;
+        .map_err(|error| io::Error::other(format!("adapter driver panicked: {error:?}")))??;
     Ok(())
 }
 
 #[test]
 fn bridge_answers_slash_help_without_an_agent_socket() -> Result<(), Box<dyn std::error::Error>> {
-    let bridge = AgentChannelBridge::new(
-        "/tmp/missing-agent.sock",
-        ChannelSessionRoute::new("executor", "im")?,
-        None,
-    );
-    let reply = bridge.handle(InboundMessage {
-        id: "help-1".to_owned(),
-        target: MessageTarget {
-            channel: ChannelId::new("telegram")?,
-            conversation: ConversationId::new("dm-1")?,
-            thread: None,
-            reply_to: None,
-        },
-        sender: Participant::default(),
-        body: MessageBody::text("/help")?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    })?;
+    let bridge = bridge("/tmp/missing-agent.sock")?;
+    let reply = bridge.handle(message(
+        "help-1",
+        target("telegram", "dm-1")?,
+        "user-1",
+        "/help",
+    )?)?;
     assert!(reply.body.text.contains("/models"));
     assert!(reply.body.text.contains("/new"));
     assert_eq!(reply.target.reply_to.as_deref(), Some("help-1"));
@@ -625,27 +546,65 @@ fn bridge_answers_slash_help_without_an_agent_socket() -> Result<(), Box<dyn std
 
 #[test]
 fn slash_new_rotates_the_derived_session() -> Result<(), Box<dyn std::error::Error>> {
-    let bridge = AgentChannelBridge::new(
-        "/tmp/missing-agent.sock",
-        ChannelSessionRoute::new("executor", "im")?,
-        None,
-    );
-    let inbound = InboundMessage {
-        id: "new-1".to_owned(),
-        target: MessageTarget {
-            channel: ChannelId::new("telegram")?,
-            conversation: ConversationId::new("dm")?,
-            thread: None,
-            reply_to: None,
-        },
-        sender: Participant::default(),
-        body: MessageBody::text("/new")?,
-        timestamp_ms: None,
-        metadata: std::collections::BTreeMap::new(),
-    };
+    let bridge = bridge("/tmp/missing-agent.sock")?;
+    let inbound = message("new-1", target("telegram", "dm")?, "user-1", "/new")?;
     let first = bridge.handle(inbound.clone())?;
     assert!(first.body.text.contains("-1"));
     let second = bridge.handle(inbound)?;
     assert!(second.body.text.contains("-2"));
+    Ok(())
+}
+
+#[test]
+fn unauthorized_senders_never_reach_agent_or_progress() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let socket = root.path().join("agent.sock");
+    for allowed in [vec![], vec!["trusted".to_owned()]] {
+        let route = ChannelSessionRoute::new("executor", "im")?
+            .with_identity_isolation()
+            .with_allowed_senders(allowed);
+        let bridge = AgentChannelBridge::new(&socket, route, None);
+        for channel in ["telegram", "discord", "slack"] {
+            let mut inbound = message(
+                "denied",
+                target(channel, "trusted")?,
+                "unknown",
+                "run a tool",
+            )?;
+            inbound.sender.display_name = Some("trusted".to_owned());
+            inbound
+                .metadata
+                .insert("identity".to_owned(), "trusted".to_owned());
+            let mut progress = ProgressProbe::default();
+            for input in ["run a tool", "/help", "/new", "/model trusted/model"] {
+                inbound.body = MessageBody::text(input)?;
+                assert!(matches!(
+                    bridge.handle_with_progress(inbound.clone(), &mut progress),
+                    Err(ChannelBridgeError::Channel(ChannelError::SenderDenied))
+                ));
+            }
+            for participant in [None, Some(inbound.sender.clone())] {
+                let event = ChannelIncomingEvent::Typing {
+                    context: ChannelEventContext {
+                        target: inbound.target.clone(),
+                        participant,
+                        timestamp_ms: None,
+                        metadata: inbound.metadata.clone(),
+                    },
+                    active: true,
+                };
+                assert!(matches!(
+                    bridge.handle_event_with_progress("event", &event, &mut progress),
+                    Err(ChannelBridgeError::Channel(ChannelError::SenderDenied))
+                ));
+            }
+            assert_eq!(progress.starts, 0);
+            assert!(progress.completed.is_none() && progress.error.is_none());
+        }
+    }
+    assert!(
+        !socket.exists(),
+        "denied requests must not create an agent endpoint"
+    );
     Ok(())
 }

@@ -15,6 +15,8 @@ Fedora/RHEL 与 openSUSE/SLES。安装包包含发布二进制文件、systemd �
 （`cortexfs-agent-architect`、`cortexfs-agent-executor`、
 `cortexfs-agent-product-manager`）以及一次性
 [`cortexfs-futureagi`](futureagi.md) 评估器。它们不是额外的 `/ctx` 根。
+源码安装器与 RPM spec 都会构建 `-p cortexfs-agents`，与 Debian、Arch、tar
+负载一致。
 
 使用宿主机原生打包工具从检出目录构建安装包：
 
@@ -81,6 +83,8 @@ ctx update --ref main --yes    # 构建、安装、验证或回滚
 成功的 ref 更新会记录跟踪 ref，之后的计划可以省略 `--ref`。本地钉死提交用
 `--source /clean/git/checkout`。更新器保留配置、存储、密钥和未活动单元状态；
 包所有权安装仅在精确的当前包可用于回滚时才会应用。
+活动单元发现会匹配精确的 `cortexfs.service` 挂载单元，以及
+`cortexfs-agent@executor.service` 这类带连字符的实例名。事务前未活动的单元保持未活动。
 
 `ctx update` 必须以普通用户运行，并具备 `sudo`、`flock` 和控制终端（`/dev/tty`）。
 它拒绝以 root 运行。已安装 helper 是 `/usr/lib/cortexfs/update-linux`；当该路径就是

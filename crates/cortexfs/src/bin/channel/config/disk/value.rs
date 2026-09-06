@@ -11,6 +11,8 @@ const DEFAULT_INTENTS: u64 = 1 | (1 << 9) | (1 << 12) | (1 << 15);
 
 #[derive(Deserialize)]
 pub(super) struct RawDiscordConfig {
+    #[serde(default)]
+    allowed_senders: Vec<String>,
     application_id: String,
     bot_token: String,
     agent_socket: PathBuf,
@@ -34,6 +36,7 @@ pub(super) struct RawDiscordConfig {
 impl RawDiscordConfig {
     pub(super) fn into_config(self) -> DiscordConfig {
         DiscordConfig {
+            allowed_senders: self.allowed_senders,
             application_id: self.application_id,
             bot_token: self.bot_token,
             agent_socket: self.agent_socket,

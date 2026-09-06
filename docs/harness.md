@@ -4,6 +4,10 @@ This is the delivery map for the default harness, not a second filesystem ABI.
 The architectural layers remain those in [architecture.md](architecture.md).
 Normative contracts live in [spec/](spec/README.md).
 
+Run the [harness evaluation environment](evaluation.md) for deterministic
+contract checks, required-test coverage and JSON/Markdown evidence. Live model
+validation remains a separate, explicitly configured deployment exercise.
+
 ## Invariants
 
 FUSE projects the authority and durable state boundary. Clients do not bypass

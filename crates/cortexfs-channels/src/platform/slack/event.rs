@@ -12,7 +12,11 @@ pub(super) fn decode(
 ) -> Result<Option<ChannelIncomingEvent>, ChannelError> {
     let root = object(payload)?;
     let event = root.get("event").unwrap_or(&root);
-    match event.get("type").and_then(Value::as_str) {
+    let kind = match event.get("type").and_then(Value::as_str) {
+        Some("message") => event.get("subtype").and_then(Value::as_str),
+        kind => kind,
+    };
+    match kind {
         Some("reaction_added") => reaction(event, channel, true).map(Some),
         Some("reaction_removed") => reaction(event, channel, false).map(Some),
         Some("message_changed") => edited(event, channel).map(Some),
@@ -31,13 +35,9 @@ fn reaction(
         .get("item")
         .ok_or_else(|| ChannelError::Protocol("slack reaction item is missing".to_owned()))?;
     let emoji = string(event.get("reaction"), "reaction")?;
+    let user = event.get("user").and_then(Value::as_str);
     Ok(ChannelIncomingEvent::Reaction {
-        context: context(
-            item,
-            None,
-            channel,
-            event.get("user").and_then(Value::as_str),
-        )?,
+        context: context(item, None, channel, user)?,
         message_id: string(item.get("ts"), "item.ts")?,
         emoji,
         added,
@@ -48,13 +48,12 @@ fn edited(event: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, Cha
     let message = event
         .get("message")
         .ok_or_else(|| ChannelError::Protocol("slack changed message is missing".to_owned()))?;
+    let editor = message
+        .get("edited")
+        .and_then(|edit| edit.get("user"))
+        .and_then(Value::as_str);
     Ok(ChannelIncomingEvent::MessageEdited {
-        context: context(
-            message,
-            Some(event),
-            channel,
-            message.get("user").and_then(Value::as_str),
-        )?,
+        context: context(message, Some(event), channel, editor)?,
         message_id: string(message.get("ts"), "message.ts")?,
         body: MessageBody::text(
             message
@@ -68,12 +67,7 @@ fn edited(event: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, Cha
 fn deleted(event: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, ChannelError> {
     let message = event.get("previous_message").unwrap_or(event);
     Ok(ChannelIncomingEvent::MessageDeleted {
-        context: context(
-            message,
-            Some(event),
-            channel,
-            message.get("user").and_then(Value::as_str),
-        )?,
+        context: context(message, Some(event), channel, None)?,
         message_id: string(
             message.get("ts").or_else(|| event.get("deleted_ts")),
             "deleted_ts",

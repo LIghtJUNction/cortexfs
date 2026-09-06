@@ -1,5 +1,0 @@
-{
-  "include": ["agent_benchmark", "tests"],
-  "venvPath": ".",
-  "venv": ".venv"
-}

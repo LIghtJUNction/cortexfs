@@ -123,35 +123,22 @@ zero-copy.
 No HTTP client, API key storage, provider SDK, background task, or unsafe code
 is included. The crate only parses, converts, validates, and serializes data.
 
-## Tests and measured performance
+## Correctness tests
 
-The integration suite currently reports **13 passed, 0 failed** for the
-protocol crate. It covers borrowed native IR, request identity/direct/fallback
-routes, all 16 request matrix cells, Responses context ownership, semantic
-validation, all four response dialects, and all response matrix directions.
+The integration suite exercises borrowed native IR, request identity/direct/
+fallback routes, the request conversion matrix, Responses context ownership,
+semantic validation, response dialects, and response conversion directions.
+Run it against the current revision:
 
-Run the checks yourself:
-
-```text
-scripts/test.sh cargo test --locked -p cortexfs-protocol
-TMPDIR=/tmp cargo clippy --locked -p cortexfs-protocol --all-targets -- -D warnings
-TMPDIR=/tmp cargo run --locked --release -p cortexfs-protocol --example bench
+```sh
+scripts/serialize-cargo.sh cargo test --locked -p cortexfs-protocol
+scripts/serialize-cargo.sh cargo clippy --locked -p cortexfs-protocol --all-targets -- -D warnings
 ```
 
-The benchmark example performs 20,000 conversions per route and prints
-elapsed milliseconds and requests/second for the direct Chat→Gemini path and
-the semantic Chat→Anthropic path. Results are machine-dependent; the README
-records the test count and the following reproducible baseline. Five release
-runs on x86_64, Intel Core i9-12900HX, 24 online CPUs, with no
-`target-cpu=native` override, produced:
-
-| Route | Median / 20,000 | Throughput | Observed range |
-| --- | ---: | ---: | ---: |
-| Direct Chat → Gemini | 11.286 ms | 1.77 M requests/s | 10.286–12.036 ms |
-| Semantic Chat → Anthropic | 27.177 ms | 0.736 M requests/s | 24.430–28.012 ms |
-
-The direct route is about 2.0× faster in this small JSON fixture. These are
-conversion-only numbers, not network latency or model inference latency.
+The former conversion timing example compared different target formats. It was
+removed because those timings do not isolate the cost of direct versus semantic
+conversion. Historical observations remain in Git history. Harness contract
+verification is documented in [Harness evaluation](../../docs/evaluation.md).
 
 ## Versioning and publishing
 

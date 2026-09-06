@@ -65,7 +65,9 @@ A host software update pins one Git commit before build and uses the native
 package backend. Package replacement and reference-tree migration are separate
 commit points: package scriptlets MUST NOT restart services while
 `CORTEXFS_UPDATE_TRANSACTION=1`, and the updater restores exactly the units
-that were active before the transaction.
+that were active before the transaction. That restored set includes the exact
+`cortexfs.service` mount unit when it is active, not only hyphenated
+`cortexfs-*` names.
 
 Before replacement, the updater records the selected `storage/current` target
 and requires an exact rollback package for package-owned installations. The

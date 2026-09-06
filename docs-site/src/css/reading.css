@@ -1,0 +1,222 @@
+/* Long-form documentation uses the same paper, ink and border tokens as home. */
+:root {
+  --doc-sidebar-width: 276px;
+  --ifm-menu-color: var(--cortex-muted);
+  --ifm-menu-color-active: var(--cortex-ink);
+  --ifm-menu-color-background-active: color-mix(in srgb, var(--cortex-mint) 9%, transparent);
+  --ifm-toc-border-color: var(--cortex-line);
+  --ifm-breadcrumb-color-active: var(--cortex-ink);
+}
+input:focus-visible, select:focus-visible, summary:focus-visible {
+  outline: 3px solid var(--cortex-mint);
+  outline-offset: 3px;
+}
+.theme-doc-sidebar-container {
+  background: var(--cortex-paper-strong);
+}
+
+.theme-doc-sidebar-menu {
+  padding: 16px 8px;
+}
+
+.theme-doc-sidebar-menu .menu__link {
+  font-size: 14px;
+  line-height: 1.5;
+  border-radius: 6px;
+  padding: 9px 12px;
+}
+
+.theme-doc-sidebar-menu > .menu__list-item {
+  margin-bottom: 12px;
+}
+
+.theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link {
+  color: var(--cortex-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.theme-doc-sidebar-menu .menu__link--active:not(.menu__link--sublist) {
+  box-shadow: inset 2px 0 var(--cortex-mint);
+}
+
+.theme-doc-markdown {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.theme-doc-markdown h1 {
+  font-size: clamp(36px, 4vw, 52px);
+  font-weight: 600;
+  line-height: 1.12;
+  margin-bottom: 24px;
+  text-wrap: balance;
+}
+
+.theme-doc-markdown h2 {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.25;
+  padding-top: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--cortex-line);
+}
+
+.theme-doc-markdown h3 {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.theme-doc-markdown > p, .theme-doc-markdown > ul, .theme-doc-markdown > ol {
+  max-width: 76ch;
+}
+
+.theme-doc-markdown > p:first-of-type {
+  color: var(--cortex-muted);
+  font-size: 17px;
+}
+
+.theme-doc-markdown p a, .theme-doc-markdown li a, .theme-doc-markdown td a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.theme-doc-markdown pre code {
+  border: 0;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.theme-doc-markdown :not(pre) > code {
+  font-size: 0.88em;
+  background: var(--cortex-paper-strong);
+  padding: 2px 5px;
+  overflow-wrap: anywhere;
+}
+
+.theme-doc-markdown table {
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.theme-doc-markdown th {
+  background: var(--cortex-paper-strong);
+  font-weight: 650;
+}
+
+.theme-doc-markdown th, .theme-doc-markdown td {
+  border-color: var(--cortex-line);
+  padding: 12px 16px;
+}
+
+.theme-doc-markdown blockquote {
+  color: var(--cortex-muted);
+  border-left: 2px solid var(--cortex-mint);
+  background: var(--cortex-paper-strong);
+  padding: 16px 24px;
+}
+
+.table-of-contents {
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.table-of-contents__link {
+  color: var(--cortex-muted);
+}
+
+.table-of-contents__link--active {
+  color: var(--cortex-ink);
+  font-weight: 650;
+}
+
+.theme-doc-breadcrumbs {
+  margin-bottom: 24px;
+}
+
+.theme-doc-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--cortex-line);
+  color: var(--cortex-muted);
+  font-size: 13px;
+}
+
+.pagination-nav__link {
+  border-color: var(--cortex-line);
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--cortex-paper-strong);
+}
+
+.pagination-nav__link:hover {
+  border-color: var(--cortex-ink);
+}
+
+.pagination-nav__sublabel {
+  color: var(--cortex-muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.pagination-nav__label {
+  font-family: var(--ifm-font-family-base);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.cortexSteps .theme-code-block {
+  margin-top: auto;
+  margin-bottom: 0;
+}
+
+.cortexSteps .theme-code-block pre {
+  border: 0;
+  margin: 0;
+  padding-top: var(--ifm-pre-padding);
+}
+
+.cortexSteps .theme-code-block code {
+  font-weight: 400;
+  white-space: pre;
+}
+
+@media (min-width: 997px) {
+  .theme-doc-markdown {
+    padding-top: 8px;
+  }
+
+  .theme-doc-sidebar-menu .menu__list .menu__list {
+    padding-left: 12px;
+  }
+
+}
+@media (max-width: 600px) {
+  .theme-doc-markdown {
+    font-size: 15px;
+    line-height: 1.8;
+  }
+
+  .theme-doc-markdown h2 {
+    font-size: 27px;
+  }
+
+  .theme-doc-markdown table {
+    font-size: 13px;
+  }
+
+  .theme-doc-markdown th, .theme-doc-markdown td {
+    padding: 10px 12px;
+  }
+
+  .pagination-nav {
+    gap: 12px;
+  }
+
+  .pagination-nav__link {
+    padding: 16px;
+  }
+
+}

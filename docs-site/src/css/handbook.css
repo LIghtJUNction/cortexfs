@@ -1,0 +1,290 @@
+.cortexHandbook {
+  padding-top: 64px;
+  padding-bottom: 64px;
+}
+
+.handbookHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 64px;
+  align-items: end;
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--cortex-line);
+}
+
+.handbookHeader h1 {
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 600;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.handbookHeader > div > p:last-child {
+  max-width: 640px;
+  color: var(--cortex-muted);
+  font-size: 17px;
+  margin: 24px 0 0;
+}
+
+.handbookStart {
+  border-left: 2px solid var(--cortex-mint);
+  padding: 8px 0 8px 24px;
+}
+
+.handbookStart > span, .handbookStart p {
+  color: var(--cortex-muted);
+  font-size: 12px;
+}
+
+.handbookStart > span {
+  font-family: var(--ifm-font-family-monospace);
+}
+
+.handbookStart a {
+  display: block;
+  color: var(--cortex-ink);
+  font-weight: 650;
+  margin: 16px 0 8px;
+}
+
+.handbookStart p {
+  margin: 0;
+}
+
+.handbookTools {
+  display: flex;
+  gap: 32px;
+  justify-content: space-between;
+  align-items: end;
+  padding-top: 48px;
+}
+
+.handbookTools h2 {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.handbookTools p {
+  color: var(--cortex-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+.handbookSearch {
+  width: 360px;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+.handbookSearch label {
+  display: block;
+  font-weight: 650;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.handbookSearch input {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--cortex-line);
+  border-radius: 8px;
+  background: var(--cortex-panel);
+  color: var(--cortex-ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.handbookSearch input::placeholder {
+  color: var(--cortex-muted);
+  opacity: 1;
+}
+
+.handbookFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 24px 0 16px;
+}
+
+.handbookFilters button {
+  background: transparent;
+  border: 1px solid var(--cortex-line);
+  border-radius: 6px;
+  min-height: 44px;
+  padding: 8px 16px;
+  color: var(--cortex-muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.handbookFilters button:hover {
+  border-color: var(--cortex-ink);
+  color: var(--cortex-ink);
+}
+
+.handbookFilters button[aria-pressed='true'] {
+  background: var(--cortex-ink);
+  border-color: var(--cortex-ink);
+  color: var(--cortex-paper);
+}
+
+.handbookCount {
+  color: var(--cortex-muted);
+  font-size: 12px;
+  font-family: var(--ifm-font-family-monospace);
+  margin: 0;
+}
+
+.handbookGroup {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  column-gap: 32px;
+  border-bottom: 1px solid var(--cortex-line);
+  padding: 32px 0;
+}
+
+.handbookGroup h3 {
+  font-family: var(--ifm-font-family-base);
+  font-size: 14px;
+  font-weight: 650;
+  margin: 16px 0 0;
+}
+
+.handbookGroup ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 24px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.handbookGroup li {
+  margin: 0;
+  min-width: 0;
+}
+
+.handbookGuide {
+  display: block;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--cortex-ink);
+}
+
+.handbookGuide:hover {
+  color: var(--cortex-ink);
+  text-decoration: none;
+  border-color: var(--cortex-line);
+  background: var(--cortex-paper-strong);
+}
+
+.handbookGuideTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.handbookGuideTitle > span {
+  color: var(--cortex-mint);
+}
+
+.handbookGuideSummary {
+  display: block;
+  color: var(--cortex-muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin-top: 8px;
+}
+
+.handbookEmpty {
+  padding: 64px 24px;
+  text-align: center;
+  border-bottom: 1px solid var(--cortex-line);
+}
+
+.handbookEmpty p {
+  color: var(--cortex-muted);
+}
+
+.handbookNote {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 32px;
+  font-size: 14px;
+  color: var(--cortex-muted);
+}
+
+.handbookNote p {
+  margin: 0;
+}
+
+.handbookNote a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+@media (max-width: 996px) {
+  .handbookHeader {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .handbookTools {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 24px;
+  }
+
+  .handbookSearch {
+    width: 100%;
+  }
+
+  .handbookGroup {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .handbookGroup h3 {
+    margin: 0;
+  }
+
+}
+@media (max-width: 600px) {
+  .cortexHandbook {
+    padding: 40px 20px;
+  }
+
+  .handbookHeader {
+    padding-bottom: 32px;
+  }
+
+  .handbookTools {
+    padding-top: 32px;
+  }
+
+  .handbookGroup ul {
+    grid-template-columns: 1fr;
+  }
+
+  .handbookGuide {
+    padding: 16px 0;
+    border-radius: 0;
+  }
+
+  .handbookGroup li + li {
+    border-top: 1px solid var(--cortex-line);
+  }
+
+  .handbookNote {
+    flex-direction: column;
+  }
+
+}

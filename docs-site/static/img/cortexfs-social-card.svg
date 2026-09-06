@@ -49,11 +49,11 @@
 
     <path d="M28 286h384" stroke="#fffdfa" stroke-opacity="0.12"/>
     <text x="28" y="330" fill="#d8ff66" font-family="ui-monospace, monospace" font-size="17" font-weight="900">$</text>
-    <text x="54" y="330" fill="#fffdfa" font-family="ui-monospace, monospace" font-size="17" font-weight="900">ctx agent chat coder</text>
+    <text x="54" y="330" fill="#fffdfa" font-family="ui-monospace, monospace" font-size="17" font-weight="900">ctx agent chat executor</text>
 
     <rect x="28" y="362" width="384" height="80" rx="8" fill="#fffdfa" fill-opacity="0.045" stroke="#fffdfa" stroke-opacity="0.1"/>
     <text x="48" y="394" fill="#64c8a9" font-family="ui-monospace, monospace" font-size="13" font-weight="900">AGENT</text>
-    <text x="120" y="394" fill="#fffdfa" fill-opacity="0.82" font-family="ui-monospace, monospace" font-size="13" font-weight="800">/ctx/agent/coder</text>
+    <text x="120" y="394" fill="#fffdfa" fill-opacity="0.82" font-family="ui-monospace, monospace" font-size="13" font-weight="800">/ctx/agent/executor</text>
     <text x="48" y="421" fill="#64c8a9" font-family="ui-monospace, monospace" font-size="13" font-weight="900">STATE</text>
     <text x="120" y="421" fill="#fffdfa" fill-opacity="0.82" font-family="ui-monospace, monospace" font-size="13" font-weight="800">policy-bound · durable JSONL</text>
   </g>

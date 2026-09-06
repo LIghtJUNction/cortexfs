@@ -1,4 +1,7 @@
 use crate::{ChannelError, ChannelIncomingEvent, InboundMessage, MessageTarget};
+use std::collections::BTreeSet;
+
+mod authorization;
 
 /// Deterministic mapping from a remote conversation to an agent session name.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -6,6 +9,7 @@ pub struct ChannelSessionRoute {
     agent: String,
     prefix: String,
     isolate_identity: bool,
+    allowed_senders: BTreeSet<String>,
 }
 
 impl ChannelSessionRoute {
@@ -19,6 +23,7 @@ impl ChannelSessionRoute {
             agent,
             prefix,
             isolate_identity: false,
+            allowed_senders: BTreeSet::new(),
         })
     }
 
