@@ -12,14 +12,14 @@ pub fn replace_exactly_once(path: &Path, old: &str, new: &str) -> io::Result<()>
         ));
     }
     let content = read_small_text_file(path, crate::MAX_FS_READ_BYTES)?;
-    let mut matches = content.match_indices(old);
-    if matches.next().is_none() {
+    let first = content.find(old);
+    if first.is_none() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             "old text not found",
         ));
     }
-    if matches.next().is_some() {
+    if content.rfind(old) != first {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "old text occurs more than once",

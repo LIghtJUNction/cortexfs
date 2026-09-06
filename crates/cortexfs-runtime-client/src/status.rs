@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -6,11 +6,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::RuntimeClientError;
+use crate::{RuntimeClientError, read_frame};
 
 const MAX_STATUS_FRAME_BYTES: u64 = 256 * 1024;
 
-/// Typed, non-secret status returned by an agent session socket.
+/// Typed, non-secret status returned by an Agent session socket.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RuntimeStatus {
     #[serde(rename = "type")]
@@ -42,29 +42,17 @@ pub fn status(socket: &Path, session: &str) -> Result<RuntimeStatus, RuntimeClie
     if session.is_empty() || session.contains('\0') {
         return Err(RuntimeClientError::InvalidRequest);
     }
+    let frame = json!({"op": "status", "session": session}).to_string();
+    if u64::try_from(frame.len()).unwrap_or(u64::MAX) >= MAX_STATUS_FRAME_BYTES {
+        return Err(RuntimeClientError::InvalidRequest);
+    }
     let mut stream =
         UnixStream::connect(socket).map_err(|_error| RuntimeClientError::CannotConnect)?;
-    let frame = json!({"op": "status", "session": session}).to_string();
     stream
         .write_all(frame.as_bytes())
         .and_then(|()| stream.write_all(b"\n"))
         .map_err(|_error| RuntimeClientError::CannotWrite)?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .map_err(|_error| RuntimeClientError::CannotRead)?;
-    let mut bytes = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_STATUS_FRAME_BYTES + 1)
-        .read_until(b'\n', &mut bytes)
-        .map_err(|_error| RuntimeClientError::CannotRead)?;
-    if bytes.is_empty()
-        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_STATUS_FRAME_BYTES
-        || bytes.last() != Some(&b'\n')
-    {
-        return Err(RuntimeClientError::InvalidFrame);
-    }
-    let value: Value =
-        serde_json::from_slice(&bytes).map_err(|_error| RuntimeClientError::InvalidFrame)?;
+    let value: Value = read_frame(stream, MAX_STATUS_FRAME_BYTES, Duration::from_secs(5))?;
     if value.get("type").and_then(Value::as_str) == Some("error") {
         return Err(RuntimeClientError::Rejected(
             value

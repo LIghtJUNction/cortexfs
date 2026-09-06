@@ -69,32 +69,48 @@ single in-process AI framework.
 ┌─────────────┐     FUSE      ┌──────────────────┐
 │  user tools │──────────────▶│ cortexfs-mount   │  (projection of generation)
 │  ctx / tsh  │               └────────┬─────────┘
-└──────┬──────┘                        │ reads
-       │ JSONL socket                  ▼
-       │                    /var/lib/cortexfs/storage/current
-       ▼
-┌──────────────────┐   spawn / unit   ┌─────────────────────────┐
-│ agent runtime    │─────────────────▶│ cortexfs-object-runner  │
-│ (per agent)      │   exec tool/     │ (model / agent / tool)  │
-└──────────────────┘   model/agent    └─────────────────────────┘
-       │
-       │ optional MCP projection (explicit adapter, not root ABI)
-       ▼
-┌──────────────────┐
-│ ctxmcp           │  maps ordinary tools ↔ MCP stdio
-└──────────────────┘
+└─────────────┘                        │ reads
+                                      ▼
+                           /var/lib/cortexfs/storage/current
+
+platform adapter ◀─ cortexfs.channel.socket/v1 ─▶ Channel Master
+terminal / web / IM Channel Masters
+        │ one multiplexed local Unix stream; SO_PEERCRED
+        │ cortexfs.interaction/v2 (v1 remains one-request mode)
+        ⇅
+┌────────────────────────────────────────────────────────────┐
+│ cortexfs-agent-runtime (current placement: per Agent)      │
+│  Agent Session Slave A   Agent Session Slave B   …         │
+│  isolated lock/mailbox/state; each session is single-writer│
+└─────────────────────────────┬──────────────────────────────┘
+                              │ spawn / unit: model/agent/tool
+                              ▼
+                   ┌─────────────────────────┐
+                   │ cortexfs-object-runner  │
+                   │ one-shot execution      │
+                   └─────────────────────────┘
 ```
 
-| Process | Job | Must not |
+| Process role | Job | Must not |
 | --- | --- | --- |
 | `cortexfs-mount` | Project generation tree as `/ctx` | Own sessions, call providers |
-| `cortexfs-agent-runtime` | Socket accept, durable record, launch policy | Become a second ABI root |
-| `cortexfs-object-runner` | One-shot model/agent/tool execution | Long-lived daemon state |
-| `ctx` / `tsh` / `ctxchat` / `ctxterm` | Host UX over the same files/sockets | Invent parallel control planes |
+| Channel Master (`ctx`/terminal/web/IM host) | Frontend auth, attach/replay cursor, render, user requests, targeted command results, platform effects | Write session history, own the Agent loop, create/destroy a slave, reverse dependencies into runtime implementation |
+| platform adapter | Translate one platform behind `cortexfs.channel.socket/v1` | Cross the neutral interaction boundary with platform types or claim session authority |
+| Agent Session Slave (`cortexfs-agent-runtime`) | Authenticate peer, own one session mailbox/lock/order, durable record, replay, idempotency, launch policy | Import frontend/platform implementation or reverse-dial a master |
+| `cortexfs-object-runner` | One-shot model/agent/tool execution | Long-lived daemon or session-writer state |
+| `tsh` / `ctxterm` | Tool shell or PTY mechanics | Invent parallel control planes |
 | `ctxmcp` | Explicit MCP adapter | Create `/ctx/mcp` root class |
 
+The Master/Slave independence rule is a protocol, state, and lifecycle boundary,
+not a process-count requirement. The per-Agent runtime may host many isolated
+slaves today. Moving a slave to its own process later changes placement only,
+not `cortexfs.interaction/v2`, session paths, ownership, or replay semantics.
+A runtime that cannot acquire or retain the exclusive session lock fails closed
+rather than serving split-brain writers.
+
 **Invariant:** development refresh is **Git commit or process restart**. No
-background watchers, polling loops, or hot-reload subcommands.
+background watchers, polling loops, hot-reload subcommands, reverse dial, or
+workflow/job/hook entry is introduced.
 
 ---
 
@@ -118,9 +134,9 @@ Protocol / AI
   provider registry (in tree)    host config → neutral model projections
 
 Agent core
-  cortexfs-runtime               sockets, session record, egress, handshakes
+  cortexfs-runtime               Session Slaves: sockets, locks, mailbox, record
   cortexfs-object                install / replace / one-shot executor
-  cortexfs-runtime-client        interaction frames (shared by all UIs)
+  cortexfs-runtime-client        neutral v2/v1 interaction frames for Masters
   cortexfs-tools                  default filesystem/shell/tsh tools
   cortexfs-tool-sdk / agent-sdk   capability process contracts
 
@@ -166,12 +182,12 @@ app:  cortexfs-agents (official role binaries on agent-sdk), cortexfs-tools
 | `cortexfs-abi` / paths | `serde`, small pure crates | `fuser`, `nix` process, HTTP, parquet |
 | `cortexfs-support` | `abi`, `nix` fs bits, serde_json | FUSE, provider HTTP, agent launch |
 | `cortexfs-protocol` | pure parse/IR crates | agent loop, FUSE, secrets, filesystem ABI |
-| `cortexfs-runtime` | `abi`, `support` | FUSE mount loop, object install stages |
+| `cortexfs-runtime` | `abi`, `support`, runtime-client protocol types | FUSE mount loop, object install stages, Channel Master/platform implementation |
 | `cortexfs-object` | `abi`, `support`, runtime-client, tool-sdk | FUSE server |
 | `cortexfs-tools` | paths, tool-sdk, `nix` fs/process, serde_json | FUSE, provider HTTP, agent lifecycle |
 | `cortexfs-fuse` | `abi`, `support`, `fuser` | object executor, provider HTTP |
-| SDKs | `runtime-client` (+ minimal abi types) | full `cortexfs` monolith when avoidable |
-| `channel-*` | channel-sdk, runtime-client | fuse, object executor, provider registry |
+| `runtime-client` / SDKs | minimal abi and serialization types | runtime implementation, FUSE, object executor, platform SDKs |
+| `channel-*` | channel-sdk, runtime-client | runtime implementation, fuse, object executor, provider registry |
 | evaluation adapters | facade/trajectory types, HTTP client | FUSE internals, runtime lifecycle, background upload |
 
 `cortexfs-futureagi` follows the evaluation-adapter row: it consumes an
@@ -226,7 +242,8 @@ Inside agent core, keep Pi’s split between **mechanics** and **environment**:
 | Concern | Owner | Notes |
 | --- | --- | --- |
 | Turn + tool scheduling | `object/executor` (+ runtime socket) | smallest correct loop |
-| Durable session append | `runtime/record` | JSONL facts; not prompt text |
+| Session mailbox, lock, ordering | `runtime/socket` + `runtime/record` | one isolated Slave per logical session; fail closed on competing owner |
+| Durable session append | `runtime/record` | single-writer JSONL facts and monotonic v2 sequence; not prompt text |
 | Context projection | context/prompt modules | disposable; rebuildable |
 | Authority gate | `authority` + `policy` | pure decision mechanism; no durable writes |
 | Child lifecycle effects | `agent` + `runtime` | cancellation state and lifecycle facts |

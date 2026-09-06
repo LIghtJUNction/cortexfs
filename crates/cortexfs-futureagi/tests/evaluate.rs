@@ -26,7 +26,7 @@ mod tests {
         ));
         fs::write(
             &path,
-            r#"{"schema_version":"ATIF-v1.7","agent":{"name":"cortexfs","version":"0.1.20"},"steps":[{"step_id":1,"source":"user","message":"Inspect"},{"step_id":2,"source":"agent","message":"Healthy"}]}"#,
+            r#"{"schema_version":"ATIF-v1.7","agent":{"name":"cortexfs","version":"0.1.21"},"steps":[{"step_id":1,"source":"user","message":"Inspect"},{"step_id":2,"source":"agent","message":"Healthy"}]}"#,
         )?;
         let binary = std::env::var("CARGO_BIN_EXE_cortexfs-futureagi")?;
         let output = Command::new(binary)

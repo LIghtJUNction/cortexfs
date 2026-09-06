@@ -1,4 +1,4 @@
-use crate::waitread::{join_reader, read_capped, sleep_tick, take_finished};
+use crate::waitread::{read_capped, sleep_tick, take_finished};
 use nix::sys::signal::Signal;
 use std::io;
 use std::process::{Child, Output};
@@ -37,7 +37,10 @@ pub(crate) fn wait_capped_child_output(
             abort_child(child, &mut stdout_reader, &mut stderr_reader);
             return Err(WaitError::ExceededLimit);
         }
-        if let Some(status) = child.try_wait().map_err(WaitError::Wait)? {
+        if let Some(status) = child.try_wait().map_err(WaitError::Wait)?
+            && stdout_reader.is_none()
+            && stderr_reader.is_none()
+        {
             break status;
         }
         if Instant::now() >= deadline {
@@ -46,11 +49,8 @@ pub(crate) fn wait_capped_child_output(
         }
         sleep_tick();
     };
-    let stdout = join_reader(stdout_reader, stdout_buffer);
-    let stderr = join_reader(stderr_reader, stderr_buffer);
-    if stdout.len() > max_output_bytes || stderr.len() > max_output_bytes {
-        return Err(WaitError::ExceededLimit);
-    }
+    let stdout = stdout_buffer.unwrap_or_default();
+    let stderr = stderr_buffer.unwrap_or_default();
     Ok(Output {
         status,
         stdout,

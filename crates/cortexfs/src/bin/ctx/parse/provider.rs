@@ -11,6 +11,7 @@ pub(crate) enum ProviderArgs {
         timeout: u64,
         device: bool,
     },
+    LoginSelect,
     ApiKeyLogin {
         provider: String,
         profile: String,
@@ -129,7 +130,9 @@ pub(crate) fn parse_auth_command(args: Vec<String>) -> Result<Command, CliError>
 }
 
 fn parse_auth_login(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
-    let provider = required_arg(&mut values, "auth login requires a provider")?;
+    let Some(provider) = values.next() else {
+        return Ok(Command::Provider(ProviderArgs::LoginSelect));
+    };
     let mut profile = "default".to_owned();
     let mut timeout = 120;
     let mut method = "auto".to_owned();

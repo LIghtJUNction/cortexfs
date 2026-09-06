@@ -32,7 +32,7 @@ Fedora/RHEL 与 openSUSE/SLES。安装包包含发布二进制文件、systemd �
 路径。
 
 使用系统原生包管理器安装生成的包。文件名使用 `Cargo.toml` 中的 workspace 版本
-（当前为 `0.1.20`）：
+（当前为 `0.1.21`）：
 
 ```bash
 # Debian 或 Ubuntu
@@ -84,7 +84,7 @@ ctx update --ref main --yes    # 构建、安装、验证或回滚
 `--source /clean/git/checkout`。更新器保留配置、存储、密钥和未活动单元状态；
 包所有权安装仅在精确的当前包可用于回滚时才会应用。
 活动单元发现会匹配精确的 `cortexfs.service` 挂载单元，以及
-`cortexfs-agent@.service` 这类带连字符的名字。事务前未活动的单元保持未活动。
+`cortexfs-agent@executor.service` 这类带连字符的实例名。事务前未活动的单元保持未活动。
 
 `ctx update` 必须以普通用户运行，并具备 `sudo`、`flock` 和控制终端（`/dev/tty`）。
 它拒绝以 root 运行。已安装 helper 是 `/usr/lib/cortexfs/update-linux`；当该路径就是

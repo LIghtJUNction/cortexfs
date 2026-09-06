@@ -44,7 +44,7 @@ impl CommandBroker {
         Some(result)
     }
 
-    pub(super) fn complete(
+    pub(in crate::channel) fn complete(
         &self,
         request_id: &str,
         session: &str,
@@ -72,7 +72,7 @@ impl CommandBroker {
         }
     }
 
-    pub(super) fn reject_all(&self) {
+    pub(in crate::channel) fn reject_all(&self) {
         if let Ok(mut pending) = self.pending.lock() {
             for (_, entry) in std::mem::take(&mut *pending) {
                 let _ignored = entry.reply.send(InteractionResult::Rejected {

@@ -14,15 +14,15 @@ categories.workspace = true
 arrow-array = "59.1.0"
 arrow-schema = "59.1.0"
 base64 = "0.23.1"
-cortexfs-channels = { version = "0.1.20", path = "../cortexfs-channels" }
+cortexfs-channels = { version = "0.1.21", path = "../cortexfs-channels" }
 cortexfs-context = { version = "0.1.7", path = "../cortexfs-context" }
-cortexfs-metadatas = { version = "0.1.20", path = "../cortexfs-metadatas" }
+cortexfs-metadatas = { version = "0.1.21", path = "../cortexfs-metadatas" }
 cortexfs-module = { version = "0.1.7", path = "../cortexfs-module" }
 cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
 cortexfs-protocol = { version = "0.1.7", path = "../cortexfs-protocol" }
 cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
 cortexfs-tool-sdk = { version = "0.1.0", path = "../cortexfs-tool-sdk" }
-cortexfs-tools = { version = "0.1.20", path = "../cortexfs-tools" }
+cortexfs-tools = { version = "0.1.21", path = "../cortexfs-tools" }
 fuser = "0.18.0"
 getrandom = "0.4.3"
 imap = { version = "3.0.0-alpha.15", default-features = false, features = ["native-tls"] }

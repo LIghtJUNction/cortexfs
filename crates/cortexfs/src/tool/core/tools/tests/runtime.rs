@@ -409,12 +409,20 @@ pub(crate) fn shell_exec_accepts_output_at_limit() {
 
 #[test]
 pub(crate) fn shell_exec_times_out_instead_of_hanging() {
-    let started = Instant::now();
-
-    let output = run_shell_exec_command_with_timeout("sleep 5", Duration::from_millis(100));
-
-    assert!(matches!(output, Err(ref error) if error.contains("timed out")));
-    assert!(started.elapsed() < Duration::from_secs(2));
+    for command in [
+        "sleep 5",
+        "sleep 5 &",
+        "sleep 5 >/dev/null &",
+        "sleep 5 2>/dev/null &",
+    ] {
+        let started = Instant::now();
+        let output = run_shell_exec_command_with_timeout(command, Duration::from_millis(100));
+        assert!(
+            matches!(output, Err(ref error) if error.contains("timed out")),
+            "{command}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2), "{command}");
+    }
 }
 
 #[test]

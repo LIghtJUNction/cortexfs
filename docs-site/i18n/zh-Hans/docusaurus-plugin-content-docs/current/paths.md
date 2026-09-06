@@ -9,7 +9,7 @@ channel host、agent runtime、SDK 扩展和运维工具在不从主实现复制
 推导路径：
 
 ~~~toml
-cortexfs-paths = "0.1.20"
+cortexfs-paths = "0.1.21"
 ~~~
 
 其版本与 CortexFS 的 workspace 版本保持一致。CortexFS 的每次发布会同步发布主
@@ -86,7 +86,7 @@ let messages = session_file_path(&root, "1000", "executor", "default", "messages
 `cortexfs-paths` 是路径名的 ABI 边界。新的集成应直接依赖它：
 
 ~~~toml
-cortexfs-paths = "0.1.20"
+cortexfs-paths = "0.1.21"
 ~~~
 
 不要在适配器中重复出现 `/ctx`、`/run/cortexfs`、`/var/lib/cortexfs` 或

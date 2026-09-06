@@ -90,7 +90,7 @@ if command -v bwrap >/dev/null 2>&1; then
     }
     cleanup() {
         cleanup_transient_unit "$approval_unit"
-        "$repo_root/target/debug/ctx" --root "$root" agent stop coder >/dev/null 2>&1 || true
+        "$repo_root/target/debug/ctx" --root "$root" agent stop executor >/dev/null 2>&1 || true
         if [ -n "$approval_socket" ]; then
             rm -f "$approval_socket"
         fi
@@ -209,7 +209,7 @@ assert_source_improved() {
   grep -q 'self-bootstrap dirty note' "$user_dirty_file"
   local uid overlay_root overlay upper work
   uid=$(id -u)
-  overlay_root="$root/home/$uid/agent/coder/session/smoke/workspace-overlay"
+  overlay_root="$root/home/$uid/agent/executor/session/smoke/workspace-overlay"
   overlay=$(find "$overlay_root" -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)
   if [ -z "$overlay" ]; then
     printf 'missing workspace overlay under %s\n' "$overlay_root" >&2
@@ -284,11 +284,11 @@ assert_source_improved() {
         local latest
         local history
         uid=$(id -u)
-        latest=$("$repo_root/target/debug/ctx" --root "$root" agent output coder --session "$session")
-        history=$("$repo_root/target/debug/ctx" --root "$root" agent history coder --session "$session")
+        latest=$("$repo_root/target/debug/ctx" --root "$root" agent output executor --session "$session")
+        history=$("$repo_root/target/debug/ctx" --root "$root" agent history executor --session "$session")
         grep -q "$expected" <<<"$latest"
         grep -q "$expected" <<<"$history"
-        grep -q '^done$' "$root/home/$uid/agent/coder/session/$session/state"
+        grep -q '^done$' "$root/home/$uid/agent/executor/session/$session/state"
     }
     assert_codex_style_final_output() {
         local output=$1
@@ -312,28 +312,26 @@ assert_source_improved() {
     cp "$host_runner" "$root/bin/cortexfs-object-runner"
     cp "$host_tsh" "$root/bin/tsh"
     chmod 755 "$root/bin/cortexfs-object-runner" "$root/bin/tsh"
-    grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/agent/coder"
+    grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/agent/executor"
     for tool in fs.read fs.write fs.replace shell.exec tsh.config; do
         grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/tool/$tool"
     done
     grep -Fq 'exec /ctx/bin/tsh "$@"' "$root/tool/tsh"
-    grep -Fq 'writable project checkout mounted at `/workspace`' "$root/agent/coder.d/system.md"
-    grep -Fq 'fs.replace' "$root/agent/coder.d/system.md"
-    grep -Fq 'do not stop at a plan' "$root/agent/coder.d/system.md"
-    grep -Fq 'implement the requested change directly through `tsh`' "$root/agent/coder.d/system.md"
-    grep -Fq 'formatter, static check, lint, and focused tests' "$root/agent/coder.d/system.md"
-    grep -Fq 'current workspace state' "$root/agent/coder.d/system.md"
-    grep -Fq 'applicable `/workspace` rules' "$root/agent/coder.d/system.md"
-    if grep -Fq 'git status --short' "$root/agent/coder.d/system.md"; then
+    grep -Fq 'writable project checkout mounted at `/workspace`' "$root/agent/executor.d/system.md"
+    grep -Fq 'fs.replace' "$root/agent/executor.d/system.md"
+    grep -Fq 'implementation and verification agent' "$root/agent/executor.d/system.md"
+    grep -Fq 'applicable rules and current workspace state' "$root/agent/executor.d/system.md"
+    grep -Fq 'focused formatter/check/lint/tests' "$root/agent/executor.d/system.md"
+    grep -Fq 'report exact commands and results' "$root/agent/executor.d/system.md"
+    grep -Fq 'Do not invent a result, overwrite unrelated user changes' "$root/agent/executor.d/system.md"
+    if grep -Fq 'git status --short' "$root/agent/executor.d/system.md"; then
         printf 'bootstrap system prompt embeds a git status command\n' >&2
         exit 1
     fi
-    if grep -Fq 'find /workspace -name AGENTS.md -print' "$root/agent/coder.d/system.md"; then
+    if grep -Fq 'find /workspace -name AGENTS.md -print' "$root/agent/executor.d/system.md"; then
         printf 'bootstrap system prompt embeds an AGENTS.md discovery command\n' >&2
         exit 1
     fi
-    grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
-    grep -Fq 'Never run destructive git commands' "$root/agent/coder.d/system.md"
     write_self_bootstrap_workspace
 
     mkdir -p "$root/model/debug" "$root/model/debug/selfedit.d"
@@ -373,17 +371,17 @@ esac
 EOF
     chmod 755 "$root/model/debug/selfedit"
 
-    printf 'debug/selfedit\n' >"$root/agent/coder.d/model"
-    cat >"$root/agent/coder.d/policy" <<'EOF'
-allow coder_t model:debug/selfedit use
-allow coder_t tool:tsh execute
-allow coder_t tool:fs.read execute
-allow coder_t tool:fs.write execute
-allow coder_t tool:fs.replace execute
-allow coder_t tool:shell.exec execute
-allow coder_t network:default connect
+    printf 'debug/selfedit\n' >"$root/agent/executor.d/model"
+    cat >"$root/agent/executor.d/policy" <<'EOF'
+allow executor_t model:debug/selfedit use
+allow executor_t tool:tsh execute
+allow executor_t tool:fs.read execute
+allow executor_t tool:fs.write execute
+allow executor_t tool:fs.replace execute
+allow executor_t tool:shell.exec execute
+allow executor_t network:default connect
 EOF
-    cat >"$root/agent/coder.d/mount" <<EOF
+    cat >"$root/agent/executor.d/mount" <<EOF
 $root	/ctx	rw	rbind,nosuid,nodev
 $workspace	/workspace	rw	rbind,nosuid,nodev
 EOF

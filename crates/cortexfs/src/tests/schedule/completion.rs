@@ -14,23 +14,7 @@ fn agent_schedule_completion_derives_done_delegated_nodes_from_child_status() {
         ),
         Ok(())
     );
-    let receipt = ok!(crate::child_handoff_receipt(
-        &session.join("context").join("child").join("rev-123")
-    ));
-    assert_eq!(
-        claim_child_handoff_active(&receipt, "reviewer", "default", None),
-        Ok(())
-    );
-    assert_eq!(
-        record_child_result_to_parent_context(
-            &session,
-            "rev-123",
-            ChildContextStatus::Done,
-            "Review accepted\n",
-            "",
-        ),
-        Ok(())
-    );
+    complete_review(&session);
     assert_eq!(
         record_child_handoff_to_parent_context(
             &session,
@@ -66,30 +50,9 @@ fn agent_schedule_completion_derives_done_delegated_nodes_from_child_status() {
 
 #[test]
 fn agent_schedule_completion_rejects_unknown_local_completion_and_symlink_child_status() {
-    let root = clean_test_dir("agent-schedule-completed-bad");
     let outside = clean_test_dir("agent-schedule-completed-bad-outside");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) =
+        ok!(review_only_schedule_fixture("agent-schedule-completed-bad"));
 
     let result = completed_agent_schedule_nodes_from_parent_context(
         &session,
@@ -114,27 +77,13 @@ fn agent_schedule_completion_rejects_unknown_local_completion_and_symlink_child_
         Ok(())
     );
     write_text_file(&outside.join("status"), "done\n");
-    assert!(
-        fs::remove_file(
-            session
-                .join("context")
-                .join("child")
-                .join("rev-123")
-                .join("status")
-        )
-        .is_ok()
-    );
-    assert!(
-        symlink(
-            outside.join("status"),
-            session
-                .join("context")
-                .join("child")
-                .join("rev-123")
-                .join("status")
-        )
-        .is_ok()
-    );
+    let child_status = session
+        .join("context")
+        .join("child")
+        .join("rev-123")
+        .join("status");
+    assert!(fs::remove_file(&child_status).is_ok());
+    assert!(symlink(outside.join("status"), &child_status).is_ok());
 
     let result = completed_agent_schedule_nodes_from_parent_context(
         &session,
@@ -191,23 +140,7 @@ fn agent_schedule_completion_rejects_done_status_from_conflicting_child_channel(
         ),
         Ok(())
     );
-    let receipt = ok!(crate::child_handoff_receipt(
-        &session.join("context").join("child").join("rev-123")
-    ));
-    assert_eq!(
-        claim_child_handoff_active(&receipt, "reviewer", "default", None),
-        Ok(())
-    );
-    assert_eq!(
-        record_child_result_to_parent_context(
-            &session,
-            "rev-123",
-            ChildContextStatus::Done,
-            "Review accepted\n",
-            "",
-        ),
-        Ok(())
-    );
+    complete_review(&session);
 
     let result = completed_agent_schedule_nodes_from_parent_context(
         &session,

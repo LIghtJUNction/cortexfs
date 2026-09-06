@@ -59,6 +59,8 @@ ctx terminal watch terminal-executor-default
 ctx terminal attach terminal-executor-default
 
 ctx provider auth methods PROVIDER
+ctx auth login
+ctx auth login PROVIDER [--profile PROFILE]
 
 ctx cat agent/executor.d/policy
 ctx set agent/executor.d/cwd /work
@@ -810,6 +812,12 @@ ctx provider auth methods PROVIDER
 
 The output is `method<TAB>flow<TAB>slot`; it is a host-side projection and does
 not expose credential values or add an `/ctx/identity` namespace.
+
+`ctx auth login` without a provider is interactive. It presents numbered
+provider/method choices from installed provider configuration and built-in
+presets, marks choices that install a preset, and requires an explicit
+selection. API-key input is hidden. If stdin or stdout is not a terminal, the
+provider argument remains required so scripts never block on a prompt.
 
 ## Non-Goals
 

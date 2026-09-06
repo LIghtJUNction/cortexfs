@@ -43,16 +43,12 @@ impl CodecHandler {
     pub fn new(transport: Box<dyn CodecTransport>) -> Self {
         Self { transport }
     }
-
-    fn send_message(&mut self, message: &OutboundMessage) -> Result<(), ChannelControlError> {
-        let request = self.transport.codec().encode(message).map_err(channel)?;
-        self.transport.send(request)
-    }
 }
 
 impl ChannelControlHandler for CodecHandler {
     fn outbound(&mut self, message: &OutboundMessage) -> Result<(), ChannelControlError> {
-        self.send_message(message)
+        let request = self.transport.codec().encode(message).map_err(channel)?;
+        self.transport.send(request)
     }
 
     fn effect(
@@ -61,7 +57,7 @@ impl ChannelControlHandler for CodecHandler {
         effect: &ChannelEffect,
     ) -> Result<(), ChannelControlError> {
         if let ChannelEffect::Preview { text } = effect {
-            return self.send_message(&OutboundMessage {
+            return self.outbound(&OutboundMessage {
                 target: target.clone(),
                 body: MessageBody::text(text.clone()).map_err(channel)?,
                 metadata: BTreeMap::new(),

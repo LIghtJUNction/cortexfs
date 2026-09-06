@@ -27,22 +27,7 @@ fn agent_schedule_advance_records_next_ready_handoffs_from_parent_state() {
             .exists()
     );
 
-    let review = session.join("context").join("child").join("rev-123");
-    let receipt = ok!(crate::child_handoff_receipt(&review));
-    assert_eq!(
-        claim_child_handoff_active(&receipt, "reviewer", "default", None),
-        Ok(())
-    );
-    assert_eq!(
-        record_child_result_to_parent_context(
-            &session,
-            "rev-123",
-            ChildContextStatus::Done,
-            "Review accepted\n",
-            "",
-        ),
-        Ok(())
-    );
+    complete_review(&session);
 
     let second = ok!(advance_agent_schedule_from_parent_context(
         &session,

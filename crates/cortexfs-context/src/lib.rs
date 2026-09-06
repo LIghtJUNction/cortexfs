@@ -6,6 +6,8 @@ mod budget;
 mod compact;
 mod history;
 mod message;
+// Shared formatting stays internal to the context projection boundary.
+mod render;
 
 pub use budget::ContextBudget;
 pub use compact::render_selection;

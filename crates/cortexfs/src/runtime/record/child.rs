@@ -58,6 +58,38 @@ fn same_file(stat: &libc::stat, receipt: &libc::stat) -> bool {
         && (stat.st_dev, stat.st_ino) == (receipt.st_dev, receipt.st_ino)
 }
 
+fn read_child_field(
+    child: &fs::File,
+    file: &str,
+    max_bytes: u64,
+    invalid: &'static str,
+) -> Result<(String, libc::stat, libc::stat), ChildContextRecordError> {
+    let before = nix::sys::stat::fstatat(child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let value = support::plain::read_small_text_file_at(child, file, max_bytes, invalid)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let after = nix::sys::stat::fstatat(child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    Ok((value, before, after))
+}
+
+fn open_child_parent(
+    receipt: &ChildHandoffReceipt,
+) -> Result<(fs::File, &str), ChildContextRecordError> {
+    let parent_path = receipt
+        .path
+        .parent()
+        .ok_or(ChildContextRecordError::CannotRecord)?;
+    let parent = open_plain_directory(parent_path)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let name = receipt
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(ChildContextRecordError::CannotRecord)?;
+    Ok((parent, name))
+}
+
 fn read_child_receipt_guard(child: &fs::File) -> Result<Option<String>, ChildContextRecordError> {
     let max_bytes = u64::try_from(CHILD_RECEIPT_BYTES * 2 + 1)
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
@@ -440,21 +472,10 @@ pub fn child_handoff_receipt(path: &Path) -> Result<ChildHandoffReceipt, ChildCo
 fn open_child_channel(
     receipt: &ChildHandoffReceipt,
 ) -> Result<(fs::File, String, fs::File), ChildContextRecordError> {
-    let parent_path = receipt
-        .path
-        .parent()
-        .ok_or(ChildContextRecordError::CannotRecord)?;
-    let parent = open_plain_directory(parent_path)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let name = receipt
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ChildContextRecordError::CannotRecord)?
-        .to_owned();
+    let (parent, name) = open_child_parent(receipt)?;
     let child = nix::fcntl::openat(
         &parent,
-        name.as_str(),
+        name,
         nix::fcntl::OFlag::O_RDONLY
             | nix::fcntl::OFlag::O_DIRECTORY
             | nix::fcntl::OFlag::O_NOFOLLOW
@@ -470,7 +491,7 @@ fn open_child_channel(
         return Err(ChildContextRecordError::CannotRecord);
     }
     verify_child_receipt_guard(&child, receipt)?;
-    Ok((parent, name, child))
+    Ok((parent, name.to_owned(), child))
 }
 
 /// Reads a terminal child status only from the exact receipt-bound channel.
@@ -482,36 +503,16 @@ pub fn read_child_terminal_status(
     validate_child_context_names("terminal", expected_agent, expected_session)?;
     let (parent, name, child) = open_child_channel(receipt)?;
     for (file, expected) in [("agent", expected_agent), ("session", expected_session)] {
-        let before =
-            nix::sys::stat::fstatat(&child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-                .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-        let value = support::plain::read_small_text_file_at(
-            &child,
-            file,
-            4096,
-            "invalid child terminal field",
-        )
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-        let after = nix::sys::stat::fstatat(&child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-            .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+        let (value, before, after) =
+            read_child_field(&child, file, 4096, "invalid child terminal field")?;
         if value.trim() != expected
             || (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
         {
             return Err(ChildContextRecordError::CannotRecord);
         }
     }
-    let before =
-        nix::sys::stat::fstatat(&child, "status", nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-            .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let value = support::plain::read_small_text_file_at(
-        &child,
-        "status",
-        64,
-        "invalid child terminal status",
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let after = nix::sys::stat::fstatat(&child, "status", nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let (value, before, after) =
+        read_child_field(&child, "status", 64, "invalid child terminal status")?;
     let channel = nix::sys::stat::fstatat(
         &parent,
         name.as_str(),
@@ -621,19 +622,8 @@ fn child_context_field_receipts(
     fields
         .into_iter()
         .map(|(file, expected, trimmed)| {
-            let before =
-                nix::sys::stat::fstatat(child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-                    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-            let value = support::plain::read_small_text_file_at(
-                child,
-                file,
-                65_537,
-                "invalid child context field",
-            )
-            .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-            let after =
-                nix::sys::stat::fstatat(child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-                    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+            let (value, before, after) =
+                read_child_field(child, file, 65_537, "invalid child context field")?;
             let matches = if trimmed {
                 value.trim() == expected
             } else {
@@ -657,17 +647,7 @@ fn verify_child_context_lease(
 ) -> Result<(), ChildContextRecordError> {
     let child = nix::sys::stat::fstat(&*lease.child)
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let parent_path = receipt
-        .path
-        .parent()
-        .ok_or(ChildContextRecordError::CannotRecord)?;
-    let parent = open_plain_directory(parent_path)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let name = receipt
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ChildContextRecordError::CannotRecord)?;
+    let (parent, name) = open_child_parent(receipt)?;
     let current = nix::sys::stat::fstatat(&parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     if !is_plain_channel_directory(&child)
@@ -844,13 +824,46 @@ fn finish_child_result_with_mode_hook(
         )
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
         let mut artifact_receipts = Vec::new();
-        for (file, value) in [
-            ("result.md", ensure_trailing_newline(result)),
-            ("refs.jsonl", ensure_trailing_newline(refs_jsonl)),
-            ("status", format!("{}\n", status.as_str())),
+        for (file, value, before, replacement, after) in [
+            (
+                "result.md",
+                ensure_trailing_newline(result),
+                None,
+                [
+                    Some(ChildFinishStage::BeforeResultPublish),
+                    Some(ChildFinishStage::AfterResultRecheck),
+                    Some(ChildFinishStage::AfterResultExchange),
+                    Some(ChildFinishStage::BeforeResultCleanup),
+                ],
+                Some(ChildFinishStage::AfterResultPublish),
+            ),
+            (
+                "refs.jsonl",
+                ensure_trailing_newline(refs_jsonl),
+                None,
+                [
+                    Some(ChildFinishStage::BeforeRefsPublish),
+                    Some(ChildFinishStage::AfterRefsRecheck),
+                    Some(ChildFinishStage::AfterRefsExchange),
+                    Some(ChildFinishStage::BeforeRefsCleanup),
+                ],
+                Some(ChildFinishStage::AfterRefsPublish),
+            ),
+            (
+                "status",
+                format!("{}\n", status.as_str()),
+                Some(ChildFinishStage::BeforeStatus),
+                [
+                    None,
+                    Some(ChildFinishStage::AfterStatusRecheck),
+                    Some(ChildFinishStage::AfterStatusExchange),
+                    Some(ChildFinishStage::BeforeStatusCleanup),
+                ],
+                None,
+            ),
         ] {
-            if file == "status" {
-                hook(ChildFinishStage::BeforeStatus)?;
+            if let Some(stage) = before {
+                hook(stage)?;
                 for receipt in &field_receipts {
                     let current = nix::sys::stat::fstatat(
                         child_dir,
@@ -900,44 +913,16 @@ fn finish_child_result_with_mode_hook(
                 CHILD_STAGE_ID.fetch_add(1, Ordering::Relaxed)
             );
             replace_child_file(child_dir, file, &temporary, &value, |point| {
-                match (file, point) {
-                    ("result.md", ReplacePoint::Prepared) => {
-                        hook(ChildFinishStage::BeforeResultPublish)
-                    }
-                    ("result.md", ReplacePoint::Rechecked) => {
-                        hook(ChildFinishStage::AfterResultRecheck)
-                    }
-                    ("result.md", ReplacePoint::Exchanged) => {
-                        hook(ChildFinishStage::AfterResultExchange)
-                    }
-                    ("result.md", ReplacePoint::Quarantined) => {
-                        hook(ChildFinishStage::BeforeResultCleanup)
-                    }
-                    ("refs.jsonl", ReplacePoint::Prepared) => {
-                        hook(ChildFinishStage::BeforeRefsPublish)
-                    }
-                    ("refs.jsonl", ReplacePoint::Rechecked) => {
-                        hook(ChildFinishStage::AfterRefsRecheck)
-                    }
-                    ("refs.jsonl", ReplacePoint::Exchanged) => {
-                        hook(ChildFinishStage::AfterRefsExchange)
-                    }
-                    ("refs.jsonl", ReplacePoint::Quarantined) => {
-                        hook(ChildFinishStage::BeforeRefsCleanup)
-                    }
-                    ("status", ReplacePoint::Rechecked) => {
-                        hook(ChildFinishStage::AfterStatusRecheck)
-                    }
-                    ("status", ReplacePoint::Exchanged) => {
-                        hook(ChildFinishStage::AfterStatusExchange)
-                    }
-                    ("status", ReplacePoint::Quarantined) => {
-                        hook(ChildFinishStage::BeforeStatusCleanup)
-                    }
-                    _ => Ok(()),
+                let [prepared, rechecked, exchanged, quarantined] = replacement;
+                match point {
+                    ReplacePoint::Prepared => prepared,
+                    ReplacePoint::Rechecked => rechecked,
+                    ReplacePoint::Exchanged => exchanged,
+                    ReplacePoint::Quarantined => quarantined,
                 }
+                .map_or(Ok(()), &mut hook)
             })?;
-            if matches!(file, "result.md" | "refs.jsonl") {
+            if let Some(stage) = after {
                 let published = nix::sys::stat::fstatat(
                     child_dir,
                     file,
@@ -945,11 +930,7 @@ fn finish_child_result_with_mode_hook(
                 )
                 .map_err(|_error| ChildContextRecordError::CannotRecord)?;
                 artifact_receipts.push((file, published.st_dev, published.st_ino));
-                hook(if file == "result.md" {
-                    ChildFinishStage::AfterResultPublish
-                } else {
-                    ChildFinishStage::AfterRefsPublish
-                })?;
+                hook(stage)?;
             }
         }
         Ok(())
@@ -1081,13 +1062,7 @@ pub fn rollback_child_handoff(
         .path
         .parent()
         .ok_or(ChildContextRecordError::CannotRecord)?;
-    let parent = open_plain_directory(parent_path)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let name = receipt
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ChildContextRecordError::CannotRecord)?;
+    let (parent, name) = open_child_parent(receipt)?;
     let quarantine = format!(
         ".{name}.rollback-{}-{}",
         std::process::id(),
@@ -1191,25 +1166,8 @@ fn claim_child_handoff_active_with_lease_hook(
     let child_fd = &lease.child;
     let fields =
         child_context_field_receipts(child_fd, child_agent, child_session, expected_handoff)?;
-    let status_before = nix::sys::stat::fstatat(
-        &**child_fd,
-        "status",
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let status = support::plain::read_small_text_file_at(
-        child_fd,
-        "status",
-        64,
-        "invalid child claim status",
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let status_after = nix::sys::stat::fstatat(
-        &**child_fd,
-        "status",
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let (status, status_before, status_after) =
+        read_child_field(child_fd, "status", 64, "invalid child claim status")?;
     if !same_file(&status_before, &status_after) {
         return Err(ChildContextRecordError::CannotRecord);
     }

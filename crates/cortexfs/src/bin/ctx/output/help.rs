@@ -506,6 +506,7 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
         ]),
         "auth" => print_help_lines(&[
             "usage:",
+            "  ctx auth login",
             "  ctx auth methods PROVIDER",
             "  ctx auth login PROVIDER [--profile NAME] [--method auto|browser|device] [--device] [--timeout SECONDS]",
             "  ctx auth login PROVIDER --method api-key --stdin [--profile NAME]",
@@ -513,6 +514,8 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx auth status PROVIDER [--profile NAME]",
             "  ctx auth refresh PROVIDER [--profile NAME]",
             "",
+            "without PROVIDER, login opens an explicit provider and method selector",
+            "selecting an unconfigured built-in provider installs its preset",
             "uses the provider declaration and root-owned CortexFS secret store",
             "without printing credentials or creating a /ctx/provider root",
         ]),

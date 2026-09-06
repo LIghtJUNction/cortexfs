@@ -1,13 +1,18 @@
-use crate::*;
+use std::io;
+
+use crate::{CliError, is_provider_name, print_line};
+use cortexfs::cli::input::read_limited_input_text;
 
 pub(crate) const MAX_PROVIDER_SECRET_STDIN_BYTES: usize = 8 * 1024;
 
 pub(crate) fn provider_secret_set(provider: &str, slot: &str) -> Result<(), CliError> {
     validate_provider_secret_target(provider, slot)?;
-    let secret = read_provider_secret_stdin_limited(io::stdin(), MAX_PROVIDER_SECRET_STDIN_BYTES)
-        .map_err(|error| {
-        CliError::unavailable(format!("cannot read secret from stdin: {error}"))
-    })?;
+    let secret = read_limited_input_text(
+        io::stdin(),
+        MAX_PROVIDER_SECRET_STDIN_BYTES,
+        "provider secret stdin exceeds limit",
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot read secret from stdin: {error}")))?;
     let secret = secret.trim_end_matches(['\r', '\n']);
     if secret.is_empty() {
         return Err(CliError::usage(
@@ -17,27 +22,6 @@ pub(crate) fn provider_secret_set(provider: &str, slot: &str) -> Result<(), CliE
     cortexfs::store_provider_system_secret(provider, slot, secret)
         .map_err(provider_system_secret_cli_error)?;
     print_line(&format!("provider secret configured: {provider}/{slot}"))
-}
-
-pub(crate) fn read_provider_secret_stdin_limited(
-    reader: impl Read,
-    max_bytes: usize,
-) -> io::Result<String> {
-    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("stdin read limit is invalid: {error}"),
-        )
-    })?;
-    let mut secret = String::new();
-    reader.take(limit).read_to_string(&mut secret)?;
-    if secret.len() > max_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "provider secret stdin exceeds limit",
-        ));
-    }
-    Ok(secret)
 }
 
 pub(crate) fn provider_secret_status(provider: &str, slot: &str) -> Result<(), CliError> {

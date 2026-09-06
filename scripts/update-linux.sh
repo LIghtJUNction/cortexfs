@@ -189,6 +189,9 @@ update_package_paths() {
 }
 
 update_path_allowed() {
+    case "/$1/" in
+    *'/../'*) return 1 ;;
+    esac
     case "$1" in
     . | .BUILDINFO | .INSTALL | .MTREE | .PKGINFO | usr | usr/bin | usr/lib | usr/lib/.build-id | usr/lib/systemd | usr/lib/systemd/system | usr/lib/cortexfs | usr/share | usr/share/doc | usr/share/doc/cortexfs | usr/share/licenses | usr/share/licenses/cortexfs | etc | etc/cortexfs | etc/cortexfs/providers.d | etc/cortexfs/channels | var | var/lib | var/lib/cortexfs | var/lib/cortexfs/storage | var/lib/cortexfs/storage/generations | var/lib/cortexfs/secrets) ;;
     usr/bin/ctx | usr/bin/ctxterm | usr/bin/ctxchat | usr/bin/ctxmcp | usr/bin/tsh | usr/bin/cortexfs-*) ;;
@@ -206,8 +209,6 @@ update_verify_package() {
         normalized=${path#./}
         normalized=${normalized#/}
         normalized=${normalized%/}
-        [[ $normalized != *'/../'* && $normalized != ../* ]] ||
-            update_fail "package contains an unsafe path: $path"
         update_path_allowed "${normalized:-.}" ||
             update_fail "package contains an unmanaged path: $path"
     done <"$paths"

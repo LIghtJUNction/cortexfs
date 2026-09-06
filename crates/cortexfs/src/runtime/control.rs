@@ -398,7 +398,7 @@ impl RunCapability {
             return Err(RunCapabilityError::PeerDenied);
         }
         let frame: RequestFrame = read_json_line(stream)?;
-        let request_id = match frame {
+        let (request_id, response) = match frame {
             RequestFrame::Ping {
                 request_id,
                 agent,
@@ -409,7 +409,12 @@ impl RunCapability {
                 if agent != self.agent || session != self.session || run != self.run {
                     return Err(RunCapabilityError::InvalidFrame);
                 }
-                request_id
+                self.authorize_request(stream, seen, &request_id, &mut *current_run)?;
+                let response = ResponseFrame::Pong {
+                    request_id: request_id.clone(),
+                    receipt: self.source_receipt.clone(),
+                };
+                (request_id, Ok(response))
             }
             RequestFrame::CreateChild {
                 request_id,
@@ -425,19 +430,16 @@ impl RunCapability {
                 ..
             } => {
                 self.authorize_request(stream, seen, &request_id, &mut *current_run)?;
-                if agent != self.agent || session != self.session || run != self.run {
+                if agent != self.agent
+                    || session != self.session
+                    || run != self.run
+                    || crate::ChildLifecycle::parse_exact(&life).is_err()
+                    || window == Some(0)
+                {
                     let _ignored = write_error_frame(stream, request_id, "EINVAL");
                     return Err(RunCapabilityError::InvalidFrame);
                 }
-                if crate::ChildLifecycle::parse_exact(&life).is_err() {
-                    let _ignored = write_error_frame(stream, request_id, "EINVAL");
-                    return Err(RunCapabilityError::InvalidFrame);
-                }
-                if window == Some(0) {
-                    let _ignored = write_error_frame(stream, request_id, "EINVAL");
-                    return Err(RunCapabilityError::InvalidFrame);
-                }
-                let result = create_child(CreateChildRequest {
+                let response = create_child(CreateChildRequest {
                     agent,
                     session,
                     run,
@@ -447,23 +449,12 @@ impl RunCapability {
                     window,
                     input,
                     life,
+                })
+                .map(|result| ResponseFrame::ChildCreated {
+                    request_id: request_id.clone(),
+                    result,
                 });
-                return match result {
-                    Ok(result) => {
-                        write_frame(
-                            stream,
-                            &ResponseFrame::ChildCreated {
-                                request_id: request_id.clone(),
-                                result,
-                            },
-                        )?;
-                        Ok(request_id)
-                    }
-                    Err(error) => {
-                        let _ignored = write_error_frame(stream, request_id, error.errno());
-                        Err(error)
-                    }
-                };
+                (request_id, response)
             }
             RequestFrame::UpdatePrompt {
                 request_id,
@@ -491,18 +482,22 @@ impl RunCapability {
                     control,
                     content,
                 };
-                return respond_update_prompt(stream, request_id, update_prompt(request));
+                let response = update_prompt(request).map(|()| ResponseFrame::PromptUpdated {
+                    request_id: request_id.clone(),
+                });
+                (request_id, response)
             }
         };
-        self.authorize_request(stream, seen, &request_id, &mut *current_run)?;
-        write_frame(
-            stream,
-            &ResponseFrame::Pong {
-                request_id: request_id.clone(),
-                receipt: self.source_receipt.clone(),
-            },
-        )?;
-        Ok(request_id)
+        match response {
+            Ok(frame) => {
+                write_frame(stream, &frame)?;
+                Ok(request_id)
+            }
+            Err(error) => {
+                let _ignored = write_error_frame(stream, request_id, error.errno());
+                Err(error)
+            }
+        }
     }
 
     fn authorize_request(
@@ -703,28 +698,6 @@ fn legal_request_id(request_id: &str) -> bool {
         && request_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-fn respond_update_prompt(
-    stream: &mut UnixStream,
-    request_id: String,
-    result: Result<(), RunCapabilityError>,
-) -> Result<String, RunCapabilityError> {
-    match result {
-        Ok(()) => {
-            write_frame(
-                stream,
-                &ResponseFrame::PromptUpdated {
-                    request_id: request_id.clone(),
-                },
-            )?;
-            Ok(request_id)
-        }
-        Err(error) => {
-            let _ignored = write_error_frame(stream, request_id, error.errno());
-            Err(error)
-        }
-    }
 }
 
 fn write_error_frame(
@@ -1381,6 +1354,9 @@ mod tests {
                 || Some("run-1".to_owned()),
                 |_request| Err(RunCapabilityError::Unsupported),
                 move |request| {
+                    if request.content == "denied\n" {
+                        return Err(RunCapabilityError::PeerDenied);
+                    }
                     server_updates
                         .lock()
                         .map_err(|_error| RunCapabilityError::CannotWrite)?
@@ -1428,6 +1404,12 @@ mod tests {
                 .map_err(|_error| std::io::Error::other("update capture poisoned"))?
                 .is_empty()
         );
+        for error in [RunCapabilityError::PeerDenied, RunCapabilityError::Replayed] {
+            assert_eq!(
+                capability.update_prompt("update-failed", "system.md", "denied\n"),
+                Err(error)
+            );
+        }
         capability.update_prompt("update-1", "system.md", "You improve yourself.\n")?;
         assert_eq!(
             capability.update_prompt("update-1", "system.md", "You improve yourself.\n"),

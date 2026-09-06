@@ -33,7 +33,7 @@ fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) 
     assert!(args.contains(&"--new-session".to_owned()));
     assert!(contains_arg_pair(args, "--cap-drop", "ALL"));
     assert!(args.contains(&"--unshare-uts".to_owned()));
-    assert!(contains_arg_pair(args, "--hostname", "cortexfs"));
+    assert!(!args.iter().any(|arg| arg == "--hostname"));
     assert!(contains_arg_pair(
         args,
         "--size",

@@ -186,7 +186,30 @@ assert_true "Codex preset installation runs through sudo" \
     grep -Fxq 'ctx provider preset install codex' "$sudo_log"
 assert_true "Codex OAuth login uses the root system store" \
     grep -Fxq 'ctx provider oauth login codex --device' "$sudo_log"
+assert_true "Codex setup binds the current executor agent" \
+    grep -Fxq 'ctx set agent/executor.d/model codex/gpt-5.6' "$sudo_log"
+assert_false "Codex setup does not reference the retired coder agent" \
+    grep -Fq coder "$sudo_log"
 unset CORTEXFS_INSTALL_TEST_MODE CORTEXFS_TEST_INPUT
+
+install_channel_env() {
+    printf '%s\n' "$@" >>"$sudo_log"
+}
+read_secret() {
+    export SECRET_VALUE=test-token
+}
+enable_im_services() {
+    printf '%s\n' "$@" >>"$sudo_log"
+}
+for channel in telegram slack; do
+    : >"$sudo_log"
+    "configure_im_$channel"
+    assert_true "$channel routes messages to executor" \
+        grep -Fxq CORTEXFS_AGENT=executor "$sudo_log"
+    assert_true "$channel uses the executor socket" \
+        grep -Fxq CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock "$sudo_log"
+done
+unset -f install_channel_env read_secret enable_im_services
 unset -f sudo
 
 package_payload_lists_match() (

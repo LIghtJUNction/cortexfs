@@ -1,5 +1,8 @@
 # Session ABI
 
+V2 ownership/replay requirements below are not yet activated in the socket
+runtime; see [Interaction ABI implementation status](interaction-abi.md#implementation-status).
+
 Socket requests must include `session`. If the client omits it, runtime uses
 `default`.
 
@@ -54,6 +57,43 @@ shared   /ctx/shared/<name>/model/<model>.d/session/<session>/
 temp     no durable path required
 ```
 
+## Agent Session Slave ownership
+
+Each logical Agent Session has one active **Agent Session Slave**. It is the
+single writer for that session's messages, events, request claims, state, and
+indexes. Multiple Channel Masters may attach through
+[`cortexfs.interaction/v2`](interaction-abi.md), but they never acquire the
+session write lock and never append session files directly.
+
+A slave is an independent protocol, state, and lifecycle boundary, not
+necessarily an operating-system process. The current per-Agent runtime may host
+many slaves, provided that every session has an isolated mailbox, lock,
+idempotency table, run state, and replay cursor space. Later per-session process
+isolation MUST NOT change the session paths or interaction ABI. The existing
+runtime/supervisor owns slave activation, placement, restart, and reclamation;
+a Channel Master attachment is not a create/destroy authority and introduces no
+second lifecycle control plane.
+
+Before serving an attachment or accepting a write, a private/shared session
+slave MUST acquire one exclusive OS-released lock keyed by the canonical
+session path, including its UID or shared-space identity, Agent, scope, and
+session name, and retain it for its active lifetime. The
+lock is implementation-private runtime state under `/run` (or an equivalent
+non-ABI location), not a session file and not a new `/ctx` entry. A contender
+that cannot acquire the lock fails with `session_locked` and MUST NOT append,
+issue a runtime command, or expose a second live stream. Loss or conflicting
+ownership stops admission and writes. Takeover is permitted only after release
+and validation of the durable JSONL tail. Temp sessions require the same
+single-writer rule within their owning runtime even though they need no durable
+lock file.
+
+All accepted mailbox items are ordered by the slave, not by a Channel Master's
+clock. Each v2-visible durable event is appended before publication and has a
+strictly increasing `session_seq` within the session. Recovery derives the next
+sequence and request-id claims from validated durable state; an incomplete or
+unprovable tail is an `EIO`-class error and MUST NOT be guessed, truncated, or
+claimed as successfully replayed.
+
 ## Session Directory
 
 Session directories use ordinary files:
@@ -61,7 +101,7 @@ Session directories use ordinary files:
 ```text
 messages.jsonl  conversation messages
 raw             read-only ABI alias of messages.jsonl; preserves original JSONL history
-events.jsonl    tool calls, errors, and state changes
+events.jsonl    ordered run, tool, error, state, and v2 session-sequence facts
 latest.md       latest assistant text
 state           active, idle, done, error
 state.json      structured non-secret runtime projection (optional for legacy sessions)
@@ -206,8 +246,9 @@ are part of the durable session ABI and are visible through the existing
 `home/<uid>` or `shared/<name>` tree. Runtime channel registration creates or
 replaces them with the normal same-directory atomic rename rule. A channel
 record is not a submission endpoint: clients use its filename to select the
-existing agent/session socket, and must not put credentials or external
-identity secrets in the record.
+existing agent/session socket, negotiate the interaction ABI, and attach to the
+session. It is neither a Channel Master identity nor a write lease. It must not
+contain credentials or external identity secrets.
 
 `index/by-cwd/<hash>`, `index/by-hash/<hash>`, and `index/by-uuid/<uuid>` are
 not symlinks. That keeps the ABI identical across mounts and different backing

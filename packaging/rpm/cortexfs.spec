@@ -1,5 +1,5 @@
 Name:           cortexfs
-Version:        0.1.20
+Version:        0.1.21
 Release:        1%{?dist}
 Summary:        FUSE filesystem interface for agent runtimes
 License:        MIT
@@ -184,6 +184,10 @@ fi
 %attr(0700,root,root) %dir %{_sharedstatedir}/cortexfs/secrets
 
 %changelog
+* Fri Sep 04 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.21-1
+- Add an explicit interactive provider and authentication-method selector to ctx auth login.
+- Keep API-key prompts hidden and non-interactive invocations fail-fast.
+
 * Fri Aug 21 2026 LIghtJUNction <lightjunction.me@gmail.com> - 0.1.20-1
 - Preserve completed host tool calls in continuation context to prevent duplicate execution.
 - Auto-mount the current workspace for bare ctx sessions when the agent policy permits it.

@@ -11,7 +11,7 @@ keywords = ["agent", "mqtt", "channel", "iot"]
 categories = ["network-programming"]
 
 [dependencies]
-cortexfs-channels = { version = "0.1.20", path = "../cortexfs-channels" }
+cortexfs-channels = { version = "0.1.21", path = "../cortexfs-channels" }
 cortexfs-paths = { version = "0.1.7", path = "../cortexfs-paths" }
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-native-tls"] }
 serde_json = "1.0.151"

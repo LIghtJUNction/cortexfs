@@ -1,8 +1,10 @@
+# pyright: reportArgumentType=false, reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import asyncio
 import importlib
 import json
+import multiprocessing
 import os
 import sys
 import tempfile
@@ -48,6 +50,7 @@ _stub_inspect()
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 agents = importlib.import_module("agent_benchmark.agents")
 system = importlib.import_module("agent_benchmark.system")
+compare = importlib.import_module("agent_benchmark.compare")
 
 
 class FakeStream:
@@ -152,6 +155,13 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 "killpg",
                 lambda _pid, _signal: setattr(process, "returncode", -15),
             ),
+            patch.object(
+                agents,
+                "_process_group_members",
+                side_effect=lambda _pgid: (
+                    {process.pid: 1} if process.returncode is None else {}
+                ),
+            ),
         ):
             return await agents.run_ctx_agent(
                 ctx_path="ctx",
@@ -187,8 +197,20 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             b"not-json\n",
             frame([]),
             frame({"type": "usage", "input_tokens": "1"}),
+            frame({"type": "usage", "input_tokens": 1}),
+            frame({"type": "usage", "output_tokens": 1}),
         ):
             self.assertEqual((await self.run_agent([bad])).error_code, "protocol_error")
+
+        partial = await self.run_agent(
+            [
+                frame({"type": "start", "run": "r"}),
+                frame({"type": "usage", "input_tokens": 2, "output_tokens": 3}),
+                frame({"type": "usage", "input_tokens": 1}),
+            ]
+        )
+        self.assertEqual(partial.error_code, "protocol_error")
+        self.assertFalse(partial.usage_available)
 
     async def test_bounds_and_redaction(self) -> None:
         oversized = b"{" + b"x" * agents.MAX_LINE_BYTES + b"}\n"
@@ -220,6 +242,77 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.timed_out)
         self.assertEqual(runner.commands[0][-1], "run-7")
         self.assertEqual(result.cancellation.local_signal, "TERM")
+        self.assertFalse(agents.record_process_cleanup_complete(result.metadata()))
+
+    async def test_command_runner_retains_verified_helper_cleanup_receipt(self) -> None:
+        runner = agents.SubprocessCommandRunner()
+        code, stdout, stderr = await runner.run(
+            sys.executable,
+            "-c",
+            "print('ok')",
+            timeout=1,
+        )
+        self.assertEqual((code, stdout.strip(), stderr), (0, "ok", ""))
+        self.assertTrue(agents.process_cleanup_complete(runner.last_cleanup))
+
+    async def test_process_group_cleanup_rejects_reused_leader_identity(self) -> None:
+        process = FakeProcess([], hang=True)
+        kill = patch.object(agents.os, "killpg")
+        with (
+            patch.object(
+                agents,
+                "_process_group_members",
+                return_value={process.pid: 2},
+            ),
+            kill as kill_mock,
+        ):
+            receipt = await agents._cleanup_process_group(process, 1)
+        self.assertFalse(receipt.verified_empty)
+        self.assertIn("ownership", receipt.detail)
+        kill_mock.assert_not_called()
+
+    async def test_process_group_cleanup_kills_a_surviving_grandchild(self) -> None:
+        code = """
+import signal, subprocess, sys, time
+child = subprocess.Popen([
+    sys.executable,
+    "-c",
+    "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(30)",
+], stdout=subprocess.PIPE, text=True)
+child.stdout.readline()
+print(child.pid, flush=True)
+signal.signal(signal.SIGTERM, lambda *_args: sys.exit(0))
+time.sleep(30)
+"""
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            code,
+            stdout=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert process.stdout is not None
+        child_pid = int((await process.stdout.readline()).decode().strip())
+        receipt = await agents._cleanup_process_group(process)
+        self.assertTrue(receipt.term_sent)
+        self.assertTrue(receipt.kill_sent)
+        self.assertTrue(receipt.verified_empty)
+        self.assertNotIn(child_pid, receipt.remaining_pids)
+
+    async def test_cancel_runner_exception_cannot_skip_local_termination(self) -> None:
+        runner = types.SimpleNamespace(
+            run=AsyncMock(side_effect=OSError("cancel transport failed"))
+        )
+        result = await self.run_agent(
+            [frame({"type": "start", "run": "run-8"})],
+            hang=True,
+            runner=runner,
+            timeout=0.01,
+        )
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.cancellation.server_exit_code, -1)
+        self.assertEqual(result.cancellation.local_signal, "TERM")
+        self.assertIn("cancel transport failed", result.cancellation.detail)
 
     async def test_timeout_before_run_never_guesses_and_cancel_failure_is_recorded(
         self,
@@ -234,6 +327,51 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             timeout=0.01,
         )
         self.assertEqual(failed.cancellation.server_exit_code, 1)
+
+    async def test_protocol_frame_completeness_tracks_retention_and_drops(self) -> None:
+        complete = await self.run_agent(
+            [
+                frame({"type": "start", "run": "r"}),
+                frame({"type": "done", "status": "ok", "run": "r"}),
+            ],
+            retain=True,
+        )
+        self.assertTrue(complete.raw_frames_complete)
+        self.assertEqual(complete.dropped_frame_count, 0)
+        self.assertTrue(
+            all("_observer_elapsed_seconds" in frame for frame in complete.frames)
+        )
+
+        long_text = "x" * 10_000
+        preserved = await self.run_agent(
+            [
+                frame({"type": "start", "run": "r", "authorization": "secret"}),
+                frame({"type": "delta", "run": "r", "text": long_text}),
+                frame({"type": "done", "status": "ok", "run": "r"}),
+            ],
+            retain=True,
+        )
+        delta = next(item for item in preserved.frames if item["type"] == "delta")
+        self.assertEqual(delta["text"], long_text)
+        self.assertEqual(preserved.truncated_field_count, 0)
+        self.assertEqual(preserved.redacted_field_count, 1)
+        self.assertEqual(
+            next(item for item in preserved.frames if item["type"] == "start")[
+                "authorization"
+            ],
+            "[REDACTED]",
+        )
+
+        incomplete = await self.run_agent(
+            [
+                frame({"type": "start", "run": "r"}),
+                frame({"type": "done", "status": "ok", "run": "r"}),
+                frame({"type": "error", "code": "LATE", "run": "r"}),
+            ],
+            retain=True,
+        )
+        self.assertFalse(incomplete.raw_frames_complete)
+        self.assertEqual(incomplete.dropped_frame_count, 1)
 
     async def test_late_frames_after_terminal_are_ignored(self) -> None:
         result = await self.run_agent(
@@ -328,6 +466,13 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 "killpg",
                 lambda _pid, _signal: setattr(process, "returncode", -15),
             ),
+            patch.object(
+                agents,
+                "_process_group_members",
+                side_effect=lambda _pgid: (
+                    {process.pid: 1} if process.returncode is None else {}
+                ),
+            ),
         ):
             task = asyncio.create_task(
                 agents.run_ctx_agent(
@@ -366,12 +511,21 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 ttft_seconds=0.05,
                 input_tokens=1,
                 output_tokens=1,
+                usage_available=True,
+                raw_frames_complete=False,
+                dropped_frame_count=0,
+                dropped_frame_bytes=0,
+                redacted_field_count=0,
+                redacted_field_bytes=0,
+                truncated_field_count=0,
+                truncated_field_bytes=0,
                 done_status="ok",
                 error_code=None,
                 error_message=None,
                 stderr="",
                 identity=agents.RunIdentity("client", "run", values["session"]),
                 cancellation=None,
+                process_cleanup=agents._empty_process_cleanup(),
                 cleanup=None,
             )
 
@@ -398,11 +552,193 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 dataset=[{"id": "one", "prompt": "q", "target": "answer"}],
                 repeat=1,
                 timeout=1,
+                measure_memory=False,
             )
         self.assertEqual(observed, ["architect", "coder", "reviewer", "worker"])
 
+    async def test_generic_observation_error_still_archives_the_session(self) -> None:
+        baseline = agents.SessionBaseline("owned", True, "default", ())
+        receipt = agents.SessionReceipt(
+            "owned",
+            baseline,
+            True,
+            None,
+            True,
+            True,
+            detail=None,
+        )
+        archive = patch.object(system, "_archive_session", return_value=receipt)
+        with (
+            patch.object(system, "_session_baseline", return_value=baseline),
+            patch.object(
+                system,
+                "run_ctx_agent",
+                AsyncMock(side_effect=ValueError("collector failed")),
+            ),
+            archive as archive_mock,
+            self.assertRaisesRegex(ValueError, "collector failed"),
+        ):
+            await system._ctx_observation(
+                ctx_path="ctx",
+                agent_name="coder",
+                sample={"id": "one", "prompt": "q", "target": "answer"},
+                sample_index=0,
+                epoch=0,
+                timeout=1,
+                retain_frames=False,
+                measure_memory=False,
+            )
+        archive_mock.assert_called_once()
+
+    async def test_interrupted_observation_surfaces_failed_session_cleanup(
+        self,
+    ) -> None:
+        baseline = agents.SessionBaseline("owned", True, "default", ())
+        receipt = agents.SessionReceipt(
+            "owned",
+            baseline,
+            True,
+            None,
+            True,
+            False,
+            detail="archive failed",
+        )
+        with (
+            patch.object(system, "_session_baseline", return_value=baseline),
+            patch.object(
+                system,
+                "run_ctx_agent",
+                AsyncMock(side_effect=asyncio.CancelledError),
+            ),
+            patch.object(system, "_archive_session", return_value=receipt),
+            self.assertRaisesRegex(RuntimeError, "archive failed"),
+        ):
+            await system._ctx_observation(
+                ctx_path="ctx",
+                agent_name="coder",
+                sample={"id": "one", "prompt": "q", "target": "answer"},
+                sample_index=0,
+                epoch=0,
+                timeout=1,
+                retain_frames=False,
+                measure_memory=False,
+            )
+
+    async def test_runtime_process_observer_hashes_executing_process(self) -> None:
+        completed = asyncio.create_task(asyncio.sleep(0))
+        await completed
+        with (
+            patch.object(system, "_unit_cgroup_pids", return_value=(os.getpid(),)),
+            patch.object(
+                system,
+                "_unit_runtime_snapshot",
+                return_value={"complete": True, "invocation_id": "run-1"},
+            ),
+        ):
+            evidence = await system._observe_unit_processes(
+                "cortexfs-agent@coder.service", completed
+            )
+        self.assertTrue(evidence["complete"])
+        observation = evidence["observations"][0]
+        self.assertEqual(observation["pid"], os.getpid())
+        self.assertEqual(len(observation["executable"]["sha256"]), 64)
+
 
 class LifecycleSystemTests(unittest.TestCase):
+    def test_benchmark_source_identity_covers_declared_modules(self) -> None:
+        identity = system._benchmark_source_identity(["agents.py", "system.py"])
+        self.assertEqual(len(identity["sha256"]), 64)
+        self.assertEqual(set(identity["files"]), {"agents.py", "system.py"})
+
+    def test_hashed_command_rejects_truncation_and_preserves_small_stdout(self) -> None:
+        small = system._hashed_command(
+            [sys.executable, "-c", "print('search')"],
+            1,
+            retain_stdout=True,
+        )
+        self.assertTrue(small["complete"])
+        self.assertEqual(small["stdout"], "search\n")
+        self.assertEqual(len(small["sha256"]), 64)
+
+        oversized = system._hashed_command(
+            [
+                sys.executable,
+                "-c",
+                f"print('x' * {system.COMMAND_VALIDATION_STDOUT_LIMIT + 1})",
+            ],
+            1,
+        )
+        self.assertFalse(oversized["complete"])
+        self.assertEqual(oversized["stdout"], "")
+
+    def test_runtime_snapshot_rejects_inactive_or_pidless_units(self) -> None:
+        with patch.object(
+            system,
+            "_systemctl_fields",
+            return_value=(
+                True,
+                {"MainPID": "0", "InvocationID": "", "ActiveState": "inactive"},
+                "hash",
+            ),
+        ):
+            snapshot = system._unit_runtime_snapshot("cortexfs-agent@coder.service", 1)
+        self.assertFalse(snapshot["complete"])
+
+    def test_unit_configuration_hashes_fragment_dropin_exec_and_environment(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fragment = root / "agent.service"
+            drop_in = root / "override.conf"
+            executable = root / "runtime"
+            fragment.write_text("[Service]\n", encoding="utf-8")
+            drop_in.write_text("[Service]\n", encoding="utf-8")
+            executable.write_bytes(b"runtime")
+            executable.chmod(0o755)
+            stdout = "\n".join(
+                (
+                    f"FragmentPath={fragment}",
+                    f"DropInPaths={drop_in}",
+                    f"ExecStart={{ path={executable} ; argv[]={executable} ; }}",
+                    "Environment=CTX_MODE=test API_KEY=must-not-leak",
+                    "EnvironmentFiles=",
+                    "User=cortexfs",
+                    "Group=cortexfs",
+                )
+            )
+            with patch.object(
+                system,
+                "_hashed_command",
+                return_value={
+                    "success": True,
+                    "complete": True,
+                    "stdout": stdout,
+                },
+            ):
+                identity = system._unit_configuration_identity(
+                    "cortexfs-agent@coder.service", 1
+                )
+        self.assertTrue(identity["complete"])
+        self.assertEqual(len(identity["configuration_sha256"]), 64)
+        self.assertEqual(len(identity["files"]["executable"]["sha256"]), 64)
+        self.assertNotIn("must-not-leak", repr(identity))
+
+    def test_executable_identity_hashes_the_exact_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "ctx"
+            executable.write_bytes(b"ctx-binary")
+            executable.chmod(0o755)
+            with patch.object(
+                system,
+                "_command",
+                return_value={"success": True, "stdout": "ctx 1.2.3\n"},
+            ):
+                identity = system._executable_identity(str(executable), 1)
+        self.assertEqual(identity["bytes"], 10)
+        self.assertEqual(len(identity["sha256"]), 64)
+        self.assertEqual(identity["version"], "ctx 1.2.3")
+
     def command_fixture(
         self, failure: str | None = None, status_output: str = "idle\nmodel=main\n"
     ):
@@ -690,6 +1026,50 @@ class LifecycleSystemTests(unittest.TestCase):
             system.main()
         output.assert_not_called()
         sampling.assert_not_called()
+
+
+class EvidenceInputTests(unittest.TestCase):
+    def test_metrics_reject_nonfinite_negative_and_overflowing_values(self) -> None:
+        for value in (float("nan"), float("inf"), -float("inf"), 10**400, -1, True):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "latency"):
+                    system._nonnegative_number(value, "latency")
+                with self.assertRaisesRegex(ValueError, "latency"):
+                    compare._metric({"latency": value}, "latency")
+        self.assertEqual(compare._metric({"latency": 1.5}, "latency"), 1.5)
+
+    def test_evidence_readers_reject_fifos_without_waiting_for_a_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fifo = root / "input"
+            os.mkfifo(fifo)
+            directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                for reader in (
+                    lambda: system._read_at(directory, "input"),
+                    lambda: system._read_json_object(fifo),
+                    lambda: compare._load_summary(fifo),
+                ):
+                    def read() -> None:
+                        try:
+                            reader()
+                        except ValueError:
+                            return
+                        raise AssertionError("FIFO was accepted")
+
+                    process = multiprocessing.get_context("fork").Process(target=read)
+                    process.start()
+                    try:
+                        process.join(timeout=2)
+                        self.assertFalse(process.is_alive(), "FIFO read blocked")
+                        self.assertEqual(process.exitcode, 0)
+                    finally:
+                        if process.is_alive():
+                            process.terminate()
+                        process.join()
+                        process.close()
+            finally:
+                os.close(directory)
 
 
 if __name__ == "__main__":

@@ -910,7 +910,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortexfs"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-agent-sdk"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs",
  "cortexfs-runtime-client",
@@ -968,14 +968,14 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-agents"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-agent-sdk",
 ]
 
 [[package]]
 name = "cortexfs-channel-amqp"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-mqtt"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1003,7 +1003,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-nostr"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-sdk"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-slack"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-tools"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-voice"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1061,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-wechat"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.23.1",
  "cortexfs-channels",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channel-wecom-ws"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-channels",
  "cortexfs-paths",
@@ -1088,7 +1088,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-channels"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.23.1",
  "futures-core",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-context"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-futureagi"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs",
  "reqwest",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-mcp"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs",
  "cortexfs-tool-sdk",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-metadatas"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "reqwest",
  "serde",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-module"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -1150,11 +1150,11 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-paths"
-version = "0.1.20"
+version = "0.1.21"
 
 [[package]]
 name = "cortexfs-protocol"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -1162,7 +1162,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-runtime-client"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "getrandom 0.4.3",
  "serde",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-sdk-extension-fixture"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs",
  "cortexfs-agent-sdk",
@@ -1184,14 +1184,14 @@ dependencies = [
 
 [[package]]
 name = "cortexfs-tool-sdk"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "cortexfs-tools"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "cortexfs-paths",
  "cortexfs-tool-sdk",

@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use cortexfs_channels::{ChannelCommandResult, ChannelEffect, ChannelFrame, ChannelFrameBody};
+use cortexfs_channels::{ChannelEffect, ChannelFrame, ChannelFrameBody};
 use cortexfs_runtime_client::interaction::{InteractionEvent, InteractionResult};
 
-use super::{CommandBroker, DriverProgress, command};
+use super::{DriverProgress, command};
 use crate::channel::bridge::ChannelProgressSink;
 
 const MAX_PREVIEW_BYTES: usize = 64 * 1024;
@@ -71,7 +71,7 @@ impl ChannelProgressSink for DriverProgress<'_> {
             command: command::convert_command(command),
             target: Some(self.target.clone()),
         });
-        if !self.write(&frame) {
+        if !self.writer.write(&frame) {
             commands.remove(command_id);
             return rejected("channel command could not be delivered");
         }
@@ -84,18 +84,4 @@ fn rejected(reason: &str) -> InteractionResult {
     InteractionResult::Rejected {
         reason: reason.to_owned(),
     }
-}
-
-pub(super) fn complete(
-    commands: &CommandBroker,
-    request_id: &str,
-    session: &str,
-    command_id: &str,
-    result: ChannelCommandResult,
-) -> bool {
-    commands.complete(request_id, session, command_id, result)
-}
-
-pub(super) fn reject_all(commands: &CommandBroker) {
-    commands.reject_all();
 }

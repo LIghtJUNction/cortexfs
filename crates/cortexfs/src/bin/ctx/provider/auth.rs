@@ -1,12 +1,23 @@
-use crate::*;
+use std::io::Read;
+use std::path::Path;
+
+use crate::{
+    CliError, MAX_PROVIDER_SECRET_STDIN_BYTES, PROVIDER_CONFIG_DIR, print_line,
+    read_provider_config_from_dir,
+};
+use cortexfs::cli::input::read_limited_input_text;
 
 pub(super) mod socket;
 
 /// Stores an API key as one complete named authentication profile.
-pub(crate) fn provider_api_key_login(provider: &str, profile: &str) -> Result<(), CliError> {
+pub(crate) fn provider_api_key_login(
+    provider: &str,
+    profile: &str,
+    reader: impl Read,
+) -> Result<(), CliError> {
     let config = read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))?;
     if !config
-        .auth_methods()
+        .auth_methods()?
         .iter()
         .any(|method| method.method == cortexfs::AuthMethod::ApiKey)
     {
@@ -14,8 +25,12 @@ pub(crate) fn provider_api_key_login(provider: &str, profile: &str) -> Result<()
             "provider does not accept API-key authentication",
         ));
     }
-    let key = read_provider_secret_stdin_limited(io::stdin(), MAX_PROVIDER_SECRET_STDIN_BYTES)
-        .map_err(|_error| CliError::unavailable("cannot read API key from stdin"))?;
+    let key = read_limited_input_text(
+        reader,
+        MAX_PROVIDER_SECRET_STDIN_BYTES,
+        "provider secret stdin exceeds limit",
+    )
+    .map_err(|_error| CliError::unavailable("cannot read API key from stdin"))?;
     let key = key.trim_end_matches(['\r', '\n']);
     if key.is_empty() {
         return Err(CliError::usage(
@@ -29,15 +44,7 @@ pub(crate) fn provider_api_key_login(provider: &str, profile: &str) -> Result<()
 /// Prints the provider-neutral authentication methods from host config.
 pub(crate) fn provider_auth_methods(provider: &str) -> Result<(), CliError> {
     let config = read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))?;
-    if config.auth.iter().any(|method| !method.is_valid())
-        || config
-            .auth
-            .iter()
-            .any(|method| method.method == cortexfs::AuthMethod::OAuth && config.oauth.is_none())
-    {
-        return Err(CliError::usage("invalid provider auth config"));
-    }
-    for method in config.auth_methods() {
+    for method in config.auth_methods()? {
         let kind = match method.method {
             cortexfs::AuthMethod::ApiKey => "api_key",
             cortexfs::AuthMethod::OAuth => "oauth",

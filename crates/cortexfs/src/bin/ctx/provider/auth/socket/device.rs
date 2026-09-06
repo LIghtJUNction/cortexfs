@@ -17,7 +17,7 @@ pub(crate) fn oauth_device_login(
         provider: provider.to_owned(),
         profile: profile.to_owned(),
         base_url: config.base_url.clone(),
-        methods: config.auth_methods(),
+        methods: config.auth_methods()?,
         oauth: Box::new(oauth),
         timeout_secs,
     });

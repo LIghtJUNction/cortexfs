@@ -9,7 +9,7 @@ sidebar_label: One-file Extensions
 CortexFS follows the same anti-framework extension rule as Pi: add behavior at
 stable edges (packages, executables, skills, modules, channel adapters) without
 a second root ABI or a resident plugin daemon. Product placement of those edges
-is in [architecture.md](architecture.md) (*Extension points*). This page is the
+is in [architecture.md](./architecture.md) (*Extension points*). This page is the
 shortest authoring path.
 
 The shortest way to add behavior is one package directory. Keep the program
@@ -37,6 +37,7 @@ schema = { type = "object" }
 [[agents]]
 name = "kit_reviewer"
 run = "bin/review-agent"
+abi = "sdk-envelope-v1"
 model = "main"
 tools = ["git.summary"]
 instructions = "Review changes, use the tool when useful, and cite evidence."
@@ -94,6 +95,29 @@ shell, or another host-language build can produce them. An SDK agent receives
 one hosted envelope on stdin and returns JSONL events. It may yield a tool call;
 the host performs the capability check and sends the observation back for the
 next step. This is the custom execution loop, without a resident plugin daemon.
+
+For a build-free first agent, copy `examples/extensions/shell-agent/`. It uses
+POSIX shell plus `jq`, requires the seven core keys, permits the SDK-optional
+`event`/`origin` keys, rejects every unknown envelope key, preserves the
+runtime's forward-compatible origin extension behavior, enforces byte bounds,
+validates known present event/origin values, caps each response at the runtime's 256 KiB
+newline-inclusive limit, and rejects a wrong launch marker, sticky frames,
+mismatched run/step values, and continuations it does not implement. It then
+emits one canonical assistant `message` frame:
+
+```bash
+CTX_BIN=ctx ./examples/extensions/shell-agent/install.sh
+CORTEXFS_EXTENSION_INSTALL=yes \
+CTX_SOURCE=/var/lib/cortexfs/storage/current \
+  ./examples/extensions/shell-agent/install.sh
+ctx agent start field-notes --session demo --cwd /workspace
+ctx agent send field-notes --session demo "record this decision"
+```
+
+The first command only validates. Installation remains an explicit second
+step. Run `scripts/shell-agent-smoke.sh` for the provider-free envelope test.
+Use `cortexfs-agent-sdk` instead of copying JSON parsing once the agent needs
+tool continuation, child handoff, richer events, or typed errors.
 
 Official defaults stay convenient while remaining overrideable:
 

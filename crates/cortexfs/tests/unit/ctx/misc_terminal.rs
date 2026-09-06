@@ -43,6 +43,26 @@ fn temp_file_name_changes_with_retry_attempt() {
 }
 
 #[test]
+fn file_readers_reject_fifo_without_waiting_for_a_writer() {
+    let root = clean_test_dir("ctx-readers-fifo");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let path = root.join("local.json");
+    assert!(nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRWXU).is_ok());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rejected = [
+            read_provider_config_file(&path).is_err(),
+            read_provider_config_from_dir("local", &root).is_err(),
+            read_file_to_string(&path).is_err(),
+            open_executable_no_follow(&path).is_err(),
+            cortexfs::cli::nofollow::open_executable_no_follow(&path).is_err(),
+        ];
+        let _ignored = sender.send(rejected);
+    });
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(2)).ok(), Some([true; 5]));
+}
+
+#[test]
 fn provider_config_file_reader_refuses_symlink_targets() {
     let root = clean_test_dir("ctx-provider-config-reader-symlink");
     assert!(fs::create_dir_all(&root).is_ok());
@@ -104,9 +124,10 @@ fn provider_config_reader_rejects_symlink_config_dir() {
 fn provider_secret_stdin_reader_accepts_input_at_limit() {
     let secret = "x".repeat(MAX_PROVIDER_SECRET_STDIN_BYTES);
 
-    let read = read_provider_secret_stdin_limited(
+    let read = cortexfs::cli::input::read_limited_input_text(
         std::io::Cursor::new(secret.as_bytes()),
         MAX_PROVIDER_SECRET_STDIN_BYTES,
+        "provider secret stdin exceeds limit",
     );
 
     assert_eq!(
@@ -119,9 +140,10 @@ fn provider_secret_stdin_reader_accepts_input_at_limit() {
 fn provider_secret_stdin_reader_rejects_input_over_limit() {
     let secret = "x".repeat(MAX_PROVIDER_SECRET_STDIN_BYTES + 1);
 
-    let read = read_provider_secret_stdin_limited(
+    let read = cortexfs::cli::input::read_limited_input_text(
         std::io::Cursor::new(secret.as_bytes()),
         MAX_PROVIDER_SECRET_STDIN_BYTES,
+        "provider secret stdin exceeds limit",
     );
 
     assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));

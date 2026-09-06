@@ -382,9 +382,9 @@ or persistent data there.
   `spec/tool-policy-abi`).
 - **Default agent is `executor`.** Examples that still say `coder` are stale.
   Schedule nodes that omit `agent` still default to retired `worker`; name
-  `executor` in new `plan.json` files. The source installer finish text and
-  optional provider/IM onboarding still mention leftover `coder`; bind
-  `agent/executor.d/model` and use `/ctx/agent/main.sock`.
+  `executor` in new `plan.json` files. The source installer and optional
+  provider/IM onboarding use `executor`; bind `agent/executor.d/model` and
+  use `/ctx/agent/main.sock` for the default agent endpoint.
 
 ## Reference Projects and Similar Code (keyword checks)
 

@@ -1,13 +1,5 @@
 use super::*;
 
-/// Builds an invocation fixture with stable schema + optional observation object.
-///
-/// This keeps the test corpus consistent and easy to compare against the canonical
-/// envelope frame shape used by runtime-client parsing.
-///
-/// Related references:
-/// - [rust-fs-mcp request lifecycle](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
-/// - [MCP newline-delimited transport discussion](https://github.com/orgs/modelcontextprotocol/discussions/364)
 fn frame(step: u8, observation: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "schema": AGENT_INVOCATION_SCHEMA,
@@ -20,26 +12,12 @@ fn frame(step: u8, observation: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// Parses one fixture frame by appending the newline delimiter required by the wire parser.
-///
-/// - Keep framing consistent with `read_agent_invocation`: one frame per newline-terminated line.
-/// - Use `assert` coverage for error codes and boundary inputs.
-///
-/// Reference:
-/// - [modelcontextprotocol/rust-sdk issue #455](https://github.com/modelcontextprotocol/rust-sdk/issues/455)
 fn parse(value: &serde_json::Value) -> Result<AgentInvocationEnvelope, RuntimeClientError> {
     let mut bytes = serde_json::to_vec(value).map_err(|_error| RuntimeClientError::InvalidFrame)?;
     bytes.push(b'\n');
     read_agent_invocation(bytes.as_slice())
 }
 
-/// Accepts initial frame without observation and continuation frame with observation.
-///
-/// This is regression coverage for the envelope rotation flow (`step` and `observation`) with highest priority.
-///
-/// Related references:
-/// - [modelcontextprotocol/servers#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-/// - [rust-fs-mcp protocol dispatch](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
 #[test]
 fn accepts_exact_initial_and_continuation_frames() {
     let initial = parse(&frame(0, &serde_json::Value::Null));
@@ -91,13 +69,6 @@ fn accepts_bounded_channel_origin_in_envelope() {
     );
 }
 
-/// Rejects a frame missing the trailing newline and reject concatenated multi-frame blobs.
-///
-/// This guards against framing ambiguities and read-side desync.
-///
-/// Reference:
-/// - [modelcontextprotocol/go-sdk discussion #364](https://github.com/orgs/modelcontextprotocol/discussions/364)
-/// - [MCP transport frame integrity PR #80](https://github.com/rust-mcp-stack/rust-mcp-sdk/pull/80)
 #[test]
 fn rejects_noncanonical_framing() {
     let encoded = serde_json::to_vec(&frame(0, &serde_json::Value::Null)).unwrap_or_default();
@@ -114,13 +85,26 @@ fn rejects_noncanonical_framing() {
     );
 }
 
-/// Rejects unknown JSON fields, step mismatch, and unexpected step-observation pairing.
-///
-/// Common practice across comparable implementations is a combination of `deny_unknown_fields` and explicit state-machine checks.
-///
-/// Reference:
-/// - [modelcontextprotocol/servers pull #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
-/// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
+#[test]
+fn invocation_limit_includes_the_newline() -> Result<(), serde_json::Error> {
+    let mut bytes = serde_json::to_vec(&frame(0, &serde_json::Value::Null))?;
+    bytes.resize(MAX_AGENT_INVOCATION_BYTES - 1, b' ');
+    bytes.push(b'\n');
+    assert!(read_agent_invocation(bytes.as_slice()).is_ok());
+    bytes.insert(0, b' ');
+    assert_eq!(
+        read_agent_invocation(bytes.as_slice()),
+        Err(RuntimeClientError::InvalidFrame)
+    );
+    bytes.remove(0);
+    bytes.push(b' ');
+    assert_eq!(
+        read_agent_invocation(bytes.as_slice()),
+        Err(RuntimeClientError::InvalidFrame)
+    );
+    Ok(())
+}
+
 #[test]
 fn rejects_unknown_fields_and_invalid_step_observations() {
     let mut unknown = frame(0, &serde_json::Value::Null);
@@ -145,16 +129,6 @@ fn rejects_unknown_fields_and_invalid_step_observations() {
     }
 }
 
-/// Rejects malformed observation identity, status and truncated payload edges.
-///
-/// - `.call` invalid leading-dot tool id；
-/// - Tool names ending in `.sock` are invalid.
-/// - `status` must be `ok` or `error`.
-/// - Over-limit `content` length is rejected.
-///
-/// Reference:
-/// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [rust-fs-mcp truncation behavior](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l557)
 #[test]
 fn rejects_invalid_observation_identity_status_and_size() {
     for (id, name, status, content) in [

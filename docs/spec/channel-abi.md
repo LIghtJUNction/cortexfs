@@ -2,8 +2,34 @@
 
 This specification defines the public `cortexfs-channels` crate boundary and
 the optional CortexFS channel host. Channel state and tools use the explicit
-`/ctx/channel` root; delivery enters the existing
-`agent/<name>.sock` JSONL session ABI.
+`/ctx/channel` root; frontend/session traffic uses the existing
+`agent/<name>.sock` interaction ABI.
+
+V2 multi-attachment behavior below is a target design. Production frontends
+still use v1; see [Interaction ABI implementation status](interaction-abi.md#implementation-status).
+
+## Channel Master role
+
+Every terminal, web, or IM Channel frontend has the process role **Channel
+Master**. A Channel Master owns its platform/frontend connection, outer-client
+authentication, session attachments and replay cursors, presentation, user
+input/cancellation, command replies, and platform side effects. It does not own
+durable Agent history, run ordering, the Agent loop, or Agent Session Slave
+lifecycle.
+
+Multiple masters may attach as peers to one Agent Session Slave. There is no
+master election, implicit active frontend, or write ownership transfer. One
+master process may keep one local Unix-stream connection and multiplex several
+logical session attachments over `cortexfs.interaction/v2`. The current
+per-Agent runtime may host many isolated slaves; those placement choices are
+not visible to the master.
+
+The Channel Master and Agent Session Slave depend only on the neutral
+[Interaction ABI](interaction-abi.md), never on each other's implementation.
+The slave accepts connections and never reverse-dials a master. A platform
+driver below the master continues to use `cortexfs.channel.socket/v1`; it does
+not gain Agent/session authority and its platform types do not cross the
+interaction boundary.
 
 ## Public crate
 
@@ -151,24 +177,28 @@ multi-turn context. A host serving multiple external users can opt into the
 same generic route's identity-isolation mode; then the sender identity is
 included in the stable key without introducing a Telegram- or Discord-specific
 field. The CortexFS built-in host enables that mode for private channel
-sessions. It maps the selected key to `im-<prefix>-<stable-hash>` and sends the
-text through the existing request:
+sessions. It maps the selected key to `im-<prefix>-<stable-hash>`. A persistent
+host attaches that session and sends an `input` through
+`cortexfs.interaction/v2`. The compatible one-request form remains:
 
 ```json
 {"op":"send","id":"im-<prefix>-<message-hash>","session":"im-<prefix>-<conversation-hash>","scope":"private","input":"hello"}
 ```
 
-The existing agent socket file remains the source of truth for idempotency, durable
-`messages.jsonl`/`events.jsonl`, tool authorization, model execution, and
-assistant event framing. Re-delivering the same platform message therefore
-replays the existing session result instead of executing the agent twice.
+The Agent Session Slave and durable session files remain the source of truth
+for idempotency, ordering, `messages.jsonl`/`events.jsonl`, tool authorization,
+model execution, and assistant facts. Re-delivering the same platform message
+with the same request id therefore replays the accepted/current/final result
+instead of executing the Agent twice; reuse with different content fails.
 
-The bridge may consume the same stream incrementally. Built-in interactive
-hosts use `start`, `delta`, `message`, `error`, and `done` frames to provide a
-transport-local acknowledgement, typing indicator, bounded placeholder edit,
-and final message. These progress effects are not written to session history;
-the socket remains the source of truth. Errors and tool events are not exposed
-as assistant text unless the host chooses a user-facing failure notice.
+The bridge may consume the same stream incrementally. `delta` and run-initiated
+approval/input commands are live events routed only to the attachment that
+originated the run. After append, authorized observer masters may receive
+replayable `start`, `message`, tool, status, `error`, and `done` facts with the
+session's monotonic sequence. Progress effects are not written as assistant
+messages, and losing a delta does not change durable history. Errors and tool
+events are not exposed as assistant text unless the host chooses a user-facing
+failure notice.
 
 `ChannelAdapter::receive_incoming()` is the canonical receive operation. It
 returns one stream whose item is either `ChannelIncoming::Message` or
@@ -177,9 +207,16 @@ returns one stream whose item is either `ChannelIncoming::Message` or
 available for adapters that need a separate native event implementation and
 for source compatibility, but hosts should route the unified stream.
 
-The socket driver boundary is deliberately separate from the frontend/runtime
-interaction ABI. A driver sends `Inbound` frames to the channel runtime; the
-runtime sends `Deliver` or `Effect` frames back. `InboundEvent` carries
+The socket driver boundary is deliberately lower than and separate from the
+Channel Master/Agent Session Slave interaction ABI:
+
+```text
+platform adapter <-> cortexfs.channel.socket/v1 <-> Channel Master
+Channel Master   <-> cortexfs.interaction/v2    <-> Agent Session Slave
+```
+
+A driver sends `Inbound` frames to the channel runtime; the runtime sends
+`Deliver` or `Effect` frames back. `InboundEvent` carries
 provider-neutral reactions, typing, message edits/deletes, and read receipts;
 the runtime forwards its structured value to the executable-agent envelope
 without adding provider fields to the message ABI. `Outbound` is the independent
@@ -244,31 +281,35 @@ handles `Effect`, `Command`, and proactive `Outbound` frames before the final
 `Deliver`. The older handler methods remain compatible and deliberately ignore
 effects when the adapter has no live-effect sink.
 
-Runtime commands use the same interaction ABI on the agent socket. The
-terminal host can answer `approval_request` with `CommandResult` and the
-runtime verifies the original request id, run, and tool-call id. The current
-one-shot web POST and native channel hosts return a bounded rejection when
-their frontend has no command reply path; they never auto-approve a tool and
-never leave the runtime waiting for an unavailable reply. An external channel
-driver using the socket ABI can opt into the full path by forwarding
-`Command` frames to its platform and returning the correlated `CommandResult`.
-Slack Socket Mode is one such persistent driver: it keeps pending input and
-approval correlations in memory for the live connection and sends the
-result frame only after the user response arrives.
+Runtime commands use the interaction ABI on the Agent socket. A v2 command
+names exactly one authorized attachment and one `command_id`; a command that
+causes a platform side effect also carries an `effect_id`. Run-initiated
+approval/input commands target only the origin attachment. Proactive
+`notify`/`invoke` commands MUST name an explicit target attachment and are
+never broadcast or routed to an arbitrary attached master. The runtime verifies
+the request, attachment, run, command, and tool-call correlations. The master
+deduplicates repeated effects and returns the correlated `command_result`.
 
-The built-in `cortexfs-channel web` host exposes the same interaction frames
-over both `POST /v1/interaction` and a WebSocket upgrade on the same
-configurable path. POST accepts one `cortexfs.interaction/v1` request and
-returns the runtime event stream as newline-delimited JSON. WebSocket clients
-send the initial request as one interaction frame, receive the same event
-frames, and can answer runtime commands on that connection after validating
-the request, session, and command ids. While that run is active, the client
-may also send `input`, `resume`, `status`, or `cancel`; the host submits each
-request through a separate existing agent-socket stream and merges its events
-back into the same WebSocket. Thus the connection is full-duplex without
-changing the agent socket ABI or introducing a web-specific command type. The
-default bind address is loopback; a non-loopback bind requires
-`CORTEXFS_WEB_TOKEN`, which is checked as an HTTP Bearer token.
+A one-request v1 client or a frontend without a reply path returns a bounded
+rejection; it never auto-approves a tool and never leaves the runtime waiting.
+An external channel driver can support the full path by forwarding the neutral
+command through `cortexfs.channel.socket/v1` and returning its correlated
+result. Slack Socket Mode is one such persistent driver: it keeps pending input
+and approval correlations in memory for the live connection and sends the
+result frame only after the user response arrives. Disconnect while an
+origin-only approval/input is pending fails closed and is not rerouted.
+
+The built-in `cortexfs-channel web` host exposes both interaction modes on the
+same configurable path. `POST /v1/interaction` remains the compatible
+one-request `cortexfs.interaction/v1` surface and returns newline-delimited v1
+events. A WebSocket is a persistent Channel Master transport: after outer
+client authentication it negotiates `cortexfs.interaction/v2`, may multiplex
+multiple logical attachments on one local Agent Unix-stream connection, and
+forwards asynchronous events and targeted command results without a web-
+specific command type. Reconnect uses the last processed `session_seq`; it does
+not start a watcher or polling loop. The default bind address is loopback; a
+non-loopback bind requires `CORTEXFS_WEB_TOKEN`, which is checked as an HTTP
+Bearer token.
 
 ## Built-in host
 

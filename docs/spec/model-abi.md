@@ -487,11 +487,20 @@ files. The bundle is mode `0600` and is not projected into `/ctx`.
 
 ```text
 ctx auth methods PROVIDER
+ctx auth login
 ctx auth login PROVIDER --profile PROFILE
 ctx auth login PROVIDER --method api-key --stdin --profile PROFILE
 ctx auth status PROVIDER --profile PROFILE
 ctx auth refresh PROVIDER --profile PROFILE
 ```
+
+With no provider argument and an interactive terminal, `ctx auth login` lists
+each declared method from configured providers together with the built-in
+provider presets. It never selects the first entry implicitly. Choosing an
+unconfigured built-in provider installs that preset before login; the menu
+labels this write before selection. API keys use a hidden system password
+prompt, while OAuth choices continue through the declared browser or device
+flow. Without a terminal, omitting `PROVIDER` is a usage error.
 
 `key(PROFILE)` in an existing `model/route` group selects that profile for the
 route. If no profile exists, CortexFS retains the older raw secret-slot lookup

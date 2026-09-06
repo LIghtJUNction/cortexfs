@@ -34,7 +34,7 @@ spec and rebuild from the source archive, which keeps the RPM path suitable for
 Fedora/RHEL build services.
 
 Install the resulting package with the native package manager. Filenames use
-the workspace version from `Cargo.toml` (currently `0.1.20`):
+the workspace version from `Cargo.toml` (currently `0.1.21`):
 
 ```bash
 # Debian or Ubuntu
@@ -94,7 +94,7 @@ a pinned local commit. The updater preserves configuration, storage, secrets,
 and inactive unit state; a package-owned install applies only when its exact
 current package is available for rollback. Active-unit discovery matches the
 exact `cortexfs.service` mount unit as well as hyphenated names such as
-`cortexfs-agent@.service`. Units that were inactive before the transaction stay
+`cortexfs-agent@executor.service`. Units that were inactive before the transaction stay
 inactive.
 
 `ctx update` must run as a normal user with `sudo`, `flock`, and a controlling

@@ -26,7 +26,7 @@ use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
@@ -56,7 +56,7 @@ pub(crate) use cortexfs::{
     ModelEffort, MountTable, ObjectClass, ObjectLayoutIssue, PathLayoutIssue, PolicyEvaluator,
     PolicyV0, REFERENCE_TREE_VERSION, ROOT_ENTRIES, SessionControlIssue, SessionIndexGuard,
     SessionIndexIssue, SessionIndexKind, SessionLayoutIssue, SharedQueueLayoutIssue,
-    SocketSessionScope, ToolPath, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError,
+    SocketSessionScope, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError,
     acquire_child_context_lease, advance_agent_schedule_from_parent_context, agent_schedule_nodes,
     agent_terminal_unit, bootstrap_state_matches_target, child_context_lease_status,
     child_handoff_receipt, claim_child_handoff_active_with_lease, classify_abi_path,
@@ -80,7 +80,6 @@ pub(crate) use cortexfs::{
     trajectory_from_session_dir, unit_main_pid_for, update_storage_generation_with_prune,
     validate_child_context_lease, validate_trajectory,
 };
-use serde::Deserialize;
 
 pub(crate) use agent::*;
 pub(crate) use attach::*;

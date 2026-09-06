@@ -18,7 +18,7 @@ name = "cortexfs-futureagi"
 path = "src/main.rs"
 
 [dependencies]
-cortexfs = { version = "0.1.20", path = "../cortexfs" }
+cortexfs = { version = "0.1.21", path = "../cortexfs" }
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

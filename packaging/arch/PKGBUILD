@@ -1,5 +1,5 @@
 pkgname=cortexfs
-pkgver="${CORTEXFS_PKGVER:-0.1.20}"
+pkgver="${CORTEXFS_PKGVER:-0.1.21}"
 pkgrel=1
 pkgdesc='FUSE filesystem interface for agent runtimes'
 arch=('x86_64' 'aarch64')

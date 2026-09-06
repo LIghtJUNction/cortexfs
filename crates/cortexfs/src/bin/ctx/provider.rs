@@ -3,16 +3,23 @@ use crate::*;
 pub(crate) use auth::*;
 pub(crate) use callback::*;
 pub(crate) use config::*;
+#[cfg(test)]
+pub(crate) use login::login_options_from_dir;
+pub(crate) use login::provider_login_select;
 pub(crate) use oauth::*;
 pub(crate) use presets::*;
+#[cfg(test)]
+pub(crate) use prompt::prompt_login_choice;
 pub(crate) use secrets::*;
 
 pub mod auth;
 pub mod callback;
 pub mod catalog;
 pub mod config;
+mod login;
 pub mod oauth;
 pub mod presets;
+mod prompt;
 pub mod secrets;
 
 pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
@@ -26,10 +33,11 @@ pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError
             timeout,
             device,
         } => provider_oauth_login(provider, profile, timeout, device).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::LoginSelect => provider_login_select(),
         ProviderArgs::ApiKeyLogin {
             ref provider,
             ref profile,
-        } => provider_api_key_login(provider, profile).map(|()| ExitCode::SUCCESS),
+        } => provider_api_key_login(provider, profile, io::stdin()).map(|()| ExitCode::SUCCESS),
         ProviderArgs::Logout {
             ref provider,
             ref profile,
