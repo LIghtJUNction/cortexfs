@@ -85,15 +85,14 @@ next `--check` clean.
 The default `executor.d/system.md` treats `executor` as the implementation and
 verification agent:
 independent implementation work should be a delegated `react` node in
-`context/plan.json`. Name `agent` explicitly (`"agent": "executor"`) on those
-nodes. A delegated node that omits `agent` still defaults to `worker`
-(`DEFAULT_DELEGATED_AGENT` in `agent/schedule`); a node that omits `session`
-uses the current parent session name.
+`context/plan.json`. A delegated node that omits `agent` uses `executor`,
+matching the managed reference tree. A node that omits `session` uses the
+current parent session name. The parent policy must still permit
+`agent:executor create`; choosing the default never grants authority.
 
-`worker` is retired from the managed reference tree. Fresh bootstrap does not
-create `/ctx/agent/worker`. An implicit `worker` handoff therefore fails unless
-that leftover object still exists and the parent policy allows
-`agent:worker create`. Prefer naming `executor` in new plans.
+Explicit agent names remain unchanged. Existing plans naming retired `worker`
+continue to require that object and its matching create permission. Update those
+plans to `"agent": "executor"` when migrating a fresh installation.
 Advance one schedule step with:
 
 ```bash

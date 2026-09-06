@@ -1,5 +1,6 @@
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
+import CodeBlock from '@theme/CodeBlock';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import CortexCurtain, {
@@ -7,6 +8,7 @@ import CortexCurtain, {
   type CortexCurtainMode,
 } from '../components/CortexCurtain';
 import type {ReactElement} from 'react';
+import {roots} from '../data/roots';
 
 type CoreObject = {
   name: CortexCurtainMode;
@@ -26,9 +28,9 @@ type Copy = {
   eyebrow: string;
   title: string;
   lead: string;
-  watchDemo: string;
   install: string;
   github: string;
+  handbook: string;
   proofLabel: string;
   proofs: string[];
   rootLabel: string;
@@ -72,27 +74,25 @@ type Copy = {
   readSpec: string;
 };
 
-const roots = ['status', 'bin', 'model', 'agent', 'tool', 'home', 'shared'];
-
 const zh: Copy = {
   description:
     'CortexFS 在 /ctx 挂载模型、agent、tool 与持久 session，形成可查看、执行、安全控制和审计的小型 Unix ABI。',
   eyebrow: 'FUSE 文件系统接口',
-  title: 'Agent runtime 不该藏在数据库里。',
+  title: '把 Agent 的运行过程，放到可检查的路径上。',
   lead:
     'CortexFS 在 /ctx 挂载模型、agent、tool 和持久 session——一个可用 ls、cat、执行、安全控制和审计的小型 Unix ABI。',
-  watchDemo: '观看项目介绍',
   install: '开始安装',
   github: 'GitHub',
+  handbook: '查找使用指南',
   proofLabel: 'CortexFS 运行时证据',
-  proofs: ['7 个稳定根名称', '通过 FUSE 挂载', '受策略约束', '持久 JSONL'],
+  proofs: [`${roots.length} 个稳定根名称`, '通过 FUSE 挂载', '受策略约束', '持久 JSONL'],
   rootLabel: '稳定的根 ABI',
   rootAria: 'CortexFS 稳定根名称',
   curtain: {
     sceneLabel: '交互式 CortexFS 挂载对象视图',
     selectorLabel: '选择 CortexFS 对象视图',
     mountLabel: 'FUSE MOUNT',
-    rootLabel: '7 个稳定根名称',
+    rootLabel: `${roots.length} 个稳定根名称`,
     captions: {
       model: 'model 是纯推理文件：读取元数据，执行一次推理。',
       agent: 'agent 是可执行对象与 socket，也是受 policy 约束的编排者。',
@@ -107,11 +107,11 @@ const zh: Copy = {
   demoLabel: '真实运行，而非概念图',
   demoTitle: '看 runtime 真正在工作。',
   demoCaption:
-    '真实 CortexFS CLI 与 coder agent 交互；命令、tool 调用和 session 路径仍然直接可见。',
+    '早期版本的运行录像使用 coder；当前默认 agent 为 executor，日常入口为 ctx。',
   demoAria: 'CortexFS coder agent 真实运行演示',
   demoFallback: '打开 CortexFS 演示视频',
   evidenceLabel: '命令',
-  evidenceCommand: '启动并进入人类聊天界面',
+  evidenceCommand: '当前交互命令',
   evidencePath: '持久消息路径',
   coreLabel: '三类可执行对象，一份持久历史',
   coreTitle: 'Runtime 的关键部分都能被直接操作。',
@@ -123,14 +123,14 @@ const zh: Copy = {
       title: '模型是纯推理文件',
       text:
         '读取文件得到元数据，执行文件完成一次推理。供应商连接与 API 格式差异留在统一模型 ABI 之后。',
-      code: '/ctx/model/main → gpt-5.6-sol · kimi-k3',
+      code: '/ctx/model/main → provider route',
     },
     {
       name: 'agent',
       title: 'Agent 是受策略约束的编排者',
       text:
         'Agent 以可执行对象和 socket 暴露；Linux 身份、mount、cwd、model 与 policy 共同限定它能看见和执行什么。',
-      code: '/ctx/agent/coder  +  coder.sock',
+      code: '/ctx/agent/executor  +  executor.sock',
     },
     {
       name: 'tool',
@@ -159,19 +159,19 @@ const zh: Copy = {
     'CortexFS 负责路径、对象生命周期、权限与 session 语义；协议适配层负责供应商连接和 API 事件适配。供应商细节不会膨胀成新的根目录。',
   neutralFootnote: 'root 只包含稳定对象类别',
   quickLabel: '快速开始',
-  quickTitle: '三步，从安装包到真实对话。',
-  quickLead: '下面就是当前 README 使用的安装、挂载与交互命令。',
+  quickTitle: '安装、检查，再开始工作。',
+  quickLead: '需要 Linux、systemd 与 FUSE。安装后先检查挂载，再配置供应商并打开会话。',
   steps: [
-    {title: '安装', text: '从 AUR 安装 CortexFS。', code: 'paru -S cortexfs-git'},
+    {title: '安装', text: '安装器检查系统依赖，并在修改前提示确认。也可选择原生 Linux 安装包。', code: 'curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh'},
     {
-      title: '挂载并验证',
-      text: '启动 systemd FUSE 挂载，然后检查有效状态。',
+      title: '检查运行状态',
+      text: '启动挂载，确认目录与运行时状态。供应商凭据需另外配置。',
       code: 'sudo systemctl enable --now cortexfs.service\nctx doctor',
     },
     {
-      title: '初始化并聊天',
-      text: '生成默认对象，启动 coder，再进入首选人类聊天界面。',
-      code: 'ctx bootstrap\nctx agent start coder\nctx agent chat coder',
+      title: '打开工作会话',
+      text: '配置好供应商后，在项目目录运行 ctx。下次用 ctx resume 继续当前目录的会话。',
+      code: 'ctx\n# 下次继续\nctx resume',
     },
   ],
   quickLink: '阅读完整安装文档',
@@ -185,21 +185,21 @@ const en: Copy = {
   description:
     'CortexFS mounts models, agents, tools, and durable sessions at /ctx as a small Unix ABI you can inspect, execute, secure, and audit.',
   eyebrow: 'FUSE filesystem interface',
-  title: 'Your agent runtime shouldn’t hide inside a database.',
+  title: 'An agent runtime you can inspect with a shell.',
   lead:
     'CortexFS mounts models, agents, tools, and durable sessions at /ctx — a small Unix ABI you can ls, cat, execute, secure, and audit.',
-  watchDemo: 'Watch the introduction',
   install: 'Install CortexFS',
   github: 'GitHub',
+  handbook: 'Find a guide',
   proofLabel: 'CortexFS runtime proof',
-  proofs: ['7 stable root names', 'FUSE mounted', 'policy-bound', 'durable JSONL'],
+  proofs: [`${roots.length} stable root names`, 'FUSE mounted', 'policy-bound', 'durable JSONL'],
   rootLabel: 'Stable root ABI',
   rootAria: 'CortexFS stable root names',
   curtain: {
     sceneLabel: 'Interactive CortexFS mount object view',
     selectorLabel: 'Select a CortexFS object view',
     mountLabel: 'FUSE MOUNT',
-    rootLabel: '7 STABLE ROOT NAMES',
+    rootLabel: `${roots.length} STABLE ROOT NAMES`,
     captions: {
       model: 'A model is a pure inference file: read metadata, execute one inference.',
       agent: 'An agent is an executable object and socket: a policy-bound orchestrator.',
@@ -215,11 +215,11 @@ const en: Copy = {
   demoLabel: 'Running product, not a diagram',
   demoTitle: 'Watch the runtime while it works.',
   demoCaption:
-    'The real CortexFS CLI talking to a coder agent; commands, tool calls, and session paths remain directly visible.',
+    'This recording uses the earlier coder agent. The current default is executor; start an interactive session with ctx.',
   demoAria: 'Live CortexFS coder agent demonstration',
   demoFallback: 'Open the CortexFS demo video',
   evidenceLabel: 'Command',
-  evidenceCommand: 'Start and enter the human chat UI',
+  evidenceCommand: 'Current interactive commands',
   evidencePath: 'Durable message path',
   coreLabel: 'Three executable objects, one durable history',
   coreTitle: 'The important parts of the runtime stay directly operable.',
@@ -231,14 +231,14 @@ const en: Copy = {
       title: 'Models are pure inference files',
       text:
         'Read the file for metadata; execute it for one-shot inference. Provider connections and API formats stay behind the unified model ABI.',
-      code: '/ctx/model/main → gpt-5.6-sol · kimi-k3',
+      code: '/ctx/model/main → provider route',
     },
     {
       name: 'agent',
       title: 'Agents orchestrate under policy',
       text:
         'An agent is exposed as an executable object and socket. Its Linux identity, mounts, cwd, model, and policy bound what it can see and run.',
-      code: '/ctx/agent/coder  +  coder.sock',
+      code: '/ctx/agent/executor  +  executor.sock',
     },
     {
       name: 'tool',
@@ -269,19 +269,19 @@ const en: Copy = {
     'CortexFS owns paths, object lifecycle, permissions, and session semantics. Its protocol adapters own provider connections and API event adaptation. Provider details never expand into new root directories.',
   neutralFootnote: 'root contains stable object classes only',
   quickLabel: 'Quick start',
-  quickTitle: 'From package to a live chat in three steps.',
-  quickLead: 'These are the install, mount, and interaction commands from the current README.',
+  quickTitle: 'Install. Check. Start working.',
+  quickLead: 'Requires Linux, systemd, and FUSE. Check the mount, then configure a provider before opening a session.',
   steps: [
-    {title: 'Install', text: 'Install CortexFS from the AUR.', code: 'paru -S cortexfs-git'},
+    {title: 'Install', text: 'The installer checks dependencies and asks before changes. Native Linux packages are also available.', code: 'curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh'},
     {
-      title: 'Mount and verify',
-      text: 'Start the systemd FUSE mount, then inspect effective health.',
+      title: 'Check the runtime',
+      text: 'Start the mount and inspect runtime health. Provider credentials are configured separately.',
       code: 'sudo systemctl enable --now cortexfs.service\nctx doctor',
     },
     {
-      title: 'Bootstrap and chat',
-      text: 'Materialize the defaults, start coder, and enter the preferred human chat UI.',
-      code: 'ctx bootstrap\nctx agent start coder\nctx agent chat coder',
+      title: 'Open a work session',
+      text: 'After provider setup, run ctx in your project. Use ctx resume to continue this folder’s session later.',
+      code: 'ctx\n# Continue later\nctx resume',
     },
   ],
   quickLink: 'Read the full installation guide',
@@ -356,8 +356,8 @@ function Hero({copy}: {copy: Copy}): ReactElement {
           <h1 id="cortex-hero-title">{copy.title}</h1>
           <p className="cortexLead">{copy.lead}</p>
           <div className="cortexActions">
-            <a className="cortexButton cortexButtonPrimary" href="#introduction">{copy.watchDemo}</a>
-            <Link className="cortexButton" to="/docs/getting-started">{copy.install}</Link>
+            <Link className="cortexButton cortexButtonPrimary" to="/docs/getting-started">{copy.install}</Link>
+            <Link className="cortexButton" to="/handbook">{copy.handbook}</Link>
             <a
               className="cortexTextLink cortexExternal"
               href="https://github.com/LIghtJUNction/cortexfs"
@@ -416,12 +416,12 @@ function DemoFilm({copy}: {copy: Copy}): ReactElement {
             <div>
               <span>01 / {copy.evidenceLabel}</span>
               <strong>{copy.evidenceCommand}</strong>
-              <code>$ ctx agent start coder{`\n`}$ ctx agent chat coder</code>
+              <code>$ ctx{`\n`}$ ctx resume</code>
             </div>
             <div>
               <span>02 / {copy.evidencePath}</span>
-              <strong>/ctx/agent/coder</strong>
-              <code>/ctx/home/&lt;uid&gt;/agent/coder/session/default/messages.jsonl</code>
+              <strong>/ctx/agent/executor</strong>
+              <code>/ctx/home/&lt;uid&gt;/agent/executor/session/&lt;session&gt;/messages.jsonl</code>
             </div>
             <div>
               <span>03 / tsh</span>
@@ -510,7 +510,7 @@ function QuickStart({copy}: {copy: Copy}): ReactElement {
               <span>{String(index + 1).padStart(2, '0')}</span>
               <h3>{step.title}</h3>
               <p>{step.text}</p>
-              <pre><code>{step.code}</code></pre>
+              <CodeBlock language="bash">{step.code}</CodeBlock>
             </li>
           ))}
         </ol>
@@ -553,11 +553,11 @@ export default function Home(): ReactElement {
     <Layout title={copy.eyebrow} description={copy.description}>
       <main className="cortexHome">
         <Hero copy={copy} />
+        <QuickStart copy={copy} />
         <Introduction copy={copy} />
         <DemoFilm copy={copy} />
         <Specimens copy={copy} />
         <Boundaries copy={copy} />
-        <QuickStart copy={copy} />
         <Closing copy={copy} />
       </main>
     </Layout>

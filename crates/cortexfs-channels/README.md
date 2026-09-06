@@ -10,6 +10,12 @@ It does not depend on CortexFS, FUSE, a model provider, an HTTP runtime, or a
 particular IM platform. Platform codecs and host runtimes can be layered on
 top without changing the agent-facing ABI.
 
+`ChannelSessionRoute` starts with an empty, deny-all sender policy. Hosts must
+set `with_allowed_senders(...)` and call `authorize_sender(...)` before any
+agent interaction, using authenticated platform user IDs. Identity-isolated
+session names do not grant authority. CortexFS bridges enforce this check for
+messages, slash commands, and actor-attributed events.
+
 ```toml
 cortexfs-channels = "0.1"
 ```

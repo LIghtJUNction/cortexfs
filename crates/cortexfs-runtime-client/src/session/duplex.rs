@@ -39,13 +39,18 @@ where
     loop {
         line.clear();
         let read = reader
+            .by_ref()
+            .take(u64::try_from(MAX_SESSION_FRAME_BYTES + 1).unwrap_or(u64::MAX))
             .read_until(b'\n', &mut line)
             .map_err(|_error| E::from(RuntimeClientError::CannotRead))?;
         if read == 0 {
             break;
         }
         total = total.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
-        if total > MAX_SESSION_RESPONSE_BYTES || line.last() != Some(&b'\n') {
+        if read > MAX_SESSION_FRAME_BYTES
+            || total > MAX_SESSION_RESPONSE_BYTES
+            || line.last() != Some(&b'\n')
+        {
             return Err(E::from(RuntimeClientError::InvalidFrame));
         }
         line.pop();
@@ -68,9 +73,6 @@ pub(super) fn write_interaction_request(
     let frame = interaction::InteractionFrame::request(request)
         .encode()
         .map_err(|_error| RuntimeClientError::InvalidRequest)?;
-    if frame.len() > MAX_SESSION_FRAME_BYTES {
-        return Err(RuntimeClientError::InvalidRequest);
-    }
     stream
         .write_all(&frame)
         .and_then(|()| stream.flush())

@@ -15,6 +15,7 @@ CortexFS 将 AI 运行时转换为轻量 Linux 文件系统接口：
   model/
   agent/
   tool/
+  channel/
   home/
   shared/
 ```

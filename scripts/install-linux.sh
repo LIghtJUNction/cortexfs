@@ -665,20 +665,44 @@ enable_im_services() {
     done
 }
 
+im_sender_ids() {
+    local platform=$1 value=$2 pattern='^[0-9]+(,[0-9]+)*$'
+    value=${value//[[:space:]]/}
+    [[ $platform == Slack ]] && pattern='^[UW][A-Z0-9]+(,[UW][A-Z0-9]+)*$'
+    [[ -z $value || $value =~ $pattern ]] || return 1
+    printf '%s' "$value"
+}
+
+read_im_senders() {
+    local platform=$1 value
+    say "Allow only trusted sender IDs. Messages can use the configured agent's tools." \
+        "只允许可信发送者 ID；消息可以使用所配置 agent 的工具。"
+    printf '%s allowed user IDs (comma-separated, blank denies everyone): ' "$platform" >"$TTY_PATH"
+    IFS= read -r value <"$TTY_PATH" || value=
+    ALLOWED_SENDERS=$(im_sender_ids "$platform" "$value") ||
+        die "Invalid sender IDs: use numeric Telegram/Discord user IDs or Slack member IDs." \
+            "发送者 ID 无效：Telegram/Discord 使用数字用户 ID，Slack 使用成员 ID。"
+}
+
 configure_im_telegram() {
+    read_im_senders Telegram
     read_secret "Telegram bot token: " ||
         die "No Telegram token was entered." "未输入 Telegram token。"
     install_channel_env /etc/cortexfs/channels/telegram.env \
         "CORTEXFS_AGENT=executor" \
         "CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock" \
         "CORTEXFS_CHANNEL_ID=telegram.primary" \
+        "CORTEXFS_CHANNEL_ALLOWED_SENDERS=$ALLOWED_SENDERS" \
         "CORTEXFS_TELEGRAM_TOKEN=$SECRET_VALUE"
     SECRET_VALUE=''
     enable_im_services cortexfs-channel-telegram.service
 }
 
 configure_im_discord() {
-    local app_id
+    local app_id sender_array
+    read_im_senders Discord
+    sender_array=${ALLOWED_SENDERS//,/\",\"}
+    [[ -z $sender_array ]] || sender_array="\"$sender_array\""
     printf 'Discord application id: ' >"$TTY_PATH"
     IFS= read -r app_id <"$TTY_PATH" || app_id=
     read_secret "Discord bot token: " ||
@@ -693,6 +717,7 @@ bot_token = "$SECRET_VALUE"
 agent_socket = "/ctx/agent/executor.sock"
 agent = "executor"
 session_prefix = "discord"
+allowed_senders = [$sender_array]
 EOF
     sudo chmod 600 /etc/cortexfs/channels/discord.toml
     SECRET_VALUE=''
@@ -701,6 +726,7 @@ EOF
 
 configure_im_slack() {
     local app bot
+    read_im_senders Slack
     read_secret "Slack app token (xapp-...): " ||
         die "No Slack app token was entered." "未输入 Slack app token。"
     app=$SECRET_VALUE
@@ -711,7 +737,8 @@ configure_im_slack() {
     install_channel_env /etc/cortexfs/channels/slack-driver.env \
         "CORTEXFS_AGENT=executor" \
         "CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock" \
-        "CORTEXFS_CHANNEL_ID=slack.primary"
+        "CORTEXFS_CHANNEL_ID=slack.primary" \
+        "CORTEXFS_CHANNEL_ALLOWED_SENDERS=$ALLOWED_SENDERS"
     install_channel_env /etc/cortexfs/channels/slack.env \
         "CORTEXFS_SLACK_APP_TOKEN=$app" \
         "CORTEXFS_SLACK_BOT_TOKEN=$bot"

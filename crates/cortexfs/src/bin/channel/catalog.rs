@@ -68,10 +68,15 @@ fn show(family: &str, preset: bool) -> Result<(), Box<dyn Error>> {
         writeln!(out, "CORTEXFS_AGENT=executor")?;
         writeln!(out, "CORTEXFS_AGENT_SOCKET=/ctx/agent/executor.sock")?;
         writeln!(out, "CORTEXFS_CHANNEL_ID={family}.primary")?;
+        writeln!(
+            out,
+            "# Required: exact sender IDs, comma-separated; empty denies everyone"
+        )?;
+        writeln!(out, "CORTEXFS_CHANNEL_ALLOWED_SENDERS=")?;
         if spec.id == "slack" {
             writeln!(
                 out,
-                "# also /etc/cortexfs/channels/{family}-driver.env with CORTEXFS_AGENT and CORTEXFS_AGENT_SOCKET"
+                "# Copy agent, socket, channel ID, and allowed senders above to /etc/cortexfs/channels/{family}-driver.env"
             )?;
         }
         if let Some(setup) = setup {
@@ -113,6 +118,8 @@ fn write_discord_preset(out: &mut impl Write) -> Result<(), Box<dyn Error>> {
     writeln!(out, "agent_socket = \"/ctx/agent/executor.sock\"")?;
     writeln!(out, "agent = \"executor\"")?;
     writeln!(out, "session_prefix = \"discord\"")?;
+    writeln!(out, "# Required: Discord user IDs; empty denies everyone")?;
+    writeln!(out, "allowed_senders = []")?;
     Ok(())
 }
 

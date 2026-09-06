@@ -42,7 +42,8 @@ const config: Config = {
           path: '../docs',
           routeBasePath: 'docs',
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/LIghtJUNction/cortexfs/edit/main/docs/',
+          editUrl: 'https://github.com/LIghtJUNction/cortexfs/edit/main/docs-site/',
+          editLocalizedFiles: true,
         },
         blog: false,
         theme: {
@@ -71,8 +72,7 @@ const config: Config = {
       },
       items: [
         {
-          type: 'docSidebar',
-          sidebarId: 'docs',
+          to: '/handbook',
           position: 'left',
           label: 'Docs',
         },
@@ -87,8 +87,8 @@ const config: Config = {
           position: 'left',
         },
         {
-          to: '/docs/agent-sh',
-          label: 'agent.sh',
+          to: '/docs/evaluation',
+          label: 'Evaluate',
           position: 'left',
         },
         {
@@ -108,6 +108,7 @@ const config: Config = {
         {
           title: 'Core',
           items: [
+            {label: 'Handbook', to: '/handbook'},
             {label: 'Install', to: '/docs/getting-started'},
             {label: 'Use CortexFS', to: '/docs/using-cortexfs'},
             {label: 'Develop', to: '/docs/developing-cortexfs'},

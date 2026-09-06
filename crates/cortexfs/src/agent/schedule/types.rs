@@ -8,7 +8,7 @@ use crate::PolicyEvaluator;
 /// Maximum number of nodes accepted in one parent-session hybrid schedule.
 pub const MAX_AGENT_SCHEDULE_NODES: usize = 1024;
 
-pub(crate) const DEFAULT_DELEGATED_AGENT: &str = "worker";
+pub(crate) const DEFAULT_DELEGATED_AGENT: &str = "executor";
 
 /// Stable issue found in a parent-session hybrid agent schedule.
 #[derive(Clone, Debug, Eq, PartialEq)]

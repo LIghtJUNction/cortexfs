@@ -31,6 +31,39 @@ Telegram, Discord, and Slack conversations also accept the sender-scoped
 commands `/help`, `/models`, `/model`, `/model PROVIDER/MODEL`, and `/new`.
 They answer from the channel bridge and do not add a platform-specific ABI.
 
+### Authorize senders before connecting
+
+Every IM bridge denies incoming messages and events until exact external user
+IDs are explicitly allowed. Missing or empty lists deny everyone, including
+slash commands; `*` does not enable public access. An authorized sender can use
+the configured agent's capabilities, so allow only trusted accounts. Separate
+sessions preserve conversation history isolation; the agent's tool policy
+still determines what each authorized request can execute.
+
+| Host | Configuration | Sender identity |
+| --- | --- | --- |
+| Telegram | `CORTEXFS_CHANNEL_ALLOWED_SENDERS=123456789,987654321` in `telegram.env` | Numeric Telegram **user** ID from `message.from.id` |
+| Discord Gateway | `allowed_senders = ["123456789012345678"]` in `discord.toml` | Discord **user** ID, available via Developer Mode → Copy User ID |
+| Slack Socket Mode | `CORTEXFS_CHANNEL_ALLOWED_SENDERS=U0123456789,W0123456789` in **`slack-driver.env`** | Slack member ID from the member profile → Copy member ID |
+| Other native, webhook, or external drivers | `CORTEXFS_CHANNEL_ALLOWED_SENDERS` in the host's environment file | Authenticated adapter's exact sender ID |
+
+Use account IDs, not display names, bot/application IDs, chat IDs, or room IDs.
+For Telegram, inspect the `from.id` in an update received by your own bot.
+The Linux installer prompts for these IDs before starting a channel; leaving
+the prompt blank safely starts a channel that accepts no agent requests.
+Existing installations must add the list before processing resumes after an
+upgrade. Keep environment/config files mode `0600`, and restart the affected
+channel unit after changing them; Slack requires restarting its driver unit.
+
+Authorization runs before progress effects, slash commands, session mutation,
+and socket submission. Messages from allowed users retain distinct sessions
+per channel instance, conversation, thread, and sender. Events without a
+verified actor are denied. Credentials authenticate the platform transport;
+the sender list controls which accounts may invoke the agent. For generic
+webhooks, deploy behind an authenticated verifier/proxy and configure the
+host token; never expose an endpoint that accepts attacker-supplied sender
+fields without transport verification.
+
 After installing the normal CortexFS package, start an agent and write the
 Discord adapter configuration to one owner-only file:
 
@@ -50,6 +83,8 @@ bot_token = "DISCORD_BOT_TOKEN"
 agent_socket = "/ctx/agent/main.sock"
 agent = "main"
 session_prefix = "discord"
+# Required: trusted Discord user IDs. Empty or omitted denies all senders.
+allowed_senders = ["123456789012345678"]
 # Optional complete instance id; omit for the base `discord` id.
 # channel = "discord.primary"
 
@@ -154,6 +189,7 @@ Telegram uses long polling:
 
 ```bash
 export CORTEXFS_TELEGRAM_TOKEN='...'
+export CORTEXFS_CHANNEL_ALLOWED_SENDERS='123456789'
 cortexfs-channel telegram
 ```
 

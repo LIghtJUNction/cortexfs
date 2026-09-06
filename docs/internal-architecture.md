@@ -60,6 +60,30 @@ Result<_, String> growing in library code
 thin rename-only wrappers or #[path] escapes
 ```
 
+## 1.2 Linux design principles as reviewable contracts
+
+Use Linux design practice to judge observable behavior. A small module name or
+filesystem-shaped API alone does not establish kernel-quality engineering.
+The [Linux API design guide](https://docs.kernel.org/process/adding-syscalls.html)
+emphasizes stable interfaces, existing object handles, extensibility, permission
+checks, and selftests. The [kref rules](https://docs.kernel.org/core-api/kref.html)
+make ownership and release order explicit. In CortexFS these translate to:
+
+| Contract | Enforcement boundary | Acceptance evidence |
+| --- | --- | --- |
+| Authorize before effects | Channel routing validates the adapter's sender identity before creating session work; runtime still checks local peer and policy | Unknown and missing senders cannot submit requests; allowed senders keep separate sessions |
+| Bound each object | Session transport caps both each JSONL frame and aggregate response, and rejects truncated typed input runs | Oversized frames, malformed events, and missing completion fail; valid legacy events remain compatible |
+| Give resources one owner | Session slave owns durable append; supervisor receipts identify child lifetime | Competing writers fail; owned child cancellation and rollback leave auditable outcomes |
+| Keep defaults usable and explicit | Omitted delegated agent selects managed `executor`; explicit names retain their meaning | Default handoff works with matching create permission and still rejects insufficient policy |
+| Separate mechanism from presentation | Protocol/SDK crates expose facts; docs, terminal and IM clients adapt them | The same contract suite runs without FUSE or a model provider where the boundary permits |
+
+Run the reproducible [harness evaluation](evaluation.md) for the current
+implementation. Its reports record the exercised tests and their outcomes;
+passing deterministic contracts does not measure model task success or prove
+latency/RSS improvements. ABI changes still require compatibility cases and a
+migration description. Physical crate extraction remains the staged roadmap
+below, with measured dependency benefits required before a wider split.
+
 ## 2. Process architecture (runtime shape)
 
 CortexFS is a **small set of long-lived and short-lived Unix processes**, not a

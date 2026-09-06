@@ -1,3 +1,5 @@
+mod identity;
+
 use std::{
     pin::Pin,
     sync::Arc,
@@ -1099,7 +1101,21 @@ fn route_keeps_threads_and_request_ids_stable() -> Result<(), ChannelError> {
             ..target
         })
     );
-    let isolated = route.with_identity_isolation();
+    assert_eq!(
+        route.authorize_sender(Some("user-a")),
+        Err(ChannelError::SenderDenied)
+    );
+    let isolated = route
+        .with_identity_isolation()
+        .with_allowed_senders(["user-a", "user-b", "", "*"].map(str::to_owned));
+    for denied in [None, Some(""), Some("*"), Some("unknown"), Some("USER-A")] {
+        assert_eq!(
+            isolated.authorize_sender(denied),
+            Err(ChannelError::SenderDenied)
+        );
+    }
+    isolated.authorize_sender(Some("user-a"))?;
+    isolated.authorize_sender(Some("user-b"))?;
     let first = InboundMessage {
         sender: Participant {
             id: "user-a".to_owned(),

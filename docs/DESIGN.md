@@ -59,6 +59,16 @@ typography:
     fontSize: 14px
     fontWeight: 400
     lineHeight: 1.68
+  doc-body:
+    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
+    fontSize: 16px
+    fontWeight: 400
+    lineHeight: 1.8
+  doc-body-mobile:
+    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
+    fontSize: 15px
+    fontWeight: 400
+    lineHeight: 1.8
   label-caps:
     fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
     fontSize: 12px
@@ -320,6 +330,27 @@ lighter border.
 
 Full coal band, large serif headline, muted on-coal supporting text, single
 underlined text link — the “closing argument” surface.
+
+### Documentation reading and discovery
+
+The handbook is the task directory: install, operate, extend/evaluate, and
+understand. Its search filters guide titles, summaries, paths, and keywords;
+do not imply full-text search. Keep both supported languages complete.
+Group the sidebar by the same user tasks and expose the handbook from every
+document. Keep the specification visible as a first-level category.
+
+Long-form documentation uses 16px body text (15px on narrow screens), 1.8
+line-height, and paragraphs near 76 characters. Technical tables and code
+retain horizontal scrolling on narrow screens. Links inside prose are
+underlined; the active sidebar item has a mint rule in addition to its fill.
+Use built-in copy controls for executable examples, and ensure installation
+and session commands match the current canonical guide. Historical recordings
+must identify retired commands instead of presenting them as current setup.
+
+The handbook uses existing paper/ink/panel tokens and 8px corners, with plain
+rows grouped by task. Search and filters have visible labels and focus states,
+44px minimum targets, a result count, and a recoverable empty state. Native
+links remain usable before client JavaScript is available.
 
 ## Do's and Don'ts
 

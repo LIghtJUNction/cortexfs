@@ -172,6 +172,15 @@ or `Command` to the adapter, and returns a correlated `ControlResponse`.
 
 ## Message and session semantics
 
+The shared route starts with an empty sender allowlist, which MUST deny all
+incoming messages and events. The built-in bridge authorizes the authenticated
+adapter's exact sender ID before slash commands, progress, session mutation,
+or agent socket submission. Empty identities and events without a verified
+actor MUST be denied. Message authors, quoted/forwarded users, display names,
+and conversation IDs MUST NOT substitute for an unknown event actor. Hosts
+configure IDs with `with_allowed_senders`; wildcard access is unsupported.
+Transport authentication remains an adapter/host obligation.
+
 The public route default treats `(channel, conversation, thread)` as one
 multi-turn context. A host serving multiple external users can opt into the
 same generic route's identity-isolation mode; then the sender identity is

@@ -87,6 +87,7 @@ fn read(stream: &TcpStream) -> std::io::Result<Request> {
 
 pub(super) fn config(api_base: String) -> DiscordConfig {
     DiscordConfig {
+        allowed_senders: Vec::new(),
         application_id: "app".to_owned(),
         bot_token: "secret-token".to_owned(),
         agent_socket: "/tmp/unused-agent.sock".into(),

@@ -15,6 +15,8 @@ pub enum ChannelError {
     Unsupported(String),
     #[error("channel authentication failed")]
     Authentication,
+    #[error("channel sender is not authorized; configure allowed sender IDs")]
+    SenderDenied,
     #[error("channel rate limited")]
     RateLimited { retry: RetryHint },
     #[error("channel transport failed: {0}")]

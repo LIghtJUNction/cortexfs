@@ -11,10 +11,6 @@
     "message": "使用",
     "description": "Navbar item with label Usage"
   },
-  "item.label.agent.sh": {
-    "message": "agent.sh",
-    "description": "Navbar item with label agent.sh"
-  },
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"
@@ -22,5 +18,9 @@
   "logo.alt": {
     "message": "/ctx",
     "description": "The alt text of navbar logo"
+  },
+  "item.label.Evaluate": {
+    "message": "评估",
+    "description": "Navbar item with label Evaluate"
   }
 }

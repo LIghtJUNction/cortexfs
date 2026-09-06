@@ -28,7 +28,8 @@ pub(super) fn decode(
 
 fn edited(data: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, ChannelError> {
     Ok(ChannelIncomingEvent::MessageEdited {
-        context: context(data, channel)?,
+        // Updates identify the message author, not the user or system that changed it.
+        context: context(data, channel, None)?,
         message_id: scalar(data.get("id"), "id")?,
         body: MessageBody::text(
             data.get("content")
@@ -40,7 +41,7 @@ fn edited(data: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, Chan
 
 fn deleted(data: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, ChannelError> {
     Ok(ChannelIncomingEvent::MessageDeleted {
-        context: context(data, channel)?,
+        context: context(data, channel, None)?,
         message_id: scalar(data.get("id"), "id")?,
     })
 }
@@ -57,7 +58,7 @@ fn reaction(
         .transpose()?
         .ok_or_else(|| ChannelError::Protocol("discord emoji is missing".to_owned()))?;
     Ok(ChannelIncomingEvent::Reaction {
-        context: context(data, channel)?,
+        context: context(data, channel, data.get("user_id"))?,
         message_id: scalar(data.get("message_id"), "message_id")?,
         emoji,
         added,
@@ -66,22 +67,21 @@ fn reaction(
 
 fn typing(data: &Value, channel: ChannelId) -> Result<ChannelIncomingEvent, ChannelError> {
     Ok(ChannelIncomingEvent::Typing {
-        context: context(data, channel)?,
+        context: context(data, channel, data.get("user_id"))?,
         active: true,
     })
 }
 
-fn context(data: &Value, channel: ChannelId) -> Result<ChannelEventContext, ChannelError> {
+fn context(
+    data: &Value,
+    channel: ChannelId,
+    user: Option<&Value>,
+) -> Result<ChannelEventContext, ChannelError> {
     let conversation = ConversationId::new(scalar(data.get("channel_id"), "channel_id")?)?;
-    let participant_id = data
-        .get("author")
-        .map(|value| scalar(value.get("id"), "author.id"))
+    let participant = user
+        .map(|value| scalar(Some(value), "user_id"))
         .transpose()?
-        .or(data
-            .get("user_id")
-            .map(|value| scalar(Some(value), "user_id"))
-            .transpose()?);
-    let participant = participant_id.map(|id| participant(data.get("author"), id));
+        .map(|id| participant(None, id));
     Ok(ChannelEventContext {
         target: MessageTarget {
             channel,

@@ -20,8 +20,10 @@ impl AgentChannelBridge {
         sink: &mut S,
     ) -> Result<OutboundMessage, ChannelBridgeError> {
         let event = self.bind_event(event);
-        event.validate()?;
         let context = event.context();
+        self.route
+            .authorize_sender(context.participant.as_ref().map(|actor| actor.id.as_str()))?;
+        event.validate()?;
         sink.begin_event(&context.target);
         let value = serde_json::to_value(&event).map_err(|_error| {
             ChannelBridgeError::Channel(cortexfs_channels::ChannelError::Protocol(

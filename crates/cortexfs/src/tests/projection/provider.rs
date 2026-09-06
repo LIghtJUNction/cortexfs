@@ -633,18 +633,12 @@ fn fuse_projection_uses_configured_provider_name_for_address_provider() {
     );
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-    let model_entries = projection.readdir("model");
-    assert!(model_entries.is_ok());
-    let model_names = model_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        model_names,
-        [
+    assert_model_entries(
+        &projection,
+        "model",
+        &[
             "code", "debug", "fast", "helper", "local", "main", "reason", "route", "vision",
-        ]
+        ],
     );
     assert_eq!(
         projection.read_to_string("model/local/gpt-5.6-terra.d/default"),
@@ -726,14 +720,7 @@ fn fuse_projection_ignores_symlink_provider_model_cache() {
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
-    let provider_entries = projection.readdir("model/local");
-    assert!(provider_entries.is_ok());
-    let provider_names = provider_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(provider_names, ["base", "base.d"]);
+    assert_model_entries(&projection, "model/local", &["base", "base.d"]);
     assert_eq!(
         projection.getattr("model/local/leaked"),
         Err(FuseError::NotFound)
@@ -766,14 +753,7 @@ fn fuse_projection_ignores_symlink_provider_model_cache_dir() {
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
-    let provider_entries = projection.readdir("model/local");
-    assert!(provider_entries.is_ok());
-    let provider_names = provider_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(provider_names, ["base", "base.d"]);
+    assert_model_entries(&projection, "model/local", &["base", "base.d"]);
     assert_eq!(
         projection.getattr("model/local/leaked"),
         Err(FuseError::NotFound)
@@ -804,14 +784,11 @@ fn fuse_projection_ignores_oversized_provider_model_cache() {
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
-    let provider_entries = projection.readdir("model/api.test");
-    assert!(provider_entries.is_ok());
-    let provider_names = provider_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(provider_names, ["gpt-5.6-terra", "gpt-5.6-terra.d"]);
+    assert_model_entries(
+        &projection,
+        "model/api.test",
+        &["gpt-5.6-terra", "gpt-5.6-terra.d"],
+    );
 }
 
 #[test]
@@ -832,18 +809,12 @@ fn fuse_projection_skips_disabled_provider_models() {
     write_text_file(&root.join("model/offline"), "flat\n");
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-    let model_entries = projection.readdir("model");
-    assert!(model_entries.is_ok());
-    let model_names = model_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        model_names,
-        [
-            "code", "debug", "fast", "helper", "main", "offline", "reason", "route", "vision"
-        ]
+    assert_model_entries(
+        &projection,
+        "model",
+        &[
+            "code", "debug", "fast", "helper", "main", "offline", "reason", "route", "vision",
+        ],
     );
     assert!(matches!(
         projection.getattr("model/api.test"),
