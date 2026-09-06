@@ -926,15 +926,10 @@ fn fuse_projection_rejects_agent_control_owner_reassignment() {
 
 #[test]
 fn fuse_projection_persists_owned_agent_and_terminal_socket_aliases() {
-    let root = reference_tree("fuse-agent-socket-aliases");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
-    let uid = nix::unistd::Uid::current().as_raw();
+    use crate::abi::constants::BROKER_SOCKET;
+    let (root, projection, uid, agent_target) =
+        agent_socket_claim_fixture("fuse-agent-socket-aliases");
     let gid = nix::unistd::Gid::current().as_raw();
-    assert!(fs::write(root.join("agent/executor.d/owner"), format!("{uid}\n")).is_ok());
-    let agent_target = PathBuf::from(format!(
-        "/run/user/{uid}/cortexfs/agent/root-hash/executor.sock"
-    ));
     let terminal = format!("home/{uid}/agent/executor/session/test/terminal");
     assert!(
         fs::create_dir_all(root.join(format!("home/{uid}/agent/executor/session/test"))).is_ok()
@@ -943,10 +938,6 @@ fn fuse_projection_persists_owned_agent_and_terminal_socket_aliases() {
         projection.create_layout_dir(&terminal, uid, gid, 0o755),
         Ok(())
     );
-    let terminal_target = PathBuf::from(format!(
-        "/run/user/{uid}/cortexfs/terminal/executor/test/main.sock"
-    ));
-
     assert_eq!(
         projection.remove_socket_alias("agent/executor.sock", uid),
         Ok(())
@@ -956,17 +947,18 @@ fn fuse_projection_persists_owned_agent_and_terminal_socket_aliases() {
             .set_socket_alias("agent/executor.sock", &agent_target, uid, gid)
             .is_ok()
     );
-    assert!(
-        projection
-            .set_socket_alias(&format!("{terminal}/main.sock"), &terminal_target, uid, gid,)
-            .is_ok()
-    );
-
     assert_eq!(projection.readlink("agent/executor.sock"), Ok(agent_target));
-    assert_eq!(
-        projection.readlink(&format!("{terminal}/main.sock")),
-        Ok(terminal_target)
-    );
+    let alias = format!("{terminal}/main.sock");
+    let legacy = format!("/run/user/{uid}/cortexfs/terminal/executor/test/main.sock");
+    for target in [Path::new(&legacy), Path::new(BROKER_SOCKET)] {
+        assert!(
+            projection
+                .set_socket_alias(&alias, target, uid, gid)
+                .is_ok()
+        );
+        assert_eq!(projection.readlink(&alias), Ok(target.to_owned()));
+        assert_eq!(projection.remove_socket_alias(&alias, uid), Ok(()));
+    }
 }
 
 fn agent_socket_claim_fixture(label: &str) -> (TestDir, FuseProjection, u32, PathBuf) {
@@ -1213,51 +1205,54 @@ fn fuse_projection_persists_owned_agent_socket_placeholder() {
 
 #[test]
 fn fuse_projection_rejects_foreign_or_escaped_socket_aliases() {
-    let root = reference_tree("fuse-agent-socket-alias-security");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
-    let uid = nix::unistd::Uid::current().as_raw();
+    use crate::abi::constants::BROKER_SOCKET;
+    use std::os::unix::ffi::OsStrExt;
+    let (root, projection, uid, agent_target) =
+        agent_socket_claim_fixture("fuse-agent-socket-alias-security");
+    assert!(fs::remove_file(root.join("agent/executor.sock")).is_ok());
     let gid = nix::unistd::Gid::current().as_raw();
-    assert!(fs::write(root.join("agent/executor.d/owner"), format!("{uid}\n")).is_ok());
-
+    let foreign_uid = uid.saturating_add(1);
+    for target in [
+        PathBuf::from("/tmp/cortexfs/agent/executor.sock"),
+        PathBuf::from(BROKER_SOCKET),
+        agent_target.with_file_name(std::ffi::OsStr::from_bytes(b"\xff/executor.sock")),
+    ] {
+        assert_eq!(
+            projection.set_socket_alias("agent/executor.sock", &target, uid, gid),
+            Err(FuseError::InvalidPath)
+        );
+    }
+    let foreign = format!("home/{foreign_uid}/agent/executor/session/test/terminal/main.sock");
+    let legacy = format!("/run/user/{uid}/cortexfs/terminal/executor/test/main.sock");
+    for target in [Path::new(&legacy), Path::new(BROKER_SOCKET)] {
+        assert_eq!(
+            projection.set_socket_alias(&foreign, target, uid, gid),
+            Err(FuseError::PermissionDenied)
+        );
+    }
+    let alias = format!("home/{uid}/agent/executor/session/test/terminal/main.sock");
+    for target in [
+        "/run/cortexfs/terminal/other.sock",
+        "/run/cortexfs/terminal/../terminal/broker.sock",
+        "/run/cortexfs/terminal//broker.sock",
+    ] {
+        assert_eq!(
+            projection.set_socket_alias(&alias, Path::new(target), uid, gid),
+            Err(FuseError::InvalidPath)
+        );
+    }
+    assert!(fs::write(root.join("agent/executor.d/owner"), foreign_uid.to_string()).is_ok());
     assert_eq!(
-        projection.set_socket_alias(
-            "agent/executor.sock",
-            Path::new("/tmp/cortexfs/agent/executor.sock"),
-            uid,
-            gid,
-        ),
-        Err(FuseError::InvalidPath)
-    );
-    assert_eq!(
-        projection.set_socket_alias(
-            &format!(
-                "home/{}/agent/executor/session/test/terminal/main.sock",
-                uid.saturating_add(1)
-            ),
-            &PathBuf::from(format!(
-                "/run/user/{uid}/cortexfs/terminal/executor/test/main.sock"
-            )),
-            uid,
-            gid,
-        ),
+        projection.set_socket_alias(&alias, Path::new(BROKER_SOCKET), uid, gid),
         Err(FuseError::PermissionDenied)
     );
-
     let outside = clean_test_dir("fuse-agent-socket-alias-security-outside");
     assert!(fs::remove_dir_all(root.join("agent/executor.d")).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(fs::write(outside.join("owner"), format!("{uid}\n")).is_ok());
     assert!(symlink(&outside, root.join("agent/executor.d")).is_ok());
     assert_eq!(
-        projection.set_socket_alias(
-            "agent/executor.sock",
-            &PathBuf::from(format!(
-                "/run/user/{uid}/cortexfs/agent/root-hash/executor.sock"
-            )),
-            uid,
-            gid,
-        ),
+        projection.set_socket_alias("agent/executor.sock", &agent_target, uid, gid),
         Err(FuseError::InvalidPath)
     );
 }

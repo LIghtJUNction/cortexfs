@@ -1,5 +1,5 @@
 use cortexfs_channels::OutboundRequest;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, RequestBuilder};
 use serde_json::Value;
 
 use super::GmailError;
@@ -34,17 +34,12 @@ impl<'a> GmailApi<'a> {
     }
 
     pub(super) fn history(&self, id: &str) -> Result<GmailHistory, GmailError> {
-        let value = self
-            .client
-            .get(self.url("users/me/history"))
-            .bearer_auth(self.token)
-            .query(&[("startHistoryId", id), ("historyTypes", "messageAdded")])
-            .send()
-            .map_err(GmailError::Http)?
-            .error_for_status()
-            .map_err(GmailError::Http)?
-            .json::<Value>()
-            .map_err(GmailError::Http)?;
+        let value = json(
+            self.client
+                .get(self.url("users/me/history"))
+                .bearer_auth(self.token)
+                .query(&[("startHistoryId", id), ("historyTypes", "messageAdded")]),
+        )?;
         let message_ids = value
             .get("history")
             .and_then(Value::as_array)
@@ -71,55 +66,39 @@ impl<'a> GmailApi<'a> {
     }
 
     pub(super) fn message(&self, id: &str) -> Result<Value, GmailError> {
-        self.client
-            .get(self.url(&format!("users/me/messages/{id}")))
-            .bearer_auth(self.token)
-            .query(&[("format", "full")])
-            .send()
-            .map_err(GmailError::Http)?
-            .error_for_status()
-            .map_err(GmailError::Http)?
-            .json::<Value>()
-            .map_err(GmailError::Http)
+        json(
+            self.client
+                .get(self.url(&format!("users/me/messages/{id}")))
+                .bearer_auth(self.token)
+                .query(&[("format", "full")]),
+        )
     }
 
     pub(super) fn search(&self, query: &str) -> Result<Value, GmailError> {
-        self.client
-            .get(self.url("users/me/messages"))
-            .bearer_auth(self.token)
-            .query(&[("q", query)])
-            .send()
-            .map_err(GmailError::Http)?
-            .error_for_status()
-            .map_err(GmailError::Http)?
-            .json::<Value>()
-            .map_err(GmailError::Http)
+        json(
+            self.client
+                .get(self.url("users/me/messages"))
+                .bearer_auth(self.token)
+                .query(&[("q", query)]),
+        )
     }
 
     pub(super) fn modify(&self, id: &str, body: &Value) -> Result<Value, GmailError> {
-        self.client
-            .post(self.url(&format!("users/me/messages/{id}/modify")))
-            .bearer_auth(self.token)
-            .json(&body)
-            .send()
-            .map_err(GmailError::Http)?
-            .error_for_status()
-            .map_err(GmailError::Http)?
-            .json::<Value>()
-            .map_err(GmailError::Http)
+        json(
+            self.client
+                .post(self.url(&format!("users/me/messages/{id}/modify")))
+                .bearer_auth(self.token)
+                .json(&body),
+        )
     }
 
     pub(super) fn watch(&self, body: &Value) -> Result<Value, GmailError> {
-        self.client
-            .post(self.url("users/me/watch"))
-            .bearer_auth(self.token)
-            .json(&body)
-            .send()
-            .map_err(GmailError::Http)?
-            .error_for_status()
-            .map_err(GmailError::Http)?
-            .json::<Value>()
-            .map_err(GmailError::Http)
+        json(
+            self.client
+                .post(self.url("users/me/watch"))
+                .bearer_auth(self.token)
+                .json(&body),
+        )
     }
 
     pub(super) fn send(&self, request: OutboundRequest) -> Result<(), GmailError> {
@@ -138,4 +117,14 @@ impl<'a> GmailApi<'a> {
     fn url(&self, path: &str) -> String {
         format!("{}/{}", self.base.trim_end_matches('/'), path)
     }
+}
+
+fn json(request: RequestBuilder) -> Result<Value, GmailError> {
+    request
+        .send()
+        .map_err(GmailError::Http)?
+        .error_for_status()
+        .map_err(GmailError::Http)?
+        .json()
+        .map_err(GmailError::Http)
 }

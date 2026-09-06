@@ -80,7 +80,8 @@ fn webhook_routes_provider_event_through_the_common_bridge()
         None,
     );
     let client = reqwest::blocking::Client::new();
-    let response = handle(
+    for sender in ["unknown", "u"] {
+        let response = handle(
         &config,
         &client,
         &DiscordCodec,
@@ -89,9 +90,11 @@ fn webhook_routes_provider_event_through_the_common_bridge()
             method: "POST".to_owned(),
             path: "/webhook".to_owned(),
             headers: std::collections::BTreeMap::new(),
-            body: r#"{"t":"MESSAGE_REACTION_ADD","d":{"channel_id":"c","message_id":"m","user_id":"u","emoji":{"name":"👍"}}}"#.to_owned(),
+            body: serde_json::json!({"t":"MESSAGE_REACTION_ADD","d":{"channel_id":"c","message_id":"m","user_id":sender,"emoji":{"name":"👍"}}}).to_string(),
         },
     );
+        assert_eq!(response.status, 200);
+    }
     let agent_result = agent
         .join()
         .map_err(|error| std::io::Error::other(format!("agent panicked: {error:?}")))
@@ -105,6 +108,5 @@ fn webhook_routes_provider_event_through_the_common_bridge()
         outbound_result.is_ok(),
         "outbound result: {outbound_result:?}"
     );
-    assert_eq!(response.status, 200);
     Ok(())
 }

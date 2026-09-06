@@ -11,15 +11,13 @@ pub(super) fn context(
     post: Option<&Value>,
     actor: Option<&Value>,
     channel: ChannelId,
-    _kind: &str,
 ) -> Result<ChannelEventContext, ChannelError> {
     let conversation = ConversationId::new(scalar(
-        data.get("channel_id")
-            .or_else(|| post.and_then(|value| value.get("channel_id")))
-            .or_else(|| root.pointer("/broadcast/channel_id")),
+        field(data, post, None, "channel_id").or_else(|| root.pointer("/broadcast/channel_id")),
         "channel_id",
     )?)?;
-    let participant = field(data, post, actor, "user_id")
+    let participant = actor
+        .and_then(|value| value.get("user_id"))
         .map(|value| scalar(Some(value), "user_id"))
         .transpose()?
         .map(|id| participant(None, id));

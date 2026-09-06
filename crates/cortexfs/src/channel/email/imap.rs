@@ -3,7 +3,7 @@ use std::time::Duration;
 use cortexfs_channels::{ChannelCodec, platform::email::EmailCodec};
 use serde_json::{Value, json};
 
-use super::super::bridge::AgentChannelBridge;
+use super::super::bridge::{AgentChannelBridge, ChannelBridgeError};
 use super::{EmailConfig, EmailError, smtp};
 
 fn login(config: &EmailConfig) -> Result<imap::Session<imap::Connection>, EmailError> {
@@ -11,9 +11,13 @@ fn login(config: &EmailConfig) -> Result<imap::Session<imap::Connection>, EmailE
         .tls_kind(imap::TlsKind::Native)
         .connect()
         .map_err(|error| EmailError::Imap(error.to_string()))?;
-    client
+    let mut session = client
         .login(&config.username, &config.password)
-        .map_err(|(error, _client)| EmailError::Imap(error.to_string()))
+        .map_err(|(error, _client)| EmailError::Imap(error.to_string()))?;
+    session
+        .select(&config.mailbox)
+        .map_err(|error| EmailError::Imap(error.to_string()))?;
+    Ok(session)
 }
 
 pub(super) fn run_once(
@@ -21,9 +25,6 @@ pub(super) fn run_once(
     bridge: &AgentChannelBridge,
 ) -> Result<(), EmailError> {
     let mut session = login(config)?;
-    session
-        .select(&config.mailbox)
-        .map_err(|error| EmailError::Imap(error.to_string()))?;
     let codec = EmailCodec;
     loop {
         receive(&mut session, config, bridge, codec)?;
@@ -37,9 +38,6 @@ pub(super) fn run_once(
 
 pub(super) fn tool(config: &EmailConfig, name: &str, payload: &Value) -> Result<Value, EmailError> {
     let mut session = login(config)?;
-    session
-        .select(&config.mailbox)
-        .map_err(|error| EmailError::Imap(error.to_string()))?;
     match name {
         "email.search" => {
             let query = payload
@@ -117,9 +115,10 @@ where
         if inbound.sender.id.eq_ignore_ascii_case(&config.username) {
             continue;
         }
-        let outbound = bridge.handle(inbound)?;
-        codec.encode(&outbound)?;
-        smtp::send(config, &outbound)?;
+        if let Some(outbound) = ChannelBridgeError::consume_denied(bridge.handle(inbound))? {
+            codec.encode(&outbound)?;
+            smtp::send(config, &outbound)?;
+        }
         if let Some(uid) = uid {
             session
                 .uid_store(uid.to_string(), "+FLAGS (\\Seen)")

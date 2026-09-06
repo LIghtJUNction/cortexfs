@@ -997,25 +997,33 @@ fn mattermost_codec_normalizes_events_and_effects() -> Result<(), ChannelError> 
     };
     assert_eq!(context.target.conversation.as_str(), "channel-1");
     assert_eq!(context.target.thread.as_deref(), Some("root-1"));
+    assert_eq!(
+        context.participant.map(|actor| actor.id).as_deref(),
+        Some("user-1")
+    );
     assert_eq!(message_id, "post-1");
     assert_eq!(emoji, "thumbsup");
     assert!(added);
 
-    let edit = serde_json::json!({
-        "event": "post_edited",
-        "data": {"post": post.to_string()}
-    });
-    assert!(matches!(
-        MattermostCodec.decode_incoming(&edit.to_string())?,
-        Some(ChannelIncoming::Event(
-            ChannelIncomingEvent::MessageEdited { .. }
-        ))
-    ));
+    for (kind, actor) in [
+        ("post_edited", None),
+        ("post_deleted", None),
+        ("typing", Some("user-2")),
+    ] {
+        let payload = serde_json::json!({
+            "event": kind, "data": {"post": post.to_string(), "user_id": "user-2"}
+        });
+        assert!(matches!(
+            (kind, MattermostCodec.decode_incoming(&payload.to_string())?),
+            ("post_edited", Some(ChannelIncoming::Event(ChannelIncomingEvent::MessageEdited { context, .. })))
+            | ("post_deleted", Some(ChannelIncoming::Event(ChannelIncomingEvent::MessageDeleted { context, .. })))
+            | ("typing", Some(ChannelIncoming::Event(ChannelIncomingEvent::Typing { context, .. })))
+            if context.participant.as_ref().map(|user| user.id.as_str()) == actor
+        ));
+    }
     let target = MessageTarget {
-        channel: ChannelId::from_static("mattermost"),
-        conversation: ConversationId::new("channel-1")?,
         thread: None,
-        reply_to: None,
+        ..context.target
     };
     let request = MattermostCodec.encode_effect(
         &target,

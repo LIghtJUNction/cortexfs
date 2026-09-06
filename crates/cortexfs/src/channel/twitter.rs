@@ -80,7 +80,9 @@ fn deliver(
     codec: TwitterCodec,
     inbound: cortexfs_channels::InboundMessage,
 ) -> Result<(), TwitterError> {
-    let outbound = bridge.handle(inbound)?;
+    let Some(outbound) = ChannelBridgeError::consume_denied(bridge.handle(inbound))? else {
+        return Ok(());
+    };
     let mut reply_to = outbound.target.reply_to.clone();
     for chunk in text::chunks(&outbound.body.text, 280) {
         let mut message = outbound.clone();
