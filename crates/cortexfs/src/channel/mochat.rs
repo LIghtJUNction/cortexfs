@@ -55,8 +55,9 @@ fn poll(
         if !config.accepts(&inbound.sender.id) {
             continue;
         }
-        let outbound = bridge.handle(inbound)?;
-        api::send(client, config, codec.encode(&outbound)?)?;
+        if let Some(outbound) = ChannelBridgeError::consume_denied(bridge.handle(inbound))? {
+            api::send(client, config, codec.encode(&outbound)?)?;
+        }
     }
     advance(
         since_id,

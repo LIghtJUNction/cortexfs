@@ -271,6 +271,8 @@ pub const SHARED_QUEUE_REQUIRED_DIRS: &[&str] =
 
 /// Maximum JSONL socket request frame size.
 pub const MAX_SOCKET_FRAME_BYTES: usize = 1024 * 1024;
+/// Canonical root-owned terminal broker endpoint.
+pub const BROKER_SOCKET: &str = "/run/cortexfs/terminal/broker.sock";
 
 /// Maximum payload accepted by the local FUSE projection for one small write.
 pub const MAX_FUSE_SMALL_WRITE_BYTES: usize = 64 * 1024;

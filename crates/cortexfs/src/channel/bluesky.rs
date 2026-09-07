@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 use cortexfs_channels::{ChannelCodec, platform::bluesky::BlueskyCodec};
 use reqwest::blocking::Client;
 
-use super::bridge::AgentChannelBridge;
+use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod api;
 mod clock;
@@ -52,7 +52,9 @@ fn poll(
             continue;
         }
         seen = inbound.metadata.get("bluesky.seen_at").cloned().or(seen);
-        let mut outbound = bridge.handle(inbound)?;
+        let Some(mut outbound) = ChannelBridgeError::consume_denied(bridge.handle(inbound))? else {
+            continue;
+        };
         outbound
             .metadata
             .insert("bluesky.repo".to_owned(), session.did.clone());

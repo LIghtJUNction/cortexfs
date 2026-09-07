@@ -221,7 +221,9 @@ fn bridge_returns_safe_progress_error_without_provider_details()
         "ping",
     )?;
     let mut probe = ProgressProbe::default();
-    let Err(error) = bridge.handle_with_progress(inbound, &mut probe) else {
+    let Err(error) =
+        ChannelBridgeError::consume_denied(bridge.handle_with_progress(inbound, &mut probe))
+    else {
         return Err(io::Error::other("agent error was not returned").into());
     };
     server
@@ -560,6 +562,7 @@ fn unauthorized_senders_never_reach_agent_or_progress() -> Result<(), Box<dyn st
     let root = tempfile::tempdir()?;
     let socket = root.path().join("agent.sock");
     for allowed in [vec![], vec!["trusted".to_owned()]] {
+        let expected = usize::from(!allowed.is_empty());
         let route = ChannelSessionRoute::new("executor", "im")?
             .with_identity_isolation()
             .with_allowed_senders(allowed);
@@ -600,6 +603,17 @@ fn unauthorized_senders_never_reach_agent_or_progress() -> Result<(), Box<dyn st
             }
             assert_eq!(progress.starts, 0);
             assert!(progress.completed.is_none() && progress.error.is_none());
+            let mut delivered = 0;
+            inbound.body = MessageBody::text("/help")?;
+            for sender in ["unknown", "trusted"] {
+                inbound.sender.id = sender.to_owned();
+                let reply = ChannelBridgeError::consume_denied(bridge.handle(inbound.clone()))?;
+                delivered += usize::from(reply.is_some());
+            }
+            assert_eq!(
+                delivered, expected,
+                "a denied sender must not stop later delivery"
+            );
         }
     }
     assert!(

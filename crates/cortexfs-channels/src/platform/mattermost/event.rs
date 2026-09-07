@@ -33,7 +33,7 @@ pub(super) fn decode(
         "post_edited" => edited(&root, data, post.as_ref(), channel).map(Some),
         "post_deleted" => deleted(&root, data, post.as_ref(), channel).map(Some),
         "typing" => {
-            parse::context(&root, data, post.as_ref(), None, channel, kind).map(|context| {
+            parse::context(&root, data, post.as_ref(), Some(data), channel).map(|context| {
                 Some(ChannelIncomingEvent::Typing {
                     context,
                     active: true,
@@ -55,7 +55,7 @@ fn reaction_event(
     let reaction = reaction
         .ok_or_else(|| ChannelError::Protocol("mattermost reaction is missing".to_owned()))?;
     Ok(ChannelIncomingEvent::Reaction {
-        context: parse::context(root, data, post, Some(reaction), channel, "reaction")?,
+        context: parse::context(root, data, post, Some(reaction), channel)?,
         message_id: scalar(reaction.get("post_id"), "reaction.post_id")?,
         emoji: scalar(reaction.get("emoji_name"), "reaction.emoji_name")?,
         added,
@@ -71,7 +71,7 @@ fn edited(
     let post =
         post.ok_or_else(|| ChannelError::Protocol("mattermost edited post is missing".to_owned()))?;
     Ok(ChannelIncomingEvent::MessageEdited {
-        context: parse::context(root, data, Some(post), None, channel, "post_edited")?,
+        context: parse::context(root, data, Some(post), None, channel)?,
         message_id: scalar(post.get("id").or_else(|| data.get("post_id")), "post.id")?,
         body: MessageBody::with_attachments(
             post.get("message")
@@ -89,7 +89,7 @@ fn deleted(
     channel: ChannelId,
 ) -> Result<ChannelIncomingEvent, ChannelError> {
     Ok(ChannelIncomingEvent::MessageDeleted {
-        context: parse::context(root, data, post, None, channel, "post_deleted")?,
+        context: parse::context(root, data, post, None, channel)?,
         message_id: scalar(
             post.and_then(|value| value.get("id"))
                 .or_else(|| data.get("post_id")),

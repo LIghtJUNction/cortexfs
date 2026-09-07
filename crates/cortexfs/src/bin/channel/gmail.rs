@@ -101,16 +101,13 @@ fn process_push(
             continue;
         }
         let resource = api.message(&id)?;
-        let Some(inbound) = codec.decode(&resource.to_string())? else {
-            seen.insert(id);
-            continue;
-        };
-        if inbound.sender.id.eq_ignore_ascii_case(&push.email_address) {
-            seen.insert(id);
-            continue;
+        if let Some(inbound) = codec
+            .decode(&resource.to_string())?
+            .filter(|message| !message.sender.id.eq_ignore_ascii_case(&push.email_address))
+            && let Some(outbound) = ChannelBridgeError::consume_denied(bridge.handle(inbound))?
+        {
+            api.send(codec.encode(&outbound)?)?;
         }
-        let outbound = bridge.handle(inbound)?;
-        api.send(codec.encode(&outbound)?)?;
         seen.insert(id);
     }
     if seen.len() > 4096 {

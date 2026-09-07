@@ -356,7 +356,7 @@ impl<'a> SocketAlias<'a> {
                     session,
                     "main.sock",
                 ];
-                (components == expected)
+                (components == expected || target.as_os_str() == abi::constants::BROKER_SOCKET)
                     .then_some(())
                     .ok_or(FuseError::InvalidPath)
             }
@@ -371,7 +371,7 @@ fn absolute_socket_components(path: &Path) -> Option<Vec<&str>> {
     path.components()
         .filter_map(|component| match component {
             std::path::Component::RootDir => None,
-            std::path::Component::Normal(part) => part.to_str(),
+            std::path::Component::Normal(part) => Some(part.to_str().unwrap_or("")),
             std::path::Component::CurDir
             | std::path::Component::ParentDir
             | std::path::Component::Prefix(_) => Some(""),

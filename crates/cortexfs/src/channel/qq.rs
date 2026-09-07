@@ -5,7 +5,7 @@ use reqwest::blocking::Client;
 use serde_json::Value;
 use tungstenite::Message;
 
-use super::bridge::AgentChannelBridge;
+use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
 mod api;
 mod config;
@@ -41,9 +41,9 @@ pub(super) fn handle_event(
     let Some(inbound) = QqCodec.decode(payload)? else {
         return Ok(());
     };
-    let outbound = bridge.handle(inbound)?;
-    let request = QqCodec.encode(&outbound)?;
-    api::send(client, config, request)?;
+    if let Some(outbound) = ChannelBridgeError::consume_denied(bridge.handle(inbound))? {
+        api::send(client, config, QqCodec.encode(&outbound)?)?;
+    }
     Ok(())
 }
 

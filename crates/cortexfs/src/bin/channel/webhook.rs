@@ -1,5 +1,5 @@
 use cortexfs::channel::{
-    bridge::AgentChannelBridge,
+    bridge::{AgentChannelBridge, ChannelBridgeError},
     http::{HttpRequest, HttpResponse},
 };
 use cortexfs_channels::{
@@ -125,8 +125,12 @@ fn handle(
             ChannelIncoming::Event(event) => event.context().target.clone(),
         };
         let mut progress = progress::Progress::new(client, config, codec, target);
-        let Ok(outbound) = bridge.handle_incoming_with_progress(inbound, &mut progress) else {
-            return HttpResponse::error(500, "agent delivery failed");
+        let outbound = match ChannelBridgeError::consume_denied(
+            bridge.handle_incoming_with_progress(inbound, &mut progress),
+        ) {
+            Ok(Some(outbound)) => outbound,
+            Ok(None) => continue,
+            Err(_) => return HttpResponse::error(500, "agent delivery failed"),
         };
         let Ok(outbound_request) = codec.encode(&outbound) else {
             return HttpResponse::error(500, "platform encoding failed");

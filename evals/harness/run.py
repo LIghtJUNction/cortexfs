@@ -19,6 +19,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(__file__).with_name("suites.json")
+PROGRESS_INTERVAL = 30.0
 TEST = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)\b")
 SUMMARY = re.compile(
     r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; "
@@ -74,6 +75,7 @@ def stop_group(process):
 
 def execute(command, log, timeout):
     started = time.monotonic()
+    deadline = started + timeout
     outcome, returncode, error = "completed", None, None
     environment = {**os.environ, "CARGO_TERM_COLOR": "never", "RUST_BACKTRACE": "1"}
     with log.open("x", encoding="utf-8") as stream:
@@ -86,7 +88,20 @@ def execute(command, log, timeout):
             outcome, error = "error", str(failure)
         else:
             try:
-                returncode = process.wait(timeout=timeout)
+                while True:
+                    remaining = max(0.0, deadline - time.monotonic())
+                    try:
+                        returncode = process.wait(timeout=min(PROGRESS_INTERVAL, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        now = time.monotonic()
+                        if now >= deadline:
+                            raise
+                        print(
+                            f"{log.stem}: running for {now - started:.0f}s; "
+                            f"log {os.fstat(stream.fileno()).st_size} bytes",
+                            flush=True,
+                        )
             except subprocess.TimeoutExpired:
                 stop_group(process)
                 outcome, returncode = "timeout", process.returncode

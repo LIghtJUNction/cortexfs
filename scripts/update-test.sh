@@ -80,12 +80,13 @@ active_units_include_primary() (
     mkdir -p "$mock_bin"
     printf '%s\n' \
         '#!/bin/sh' \
-        "printf '%s\\n' 'cortexfs.service loaded active running CortexFS' 'cortexfs-agent.service loaded active running CortexFS agent'" \
+        "printf '%s\\n' 'cortexfs.service loaded active running CortexFS' 'cortexfs-agent.service loaded active running CortexFS agent' 'cortexfs-agent@foo_bar.socket loaded active listening Custom agent' 'postgres.service loaded active running Other service' 'cortexfs-update.timer loaded active waiting Timer' 'cortexfs.service.evil loaded active running Invalid suffix'" \
         >"$mock_bin/systemctl"
     chmod +x "$mock_bin/systemctl"
-    PATH="$mock_bin:$PATH" update_active_units | grep -Fxq cortexfs.service
+    [[ $(PATH="$mock_bin:$PATH" update_active_units) == \
+        "$(printf '%s\n' cortexfs.service cortexfs-agent.service cortexfs-agent@foo_bar.socket | sort -u)" ]]
 )
-assert_true 'active unit discovery includes the primary service' active_units_include_primary
+assert_true 'active unit discovery includes primary and underscore instances only' active_units_include_primary
 
 fixture=$TEST_TEMP/source
 mkdir -p "$fixture/packaging" "$fixture/scripts"

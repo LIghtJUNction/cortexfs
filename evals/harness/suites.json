@@ -142,6 +142,16 @@
       ]
     },
     {
+      "id": "aliases",
+      "title": "Terminal broker aliases preserve path and ownership boundaries",
+      "cargo_args": ["-p", "cortexfs", "--lib", "socket_alias"],
+      "fixtures": ["crates/cortexfs/src/tests/projection/basic.rs"],
+      "required_tests": [
+        "tests::projection::basic::fuse_projection_persists_owned_agent_and_terminal_socket_aliases",
+        "tests::projection::basic::fuse_projection_rejects_foreign_or_escaped_socket_aliases"
+      ]
+    },
+    {
       "id": "sdk",
       "title": "Installed Agent/Tool SDK process lifecycle and two-call loop",
       "cargo_args": [
@@ -176,6 +186,7 @@
       ],
       "required_tests": [
         "tests::route_keeps_threads_and_request_ids_stable",
+        "tests::mattermost_codec_normalizes_events_and_effects",
         "tests::identity::telegram_never_uses_chat_or_forwarded_subject_as_sender",
         "tests::identity::telegram_anonymous_events_have_no_user_actor",
         "tests::identity::discord_events_distinguish_actor_from_message_author",

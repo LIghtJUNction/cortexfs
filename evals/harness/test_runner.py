@@ -67,6 +67,17 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual((result["status"], result["outcome"]), ("failed", "error"))
         self.assertIsNotNone(result["error"])
 
+    def test_progress_keeps_complete_raw_log_and_success_evidence(self):
+        code = f"import sys,time; sys.stdout.write({SUCCESS!r}); sys.stdout.flush(); time.sleep(0.12)"
+        log = self.root / "progress.log"
+        console = io.StringIO()
+        with patch.object(run, "PROGRESS_INTERVAL", 0.02), redirect_stdout(console):
+            result = run.execute([sys.executable, "-c", code], log, 5)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(log.read_text(), SUCCESS)
+        self.assertIn("progress: running for ", console.getvalue())
+        self.assertIn(f"log {len(SUCCESS.encode())} bytes", console.getvalue())
+
     def test_timeout_cleans_descendants_when_parent_exits_on_term(self):
         child = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
         code = (
@@ -75,7 +86,10 @@ class RunnerTests(unittest.TestCase):
             "print(p.pid,flush=True); time.sleep(30)"
         )
         log = self.root / "timeout.log"
-        result = run.execute([sys.executable, "-c", code], log, 0.5)
+        console = io.StringIO()
+        with patch.object(run, "PROGRESS_INTERVAL", 0.05), redirect_stdout(console):
+            result = run.execute([sys.executable, "-c", code], log, 0.5)
+        self.assertIn("timeout: running for ", console.getvalue())
         self.assertEqual((result["status"], result["outcome"]), ("failed", "timeout"))
         pid = log.read_text().strip()
         state = Path(f"/proc/{pid}/stat")
