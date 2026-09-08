@@ -21,19 +21,29 @@ pub fn credential_from_token(
     if retained.is_some_and(|credential| credential.provider() != provider) {
         return Err(AuthProviderError::InvalidCredential);
     }
+    let (old_refresh, old_scopes) =
+        retained.map_or_else(Default::default, |credential| match *credential {
+            Credential::OAuth {
+                ref refresh_token,
+                ref scopes,
+                ..
+            } => (refresh_token.clone(), scopes.clone()),
+            Credential::ApiKey { .. } => Default::default(),
+        });
     let refresh_token = token
         .refresh_token
-        .or_else(|| retained.and_then(refresh_token))
+        .or(old_refresh)
         .filter(|value| !value.trim().is_empty());
     let expires_at = token
         .expires_in
-        .and_then(|value| now.checked_add(value))
-        .or_else(|| retained.and_then(expiry));
-    let scopes = token
-        .scope
-        .map(|scope| scope.split_whitespace().map(str::to_owned).collect())
-        .or_else(|| retained.and_then(scopes))
-        .unwrap_or_default();
+        .map(|value| {
+            now.checked_add(value)
+                .ok_or(AuthProviderError::InvalidResponse)
+        })
+        .transpose()?;
+    let scopes = token.scope.map_or(old_scopes, |scope| {
+        scope.split_whitespace().map(str::to_owned).collect()
+    });
     Ok(Credential::OAuth {
         provider: provider.to_owned(),
         access_token: access_token.to_owned(),
@@ -66,27 +76,4 @@ pub fn parse_models(response: &AuthResponse) -> Result<Vec<String>, AuthProvider
         .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
         .map(str::to_owned);
     Ok(crate::provider::discovery::provider_model_names(names))
-}
-
-fn refresh_token(credential: &Credential) -> Option<String> {
-    match *credential {
-        Credential::OAuth {
-            ref refresh_token, ..
-        } => refresh_token.clone(),
-        Credential::ApiKey { .. } => None,
-    }
-}
-
-fn expiry(credential: &Credential) -> Option<u64> {
-    match *credential {
-        Credential::OAuth { expires_at, .. } => expires_at,
-        Credential::ApiKey { .. } => None,
-    }
-}
-
-fn scopes(credential: &Credential) -> Option<Vec<String>> {
-    match *credential {
-        Credential::OAuth { ref scopes, .. } => Some(scopes.clone()),
-        Credential::ApiKey { .. } => None,
-    }
 }

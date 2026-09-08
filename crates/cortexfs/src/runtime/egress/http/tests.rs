@@ -37,6 +37,7 @@ pub(super) fn fail_monitor(fd: i32) -> bool {
 fn provider_target(provider: &str, base: &str) -> ProviderTarget {
     ProviderTarget {
         provider: provider.to_owned(),
+        profile: "default".to_owned(),
         base_url: format!("http://example.test{base}"),
         authority: "http://example.test".to_owned(),
         base_path: base.to_owned(),
@@ -47,6 +48,7 @@ fn provider_target(provider: &str, base: &str) -> ProviderTarget {
 fn live_target(address: std::net::SocketAddr) -> ProviderTarget {
     ProviderTarget {
         provider: "fixture".to_owned(),
+        profile: "default".to_owned(),
         base_url: format!("http://{address}/v1"),
         authority: format!("http://{address}"),
         base_path: "/v1".to_owned(),
@@ -89,6 +91,7 @@ fn host_credential_replaces_agent_authentication() {
     let mut target = provider_target("fixture", "/v1");
     target.credential = Some(ProviderEgressCredential {
         token: "host-token".to_owned(),
+        kind: crate::provider::auth::CredentialKind::ApiKey,
         codex_account_id: None,
         run: "run-1".to_owned(),
     });

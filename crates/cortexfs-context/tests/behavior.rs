@@ -76,13 +76,60 @@ mod tests {
     #[test]
     fn tiny_utf8_budgets_are_hard_limits() {
         let history = History::from_messages([Message::new("user", "最新观察")]);
+        let complete = history.select(80);
         for budget in 0..80 {
+            assert!(
+                complete.render(budget).text().len() <= budget,
+                "budget={budget}"
+            );
+            assert!(
+                history.render(budget).text().len() <= budget,
+                "budget={budget}"
+            );
+            assert!(History::default().render(budget).text().len() <= budget);
             let selected = history.select(budget);
             let compacted = render_selection(&selected, budget, Some(&"摘要💡".repeat(100)));
             assert!(compacted.text().len() <= budget, "budget={budget}");
             if !selected.messages().is_empty() {
                 assert!(compacted.text().ends_with("- user: 最新观察"));
             }
+        }
+    }
+
+    #[test]
+    fn oversized_latest_message_keeps_a_marked_excerpt_without_mutating_history() {
+        let original = History::from_messages([
+            Message::new("user", "old context"),
+            Message::new("tool", "new observation 最新💡 ".repeat(1000)),
+        ]);
+        let jsonl = original
+            .messages()
+            .iter()
+            .map(|message| serde_json::json!(message).to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!((17 * 1024..64 * 1024).contains(&jsonl.len()));
+        let history = History::from_jsonl(&jsonl);
+        assert_eq!(history, original);
+        let oversized = serde_json::json!({"role": "tool", "content": "x".repeat(64 * 1024)});
+        assert!(
+            History::from_jsonl(&oversized.to_string())
+                .messages()
+                .is_empty()
+        );
+        for budget in 80..128 {
+            let compacted = compact_history(&history, budget, Some(&DefaultSummarizer))
+                .unwrap_or_else(|error| match error {});
+            assert!(
+                compacted
+                    .text()
+                    .starts_with("- tool: new observation 最新💡")
+            );
+            assert!(compacted.text().ends_with(" [truncated]"));
+            assert!(compacted.text().len() <= budget);
+            assert_eq!(compacted.omitted(), 1);
+            assert!(!compacted.summarized());
+            assert_eq!(history, original);
         }
     }
 

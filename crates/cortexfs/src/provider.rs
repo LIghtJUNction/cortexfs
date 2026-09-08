@@ -23,7 +23,7 @@ pub(crate) use link::{remove_alias, replace_alias};
 pub(crate) use project::projected_control_content;
 #[cfg(test)]
 pub(crate) use snapshot::set_load_hook;
-pub(crate) use snapshot::{ProviderError, ProviderSnapshot};
+pub(crate) use snapshot::{ProviderError, ProviderSnapshot, read_configs};
 
 pub(crate) fn openai_response_item_requires_continuation(value: &Value) -> bool {
     matches!(

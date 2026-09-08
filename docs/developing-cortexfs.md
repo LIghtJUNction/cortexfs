@@ -280,21 +280,19 @@ switch models. When a user explicitly asks to test their configured provider or
 aggregation API, use the existing provider registry, routes, secret state, and
 unified commit semantics.
 
-Provider API key resolution is:
+Keep API keys, OAuth tokens, PKCE verifiers, and callback state out of
+`/ctx/model/*`, `.d/default`, model history, and other ABI files. New logins
+store complete credentials in root-owned
+[authentication profiles](spec/model-abi.md#authentication-profiles); use the
+existing provider resolver and route selection instead of adding another
+environment or credential lookup path.
 
-```text
-1. provider environment candidates (if present)
-2. root-owned CortexFS system secret store
-3. unconfigured, return a stable error
-```
+Before adding an OAuth preset, check the
+[authentication support matrix](spec/model-abi.md#authentication-support-boundaries).
+Generic OAuth transport does not establish subscription access. Official
+client/SDK integration and direct model HTTP transport must be documented and
+tested separately, including refresh, discovery, and tool-result replay.
 
-
-Do not write secrets into `/ctx/model/*`, `.d/default`, or any other ABI file.
-OAuth access tokens follow the same principle: provider adapters read secret state from the system secret store.
-Provider configuration may declare Authorization Code + PKCE metadata.
-By default, the access token is stored under `service=cortexfs:<provider> account=oauth:access`, and refresh token under
-`account=oauth:refresh`. PKCE verifier, state, access token, refresh token
-must not be written into `/ctx/model/*`, `.d/default`, or any other ABI file.
 When you need to test an OpenAI-compatible provider path without calling a
 cloud API, use this repository's aimock fixture:
 

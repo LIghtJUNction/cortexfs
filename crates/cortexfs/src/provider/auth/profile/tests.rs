@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn profile_rejects_unsafe_name_before_secret_store_access() {
+    assert_eq!(account("auth-work"), Ok("auth-auth-work".to_owned()));
     let credential = Credential::ApiKey {
         provider: "local".to_owned(),
         key: "secret".to_owned(),

@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -14,7 +13,9 @@ use crate::runtime::compactabi::{
 };
 use crate::runtime::socket::command_for_agent_identity;
 use crate::support::command::TRUSTED_PATH;
-use crate::support::process::{CappedOutputError, CappedOutputWait, wait_capped_child_output};
+use crate::support::process::{
+    CappedOutputError, CappedOutputWait, wait_capped_child_output, write_child_input,
+};
 use cortexfs_context::Message;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -58,19 +59,8 @@ pub(crate) fn run_custom_compact(
     let mut child = command
         .spawn()
         .map_err(|_error| CompactError::new("EIO", name))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| CompactError::new("EIO", name))?;
-    if stdin
-        .write_all(frame.as_bytes())
-        .and_then(|()| stdin.write_all(b"\n"))
-        .is_err()
-    {
-        crate::support::process::terminate_process_group(&mut child);
-        return Err(CompactError::new("EIO", name));
-    }
-    drop(stdin);
+    let input = write_child_input(&mut child, (frame + "\n").into_bytes())
+        .map_err(|_error| CompactError::new("EIO", name))?;
     let result = wait_capped_child_output(
         &mut child,
         CappedOutputWait {
@@ -84,6 +74,12 @@ pub(crate) fn run_custom_compact(
     );
     match result {
         Ok(output) if output.status.success() => {
+            input
+                .result
+                .recv_timeout(Duration::from_millis(200))
+                .ok()
+                .and_then(Result::ok)
+                .ok_or_else(|| CompactError::new("EIO", name))?;
             let summary = String::from_utf8(output.stdout)
                 .map_err(|_error| CompactError::new("EINVAL", name))?;
             if summary.contains('\0') {

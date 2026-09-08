@@ -15,7 +15,6 @@ const MAX_STRATEGY_BYTES: u64 = 256;
 pub fn read_compact_strategy(control_dir: &Path) -> CompactStrategy {
     match read_small_text_file(&control_dir.join("compact.strategy"), MAX_STRATEGY_BYTES) {
         Ok(content) => CompactStrategy::parse(&content).unwrap_or_default(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => CompactStrategy::default(),
         Err(_error) => CompactStrategy::default(),
     }
 }
@@ -60,9 +59,11 @@ fn compact_with_custom(
         .get(..selection.omitted())
         .unwrap_or_default();
     match run_custom_compact(path, invocation, omitted, identity) {
-        Ok(summary) => render_selection(&selection, invocation.max_chars, Some(&summary))
-            .text()
-            .to_owned(),
-        Err(_error) => history.render(invocation.max_chars).text().to_owned(),
+        Ok(summary) if !summary.is_empty() => {
+            render_selection(&selection, invocation.max_chars, Some(&summary))
+                .text()
+                .to_owned()
+        }
+        _ => selection.render(invocation.max_chars).text().to_owned(),
     }
 }

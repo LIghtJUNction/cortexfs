@@ -224,32 +224,25 @@ fn parses_and_applies_agent_session_select_compare_and_swap() {
 fn agent_session_gc_and_select_share_index_guard() {
     let root = clean_test_dir("ctx-agent-session-index-guard");
     let session_root = create_agent_session_gc_fixture(&root);
-    let guard = SessionIndexGuard::exclusive(&session_root);
-    assert!(guard.is_ok());
-    let select_root = root.to_path_buf();
-    let (sent, received) = std::sync::mpsc::channel();
-    let worker = thread::spawn(move || {
-        let result = agent_session_select(&select_root, "executor", "default", "current");
-        let _ignored = sent.send(result);
-    });
-    assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
-    drop(guard);
-    assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
-    assert!(worker.join().is_ok());
-
-    let guard = SessionIndexGuard::exclusive(&session_root);
-    assert!(guard.is_ok());
-    let gc_root = root.to_path_buf();
-    let (sent, received) = std::sync::mpsc::channel();
-    let worker = thread::spawn(move || {
-        let args = agent_session_gc_args(false, false, &["missing-*"], &[]);
-        let result = agent_session_gc(&gc_root, &args);
-        let _ignored = sent.send(result);
-    });
-    assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
-    drop(guard);
-    assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
-    assert!(worker.join().is_ok());
+    for select in [true, false] {
+        let guard = SessionIndexGuard::exclusive(&session_root);
+        assert!(guard.is_ok());
+        let worker_root = root.to_path_buf();
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let result = if select {
+                agent_session_select(&worker_root, "executor", "default", "current")
+            } else {
+                let args = agent_session_gc_args(false, false, &["missing-*"], &[]);
+                agent_session_gc(&worker_root, &args)
+            };
+            let _ignored = sent.send(result);
+        });
+        assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(guard);
+        assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
+        assert!(worker.join().is_ok());
+    }
 }
 
 #[test]
@@ -594,20 +587,11 @@ fn agent_session_gc_cleans_only_matching_index_references() {
     let root = clean_test_dir("ctx-agent-session-gc-index");
     let session_root = create_agent_session_gc_fixture(&root);
     for directory in ["by-cwd", "by-hash", "by-uuid"] {
-        assert!(
-            fs::write(
-                session_root.join("index").join(directory).join("target"),
-                "e2e-old\n",
-            )
-            .is_ok()
-        );
-        assert!(
-            fs::write(
-                session_root.join("index").join(directory).join("other"),
-                "manual\n",
-            )
-            .is_ok()
-        );
+        for (name, content) in [("target", "e2e-old\n"), ("other", "manual\n")] {
+            assert!(
+                fs::write(session_root.join("index").join(directory).join(name), content).is_ok()
+            );
+        }
     }
     let args = agent_session_gc_args(false, true, &["e2e-old"], &[]);
 
@@ -637,33 +621,15 @@ fn agent_session_gc_cleans_only_matching_index_references() {
     }
 }
 
-#[test]
-fn agent_session_gc_stage_list_replacement_preserves_foreign_list() {
-    let root = clean_test_dir("ctx-agent-session-gc-list-replacement");
-    let session_root = create_agent_session_gc_fixture(&root);
+/// Verifies rollback restores the secondary claim and preserves the foreign inode.
+fn assert_gc_foreign_list_preserved(
+    session_root: &Path,
+    foreign_content: &str,
+    foreign_metadata: &fs::Metadata,
+) {
     let index = session_root.join("index");
-    let list = index.join("list");
-    let replacement = index.join("foreign-list");
-    let foreign_content = "foreign\nmanual\ndefault\n";
-    assert!(fs::write(&replacement, foreign_content).is_ok());
-    let foreign_metadata = fs::symlink_metadata(&replacement);
-    assert!(foreign_metadata.is_ok(), "{foreign_metadata:?}");
-    let Ok(foreign_metadata) = foreign_metadata else {
-        return;
-    };
     let mapping = index.join("by-cwd/target");
-    assert!(fs::write(&mapping, "e2e-old\n").is_ok());
-    let args = agent_session_gc_args(false, true, &["e2e-old"], &[]);
-
-    set_gc_list_publish_replacement_for_test(Some(replacement));
-    let result = agent_session_gc(&root, &args);
-    set_gc_list_publish_replacement_for_test(None);
-
-    assert!(result.is_err(), "foreign index replacement must fail closed");
-    let Err(error) = result else {
-        return;
-    };
-    assert!(error.message.contains("rollback conflict"));
+    let list = index.join("list");
     assert!(session_root.join("e2e-old").is_dir());
     assert!(
         fs::read_to_string(&mapping).is_ok_and(|content| content == "e2e-old\n"),
@@ -690,11 +656,39 @@ fn agent_session_gc_stage_list_replacement_preserves_foreign_list() {
 }
 
 #[test]
+fn agent_session_gc_stage_list_replacement_preserves_foreign_list() {
+    let root = clean_test_dir("ctx-agent-session-gc-list-replacement");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let index = session_root.join("index");
+    let replacement = index.join("foreign-list");
+    let foreign_content = "foreign\nmanual\ndefault\n";
+    assert!(fs::write(&replacement, foreign_content).is_ok());
+    let foreign_metadata = fs::symlink_metadata(&replacement);
+    assert!(foreign_metadata.is_ok(), "{foreign_metadata:?}");
+    let Ok(foreign_metadata) = foreign_metadata else {
+        return;
+    };
+    let mapping = index.join("by-cwd/target");
+    assert!(fs::write(&mapping, "e2e-old\n").is_ok());
+    let args = agent_session_gc_args(false, true, &["e2e-old"], &[]);
+
+    set_gc_list_publish_replacement_for_test(Some(replacement));
+    let result = agent_session_gc(&root, &args);
+    set_gc_list_publish_replacement_for_test(None);
+
+    assert!(result.is_err(), "foreign index replacement must fail closed");
+    let Err(error) = result else {
+        return;
+    };
+    assert!(error.message.contains("rollback conflict"));
+    assert_gc_foreign_list_preserved(&session_root, foreign_content, &foreign_metadata);
+}
+
+#[test]
 fn agent_session_gc_rollback_list_replacement_preserves_foreign_list() {
     let root = clean_test_dir("ctx-agent-session-gc-rollback-replacement");
     let session_root = create_agent_session_gc_fixture(&root);
     let index = session_root.join("index");
-    let list = index.join("list");
     let replacement = index.join("rollback-foreign-list");
     let foreign_content = "foreign-rollback\nmanual\ndefault\n";
     assert!(fs::write(&replacement, foreign_content).is_ok());
@@ -718,29 +712,7 @@ fn agent_session_gc_rollback_list_replacement_preserves_foreign_list() {
         return;
     };
     assert!(error.message.contains("rollback conflict"));
-    assert!(session_root.join("e2e-old").is_dir());
-    assert!(
-        fs::read_to_string(&mapping).is_ok_and(|content| content == "e2e-old\n"),
-        "secondary index claim must be restored"
-    );
-    assert!(!fs::read_dir(index.join("by-cwd")).is_ok_and(|entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".target.gc-")
-        })
-    }));
-    assert!(fs::read_to_string(&list).is_ok_and(|content| content == foreign_content));
-    let current_metadata = fs::symlink_metadata(&list);
-    assert!(current_metadata.is_ok(), "{current_metadata:?}");
-    let Ok(current_metadata) = current_metadata else {
-        return;
-    };
-    assert_eq!(
-        (current_metadata.dev(), current_metadata.ino()),
-        (foreign_metadata.dev(), foreign_metadata.ino())
-    );
+    assert_gc_foreign_list_preserved(&session_root, foreign_content, &foreign_metadata);
 }
 
 #[test]

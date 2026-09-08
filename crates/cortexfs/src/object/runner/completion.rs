@@ -183,8 +183,14 @@ fn call_provider_driver(
     effort: cortexfs::ModelEffort,
     allow_unauthenticated: bool,
 ) -> Result<(), ProviderCompletionError> {
-    let credential = provider_credential(provider, config, route.key_slot.as_deref(), driver)
-        .map_err(ProviderCompletionError::fallback)?;
+    let credential = provider_credential(
+        provider,
+        config,
+        route.key_slot.as_deref(),
+        driver,
+        &route.transport,
+    )
+    .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
             let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())

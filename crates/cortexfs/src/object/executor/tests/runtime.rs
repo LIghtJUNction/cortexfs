@@ -1,3 +1,5 @@
+use crate::object::executor::MAX_AGENT_TOOL_CONTEXT_BYTES;
+
 pub(super) fn test_prompt_context() -> AgentPromptContext {
     AgentPromptContext {
         template: DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),
@@ -76,14 +78,18 @@ fn openai_provider_uses_resolved_credential_when_present() {
     );
 }
 
-#[test]
-fn brokered_external_direct_provider_still_requires_credential_before_request() {
+fn assert_brokered_direct(
+    provider: &str,
+    base_url: &str,
+    expected_url: &str,
+    expected_credential: Result<Option<&str>, String>,
+) {
     let original = ResolvedTransport::Direct {
-        base_url: "https://api.example.test/v1".to_owned(),
+        base_url: base_url.to_owned(),
     };
     let allow_unauthenticated = transport_allows_unauthenticated(&original);
     let rewritten = provider_egress_transport(
-        "fixture",
+        provider,
         original,
         Some(OsStr::new(
             cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
@@ -93,73 +99,45 @@ fn brokered_external_direct_provider_still_requires_credential_before_request() 
     assert_eq!(
         rewritten.map(|transport| (
             transport,
-            openai_api_key("fixture", allow_unauthenticated, None)
+            openai_api_key(provider, allow_unauthenticated, None)
         )),
         Ok((
             ResolvedTransport::Unix {
-                base_url: "http://localhost/v1".to_owned(),
-                socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
+                base_url: expected_url.to_owned(),
+                socket_path: format!("/run/cortexfs/provider-egress/{provider}.sock"),
             },
-            Err("missing provider credential: fixture".to_owned())
+            expected_credential
         ))
+    );
+}
+
+#[test]
+fn brokered_external_direct_provider_still_requires_credential_before_request() {
+    assert_brokered_direct(
+        "fixture",
+        "https://api.example.test/v1",
+        "http://localhost/v1",
+        Err("missing provider credential: fixture".to_owned()),
     );
 }
 
 #[test]
 fn brokered_local_direct_provider_remains_anonymous() {
-    let original = ResolvedTransport::Direct {
-        base_url: "http://127.0.0.1:8317/v1".to_owned(),
-    };
-    let allow_unauthenticated = transport_allows_unauthenticated(&original);
-    let rewritten = provider_egress_transport(
+    assert_brokered_direct(
         "local",
-        original,
-        Some(OsStr::new(
-            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
-        )),
-    );
-
-    assert_eq!(
-        rewritten.map(|transport| (
-            transport,
-            openai_api_key("local", allow_unauthenticated, None)
-        )),
-        Ok((
-            ResolvedTransport::Unix {
-                base_url: "http://localhost/v1".to_owned(),
-                socket_path: "/run/cortexfs/provider-egress/local.sock".to_owned(),
-            },
-            Ok(None)
-        ))
+        "http://127.0.0.1:8317/v1",
+        "http://localhost/v1",
+        Ok(None),
     );
 }
 
 #[test]
 fn brokered_provider_keeps_only_trusted_path_and_frozen_auth_policy() {
-    let original = ResolvedTransport::Direct {
-        base_url: "https://api.example.test/custom?ignored=yes".to_owned(),
-    };
-    let allow_unauthenticated = transport_allows_unauthenticated(&original);
-    let rewritten = provider_egress_transport(
+    assert_brokered_direct(
         "fixture",
-        original,
-        Some(OsStr::new(
-            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
-        )),
-    );
-
-    assert_eq!(
-        rewritten.map(|transport| (
-            transport,
-            openai_api_key("fixture", allow_unauthenticated, None)
-        )),
-        Ok((
-            ResolvedTransport::Unix {
-                base_url: "http://localhost/custom".to_owned(),
-                socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
-            },
-            Err("missing provider credential: fixture".to_owned())
-        ))
+        "https://api.example.test/custom?ignored=yes",
+        "http://localhost/custom",
+        Err("missing provider credential: fixture".to_owned()),
     );
 }
 
@@ -289,7 +267,8 @@ fn prompt_admission_accepts_exact_boundary_and_rejects_one_more_byte() {
 }
 
 #[test]
-fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
+fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth()
+-> Result<(), Box<dyn std::error::Error>> {
     let mut config = test_agent_run_config();
     let budget = budget_from_effective(
         ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
@@ -299,41 +278,107 @@ fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
         matches!(budget, Some(value) if value.output_tokens() == 1_024 && value.input_chars() == 12_288)
     );
     assert_eq!(admit_agent_prompt(&config, "hello"), Ok(true));
-    let frame = format!(
-        "{}\n",
-        serde_json::json!({
-            "schema": cortexfs_runtime_client::agent::AGENT_INVOCATION_SCHEMA,
-            "run": "r1",
-            "step": 1,
-            "input": "hello",
-            "history_messages": "previous message",
-            "tool_context": format!(
-                "{}{}",
-                crate::agent::TOOL_CALL_CONTEXT_PREFIX,
-                serde_json::json!({
-                    "id": "call-1", "name": "tsh", "arguments": {"args": ["tools"]}
-                })
-            ),
-            "observation": {
-                "tool_call_id": "call-1",
-                "name": "tsh",
-                "status": "ok",
-                "content": "x".repeat(16_384),
-                "truncated": false
-            }
-        })
-    );
-    let envelope = cortexfs_runtime_client::agent::read_agent_invocation(frame.as_bytes());
-    assert!(
-        envelope.is_ok(),
-        "valid test envelope rejected: {envelope:?}"
-    );
-    let Some(envelope) = envelope.ok() else {
-        return;
-    };
-    config.apply_invocation(&envelope);
-    assert!(agent_continuation_messages(&config.tool_context).is_some());
-    assert_eq!(admit_agent_prompt(&config, "hello"), Ok(false));
+    for (content, clipped, oversized_call) in [
+        ("x".repeat(16_384), false, false),
+        ("\u{1}".repeat(16_384), true, false),
+        ("雪\u{1}\u{1}\u{1}\u{1}\u{1}".repeat(2048), true, false),
+        ("雪💡".repeat(2000), false, false),
+        ("small".to_owned(), false, true),
+    ] {
+        let mut call = serde_json::json!({
+            "id": "call-1", "name": "tsh", "arguments": {"args": ["tools"]}
+        });
+        if oversized_call {
+            let padding = MAX_AGENT_TOOL_CONTEXT_BYTES
+                - crate::agent::TOOL_CALL_CONTEXT_PREFIX.len()
+                - call.to_string().len();
+            *call
+                .pointer_mut("/arguments/args")
+                .ok_or("missing tool args")? =
+                serde_json::json!([format!("tools{}", "x".repeat(padding))]);
+        }
+        let frame = format!(
+            "{}\n",
+            serde_json::json!({
+                "schema": cortexfs_runtime_client::agent::AGENT_INVOCATION_SCHEMA,
+                "run": "r1",
+                "step": 1,
+                "input": "hello",
+                "history_messages": "previous message",
+                "event": {"content": if clipped { "e".repeat(64_000) } else { String::new() }},
+                "tool_context": format!(
+                    "{}{}",
+                    crate::agent::TOOL_CALL_CONTEXT_PREFIX,
+                    call
+                ),
+                "observation": {
+                    "tool_call_id": "call-1",
+                    "name": "tsh",
+                    "status": "ok",
+                    "content": content,
+                    "truncated": false
+                }
+            })
+        );
+        let envelope = cortexfs_runtime_client::agent::read_agent_invocation(frame.as_bytes());
+        assert!(
+            envelope.is_ok(),
+            "valid test envelope rejected: {envelope:?}"
+        );
+        let envelope = envelope?;
+        let applied = config.apply_invocation(&envelope);
+        assert_eq!(
+            envelope
+                .observation()
+                .map(cortexfs_runtime_client::agent::AgentToolObservation::content),
+            Some(content.as_str())
+        );
+        if oversized_call {
+            assert_eq!(
+                applied,
+                Err(ExecError::new("tool continuation exceeds context budget"))
+            );
+            continue;
+        }
+        assert_eq!(applied, Ok(()));
+        assert!(config.tool_context.len() <= MAX_AGENT_TOOL_CONTEXT_BYTES);
+        assert!(agent_continuation_messages(&config.tool_context).is_some());
+        let [assistant, tool] =
+            agent_continuation_messages(&config.tool_context).ok_or("missing tool continuation")?;
+        assert_eq!(
+            assistant
+                .tool_calls
+                .first()
+                .map(|call| serde_json::json!(call)),
+            Some(call)
+        );
+        assert_eq!(tool.tool_call_id.as_deref(), Some("call-1"));
+        let rendered = tool.content.text_value();
+        assert_eq!(rendered.ends_with("\n[truncated]\n"), clipped);
+        if clipped {
+            let excerpt = rendered.trim_end_matches("\n[truncated]\n");
+            assert!(content.starts_with(excerpt));
+            let next = content
+                .get(excerpt.len()..)
+                .ok_or("invalid excerpt boundary")?
+                .chars()
+                .next()
+                .ok_or("nothing truncated")?;
+            let mut expanded = serde_json::json!([assistant, tool]);
+            *expanded
+                .pointer_mut("/1/content/value")
+                .ok_or("missing tool result")? =
+                serde_json::json!(format!("{excerpt}{next}\n[truncated]\n"));
+            assert!(
+                expanded.to_string().len() + crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX.len()
+                    > MAX_AGENT_TOOL_CONTEXT_BYTES
+            );
+        } else {
+            assert_eq!(rendered, content);
+        }
+        assert_eq!(admit_agent_prompt(&config, "hello"), Ok(false));
+    }
+    Ok(())
 }
 
 #[test]

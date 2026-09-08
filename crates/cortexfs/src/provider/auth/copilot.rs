@@ -66,10 +66,10 @@ impl GitHubCopilotAdapter {
 }
 
 fn default_methods() -> Vec<ProviderAuthConfig> {
-    vec![
-        ProviderAuthConfig::oauth(super::OAuthFlow::AuthorizationCode, "subscription"),
-        ProviderAuthConfig::oauth(super::OAuthFlow::DeviceCode, "subscription"),
-    ]
+    vec![ProviderAuthConfig::oauth(
+        super::OAuthFlow::DeviceCode,
+        "subscription",
+    )]
 }
 impl CoreAuthProvider for GitHubCopilotAdapter {
     fn core(&self) -> &AdapterCore {

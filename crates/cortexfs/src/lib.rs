@@ -103,8 +103,8 @@ pub use provider::auth::{
 };
 pub use provider::discovery::*;
 pub(crate) use provider::{
-    ProjectedProviderModel, ProviderConfig, ProviderModelCache, ProviderSnapshot,
-    current_model_alias_target, is_current_model_alias_target,
+    ProjectedProviderModel, ProviderModelCache, ProviderSnapshot, current_model_alias_target,
+    is_current_model_alias_target,
 };
 pub use support::control::ControlLineIssue;
 pub use support::jsonl::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};

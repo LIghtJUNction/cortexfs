@@ -149,45 +149,29 @@ fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid
 
 #[test]
 fn parses_bootstrap_and_mount_commands() {
-    let bootstrap = cmd!("bootstrap");
-    assert!(matches!(
-        bootstrap,
-        Ok(Command::Bootstrap {
-            source: None,
-            dry_run: false,
-            check: false
-        })
-    ));
-
-    let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
-    assert!(matches!(
-        bootstrap_source,
-        Ok(Command::Bootstrap {
-            source: Some(ref source),
-            dry_run: false,
-            check: false
-        }) if source == Path::new("/tmp/cortexfs-source")
-    ));
-
-    let dry_run = cmd!("bootstrap", "--dry-run", "/tmp/cortexfs-source");
-    assert!(matches!(
-        dry_run,
-        Ok(Command::Bootstrap {
-            source: Some(ref source),
-            dry_run: true,
-            check: false
-        }) if source == Path::new("/tmp/cortexfs-source")
-    ));
-
-    let check = cmd!("bootstrap", "--check");
-    assert!(matches!(
-        check,
-        Ok(Command::Bootstrap {
-            source: None,
-            dry_run: false,
-            check: true
-        })
-    ));
+    for (parsed, source, dry_run, check) in [
+        (cmd!("bootstrap"), None, false, false),
+        (
+            cmd!("bootstrap", "/tmp/cortexfs-source"),
+            Some("/tmp/cortexfs-source"),
+            false,
+            false,
+        ),
+        (
+            cmd!("bootstrap", "--dry-run", "/tmp/cortexfs-source"),
+            Some("/tmp/cortexfs-source"),
+            true,
+            false,
+        ),
+        (cmd!("bootstrap", "--check"), None, false, true),
+    ] {
+        let expected = (source.map(Path::new), dry_run, check);
+        assert!(matches!(
+            parsed,
+            Ok(Command::Bootstrap { ref source, dry_run, check })
+                if (source.as_deref(), dry_run, check) == expected
+        ));
+    }
 
     assert!(matches!(
         cmd!("bootstrap", "--check", "--dry-run"),

@@ -59,7 +59,7 @@ impl CompactedHistory {
         &self.text
     }
 
-    /// Returns the number of omitted durable messages.
+    /// Returns the number of entirely omitted durable messages, excluding a marked recent excerpt.
     #[must_use]
     pub const fn omitted(&self) -> usize {
         self.omitted

@@ -10,6 +10,7 @@ use super::{
 use crate::support::atomic::atomic_replace_text_with_mode;
 use crate::support::columnar;
 use crate::support::plain::open_plain_directory;
+use crate::support::process::write_child_input;
 use crate::{
     AgentApprovalMode, AgentExecutableSocketRuntime, AgentStopHandler, ChildContextStatus,
     ChildLifecycle, MAX_AGENT_STDOUT_QUEUE_FRAMES, MAX_HISTORY_MESSAGES_CHARS, SocketRequest,
@@ -24,7 +25,7 @@ use cortexfs_runtime_client::interaction::InteractionOrigin;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -905,11 +906,9 @@ fn run_agent_envelope_loop_with_control(
     let mut seen = HashSet::new();
     let mut observation = Value::Null;
     let mut tool_context = request.tool_context.to_owned();
+    let cancel_dir = runtime.session_root.join(request.session);
     for step in 0..=max_steps {
-        if agent_run_cancelled(
-            &runtime.session_root.join(request.session),
-            request.cancellation_id,
-        ) {
+        if agent_run_cancelled(&cancel_dir, request.cancellation_id) {
             return Ok(AgentRunOutcome {
                 frames,
                 process: AgentProcessOutcome::Cancelled,
@@ -1054,16 +1053,12 @@ fn run_agent_envelope_loop_with_control(
                 ),
             ));
         }
-        if agent_run_cancelled(
-            &runtime.session_root.join(request.session),
-            request.cancellation_id,
-        ) {
+        if agent_run_cancelled(&cancel_dir, request.cancellation_id) {
             return Ok(AgentRunOutcome {
                 frames,
                 process: AgentProcessOutcome::Cancelled,
             });
         }
-        let cancel_dir = runtime.session_root.join(request.session);
         let config = object::executor::exec::AgentToolExecutionConfig {
             agent: runtime.agent_name,
             source: runtime.source_root,
@@ -1264,20 +1259,8 @@ pub(crate) fn run_agent_executable_streaming(
         let _ignored = child.wait();
         return Err(SocketRuntimeError::CannotRunAgent);
     }
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or(SocketRuntimeError::CannotRunAgent)?;
-    // A fast-exiting executable can close stdin before the envelope arrives;
-    // its emitted frames and exit status stay the authoritative outcome.
-    if let Err(error) = stdin.write_all(envelope.as_bytes())
-        && error.kind() != std::io::ErrorKind::BrokenPipe
-    {
-        terminate_agent_process_group(&mut child);
-        let _ignored = child.wait();
-        return Err(SocketRuntimeError::CannotRunAgent);
-    }
-    drop(stdin);
+    let input = write_child_input(&mut child, envelope.as_bytes().to_vec())
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
     drop(agent_executable_fd);
     if let Some(control) = control
         && control.await_startup().is_err()
@@ -1316,6 +1299,15 @@ pub(crate) fn run_agent_executable_streaming(
     let mut yielded_tool_call = None;
     let mut cancel_check = Instant::now();
     loop {
+        // Fast-exiting executables may close stdin before reading the envelope;
+        // their emitted frames and exit status remain authoritative.
+        if let Ok(Err(error)) = input.result.try_recv()
+            && error.kind() != std::io::ErrorKind::BrokenPipe
+        {
+            terminate_agent_process_group(&mut child);
+            let _ignored = child.wait();
+            return Err(SocketRuntimeError::CannotRunAgent);
+        }
         if cancel_check.elapsed() >= Duration::from_millis(100) {
             cancel_check = Instant::now();
             if agent_run_cancelled(&session_dir, request.cancellation_id) {
@@ -1345,41 +1337,28 @@ pub(crate) fn run_agent_executable_streaming(
                     })?;
                     saw_agent_frame = true;
                 }
-                if !inspect_event_stream_jsonl(&format!("{line}\n")).is_ok() {
-                    terminate_agent_process_group(&mut child);
-                    let _ignored = child.wait();
-                    return Err(SocketRuntimeError::InvalidAgentOutput);
-                }
-                let value: Value = serde_json::from_str(&line)
-                    .map_err(|_error| SocketRuntimeError::InvalidAgentOutput)?;
-                let frame_type = event_type(&line);
+                let value: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+                let frame_type = value.get("type").and_then(Value::as_str);
                 let recoverable_error =
                     value.get("recoverable").and_then(Value::as_bool) == Some(true);
-                if matches!(
-                    frame_type.as_deref(),
-                    Some("approval_request" | "approval_result" | "start" | "done")
-                ) || frame_type.as_deref() == Some("error") && !recoverable_error
-                {
-                    terminate_agent_process_group(&mut child);
-                    let _ignored = child.wait();
-                    return Err(SocketRuntimeError::InvalidAgentOutput);
-                }
-                if agent_frame_has_tool_result(&value) {
-                    terminate_agent_process_group(&mut child);
-                    let _ignored = child.wait();
-                    return Err(SocketRuntimeError::InvalidAgentOutput);
-                }
                 let next_frame_bytes = frame_bytes.saturating_add(line.len());
-                if yielded_tool_call.is_some() || next_frame_bytes > MAX_SOCKET_RUNTIME_OUTPUT_BYTES
+                if !inspect_event_stream_jsonl(&format!("{line}\n")).is_ok()
+                    || matches!(
+                        frame_type,
+                        Some("approval_request" | "approval_result" | "start" | "done")
+                    )
+                    || frame_type == Some("error") && !recoverable_error
+                    || agent_frame_has_tool_result(&value)
+                    || frame_type == Some("tool_call")
+                        && object::executor::call::agent_tool_call_from_value(&value).is_err()
+                    || yielded_tool_call.is_some()
+                    || next_frame_bytes > MAX_SOCKET_RUNTIME_OUTPUT_BYTES
                 {
                     terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
                 }
-                if object::executor::call::tool_call_from_event_frame(&line)
-                    .map_err(|_error| SocketRuntimeError::InvalidAgentOutput)?
-                    .is_some()
-                {
+                if frame_type == Some("tool_call") {
                     yielded_tool_call = Some(line);
                     continue;
                 }
@@ -1645,7 +1624,7 @@ mod completion_tests {
     use crate::reference::bootstrap::ensure_runtime_models_from;
     use crate::{AgentUnixIdentity, MountTable, RunEnvironment, ensure_reference_tree};
     use std::ffi::OsString;
-    use std::io::{self, Read};
+    use std::io::{self, Read, Write};
     use std::net::{Shutdown, TcpListener};
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
@@ -1805,14 +1784,11 @@ mod completion_tests {
             .map_err(|error| io::Error::other(format!("{error:?}")))
     }
 
-    #[test]
-    fn direct_agent_output_rejects_aggregate_overflow() -> Result<(), Box<dyn std::error::Error>> {
-        let root = tempfile::tempdir()?;
-        let executable = root.path().join("agent");
-        fs::write(
-            &executable,
-            "#!/bin/sh\npayload=$(/usr/bin/head -c 131072 /dev/zero | /usr/bin/tr '\\0' x)\ni=0\nwhile [ \"$i\" -le 8 ]; do printf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"%s\"}\\n' \"$CTX_RUN_ID\" \"$payload\"; i=$((i + 1)); done\n",
-        )?;
+    fn run_direct_agent(
+        root: &Path,
+        input: &str,
+    ) -> Result<AgentRunOutcome, Box<dyn std::error::Error>> {
+        let executable = root.join("agent");
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))?;
         let identity = AgentUnixIdentity::new(
             nix::unistd::geteuid().as_raw(),
@@ -1820,11 +1796,11 @@ mod completion_tests {
             [],
         );
         let runtime = AgentExecutableSocketRuntime {
-            ctx_root: root.path(),
-            source_root: root.path(),
+            ctx_root: root,
+            source_root: root,
             identity: &identity,
             env: &[],
-            session_root: root.path(),
+            session_root: root,
             default_cwd: "/",
             model: None,
             network_allowed: false,
@@ -1832,13 +1808,20 @@ mod completion_tests {
             agent_executable: &executable,
             environment: RunEnvironment::Native,
         };
+        run_test_agent(runtime, input).map(|(outcome, _delivered)| outcome)
+    }
+
+    fn run_test_agent(
+        runtime: AgentExecutableSocketRuntime<'_>,
+        input: &str,
+    ) -> Result<(AgentRunOutcome, String), Box<dyn std::error::Error>> {
         let request = AgentExecutableRunRequest {
             request_id: "request-1",
             run_id: "run1",
             cancellation_id: "run1",
             session: "default",
             cwd: None,
-            input: "overflow",
+            input,
             event: None,
             origin: None,
             channel: None,
@@ -1848,16 +1831,82 @@ mod completion_tests {
         };
         let (mut client, mut server) = UnixStream::pair()?;
         let reader = thread::spawn(move || {
-            let _ignored = client.read_to_end(&mut Vec::new());
+            let mut delivered = String::new();
+            client.read_to_string(&mut delivered).map(|_read| delivered)
         });
         let outcome = run_agent_request(&mut server, runtime, request, None)
             .map_err(|error| io::Error::other(format!("{error:?}")))?;
         drop(server);
-        reader
+        let delivered = reader
             .join()
-            .map_err(|_error| io::Error::other("socket reader panicked"))?;
-        assert_eq!(outcome.process, AgentProcessOutcome::Error);
-        assert!(outcome.frames.iter().any(|frame| frame.contains("EPROTO")));
+            .map_err(|_error| io::Error::other("socket reader panicked"))??;
+        Ok((outcome, delivered))
+    }
+
+    #[test]
+    fn direct_agent_output_rejects_aggregate_overflow() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        fs::write(
+            root.path().join("agent"),
+            "#!/bin/sh\npayload=$(/usr/bin/head -c 131072 /dev/zero | /usr/bin/tr '\\0' x)\ni=0\nwhile [ \"$i\" -le 8 ]; do printf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"%s\"}\\n' \"$CTX_RUN_ID\" \"$payload\"; i=$((i + 1)); done\n",
+        )?;
+        let outcome = run_direct_agent(root.path(), "overflow")?;
+        assert_eq!(outcome.process, AgentProcessOutcome::Error, "{outcome:?}");
+        assert!(
+            outcome.frames.iter().any(|frame| frame.contains("EPROTO")),
+            "{outcome:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn direct_agent_drains_output_while_feeding_large_envelope()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        fs::write(
+            root.path().join("agent"),
+            r#"#!/bin/sh
+exec /usr/bin/timeout 5s /bin/sh -c '
+printf "{\"type\":\"delta\",\"run\":\"run1\",\"text\":\""
+/usr/bin/head -c 131072 /dev/zero | /usr/bin/tr "\\0" x
+printf "\"}\n"
+/usr/bin/cat >/dev/null
+printf "{\"type\":\"message\",\"run\":\"run1\",\"role\":\"assistant\",\"content\":\"input consumed\"}\n"
+'
+"#,
+        )?;
+        let outcome = run_direct_agent(root.path(), &"x".repeat(512 * 1024))?;
+        assert_eq!(outcome.process, AgentProcessOutcome::Success, "{outcome:?}");
+        assert!(
+            outcome
+                .frames
+                .iter()
+                .any(|frame| frame.contains("input consumed"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn direct_agent_can_cancel_without_reading_envelope() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = tempfile::tempdir()?;
+        fs::create_dir_all(root.path().join("default"))?;
+        fs::write(
+            root.path().join("agent"),
+            r#"#!/bin/sh
+printf '{"type":"done","run":"run1","status":"cancelled"}\n' > "$CTX_SOURCE/default/events.jsonl"
+printf 'cancelled\n' > "$CTX_SOURCE/default/state"
+exec /usr/bin/timeout 5s /usr/bin/sleep 30
+"#,
+        )?;
+        let started = Instant::now();
+        let outcome = run_direct_agent(root.path(), &"x".repeat(512 * 1024))?;
+        assert_eq!(
+            outcome.process,
+            AgentProcessOutcome::Cancelled,
+            "{outcome:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
         Ok(())
     }
 
@@ -1920,26 +1969,7 @@ mod completion_tests {
                 control_dir: Some(&control_dir),
             },
         };
-        let request = AgentExecutableRunRequest {
-            request_id: "request-1",
-            run_id: "run1",
-            cancellation_id: "run1",
-            session: "default",
-            cwd: None,
-            input: "say hello",
-            event: None,
-            origin: None,
-            channel: None,
-            history_messages: "",
-            tool_context: "",
-            debug: None,
-        };
-        let (mut client, mut server) = UnixStream::pair()?;
-        let outcome = run_agent_request(&mut server, runtime, request, None)
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        server.shutdown(Shutdown::Write)?;
-        let mut delivered = String::new();
-        client.read_to_string(&mut delivered)?;
+        let (outcome, delivered) = run_test_agent(runtime, "say hello")?;
         let frames = outcome.frames.join("\n");
         assert!(frames.contains("brokered ok"), "{frames}");
         assert!(frames.contains("\"type\":\"usage\""), "{frames}");

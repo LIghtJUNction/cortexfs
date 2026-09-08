@@ -42,6 +42,10 @@ pub enum ProviderEgressError {
     AuthorityConflict,
     #[error("cannot create provider egress boundary")]
     CannotCreate,
+    #[error("provider credential unavailable; check authentication or log in again")]
+    CredentialUnavailable,
+    #[error("process-dependent authentication routes are unsupported by provider egress")]
+    UnsupportedRoute,
 }
 
 /// Run-scoped Unix sockets that relay only to pre-resolved provider authorities.

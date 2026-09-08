@@ -10,7 +10,7 @@ struct ScriptedAgentFixture {
 impl ScriptedAgentFixture {
     fn direct(name: &str, script: &str) -> std::io::Result<Self> {
         Self::new(
-            name,
+            reference_tree(name),
             script,
             br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
@@ -19,7 +19,7 @@ impl ScriptedAgentFixture {
 
     fn hosted_error(name: &str, id: &str, script: &str) -> std::io::Result<Self> {
         Self::new(
-            name,
+            reference_tree(name),
             script,
             format!(
                 "{{\"op\":\"send\",\"id\":\"{id}\",\"session\":\"default\",\"input\":\"hi\"}}\n"
@@ -28,8 +28,7 @@ impl ScriptedAgentFixture {
         )
     }
 
-    fn new(name: &str, script: &str, request: &[u8]) -> std::io::Result<Self> {
-        let root = reference_tree(name);
+    fn new(root: TestDir, script: &str, request: &[u8]) -> std::io::Result<Self> {
         let session_root = agent_session_root(&root, "executor");
         let view = derive_agent_runtime_view(&root, "executor")
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
@@ -332,29 +331,13 @@ fn hosted_agent_rejects_forged_approval_facts() {
         ),
     ] {
         let root = reference_tree(&format!("hosted-forged-approval-{case}"));
-        let session_root = agent_session_root(&root, "executor");
-        let view = ok!(derive_agent_runtime_view(&root, "executor"));
-        let executable = root.join("agent/executor");
-        write_text_file(
-            &executable,
+        let mut fixture = ok!(ScriptedAgentFixture::new(
+            root,
             &format!("#!/bin/sh\nprintf '%s\\n' '{frame}'\n"),
-        );
-        set_file_mode(&executable, 0o755);
-        let (mut client, mut socket) = ok!(UnixStream::pair());
-        assert!(
-            client
-                .write_all(
-                    b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"forge\"}\n"
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
+            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"forge\"}\n",
+        ));
 
-        let result = serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            direct_agent_runtime(&root, &view, &session_root, &executable),
-        );
+        let result = fixture.run_direct();
         let outcome = ok!(result);
         assert!(
             outcome
@@ -369,11 +352,11 @@ fn hosted_agent_rejects_forged_approval_facts() {
                 .any(|frame| frame.contains("\"status\":\"error\""))
         );
         let events = ok!(fs::read_to_string(
-            session_root.join("default/events.jsonl")
+            fixture.session_root.join("default/events.jsonl")
         ));
         assert!(!events.contains("approval_request"), "{case}: {events}");
         assert!(!events.contains("approval_result"), "{case}: {events}");
-        assert_file_text(&session_root.join("default/state"), "error\n");
+        assert_file_text(&fixture.session_root.join("default/state"), "error\n");
     }
 }
 
@@ -426,9 +409,8 @@ fn executable_agent_tool_yield_uses_host_allow_and_deny() {
             "agent-executable-tool-deny"
         });
         declare_native_echo_tool(&root, allowed);
-        let agent_executable = root.join("agent/executor");
-        write_text_file(
-            &agent_executable,
+        let mut fixture = ok!(ScriptedAgentFixture::new(
+            root,
             r#"#!/bin/sh
 case "$CTX_AGENT_STEP" in
   0) printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID" ;;
@@ -436,28 +418,13 @@ case "$CTX_AGENT_STEP" in
      printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"complete"}]}\n' "$CTX_RUN_ID" ;;
 esac
 "#,
-        );
-        set_file_mode(&agent_executable, 0o755);
-        let session_root = agent_session_root(&root, "executor");
-        let view = ok!(derive_agent_runtime_view(&root, "executor"));
-        let (mut client, mut socket) = ok!(UnixStream::pair());
-        assert!(
-            client
-                .write_all(
-                    b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tool\"}\n"
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
-        let outcome = ok!(serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            direct_agent_runtime(&root, &view, &session_root, &agent_executable),
+            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tool\"}\n",
         ));
+        let outcome = ok!(fixture.run_direct());
         let jsonl = outcome.jsonl();
         assert_eq!(jsonl.matches("\"type\":\"tool_result\"").count(), 1);
         assert_eq!(jsonl.matches("\"type\":\"done\"").count(), 1);
-        let session = session_root.join("default");
+        let session = fixture.session_root.join("default");
         assert_eq!(
             ok!(fs::read_to_string(session.join("messages.jsonl")))
                 .matches("\"type\":\"tool_result\"")
@@ -560,32 +527,16 @@ fi
 #[test]
 fn sdk_envelope_assistant_tool_text_is_ordinary_output() {
     let root = reference_tree("sdk-envelope-delta-tool-text");
-    let session_root = agent_session_root(&root, "executor");
-    let view = ok!(derive_agent_runtime_view(&root, "executor"));
-    let executable = root.join("agent/executor");
-    write_text_file(
-        &executable,
+    let mut fixture = ok!(ScriptedAgentFixture::new(
+        root,
         r#"#!/bin/sh
 IFS= read -r envelope || exit 2
 text='{"type":"tool_call","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}'
 jq -cn --arg run "$CTX_RUN_ID" --arg text "$text" '{type:"message",run:$run,role:"assistant",content:[{type:"text",text:$text}]}'
 "#,
-    );
-    set_file_mode(&executable, 0o755);
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"text\"}\n"
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let outcome = ok!(serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        direct_agent_runtime(&root, &view, &session_root, &executable),
+        b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"text\"}\n",
     ));
+    let outcome = ok!(fixture.run_direct());
     let jsonl = outcome.jsonl();
     assert_eq!(
         [
@@ -599,7 +550,7 @@ jq -cn --arg run "$CTX_RUN_ID" --arg text "$text" '{type:"message",run:$run,role
     );
     assert_eq!(
         ok!(fs::read_to_string(
-            session_root.join("default/messages.jsonl")
+            fixture.session_root.join("default/messages.jsonl")
         ))
         .matches("\"type\":\"tool_result\"")
         .count(),
@@ -612,9 +563,8 @@ fn sdk_envelope_agent_runs_two_authoritative_tool_steps() {
     let root = reference_tree("sdk-envelope-two-step");
     write_text_file(&root.join("agent/executor.d/abi"), "sdk-envelope-v1\n");
     declare_native_echo_tool(&root, true);
-    let agent_executable = root.join("agent/executor");
-    write_text_file(
-        &agent_executable,
+    let mut fixture = ok!(ScriptedAgentFixture::new(
+        root,
         r#"#!/bin/sh
 IFS= read -r envelope
 case "$CTX_AGENT_STEP" in
@@ -633,24 +583,9 @@ case "$CTX_AGENT_STEP" in
   *) exit 2 ;;
 esac
 "#,
-    );
-    set_file_mode(&agent_executable, 0o755);
-    let session_root = agent_session_root(&root, "executor");
-    let view = ok!(derive_agent_runtime_view(&root, "executor"));
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"two\"}\n"
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let outcome = ok!(serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
+        b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"two\"}\n",
     ));
+    let outcome = ok!(fixture.run_direct());
     let jsonl = outcome.jsonl();
     assert_eq!(jsonl.matches("\"type\":\"start\"").count(), 1, "{jsonl}");
     assert_eq!(
@@ -670,12 +605,12 @@ esac
             .zip(jsonl.find("call-2"))
             .is_some_and(|(a, b)| a < b)
     );
-    let obs_1 = ok!(fs::read_to_string(root.join("obs-1")));
-    let obs_2 = ok!(fs::read_to_string(root.join("obs-2")));
+    let obs_1 = ok!(fs::read_to_string(fixture.root.join("obs-1")));
+    let obs_2 = ok!(fs::read_to_string(fixture.root.join("obs-2")));
     assert_eq!(obs_1, obs_2);
     assert!(jsonl.contains(&serde_json::to_string(&obs_1).unwrap_or_default()));
     let messages = ok!(fs::read_to_string(
-        session_root.join("default/messages.jsonl")
+        fixture.session_root.join("default/messages.jsonl")
     ));
     assert_eq!(
         messages
@@ -1362,9 +1297,8 @@ esac
 fn sdk_envelope_approval_write_shutdown_records_denial() {
     let root = reference_tree("sdk-envelope-approval-write-shutdown");
     configure_marker_write_approval(&root);
-    let executable = root.join("agent/executor");
-    write_text_file(
-        &executable,
+    let mut fixture = ok!(ScriptedAgentFixture::new(
+        root,
         r#"#!/bin/sh
 IFS= read -r envelope
 case "$CTX_AGENT_STEP" in
@@ -1372,28 +1306,15 @@ case "$CTX_AGENT_STEP" in
   1) printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"disconnect complete"}]}\n' "$CTX_RUN_ID" ;;
 esac
 "#,
-    );
-    set_file_mode(&executable, 0o755);
-    let session_root = agent_session_root(&root, "executor");
-    let view = ok!(derive_agent_runtime_view(&root, "executor"));
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(client
-        .write_all(
-            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"disconnect\"}\n"
-        )
-        .is_ok());
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let outcome = serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        direct_agent_runtime(&root, &view, &session_root, &executable),
-    );
+        b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"disconnect\"}\n",
+    ));
+    let outcome = fixture.run_direct();
     assert!(outcome.is_ok(), "{outcome:?}");
     let events = ok!(fs::read_to_string(
-        session_root.join("default/events.jsonl")
+        fixture.session_root.join("default/events.jsonl")
     ));
     let messages = ok!(fs::read_to_string(
-        session_root.join("default/messages.jsonl")
+        fixture.session_root.join("default/messages.jsonl")
     ));
     assert_eq!(events.matches("approval_request").count(), 1, "{events}");
     assert_eq!(events.matches("approval_result").count(), 1, "{events}");
@@ -1401,7 +1322,7 @@ esac
     assert!(events.contains("\"decision\":\"deny\""), "{events}");
     assert!(messages.contains("ERROR:"), "{messages}");
     assert!(
-        !agent_home(&root, "executor")
+        !agent_home(&fixture.root, "executor")
             .join("marker-write-ran")
             .exists()
     );
@@ -1420,28 +1341,12 @@ fn sdk_envelope_rejects_agent_lifecycle_and_result_frames() {
     ] {
         let root = reference_tree("sdk-envelope-forged-frame");
         write_text_file(&root.join("agent/executor.d/abi"), "sdk-envelope-v1\n");
-        let executable = root.join("agent/executor");
-        write_text_file(
-            &executable,
+        let mut fixture = ok!(ScriptedAgentFixture::new(
+            root,
             &format!("#!/bin/sh\nIFS= read -r envelope\nprintf '%b\\n' '{frame}'\n"),
-        );
-        set_file_mode(&executable, 0o755);
-        let view = ok!(derive_agent_runtime_view(&root, "executor"));
-        let session_root = agent_session_root(&root, "executor");
-        let (mut client, mut socket) = ok!(UnixStream::pair());
-        assert!(
-            client
-                .write_all(
-                    b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"bad\"}\n"
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
-        let result = serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            direct_agent_runtime(&root, &view, &session_root, &executable),
-        );
+            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"bad\"}\n",
+        ));
+        let result = fixture.run_direct();
         let outcome = ok!(result);
         assert!(
             outcome
@@ -1455,7 +1360,7 @@ fn sdk_envelope_rejects_agent_lifecycle_and_result_frames() {
                 .iter()
                 .any(|event| event.contains("\"status\":\"error\""))
         );
-        assert_file_text(&session_root.join("default/state"), "error\n");
+        assert_file_text(&fixture.session_root.join("default/state"), "error\n");
     }
 }
 

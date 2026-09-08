@@ -45,10 +45,11 @@ fn store_key(
                 .map(|method| method.slot.as_str())
         })
         .ok_or(AuthProviderError::UnsupportedMethod)?;
-    if !core
-        .methods
-        .iter()
-        .any(|method| method.method == AuthMethod::ApiKey && method.slot == slot)
+    if !super::is_api_key_slot(slot)
+        || !core
+            .methods
+            .iter()
+            .any(|method| method.method == AuthMethod::ApiKey && method.slot == slot)
     {
         return Err(AuthProviderError::InvalidCredential);
     }

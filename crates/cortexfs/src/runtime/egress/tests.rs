@@ -150,6 +150,34 @@ fn plan_rejects_credentials_queries_and_fragments() -> Result<(), Box<dyn std::e
 }
 
 #[test]
+fn plan_preserves_named_profile_and_rejects_same_provider_profile_conflict()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (root, _control) = fixture()?;
+    write_model(root.path(), "fixture/primary", "https://example.test/v1")?;
+    write_model(root.path(), "fixture/fallback", "https://example.test/v1")?;
+    let route = root.path().join("model/route");
+    fs::write(
+        &route,
+        "group(work) -> direct,key(work)\nprovider(fixture) -> work\n",
+    )?;
+    assert_eq!(
+        plan_targets(root.path(), "fixture/primary")?
+            .first()
+            .map(|target| target.profile.as_str()),
+        Some("work")
+    );
+    fs::write(
+        &route,
+        "group(work) -> direct,key(work)\nmodel(fallback) -> work\nmodel-fallback(fixture/primary) -> fixture/fallback\n",
+    )?;
+    assert!(matches!(
+        plan_targets(root.path(), "fixture/primary"),
+        Err(ProviderEgressError::AuthorityConflict)
+    ));
+    Ok(())
+}
+
+#[test]
 fn plan_resolves_alias_fallback_and_deduplicates_provider() -> Result<(), Box<dyn std::error::Error>>
 {
     let root = tempfile::tempdir()?;
@@ -326,6 +354,7 @@ fn listener_rejects_wrong_peer_without_reaching_upstream() -> Result<(), Box<dyn
         base_url: format!("http://{}", tcp.local_addr()?),
         authority: format!("http://{}", tcp.local_addr()?),
         base_path: String::new(),
+        profile: "default".to_owned(),
         credential: None,
     };
     let socket = root.path().join("egress.sock");

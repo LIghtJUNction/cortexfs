@@ -1,8 +1,46 @@
+use crate::AgentRuntimeView;
+
+fn agent_fixture(name: &str, agent: &str) -> (TestDir, PathBuf) {
+    let root = clean_test_dir(name);
+    create_complete_object_layout(&root, ObjectClass::Agent, agent, "none");
+    let control = root.join("agent").join(format!("{agent}.d"));
+    (root, control)
+}
+
+fn missing_model_view(
+    name: &str,
+    agent: &str,
+) -> Result<(TestDir, AgentRuntimeView), AgentRuntimeViewError> {
+    let (root, control) = agent_fixture(name, agent);
+    write_text_file(
+        &control.join("label"),
+        &format!("user_u:agent_r:{agent}_t:s0\n"),
+    );
+    write_text_file(
+        &control.join("policy"),
+        &format!("allow {agent}_t model:openai/gpt-5.6 use\n"),
+    );
+    let default_model = root.join("model/openai/gpt-5.6.d");
+    assert!(fs::create_dir_all(&default_model).is_ok());
+    write_text_file(&default_model.join("limit"), "unknown\n");
+    assert!(fs::remove_file(control.join("model")).is_ok());
+    let view = derive_agent_runtime_view(&root, agent)?;
+    Ok((root, view))
+}
+
+fn secret_command(script: &str) -> std::process::Command {
+    let mut command = std::process::Command::new("sh");
+    command
+        .arg("-c")
+        .arg(script)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    command
+}
+
 #[test]
 fn agent_runtime_view_derives_identity_environment_policy_and_view() {
-    let root = clean_test_dir("agent-runtime-view");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
-    let control = root.join("agent").join("executor.d");
+    let (root, control) = agent_fixture("agent-runtime-view", "executor");
     write_text_file(
         &control.join("env"),
         "CTX_ROOT=/ignored\nHOME=/ignored\nPATH=/tmp/pwn\nLD_PRELOAD=/tmp/libpwn.so\nRUST_LOG=info\nCTX_PROVIDER_SECRET_PATH=/tmp/secret\nTERM=vt100\n",
@@ -78,9 +116,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
 
 #[test]
 fn agent_runtime_view_loads_a_custom_loop_control() {
-    let root = clean_test_dir("agent-runtime-loop-control");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
-    let control = root.join("agent/executor.d");
+    let (root, control) = agent_fixture("agent-runtime-loop-control", "executor");
     write_text_file(&control.join("loop"), "coding\n");
 
     let view = ok!(derive_agent_runtime_view(&root, "executor"));
@@ -97,9 +133,7 @@ fn agent_runtime_view_loads_a_custom_loop_control() {
 
 #[test]
 fn agent_runtime_view_resolves_auto_and_explicit_windows() {
-    let root = clean_test_dir("agent-runtime-window-resolution");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
-    let control = root.join("agent/executor.d");
+    let (root, control) = agent_fixture("agent-runtime-window-resolution", "executor");
     write_text_file(&control.join("model"), "local/chat\n");
     write_text_file(&root.join("model/local/chat.d/limit"), "64\n");
 
@@ -217,9 +251,7 @@ fn live_models_dev_metadata_reaches_agent_context_environment() -> std::io::Resu
 
 #[test]
 fn agent_runtime_view_rejects_malformed_alias_and_limit() {
-    let root = clean_test_dir("agent-runtime-window-invalid-model-state");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
-    let control = root.join("agent/executor.d");
+    let (root, control) = agent_fixture("agent-runtime-window-invalid-model-state", "executor");
     write_text_file(&control.join("model"), "main\n");
     assert!(fs::remove_file(root.join("model/main")).is_ok());
     assert!(symlink("../escape", root.join("model/main")).is_ok());
@@ -243,9 +275,7 @@ fn agent_runtime_view_rejects_malformed_alias_and_limit() {
 
 #[test]
 fn agent_runtime_view_requires_sdk_envelope_abi() {
-    let root = clean_test_dir("agent-runtime-abi");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
-    let control = root.join("agent/executor.d");
+    let (root, control) = agent_fixture("agent-runtime-abi", "executor");
     write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
     assert!(derive_agent_runtime_view(&root, "executor").is_ok());
 
@@ -343,12 +373,7 @@ fn secret_tool_lookup_uses_minimal_dbus_environment() {
 
 #[test]
 fn secret_tool_runner_rejects_oversized_stdout() {
-    let mut command = std::process::Command::new("sh");
-    command
-        .arg("-c")
-        .arg("head -c 16384 /dev/zero | tr '\\0' x")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+    let command = secret_command("head -c 16384 /dev/zero | tr '\\0' x");
 
     let output = super::run_secret_tool_command_with_timeout(command, Duration::from_secs(2));
 
@@ -357,12 +382,7 @@ fn secret_tool_runner_rejects_oversized_stdout() {
 
 #[test]
 fn secret_tool_runner_kills_child_after_oversized_stdout() {
-    let mut command = std::process::Command::new("sh");
-    command
-        .arg("-c")
-        .arg("head -c 16384 /dev/zero | tr '\\0' x; sleep 5")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+    let command = secret_command("head -c 16384 /dev/zero | tr '\\0' x; sleep 5");
     let started = std::time::Instant::now();
 
     let output = super::run_secret_tool_command_with_timeout(command, Duration::from_secs(10));
@@ -373,12 +393,7 @@ fn secret_tool_runner_kills_child_after_oversized_stdout() {
 
 #[test]
 fn secret_tool_runner_times_out_instead_of_hanging() {
-    let mut command = std::process::Command::new("sh");
-    command
-        .arg("-c")
-        .arg("sleep 5")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+    let command = secret_command("sleep 5");
     let started = std::time::Instant::now();
 
     let output = super::run_secret_tool_command_with_timeout(command, Duration::from_millis(100));
@@ -474,21 +489,10 @@ fn agent_runtime_view_reports_missing_controls_and_bad_agent_names() {
 
 #[test]
 fn agent_runtime_view_defaults_missing_worker_model_to_current_default() {
-    let root = clean_test_dir("agent-runtime-worker-missing-model");
-    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
-    let control = root.join("agent").join("worker.d");
-    write_text_file(&control.join("label"), "user_u:agent_r:worker_t:s0\n");
-    write_text_file(
-        &control.join("policy"),
-        "allow worker_t model:openai/gpt-5.6 use\n",
-    );
-    let default_model = root.join("model/openai/gpt-5.6.d");
-    assert!(fs::create_dir_all(&default_model).is_ok());
-    write_text_file(&default_model.join("limit"), "unknown\n");
-    assert!(fs::remove_file(control.join("model")).is_ok());
-
-    let view = derive_agent_runtime_view(&root, "worker");
-    let view = ok!(view);
+    let (_root, view) = ok!(missing_model_view(
+        "agent-runtime-worker-missing-model",
+        "worker"
+    ));
     assert_eq!(view.model(), "openai/gpt-5.6");
     assert!(view.policy().allows(
         "worker_t",
@@ -500,9 +504,7 @@ fn agent_runtime_view_defaults_missing_worker_model_to_current_default() {
 
 #[test]
 fn agent_runtime_view_defaults_missing_life_to_owned() {
-    let root = clean_test_dir("agent-runtime-missing-life");
-    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
-    let control = root.join("agent").join("worker.d");
+    let (root, control) = agent_fixture("agent-runtime-missing-life", "worker");
     assert!(fs::remove_file(control.join("life")).is_ok());
 
     let view = derive_agent_runtime_view(&root, "worker");
@@ -512,9 +514,7 @@ fn agent_runtime_view_defaults_missing_life_to_owned() {
 
 #[test]
 fn agent_runtime_view_accepts_parent_run_field() {
-    let root = clean_test_dir("agent-runtime-parent-run");
-    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
-    let control = root.join("agent").join("worker.d");
+    let (root, control) = agent_fixture("agent-runtime-parent-run", "worker");
     write_text_file(
         &control.join("parent"),
         "agent:executor session:default run:r123\n",
@@ -530,9 +530,7 @@ fn agent_runtime_view_accepts_parent_run_field() {
 
 #[test]
 fn agent_runtime_view_rejects_unknown_parent_field() {
-    let root = clean_test_dir("agent-runtime-parent-unknown-field");
-    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
-    let control = root.join("agent").join("worker.d");
+    let (root, control) = agent_fixture("agent-runtime-parent-unknown-field", "worker");
     write_text_file(&control.join("parent"), "agent:executor task:work\n");
 
     assert_eq!(
@@ -545,44 +543,19 @@ fn agent_runtime_view_rejects_unknown_parent_field() {
 
 #[test]
 fn agent_runtime_view_defaults_missing_worker_prefix_model_to_current_default() {
-    let root = clean_test_dir("agent-runtime-worker-prefix-missing-model");
-    create_complete_object_layout(&root, ObjectClass::Agent, "worker-fast", "none");
-    let control = root.join("agent").join("worker-fast.d");
-    write_text_file(&control.join("label"), "user_u:agent_r:worker-fast_t:s0\n");
-    write_text_file(
-        &control.join("policy"),
-        "allow worker-fast_t model:openai/gpt-5.6 use\n",
-    );
-    let default_model = root.join("model/openai/gpt-5.6.d");
-    assert!(fs::create_dir_all(&default_model).is_ok());
-    write_text_file(&default_model.join("limit"), "unknown\n");
-    assert!(fs::remove_file(control.join("model")).is_ok());
-
-    let view = derive_agent_runtime_view(&root, "worker-fast");
-    let view = ok!(view);
+    let (_root, view) = ok!(missing_model_view(
+        "agent-runtime-worker-prefix-missing-model",
+        "worker-fast"
+    ));
     assert_eq!(view.model(), "openai/gpt-5.6");
 }
 
 #[test]
 fn agent_runtime_view_defaults_missing_executor_prefix_model_to_current_default() {
-    let root = clean_test_dir("agent-runtime-executor-prefix-missing-model");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor-fast", "none");
-    let control = root.join("agent").join("executor-fast.d");
-    write_text_file(
-        &control.join("label"),
-        "user_u:agent_r:executor-fast_t:s0\n",
-    );
-    write_text_file(
-        &control.join("policy"),
-        "allow executor-fast_t model:openai/gpt-5.6 use\n",
-    );
-    let default_model = root.join("model/openai/gpt-5.6.d");
-    assert!(fs::create_dir_all(&default_model).is_ok());
-    write_text_file(&default_model.join("limit"), "unknown\n");
-    assert!(fs::remove_file(control.join("model")).is_ok());
-
-    let view = derive_agent_runtime_view(&root, "executor-fast");
-    let view = ok!(view);
+    let (_root, view) = ok!(missing_model_view(
+        "agent-runtime-executor-prefix-missing-model",
+        "executor-fast",
+    ));
     assert_eq!(view.model(), "openai/gpt-5.6");
 }
 
@@ -642,9 +615,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
 
 #[test]
 fn agent_runtime_view_accepts_missing_and_empty_optional_tools_control() {
-    let root = clean_test_dir("agent-runtime-optional-tools");
-    create_complete_object_layout(&root, ObjectClass::Agent, "executor", "none");
-    let control = root.join("agent/executor.d");
+    let (root, control) = agent_fixture("agent-runtime-optional-tools", "executor");
     assert!(!control.join("tools").exists());
     let view = ok!(derive_agent_runtime_view(&root, "executor"));
     assert!(view.declared_tools().is_empty());

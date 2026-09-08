@@ -38,6 +38,9 @@ pub fn read_provider_system_secret(
     let content = match read_provider_secret_file(&path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Err(ProviderSystemSecretError::AccessDenied);
+        }
         Err(_error) => return Err(ProviderSystemSecretError::CannotRead),
     };
     let secret = content.trim_end_matches(['\r', '\n']);
@@ -104,6 +107,8 @@ pub enum ProviderSystemSecretError {
     InvalidName,
     /// Secret could not be read.
     CannotRead,
+    /// The operating system denied access to the root-owned secret store.
+    AccessDenied,
     /// Secret could not be written.
     CannotWrite,
 }

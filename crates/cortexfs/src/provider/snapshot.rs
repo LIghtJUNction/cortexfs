@@ -89,7 +89,7 @@ impl ProviderSnapshot {
     }
 }
 
-fn read_configs(config_dir: &Path) -> Result<Vec<ProviderConfig>, ProviderError> {
+pub fn read_configs(config_dir: &Path) -> Result<Vec<ProviderConfig>, ProviderError> {
     let directory = match open_plain_directory(config_dir) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),

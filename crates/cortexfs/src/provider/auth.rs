@@ -12,7 +12,9 @@ pub mod openai;
 mod persist;
 mod profile;
 mod protocol;
+mod refresh;
 mod registry;
+mod resolve;
 mod transport;
 mod wire;
 
@@ -27,7 +29,9 @@ pub use factory::{configured_adapter, configured_registry};
 pub use profile::{
     AuthProfile, AuthProfileError, delete_auth_profile, read_auth_profile, store_auth_profile,
 };
+pub use refresh::resolve_auth_profile;
 pub use registry::{ProviderRegistry, ProviderRegistryError};
+pub(crate) use resolve::resolve_credential;
 use serde::{Deserialize, Serialize};
 pub use wire::{AUTH_SOCKET_ABI, AuthWireError, AuthWireFrame, AuthWireRequest, AuthWireResponse};
 
@@ -92,10 +96,16 @@ impl ProviderAuthConfig {
     pub fn is_valid(&self) -> bool {
         crate::is_object_name(&self.slot)
             && match self.method {
-                AuthMethod::ApiKey => self.flow.is_none(),
+                AuthMethod::ApiKey => self.flow.is_none() && is_api_key_slot(&self.slot),
                 AuthMethod::OAuth => self.flow.is_some(),
             }
     }
+}
+
+/// Raw API-key slots cannot overlap the serialized authentication-profile namespace.
+#[must_use]
+pub fn is_api_key_slot(slot: &str) -> bool {
+    crate::is_object_name(slot) && !slot.starts_with("auth-")
 }
 
 /// Applies the compatibility default for provider JSON without `auth`.
