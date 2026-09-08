@@ -1,8 +1,9 @@
 use crate::message::{Message, message_from_json_line};
+use crate::render::{clip, render_message};
 
 mod render;
 
-const MAX_MESSAGE_LINE_BYTES: usize = 16 * 1024;
+const MAX_MESSAGE_LINE_BYTES: usize = 64 * 1024;
 const EMPTY_HISTORY: &str = "(no historical messages injected)";
 
 /// In-memory normalized view of durable session messages.
@@ -11,7 +12,7 @@ pub struct History {
     messages: Vec<Message>,
 }
 
-/// The newest messages that fit a character budget.
+/// The newest messages that fit a byte budget, with the last message clipped if necessary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistorySelection {
     messages: Vec<Message>,
@@ -26,7 +27,7 @@ pub struct RenderedHistory {
 }
 
 impl History {
-    /// Parses valid, bounded JSONL messages and ignores unrelated durable lines.
+    /// Parses valid JSONL messages up to 64 KiB per line, ignoring unrelated or oversized lines.
     #[must_use]
     pub fn from_jsonl(input: &str) -> Self {
         let messages = input
@@ -56,15 +57,21 @@ impl History {
         &self.messages
     }
 
-    /// Selects the newest renderable messages under `max_chars`.
+    /// Selects recent messages, retaining a marked excerpt if the newest exceeds `max_chars`.
     #[must_use]
     pub fn select(&self, max_chars: usize) -> HistorySelection {
         let mut selected = Vec::new();
         let mut used = 0_usize;
         for message in self.messages.iter().rev() {
-            let line = crate::render::render_message(message);
+            let line = render_message(message);
             let needed = line.len() + usize::from(!selected.is_empty());
             if used.saturating_add(needed) > max_chars {
+                let marker = " [truncated]";
+                let available = max_chars.saturating_sub(message.role().len() + 4 + marker.len());
+                if selected.is_empty() && available > 0 {
+                    let excerpt = clip(message.content().trim(), available);
+                    selected.push(Message::new(message.role(), format!("{excerpt}{marker}")));
+                }
                 break;
             }
             used = used.saturating_add(needed);

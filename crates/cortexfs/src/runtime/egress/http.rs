@@ -46,7 +46,13 @@ pub(super) fn relay(
             .write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
         return Err(error);
     }
-    let request = inject_provider_credential(request, target);
+    let mut request = inject_provider_credential(request, target);
+    if target.credential.is_none() {
+        let bearer = format!("Bearer {client_token}");
+        request
+            .headers
+            .retain(|header| !(header.0 == "authorization" && header.1 == bearer));
+    }
     run_curl(local, target, &request, shutdown)
 }
 

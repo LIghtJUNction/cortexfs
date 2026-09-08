@@ -1,7 +1,12 @@
 use crate::abi::constants::DEFAULT_SANDBOX_TMPFS_BYTES;
 use std::{
-    io::Read,
+    io::{self, Read, Write},
     process::{Child, Output},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -68,6 +73,66 @@ pub fn bwrap_system_layout_args() -> Vec<String> {
     args
 }
 
+pub(crate) struct ChildInput {
+    pub(crate) result: mpsc::Receiver<io::Result<()>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for ChildInput {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+    }
+}
+
+/// Feed piped stdin without blocking output supervision; dropping cancels writes
+/// even if a descendant outside the process group keeps the read end open.
+pub(crate) fn write_child_input(child: &mut Child, input: Vec<u8>) -> io::Result<ChildInput> {
+    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+
+    let result = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("missing stdin pipe"))
+        .and_then(|mut stdin| {
+            let flags = OFlag::from_bits_retain(fcntl(&stdin, FcntlArg::F_GETFL)?);
+            fcntl(&stdin, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
+            let (sender, receiver) = mpsc::sync_channel(1);
+            let stop = Arc::new(AtomicBool::new(false));
+            let writer_stop = Arc::clone(&stop);
+            thread::Builder::new().spawn(move || {
+                let mut remaining = input.as_slice();
+                let result = loop {
+                    if writer_stop.load(Ordering::Acquire) {
+                        break Err(io::ErrorKind::Interrupted.into());
+                    }
+                    if remaining.is_empty() {
+                        break Ok(());
+                    }
+                    match stdin.write(remaining) {
+                        Ok(0) => break Err(io::ErrorKind::WriteZero.into()),
+                        Ok(written) => remaining = remaining.get(written..).unwrap_or_default(),
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => break Err(error),
+                    }
+                };
+                drop(stdin);
+                let _ignored = sender.send(result);
+            })?;
+            Ok(ChildInput {
+                result: receiver,
+                stop,
+            })
+        });
+    if result.is_err() {
+        terminate_process_group(child);
+        let _ignored = child.wait();
+    }
+    result
+}
+
 pub(crate) fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
     let mut output = Vec::with_capacity(limit.min(8 * 1024));
     let mut buffer = [0_u8; 8 * 1024];
@@ -131,7 +196,7 @@ pub(crate) struct CappedOutputWait {
 /// Failure while waiting for a capped child process.
 #[derive(Debug)]
 pub(crate) enum CappedOutputError {
-    Wait(std::io::Error),
+    Wait(io::Error),
     ExceededLimit,
     TimedOut,
     Cancelled,
@@ -152,7 +217,7 @@ pub(crate) fn wait_capped_child_output(
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| CappedOutputError::Wait(std::io::Error::other("missing stdout pipe")))?;
+        .ok_or_else(|| CappedOutputError::Wait(io::Error::other("missing stdout pipe")))?;
     let mut stdout_reader: Option<JoinHandle<Vec<u8>>> = Some(thread::spawn(move || {
         read_limited_bytes(stdout, read_limit)
     }));
@@ -160,7 +225,7 @@ pub(crate) fn wait_capped_child_output(
         let stderr = child
             .stderr
             .take()
-            .ok_or_else(|| CappedOutputError::Wait(std::io::Error::other("missing stderr pipe")))?;
+            .ok_or_else(|| CappedOutputError::Wait(io::Error::other("missing stderr pipe")))?;
         Some(thread::spawn(move || {
             read_limited_bytes(stderr, read_limit)
         }))
@@ -268,66 +333,4 @@ fn join_reader(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-    use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
-
-    #[test]
-    fn read_limited_text_caps_and_decodes() {
-        let input = b"hello world and more";
-        let text = read_limited_text(Cursor::new(input), 5);
-        assert_eq!(text, "hello");
-        let full = read_limited_text(Cursor::new(input), 64);
-        assert_eq!(full, "hello world and more");
-    }
-
-    #[test]
-    fn wait_capped_child_output_captures_stdout() -> Result<(), Box<dyn std::error::Error>> {
-        let mut child = Command::new("/usr/bin/printf")
-            .arg("hi")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()?;
-        let output = wait_capped_child_output(
-            &mut child,
-            CappedOutputWait {
-                max_output_bytes: 64,
-                timeout: Duration::from_secs(2),
-                capture_stderr: false,
-                drain_timeout: None,
-                terminate_group_after_exit: false,
-            },
-            || false,
-        )
-        .map_err(|error| format!("{error:?}"))?;
-        assert!(output.status.success());
-        assert_eq!(output.stdout, b"hi");
-        Ok(())
-    }
-
-    #[test]
-    fn wait_capped_child_output_times_out() -> Result<(), Box<dyn std::error::Error>> {
-        let mut child = Command::new("/usr/bin/sleep")
-            .arg("5")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()?;
-        let result = wait_capped_child_output(
-            &mut child,
-            CappedOutputWait {
-                max_output_bytes: 64,
-                timeout: Duration::from_millis(100),
-                capture_stderr: false,
-                drain_timeout: None,
-                terminate_group_after_exit: false,
-            },
-            || false,
-        );
-        assert!(matches!(result, Err(CappedOutputError::TimedOut)));
-        Ok(())
-    }
-}
+mod tests;

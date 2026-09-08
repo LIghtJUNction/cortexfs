@@ -90,8 +90,6 @@ fn serve(config: &RuntimeConfig) -> Result<(), String> {
         NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
     )
     .is_ok();
-    let mut env = view.env().to_vec();
-    env.extend(provider_runtime_env(&config.source, model)?);
     let executable =
         cortexfs::agent::resolve_agent_loop_executable_for_agent(&config.source, &config.agent)
             .map_err(|_error| "cannot resolve agent loop executable".to_owned())?;
@@ -118,7 +116,7 @@ fn serve(config: &RuntimeConfig) -> Result<(), String> {
         ctx_root: &config.source,
         source_root: &config.source,
         identity: view.identity(),
-        env: &env,
+        env: view.env(),
         session_root: &session_root,
         default_cwd: &default_cwd,
         model: Some(model),
@@ -182,48 +180,6 @@ pub(crate) fn runtime_agent_environment<'a>(
         mount_table,
         control_dir: Some(control_dir),
     }
-}
-fn provider_runtime_env(source: &Path, model: &str) -> Result<Vec<(String, String)>, String> {
-    if cortexfs::selected_model_provider(source, model).as_deref() == Some("codex") {
-        let credential = cortexfs::resolve_codex_system()
-            .map_err(|_error| "codex system credential refresh failed".to_owned())?
-            .ok_or_else(|| {
-                "missing codex system credential; run sudo ctx provider oauth login codex"
-                    .to_owned()
-            })?;
-        return Ok(secret_runtime_env(
-            credential.0,
-            "codex".to_owned(),
-            "default".to_owned(),
-            credential.1,
-        ));
-    }
-    let Some(secret) = cortexfs::read_provider_system_secret_for_model(source, model)
-        .map_err(|_error| "system provider credential unavailable".to_owned())?
-    else {
-        return Ok(Vec::new());
-    };
-    Ok(secret_runtime_env(
-        secret.secret().to_owned(),
-        secret.provider().to_owned(),
-        secret.account().to_owned(),
-        String::new(),
-    ))
-}
-fn secret_runtime_env(
-    token: String,
-    provider: String,
-    slot: String,
-    account: String,
-) -> Vec<(String, String)> {
-    [
-        ("CTX_PROVIDER_SECRET_VALUE", token),
-        ("CTX_PROVIDER_SECRET_PROVIDER", provider),
-        ("CTX_PROVIDER_SECRET_SLOT", slot),
-        ("CTX_PROVIDER_SECRET_ACCOUNT_ID", account),
-    ]
-    .map(|(name, value)| (name.to_owned(), value))
-    .to_vec()
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeMode {

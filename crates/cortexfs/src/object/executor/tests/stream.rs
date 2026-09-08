@@ -629,7 +629,9 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
         let provider = std::env::var(PROVIDER_ENV)?;
         assert!(matches!(
             cortexfs::read_provider_system_secret(&provider, "default"),
-            Ok(None) | Err(cortexfs::ProviderSystemSecretError::CannotRead)
+            Ok(None)
+                | Err(cortexfs::ProviderSystemSecretError::CannotRead
+                    | cortexfs::ProviderSystemSecretError::AccessDenied)
         ));
         reset_provider_request_attempts();
         let mut output = Vec::new();

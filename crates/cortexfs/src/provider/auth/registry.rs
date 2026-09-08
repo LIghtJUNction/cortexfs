@@ -54,21 +54,17 @@ impl ProviderRegistry {
         &mut self,
         provider: Box<dyn AuthProvider>,
     ) -> Result<(), ProviderRegistryError> {
-        if !crate::is_object_name(provider.id()) || self.find(provider.id()).is_some() {
-            return Err(if crate::is_object_name(provider.id()) {
-                ProviderRegistryError::DuplicateName
-            } else {
-                ProviderRegistryError::InvalidName
-            });
-        }
-        for name in provider.aliases().iter().map(String::as_str) {
-            if name == provider.id() {
-                continue;
-            }
+        for name in std::iter::once(provider.id()).chain(
+            provider
+                .aliases()
+                .iter()
+                .map(String::as_str)
+                .filter(|name| *name != provider.id()),
+        ) {
             if !crate::is_object_name(name) {
                 return Err(ProviderRegistryError::InvalidName);
             }
-            if self.find(name).is_some() {
+            if self.get(name).is_some() {
                 return Err(ProviderRegistryError::DuplicateName);
             }
         }
@@ -118,10 +114,6 @@ impl ProviderRegistry {
             registry.register(super::copilot::GitHubCopilotAdapter::new(config))?;
         }
         Ok(registry)
-    }
-
-    fn find(&self, name: &str) -> Option<&dyn AuthProvider> {
-        self.get(name)
     }
 }
 

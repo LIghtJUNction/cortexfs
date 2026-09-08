@@ -56,6 +56,18 @@ fn authorization_transport(models: &[u8]) -> ScriptedTransport {
         ..ScriptedTransport::default()
     }
 }
+fn oauth_config(client_id: &str) -> OAuthProviderConfig {
+    OAuthProviderConfig {
+        client_id: client_id.to_owned(),
+        auth_url: "https://auth.example/authorize".to_owned(),
+        token_url: "https://auth.example/token".to_owned(),
+        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
+        scopes: vec!["model.read".to_owned()],
+        device: None,
+        access_token_account: None,
+        refresh_token_account: None,
+    }
+}
 fn device_config() -> OAuthDeviceConfig {
     OAuthDeviceConfig {
         request_url: "https://auth.example/device".to_owned(),
@@ -123,8 +135,12 @@ fn credential_envelope_round_trips_without_provider_specific_shape()
 }
 #[test]
 fn auth_config_rejects_unsafe_slot_names() {
-    let config = ProviderAuthConfig::api_key("../secret");
-    assert!(!config.is_valid());
+    for slot in ["../secret", "auth-work", "auth-default"] {
+        assert!(!crate::provider::auth::is_api_key_slot(slot));
+        assert!(!ProviderAuthConfig::api_key(slot).is_valid());
+    }
+    assert!(ProviderAuthConfig::api_key("work").is_valid());
+    assert!(ProviderAuthConfig::oauth(OAuthFlow::AuthorizationCode, "auth-work").is_valid());
 }
 #[test]
 fn openai_adapter_exchanges_refreshes_and_discovers_models() -> Result<(), AuthProviderError> {
@@ -244,16 +260,7 @@ fn anthropic_adapter_uses_api_key_header() -> Result<(), AuthProviderError> {
 #[test]
 fn anthropic_oauth_adapter_exchanges_refreshes_and_discovers_models()
 -> Result<(), AuthProviderError> {
-    let oauth = OAuthProviderConfig {
-        client_id: "claude-client".to_owned(),
-        auth_url: "https://auth.example/authorize".to_owned(),
-        token_url: "https://auth.example/token".to_owned(),
-        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
-        scopes: vec!["model.read".to_owned()],
-        device: None,
-        access_token_account: None,
-        refresh_token_account: None,
-    };
+    let oauth = oauth_config("claude-client");
     let adapter = AnthropicAdapter::new(
         "anthropic",
         "https://api.example/v1",
@@ -293,14 +300,8 @@ fn anthropic_oauth_adapter_exchanges_refreshes_and_discovers_models()
 #[test]
 fn anthropic_host_device_flow_uses_shared_adapter_contract() -> Result<(), AuthProviderError> {
     let oauth = OAuthProviderConfig {
-        client_id: "claude-client".to_owned(),
-        auth_url: "https://auth.example/authorize".to_owned(),
-        token_url: "https://auth.example/token".to_owned(),
-        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
-        scopes: vec!["model.read".to_owned()],
         device: Some(device_config()),
-        access_token_account: None,
-        refresh_token_account: None,
+        ..oauth_config("claude-client")
     };
     let adapter = AnthropicAdapter::new(
         "claude",
@@ -328,6 +329,13 @@ fn copilot_device_flow_reports_challenge_and_refreshes_poll_interval()
         "client",
         "http://localhost/callback",
     ));
+    assert_eq!(
+        adapter.methods(),
+        &[ProviderAuthConfig::oauth(
+            OAuthFlow::DeviceCode,
+            "subscription"
+        )]
+    );
     let mut transport = ScriptedTransport {
         responses: vec![
             AuthResponse {
@@ -427,14 +435,8 @@ fn registry_resolves_concrete_provider_aliases() -> Result<(), Box<dyn std::erro
 #[test]
 fn host_device_endpoints_feed_generic_adapter() -> Result<(), AuthProviderError> {
     let oauth = OAuthProviderConfig {
-        client_id: "client".to_owned(),
-        auth_url: "https://auth.example/authorize".to_owned(),
-        token_url: "https://auth.example/token".to_owned(),
-        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
-        scopes: vec!["model.read".to_owned()],
         device: Some(device_config()),
-        access_token_account: None,
-        refresh_token_account: None,
+        ..oauth_config("client")
     };
     let adapter = OpenAiAdapter::new(
         "example",
@@ -466,14 +468,8 @@ fn host_device_endpoints_feed_generic_adapter() -> Result<(), AuthProviderError>
 #[test]
 fn authorization_url_requires_authorization_code_method() -> Result<(), AuthProviderError> {
     let oauth = OAuthProviderConfig {
-        client_id: "client".to_owned(),
-        auth_url: "https://auth.example/authorize".to_owned(),
-        token_url: "https://auth.example/token".to_owned(),
-        redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
         scopes: Vec::new(),
-        device: None,
-        access_token_account: None,
-        refresh_token_account: None,
+        ..oauth_config("client")
     };
     let adapter = OpenAiAdapter::new(
         "example",
@@ -521,4 +517,48 @@ fn api_key_only_adapter_does_not_refresh_oauth_credentials() {
         adapter.refresh(&credential),
         Err(AuthProviderError::UnsupportedMethod)
     );
+}
+
+#[test]
+fn refreshed_token_expiry_is_not_inherited_or_overflowed() {
+    let adapter = OpenAiAdapter::codex();
+    let old = Credential::OAuth {
+        provider: "codex".to_owned(),
+        access_token: "old".to_owned(),
+        refresh_token: Some("refresh".to_owned()),
+        expires_at: Some(100),
+        scopes: vec!["model.read".to_owned()],
+    };
+    for (expiry, expected) in [
+        (None, Ok(None)),
+        (Some(60), Ok(Some(260))),
+        (Some(u64::MAX), Err(AuthProviderError::InvalidResponse)),
+    ] {
+        let mut transport = ScriptedTransport {
+            responses: vec![AuthResponse {
+                status: 200,
+                body: serde_json::json!({"access_token": "new", "expires_in": expiry})
+                    .to_string()
+                    .into_bytes(),
+            }],
+            ..ScriptedTransport::default()
+        };
+        let result = adapter
+            .refresh_with(&old, &mut transport, 200)
+            .and_then(|credential| {
+                let Credential::OAuth {
+                    expires_at,
+                    refresh_token,
+                    scopes,
+                    ..
+                } = credential
+                else {
+                    return Err(AuthProviderError::InvalidCredential);
+                };
+                assert_eq!(refresh_token.as_deref(), Some("refresh"));
+                assert_eq!(scopes, ["model.read"]);
+                Ok(expires_at)
+            });
+        assert_eq!(result, expected);
+    }
 }

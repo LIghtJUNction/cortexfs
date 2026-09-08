@@ -1,4 +1,5 @@
 use super::{ProviderTarget, Request};
+use crate::provider::auth::CredentialKind;
 pub(super) fn authorize_provider_credential(
     request: &Request,
     target: &ProviderTarget,
@@ -35,7 +36,7 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
                 "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
             )
     });
-    if request.endpoint == "messages" {
+    if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
         request.headers.extend([
             ("x-api-key".to_owned(), credential.token.clone()),
             ("anthropic-version".to_owned(), "2023-06-01".to_owned()),
@@ -46,9 +47,12 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
         "authorization".to_owned(),
         format!("Bearer {}", credential.token),
     ));
-    if target.provider == "codex"
-        && let Some(account_id) = credential.codex_account_id.as_deref()
-    {
+    if request.endpoint == "messages" {
+        request
+            .headers
+            .push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
+    }
+    if let Some(account_id) = credential.codex_account_id.as_deref() {
         request.headers.extend([
             ("chatgpt-account-id".to_owned(), account_id.to_owned()),
             ("originator".to_owned(), "ctx".to_owned()),

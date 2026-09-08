@@ -9,7 +9,7 @@ impl HistorySelection {
         &self.messages
     }
 
-    /// Returns how many older messages were omitted.
+    /// Returns how many older messages were entirely omitted, excluding a marked recent excerpt.
     #[must_use]
     pub const fn omitted(&self) -> usize {
         self.omitted
@@ -21,13 +21,13 @@ impl HistorySelection {
         let lines = self.messages.iter().map(render_message).collect::<Vec<_>>();
         let mut text = lines.join("\n");
         if self.omitted > 0 {
-            text = clip(&format!("{text}\n{}", warning(max_chars)), max_chars);
+            text = format!("{text}\n{}", warning(max_chars));
         }
         if text.is_empty() {
             EMPTY_HISTORY.clone_into(&mut text);
         }
         RenderedHistory {
-            text,
+            text: clip(&text, max_chars),
             omitted: self.omitted,
         }
     }
@@ -40,7 +40,7 @@ impl RenderedHistory {
         &self.text
     }
 
-    /// Returns how many older messages were omitted.
+    /// Returns how many older messages were entirely omitted, excluding a marked recent excerpt.
     #[must_use]
     pub const fn omitted(&self) -> usize {
         self.omitted

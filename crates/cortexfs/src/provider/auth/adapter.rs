@@ -27,6 +27,9 @@ pub enum AuthProviderError {
     /// The credential is malformed or cannot be refreshed.
     #[error("invalid provider credential")]
     InvalidCredential,
+    /// An expired OAuth profile needs a new login or a successful refresh.
+    #[error("OAuth credential expired; log in again")]
+    ExpiredCredential,
     /// Provider configuration is incomplete or unsafe.
     #[error("invalid provider configuration")]
     InvalidConfig,
@@ -36,6 +39,9 @@ pub enum AuthProviderError {
     /// The provider or its local credential store was unavailable.
     #[error("provider authentication unavailable")]
     Unavailable,
+    /// No profile could be read because the operating system denied store access.
+    #[error("provider credential store access denied")]
+    StoreAccessDenied,
 }
 
 /// Provider adapter boundary shared by OAuth, API-key, and future providers.

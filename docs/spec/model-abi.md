@@ -345,20 +345,13 @@ request, so only those two advertise agent tools. `anthropic-messages` and
 `google-generative` serve text completion; an agent that needs a tool loop must
 route its `agent` use case to an OpenAI adapter.
 
-Secrets are never stored in model files or `.d/` control files. Provider
-credentials use this priority:
-
-```text
-root-owned CortexFS system secret store
-unconfigured
-```
-
-The API key is read from
-`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`. Provider JSON must not
-declare API-key environment variable names, and API keys must not be placed in
-process environments. If the system secret is absent, the model is not
-configured and must return a stable error unless the endpoint supports
-unauthenticated requests.
+Secrets are never stored in model files or `.d/` control files. Host credential
+lookup selects an [authentication profile](#authentication-profiles) before
+trying migration-only legacy stores. New credentials live in the root-owned
+CortexFS system secret store. Provider JSON must not declare API-key environment
+variable names, and users must not provision API keys through process
+environments. If no credential resolves, the model returns a stable error unless
+the endpoint supports unauthenticated requests.
 
 OAuth providers use the same rule: access tokens are bearer credentials and
 remain provider-runtime state, not model ABI state. A provider config may
@@ -382,16 +375,15 @@ declare OAuth Authorization Code + PKCE metadata:
 }
 ```
 
-OAuth token environment names are generated from provider identity, for example
-`CTX_EXAMPLE_OAUTH_ACCESS_TOKEN` and `CTX_EXAMPLE_OAUTH_REFRESH_TOKEN`; users do
-not configure those names in provider JSON. If the generated access-token
-variable is absent or empty, the runtime looks up
-`service=cortexfs:<provider> account=oauth:access`. Refresh tokens, when used by
-a provider adapter or CLI wrapper, use `account=oauth:refresh` by default. PKCE
-uses `S256`; the verifier and callback state are short-lived local flow state
-and must not be written into `/ctx/model`.
-`ctx provider oauth login PROVIDER` is the host-side helper that performs this
-PKCE login flow and writes tokens to the system keychain.
+Legacy OAuth lookup can still read generated names such as
+`CTX_EXAMPLE_OAUTH_ACCESS_TOKEN` and `CTX_EXAMPLE_OAUTH_REFRESH_TOKEN`, followed
+by `service=cortexfs:<provider>` keychain accounts `oauth:access` and
+`oauth:refresh`. These are migration sources for the default profile; users do
+not configure their environment names in provider JSON. PKCE uses `S256`; its
+verifier and callback state are short-lived local flow state and must not be
+written into `/ctx/model`. `ctx auth login` and the existing
+`ctx provider oauth login PROVIDER` helper persist new logins as profile
+bundles, with no new environment or keychain writes.
 
 ## Provider Authentication Framework
 
@@ -432,10 +424,11 @@ authorization URL, login, device challenge, refresh, persistence, and model
 listing) and return the normalized credential shape. The host can inject the
 HTTP transport, clock, challenge notifier, and sleep callback for deterministic
 tests; Agents never receive that transport or provider-native response types.
-The built-in registry provides concrete OpenAI/Codex and Anthropic/Claude
-adapters, plus a GitHub Copilot adapter when the host supplies its OAuth app
-metadata. Claude and Copilot client registrations remain host configuration;
-no provider client id is compiled into the Agent path.
+The built-in registry provides OpenAI-compatible, Codex-specific, and
+Anthropic API-key adapters, plus a GitHub OAuth adapter when the host supplies
+its app registration. Authentication metadata describes the transport and
+credential type; it does not establish subscription entitlement or official
+compatibility with a provider's inference service.
 
 ```json
 {
@@ -465,12 +458,40 @@ adapter's model transport and parser, so provider-specific model envelopes do
 not leak into the model ABI.
 `device_code` is part of the shared declaration grammar. An OAuth `device`
 block supplies standard device-code endpoints for host-configured adapters.
-The built-in GitHub Copilot adapter supplies its documented defaults when that
-block is omitted; `api.githubcopilot.com` also maps to the stable
+The GitHub adapter supplies GitHub's device endpoints when that block is
+omitted; `api.githubcopilot.com` also maps to the stable
 `github-copilot` provider name when no explicit host name is supplied. Adapters
 implement the standard device challenge, bounded
 polling, and normalized credential persistence. The CLI prints the
 verification URI and user code but never stores the device code in `/ctx`.
+
+### Authentication support boundaries
+
+API-key transport, host-configured OAuth, and official subscription clients
+have different integration contracts. The current support boundaries are:
+
+| Provider or path | CortexFS implementation | Official subscription integration |
+| --- | --- | --- |
+| OpenAI / compatible APIs | API-key requests through the selected protocol adapter | API billing is separate from ChatGPT subscription usage. See [OpenAI authentication](https://developers.openai.com/codex/auth). |
+| Host OAuth service or gateway | Authorization Code + S256 PKCE, device flow, refresh, and credential profiles with host-supplied endpoints | Requires an endpoint and app registration that support those flows; OAuth alone conveys no model or subscription entitlement. |
+| Codex / ChatGPT | Codex-specific OAuth and direct backend transport | The documented integration surface is [Codex App Server](https://developers.openai.com/codex/app-server), which owns login and refresh. The current CortexFS direct HTTP adapter is not an App Server integration or an official compatibility guarantee. |
+| Anthropic / Claude | API-key adapter; generic OAuth metadata can describe a supported host gateway | Claude subscription login belongs to the unmodified official Claude Code client. CortexFS does not implement Claude.ai subscription login or token import. See [Anthropic credential-use boundaries](https://code.claude.com/docs/en/legal-and-compliance). |
+| GitHub Copilot | GitHub OAuth/device transport with a host-owned app registration | GitHub documents third-party subscription access through [Copilot SDK](https://docs.github.com/en/copilot/how-tos/copilot-sdk/setup/github-oauth). The current direct HTTP adapter does not establish SDK or inference-endpoint compatibility. |
+| Google / Gemini | API-key preset using Gemini's OpenAI-compatible endpoint; native GenerateContent adapter | Google login for Gemini Code Assist belongs to Gemini CLI. Google excludes third-party direct use of Gemini CLI OAuth from its supported service access. See [Gemini CLI service boundaries](https://geminicli.com/docs/resources/tos-privacy/). |
+
+The default GitHub adapter advertises device flow. The host must register its
+own app and enable that flow. GitHub's browser authorization-code exchange
+requires a client secret even with PKCE; the current generic OAuth metadata
+does not provide confidential-client secret exchange. An explicitly declared
+browser method is usable only with a compatible host endpoint. See
+[GitHub authorization flows](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
+
+Refresh must retain a replacement access/refresh token pair together and handle
+expiry using the provider's response, without a universal token lifetime.
+GitHub's expiring user tokens rotate both values; its SDK leaves that lifecycle
+to the host. See [GitHub token refresh](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens).
+Successful authentication or model discovery does not by itself verify
+inference, tool replay, or access to a particular subscription model.
 
 ### Authentication profiles
 
@@ -503,9 +524,45 @@ prompt, while OAuth choices continue through the declared browser or device
 flow. Without a terminal, omitting `PROVIDER` is a usage error.
 
 `key(PROFILE)` in an existing `model/route` group selects that profile for the
-route. If no profile exists, CortexFS retains the older raw secret-slot lookup
-only as a migration fallback. New API-key and OAuth logins write a profile
-bundle; they do not write environment variables or a keyring entry.
+route; without it, lookup uses `default`. Discovery uses `default`, while
+direct model execution and host egress resolve the profile selected for each
+provider candidate. The shared host lookup order is:
+
+| Priority | Source | Condition |
+| --- | --- | --- |
+| 1 | `auth-<profile>` bundle | Validate provider identity, credential type, and expiry; a present but invalid or unrefreshable profile returns an error. |
+| 2 | Legacy raw API-key slot | When profile lookup supplies no credential and the provider permits API-key authentication. `default` uses the first advertised API-key slot; a named profile uses the same-named raw slot without requiring a separate advertised slot. |
+| 3 | Legacy OAuth state | Only for `default` with OAuth configured and no prior credential. Codex's legacy system state precedes its other configured OAuth migration sources. |
+| 4 | Unconfigured | No credential resolved. Named profiles do not inherit another profile's OAuth tokens. |
+
+Raw slots beginning with `auth-` are reserved for profile bundles and never
+qualify for API-key fallback. A typed profile may itself be named `auth-work`:
+its bundle is stored as `auth-auth-work`. If that profile is absent, the
+resolver must not reinterpret the raw `auth-work` bundle as an API key.
+
+Existing host-supplied invocation credentials remain bound to their exact
+provider/profile pair before filesystem lookup. An agent using the authenticated
+egress socket receives a run-scoped capability; the host injects the selected
+upstream credential.
+
+When a stored OAuth expiry is within five minutes, resolution refreshes it if
+a refresh token exists and atomically saves the replacement bundle before
+returning it. Without a refresh token, a still-valid access token remains usable
+until its recorded expiry; an expired token fails. Missing expiry metadata does
+not establish a lifetime or schedule a refresh.
+
+Host egress resolves credentials for all planned provider candidates at run
+startup, including fallback candidates. Each target keeps the resulting token
+for that run; it does not refresh per request or recover from token expiry
+during the run. A subsequent run resolves credentials again. Within one egress
+plan, candidates for the same provider must share the same authority, base path,
+and profile. Conflicting profiles fail with `AuthorityConflict`; this plan does
+not support multiple identities for one provider.
+
+New API-key and OAuth logins write a profile bundle. Legacy sources remain
+migration fallbacks and do not override a stored profile. These credential
+mechanics do not change the
+[official subscription integration boundaries](#authentication-support-boundaries).
 
 ## Provider Presets
 
@@ -527,8 +584,10 @@ openrouter, groq, deepseek, mistral, together, fireworks, xai
 moonshot, minimax, zhipu, qwen, siliconflow, volcengine
 ```
 
-Canonical names for the first four remain `openai`, `anthropic`, and `google`.
-`codex` is the ChatGPT subscription preset; `gemini` aliases `google`.
+Canonical names for the first four are `openai`, `codex`, `anthropic`, and
+`google`. `codex` configures the Codex-specific OAuth/backend path described
+under [Authentication support boundaries](#authentication-support-boundaries);
+`gemini` aliases the API-key `google` preset.
 Aggregator and regional OpenAI-compatible presets set an explicit `name` so
 `/ctx/model/<provider>` stays a stable object, not a transport host.
 `compatible` writes the same shape for any OpenAI-compatible base URL,
@@ -536,7 +595,9 @@ including a local runtime; it is not an Ollama-specific path.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
 preset uses `anthropic.messages`, so the runner sends `POST /v1/messages` with
-the required Anthropic version header.
+the required Anthropic version header. Neither preset enables consumer
+subscription OAuth. Installing a preset writes configuration; it does not
+verify credentials, model availability, or subscription access.
 
 ## One-Shot Exec
 

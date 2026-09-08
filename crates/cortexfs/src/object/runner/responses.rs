@@ -329,7 +329,9 @@ fn gemini_target(transport: &ResolvedTransport, model: &str) -> Result<CurlJsonT
 fn gemini_headers(credential: &ProviderCredential) -> Result<Vec<String>, String> {
     match *credential {
         ProviderCredential::GoogleApiKey(ref key) => Ok(vec![format!("x-goog-api-key: {key}")]),
-        ProviderCredential::Bearer(ref token) => Ok(vec![format!("Authorization: Bearer {token}")]),
+        ProviderCredential::Bearer(ref token) | ProviderCredential::Egress { ref token, .. } => {
+            Ok(vec![format!("Authorization: Bearer {token}")])
+        }
         ProviderCredential::AnthropicApiKey(_) | ProviderCredential::Codex { .. } => {
             Err("invalid Gemini credential".to_owned())
         }
@@ -352,7 +354,10 @@ fn openai_target(
     responses: bool,
     run: &str,
 ) -> Result<(CurlJsonTarget, Vec<String>), String> {
-    let codex = matches!(credential, Some(ProviderCredential::Codex { .. }));
+    let codex = matches!(
+        credential,
+        Some(ProviderCredential::Codex { .. } | ProviderCredential::Egress { codex: true, .. })
+    );
     if codex && !responses {
         return Err("Codex OAuth only supports openai.responses".to_owned());
     }
@@ -401,7 +406,9 @@ fn openai_target(
 }
 pub(crate) fn anthropic_headers(credential: &ProviderCredential) -> Result<Vec<String>, String> {
     let auth = match *credential {
-        ProviderCredential::Bearer(ref token) | ProviderCredential::Codex { ref token, .. } => {
+        ProviderCredential::Bearer(ref token)
+        | ProviderCredential::Codex { ref token, .. }
+        | ProviderCredential::Egress { ref token, .. } => {
             format!("Authorization: Bearer {token}")
         }
         ProviderCredential::AnthropicApiKey(ref key) => format!("x-api-key: {key}"),

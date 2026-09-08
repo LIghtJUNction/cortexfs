@@ -28,7 +28,7 @@ pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), ExecError> 
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut config = AgentModelRunConfig::new(name)?;
-    config.apply_invocation(&envelope);
+    config.apply_invocation(&envelope)?;
     write_agent_debug_timing(&mut stdout, &config, "agent_runner_ready")?;
     if !is_regular_file_no_follow(&config.model_path) {
         return Err(ExecError::new(missing_model_message(
@@ -196,19 +196,14 @@ impl AgentModelRunConfig {
         })
     }
 
-    pub(crate) fn apply_invocation(&mut self, envelope: &AgentInvocationEnvelope) {
+    pub(crate) fn apply_invocation(
+        &mut self,
+        envelope: &AgentInvocationEnvelope,
+    ) -> Result<(), ExecError> {
         self.history_messages.clear();
         self.history_messages.push_str(envelope.history_messages());
         self.tool_context.clear();
         self.tool_context.push_str(envelope.tool_context());
-        if let Some((prefix, encoded)) = encoded_tool_context(envelope) {
-            if !self.tool_context.trim().is_empty() {
-                self.tool_context.push_str("\n\n");
-            }
-            self.tool_context.push_str(prefix);
-            self.tool_context.push_str(&encoded);
-            trim_tool_context_to_limit(&mut self.tool_context);
-        }
         if let Some(event) = envelope.event()
             && let Ok(encoded) = serde_json::to_string(event)
         {
@@ -219,29 +214,92 @@ impl AgentModelRunConfig {
             self.tool_context.push_str(&encoded);
             trim_tool_context_to_limit(&mut self.tool_context);
         }
+        if let Some((prefix, encoded)) = encoded_tool_context(envelope)? {
+            if self.tool_context.len() + prefix.len() + encoded.len() + 2
+                > MAX_AGENT_TOOL_CONTEXT_BYTES
+            {
+                self.tool_context.clear();
+            }
+            if !self.tool_context.trim().is_empty() {
+                self.tool_context.push_str("\n\n");
+            }
+            self.tool_context.push_str(prefix);
+            self.tool_context.push_str(&encoded);
+        }
+        Ok(())
     }
 }
 
-fn encoded_tool_context(envelope: &AgentInvocationEnvelope) -> Option<(&'static str, String)> {
-    let observation = envelope.observation()?;
+fn encoded_tool_context(
+    envelope: &AgentInvocationEnvelope,
+) -> Result<Option<(&'static str, String)>, ExecError> {
+    let Some(observation) = envelope.observation() else {
+        return Ok(None);
+    };
     let call = envelope
         .tool_context()
         .lines()
         .rev()
         .find_map(|line| line.strip_prefix(crate::agent::TOOL_CALL_CONTEXT_PREFIX))
         .and_then(|value| serde_json::from_str::<ToolCall>(value).ok());
-    if let Some(call) = call.filter(|call| call.id == observation.tool_call_id()) {
-        let mut assistant = Message::assistant("");
-        assistant.tool_calls.push(call);
-        let mut tool = Message::new("tool", observation.content());
-        tool.tool_call_id = Some(observation.tool_call_id().to_owned());
-        return serde_json::to_string(&[assistant, tool])
-            .ok()
-            .map(|encoded| (crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX, encoded));
+    let (prefix, mut payload, field) = call
+        .filter(|call| call.id == observation.tool_call_id())
+        .map_or_else(
+            || {
+                (
+                    crate::agent::TOOL_RESULT_CONTEXT_PREFIX,
+                    serde_json::json!(observation),
+                    "/content",
+                )
+            },
+            |call| {
+                let mut assistant = Message::assistant("");
+                assistant.tool_calls.push(call);
+                let mut tool = Message::new("tool", observation.content());
+                tool.tool_call_id = Some(observation.tool_call_id().to_owned());
+                (
+                    crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX,
+                    serde_json::json!([assistant, tool]),
+                    "/1/content/value",
+                )
+            },
+        );
+    let mut encoded = payload.to_string();
+    let limit = MAX_AGENT_TOOL_CONTEXT_BYTES.saturating_sub(prefix.len());
+    if encoded.len() > limit {
+        if let Some(truncated) = payload.get_mut("truncated") {
+            *truncated = Value::Bool(true);
+        }
+        let (mut low, mut high, mut end) = (0, observation.content().chars().count(), 0);
+        loop {
+            let boundary = observation
+                .content()
+                .char_indices()
+                .nth(end)
+                .map_or_else(|| observation.content().len(), |(byte, _)| byte);
+            *payload
+                .pointer_mut(field)
+                .ok_or_else(|| ExecError::new("cannot encode agent tool context"))? =
+                Value::String(format!(
+                    "{}\n[truncated]\n",
+                    observation.content().get(..boundary).unwrap_or_default()
+                ));
+            let candidate = payload.to_string();
+            if candidate.len() <= limit {
+                encoded = candidate;
+                low = end;
+            } else if end == 0 {
+                return Err(ExecError::new("tool continuation exceeds context budget"));
+            } else {
+                high = end - 1;
+            }
+            end = low + high.saturating_sub(low).div_ceil(2);
+            if end <= low {
+                break;
+            }
+        }
     }
-    serde_json::to_string(observation)
-        .ok()
-        .map(|encoded| (crate::agent::TOOL_RESULT_CONTEXT_PREFIX, encoded))
+    Ok(Some((prefix, encoded)))
 }
 
 pub(crate) fn candidate_window_budget(

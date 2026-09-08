@@ -38,7 +38,7 @@ pub(crate) fn validate_provider_secret_target(provider: &str, slot: &str) -> Res
     if !is_provider_name(provider) {
         return Err(CliError::usage("invalid provider name"));
     }
-    if !is_provider_secret_slot(slot) {
+    if !is_provider_secret_slot(slot) || !cortexfs::provider::auth::is_api_key_slot(slot) {
         return Err(CliError::usage("invalid provider secret slot"));
     }
     Ok(())
@@ -58,7 +58,8 @@ pub(crate) fn provider_system_secret_cli_error(
         cortexfs::ProviderSystemSecretError::InvalidName => {
             CliError::usage("invalid provider secret name")
         }
-        cortexfs::ProviderSystemSecretError::CannotRead => {
+        cortexfs::ProviderSystemSecretError::CannotRead
+        | cortexfs::ProviderSystemSecretError::AccessDenied => {
             CliError::unavailable("cannot read provider system secret")
         }
         cortexfs::ProviderSystemSecretError::CannotWrite => CliError::unavailable(

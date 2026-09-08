@@ -151,7 +151,7 @@ fn runtime_environment_preserves_sandbox_model_and_secret_behavior()
     let RunEnvironment::Sandbox {
         program,
         mount_table,
-        ..
+        control_dir,
     } = environment
     else {
         return Err("socket-activated agents must use the bwrap sandbox".into());
@@ -160,13 +160,6 @@ fn runtime_environment_preserves_sandbox_model_and_secret_behavior()
         (environment.kind(), program, mount_table.entries()),
         ("sandbox", Path::new(BWRAP_PROGRAM), mounts.entries())
     );
-    let env = super::secret_runtime_env(
-        "access".into(),
-        "codex".into(),
-        "default".into(),
-        "account".into(),
-    );
-    assert_eq!(env.last().map(|value| value.1.as_str()), Some("account"));
-    assert!(!format!("{env:?}").contains("refresh"));
+    assert_eq!(control_dir, Some(Path::new("/run/cortexfs/control")));
     Ok(())
 }

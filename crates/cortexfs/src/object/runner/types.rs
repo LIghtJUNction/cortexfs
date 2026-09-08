@@ -52,6 +52,7 @@ pub(crate) type ProviderRuntimeDriver = cortexfs_protocol::WireProtocol;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderCredential {
     Bearer(String),
+    Egress { token: String, codex: bool },
     Codex { token: String, account_id: String },
     AnthropicApiKey(String),
     GoogleApiKey(String),
@@ -62,13 +63,16 @@ impl ProviderCredential {
             Self::Bearer(ref secret)
             | Self::AnthropicApiKey(ref secret)
             | Self::GoogleApiKey(ref secret) => secret,
-            Self::Codex { ref token, .. } => token,
+            Self::Codex { ref token, .. } | Self::Egress { ref token, .. } => token,
         }
     }
     pub(crate) fn codex_account(&self) -> Option<&str> {
         match *self {
             Self::Codex { ref account_id, .. } => Some(account_id),
-            Self::Bearer(_) | Self::AnthropicApiKey(_) | Self::GoogleApiKey(_) => None,
+            Self::Bearer(_)
+            | Self::AnthropicApiKey(_)
+            | Self::GoogleApiKey(_)
+            | Self::Egress { .. } => None,
         }
     }
 }

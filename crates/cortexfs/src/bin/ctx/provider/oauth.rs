@@ -51,6 +51,9 @@ pub(crate) fn provider_oauth_status(provider: &str, profile_name: &str) -> Resul
         }
         return Ok(());
     }
+    if profile_name != "default" {
+        return Err(CliError::unavailable("oauth profile is not configured"));
+    }
     let system = oauth_uses_system_store(&config)?;
     let stored = system
         .then(|| {
@@ -97,20 +100,29 @@ pub(crate) fn provider_oauth_refresh(provider: &str, profile: &str) -> Result<()
     let adapter = registry
         .get(provider)
         .ok_or_else(|| CliError::usage("provider auth adapter is unavailable"))?;
+    if cortexfs::provider::auth::resolve_auth_profile(adapter, profile, true)
+        .map_err(|error| CliError::unavailable(error.to_string()))?
+        .is_some()
+    {
+        return print_line("oauth refresh ok");
+    }
     let credential = stored_oauth_credential(provider, profile, &config)?;
     let mut transport = cortexfs::http_transport()
         .map_err(|_error| CliError::unavailable("oauth transport unavailable"))?;
     let refreshed = adapter
         .refresh_with(&credential, &mut transport, current_time_unix())
         .map_err(|_error| CliError::unavailable("oauth token exchange failed"))?;
-    persist_adapter_credential(&config, adapter, profile, &refreshed)?;
+    cortexfs::store_auth_profile(adapter.id(), profile, refreshed)
+        .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?;
     print_line("oauth refresh ok")
 }
 
 pub(crate) fn provider_auth_logout(provider: &str, profile: &str) -> Result<(), CliError> {
     cortexfs::delete_auth_profile(provider, profile)
         .map_err(|_error| CliError::unavailable("authentication credential store unavailable"))?;
-    if let Ok(config) = provider_oauth_config(provider) {
+    if profile == "default"
+        && let Ok(config) = provider_oauth_config(provider)
+    {
         cortexfs::delete_oauth_credentials(provider, &config)
             .map_err(|_error| CliError::unavailable("OAuth credential store unavailable"))?;
     }
@@ -155,15 +167,8 @@ fn stored_oauth_credential(
     profile_name: &str,
     config: &cortexfs::OAuthProviderConfig,
 ) -> Result<cortexfs::Credential, CliError> {
-    if let Some(profile) = cortexfs::read_auth_profile(provider, profile_name)
-        .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?
-    {
-        return match *profile.credential() {
-            cortexfs::Credential::OAuth { .. } => Ok(profile.credential().clone()),
-            cortexfs::Credential::ApiKey { .. } => {
-                Err(CliError::usage("authentication profile is not OAuth"))
-            }
-        };
+    if profile_name != "default" {
+        return Err(CliError::unavailable("oauth profile is not configured"));
     }
     if oauth_uses_system_store(config)? {
         let state = cortexfs::read_codex_system()
@@ -198,18 +203,6 @@ fn stored_oauth_credential(
         expires_at,
         scopes: Vec::new(),
     })
-}
-
-fn persist_adapter_credential(
-    config: &cortexfs::OAuthProviderConfig,
-    adapter: &dyn cortexfs::AuthProvider,
-    profile: &str,
-    credential: &cortexfs::Credential,
-) -> Result<(), CliError> {
-    let _ = config;
-    cortexfs::store_auth_profile(adapter.id(), profile, credential.clone())
-        .map(|_profile| ())
-        .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))
 }
 
 fn oauth_uses_system_store(config: &cortexfs::OAuthProviderConfig) -> Result<bool, CliError> {

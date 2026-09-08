@@ -1,3 +1,17 @@
+fn capture_cli_request(root: &Path, command: &[&str]) -> String {
+    let server = spawn_agent_socket_request_capture(root, "executor");
+    let mut argv = vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+    ];
+    argv.extend(command.iter().copied().map(std::ffi::OsString::from));
+    let result = run(argv);
+    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    request.unwrap_or_default()
+}
+
 #[test]
 fn terminal_connect_error_classifies_socket_failures() {
     let socket = Path::new("/tmp/cortexfs-terminal.sock");
@@ -38,22 +52,7 @@ fn top_level_send_uses_agent_send_request_shape() {
     let agent_dir = root.join("agent").join("executor.d");
     assert!(fs::create_dir_all(&agent_dir).is_ok());
     assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "executor");
-
-    let result = run(vec![
-        std::ffi::OsString::from("--root"),
-        root.as_os_str().to_os_string(),
-        std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("executor"),
-        std::ffi::OsString::from("hello"),
-    ]);
-
-    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
-    let request = server.join();
-    assert!(request.is_ok());
-    let Ok(request) = request else {
-        return;
-    };
+    let request = capture_cli_request(&root, &["send", "executor", "hello"]);
     assert!(request.contains("\"op\":\"send\""));
     assert!(request.contains("\"session\":\"default\""));
     assert!(request.contains("\"scope\":\"private\""));
@@ -65,22 +64,7 @@ fn top_level_send_uses_agent_send_request_shape() {
 fn top_level_send_defaults_cwd_to_workspace() {
     let root = clean_test_dir("ctx-top-level-send-default-cwd");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "executor");
-
-    let result = run(vec![
-        std::ffi::OsString::from("--root"),
-        root.as_os_str().to_os_string(),
-        std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("executor"),
-        std::ffi::OsString::from("hello"),
-    ]);
-
-    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
-    let request = server.join();
-    assert!(request.is_ok());
-    let Ok(request) = request else {
-        return;
-    };
+    let request = capture_cli_request(&root, &["send", "executor", "hello"]);
     assert!(request.contains("\"cwd\":\"/workspace\""));
 }
 
@@ -106,22 +90,7 @@ fn top_level_send_ignores_external_session_workspace() {
         )
         .is_ok()
     );
-    let server = spawn_agent_socket_request_capture(&root, "executor");
-
-    let result = run(vec![
-        std::ffi::OsString::from("--root"),
-        root.as_os_str().to_os_string(),
-        std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("executor"),
-        std::ffi::OsString::from("hello"),
-    ]);
-
-    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
-    let request = server.join();
-    assert!(request.is_ok());
-    let Ok(request) = request else {
-        return;
-    };
+    let request = capture_cli_request(&root, &["send", "executor", "hello"]);
     assert!(request.contains("\"cwd\":\"/workspace\""));
     assert!(!request.contains("\"workspace\""));
     assert!(!request.contains(&workspace.display().to_string()));
@@ -142,22 +111,7 @@ fn top_level_send_ignores_root_session_workspace() {
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
     assert!(fs::write(session.join("workspace"), "/\n").is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "executor");
-
-    let result = run(vec![
-        std::ffi::OsString::from("--root"),
-        root.as_os_str().to_os_string(),
-        std::ffi::OsString::from("send"),
-        std::ffi::OsString::from("executor"),
-        std::ffi::OsString::from("hello"),
-    ]);
-
-    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
-    let request = server.join();
-    assert!(request.is_ok());
-    let Ok(request) = request else {
-        return;
-    };
+    let request = capture_cli_request(&root, &["send", "executor", "hello"]);
     assert!(request.contains("\"cwd\":\"/workspace\""));
     assert!(!request.contains("\"workspace\""));
 }
@@ -180,21 +134,7 @@ fn top_level_resume_uses_agent_resume_request_shape() {
         return;
     };
     assert!(fs::write(session.join("workspace"), format!("{}\n", current.display())).is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "executor");
-
-    let result = run(vec![
-        std::ffi::OsString::from("--root"),
-        root.as_os_str().to_os_string(),
-        std::ffi::OsString::from("resume"),
-        std::ffi::OsString::from("executor"),
-    ]);
-
-    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
-    let request = server.join();
-    assert!(request.is_ok());
-    let Ok(request) = request else {
-        return;
-    };
+    let request = capture_cli_request(&root, &["resume", "executor"]);
     assert!(request.contains("\"op\":\"resume\""));
     assert!(request.contains("\"session\":\"default\""));
     assert!(!request.contains("\"scope\""));
