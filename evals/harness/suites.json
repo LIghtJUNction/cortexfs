@@ -218,14 +218,22 @@
         "-p",
         "cortexfs",
         "--lib",
-        "tests::schedule::validation::rules::"
+        "tests::schedule::"
       ],
       "fixtures": [
+        "crates/cortexfs/src/tests/schedule.rs",
+        "crates/cortexfs/src/tests/schedule/advance.rs",
+        "crates/cortexfs/src/tests/schedule/completion.rs",
+        "crates/cortexfs/src/tests/schedule/handoffs.rs",
         "crates/cortexfs/src/tests/schedule/validation/rules.rs"
       ],
       "required_tests": [
         "tests::schedule::validation::rules::agent_schedule_defaults_delegated_nodes_to_executor_agent",
-        "tests::schedule::validation::rules::agent_schedule_requires_executor_create_for_implicit_handoff"
+        "tests::schedule::validation::rules::agent_schedule_requires_executor_create_for_implicit_handoff",
+        "tests::schedule::advance::agent_schedule_advance_defaults_child_session_to_parent_session",
+        "tests::schedule::advance::agent_schedule_advance_records_next_ready_handoffs_from_parent_state",
+        "tests::schedule::completion::agent_schedule_completion_derives_done_delegated_nodes_from_child_status",
+        "tests::schedule::handoffs::agent_schedule_recorder_materializes_ready_child_handoffs"
       ]
     }
   ]

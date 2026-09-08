@@ -11,7 +11,7 @@ pub(super) fn commit_preserving(
     expected: (u64, u64),
     replacement: (u64, u64),
 ) -> std::io::Result<AtomicReplaceOutcome> {
-    if is_fuse(parent)? {
+    if is_fuse(parent).inspect_err(|_error| remove_temp(parent, temp))? {
         // Synthetic inodes are path-derived; the mount enforces owner-UID writes.
         if !target_matches(parent, name, expected) {
             remove_temp(parent, temp);
@@ -30,7 +30,8 @@ pub(super) fn commit_preserving(
         parent,
         name,
         nix::fcntl::RenameFlags::RENAME_EXCHANGE,
-    )?;
+    )
+    .inspect_err(|_error| remove_temp(parent, temp))?;
     if target_matches(parent, temp, expected) {
         remove_temp(parent, temp);
         return Ok(publish_outcome(parent.sync_all()));
