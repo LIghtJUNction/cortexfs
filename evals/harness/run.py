@@ -240,6 +240,8 @@ def main(argv=None):
         invocations[plan["id"]] = invocation
         report["invocations"].append(invocation)
         report["suites"] = [assess(suite, invocations.get("workspace" if args.workspace else suite["id"])) for suite in suites]
+        if any(suite["status"] == "failed" for suite in report["suites"]):
+            invocation["status"] = "failed"
         report["status"] = "passed" if all(suite["status"] == "passed" for suite in report["suites"]) else "failed"
         write_report(output, report)
         print(f"{plan['id']}: {invocation['status']} ({invocation['counts']['passed']} tests passed)", flush=True)

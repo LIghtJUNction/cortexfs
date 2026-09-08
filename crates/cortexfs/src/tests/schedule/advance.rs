@@ -37,28 +37,11 @@ fn agent_schedule_advance_records_next_ready_handoffs_from_parent_state() {
         &["plan"]
     ));
     assert_schedule_advance(&second, &["plan", "review"], &["execute"]);
+    let child = session.join("context").join("child").join("exec-123");
+    assert_file_text(&child.join("agent"), "executor\n");
+    assert_file_text(&child.join("session"), "default\n");
     assert_file_text(
-        &session
-            .join("context")
-            .join("child")
-            .join("exec-123")
-            .join("agent"),
-        "executor\n",
-    );
-    assert_file_text(
-        &session
-            .join("context")
-            .join("child")
-            .join("exec-123")
-            .join("session"),
-        "default\n",
-    );
-    assert_file_text(
-        &session
-            .join("context")
-            .join("child")
-            .join("exec-123")
-            .join("handoff.md"),
+        &child.join("handoff.md"),
         "Task: execute the accepted plan\n",
     );
 }

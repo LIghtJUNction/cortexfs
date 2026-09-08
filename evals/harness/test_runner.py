@@ -130,6 +130,28 @@ class RunnerTests(unittest.TestCase):
         report = json.loads((output / "report.json").read_text())
         self.assertEqual([suite["status"] for suite in report["suites"]], ["failed", "not_run"])
 
+    def test_missing_or_ignored_contract_evidence_fails_the_invocation(self):
+        invocation = self.invoke()
+        for workspace in (False, True):
+            for observed in ([], ["ignored"]):
+                with self.subTest(workspace=workspace, observed=observed):
+                    output = self.root / f"results-{workspace}-{len(observed)}"
+                    console = io.StringIO()
+                    evidence = {**invocation, "tests": {"sample::contract": observed}}
+                    with patch.object(run, "load_suites", return_value=[SUITE, {**SUITE, "id": "later"}]), \
+                         patch.object(run, "identify", return_value="fixture"), \
+                         patch.object(run, "execute", return_value=evidence) as execute, \
+                         redirect_stdout(console):
+                        args = ["--output", str(output)] + (["--workspace"] if workspace else [])
+                        self.assertEqual(run.main(args), 1)
+                    self.assertEqual(execute.call_count, 1)
+                    report = json.loads((output / "report.json").read_text())
+                    self.assertEqual(report["invocations"][0]["status"], "failed")
+                    self.assertEqual(report["invocations"][0]["returncode"], 0)
+                    self.assertEqual([suite["status"] for suite in report["suites"]],
+                                     ["failed", "failed" if workspace else "not_run"])
+                    self.assertIn("failed (1 tests passed)", console.getvalue())
+
     def test_existing_output_directory_is_never_reused(self):
         with redirect_stdout(io.StringIO()), patch("sys.stderr", new=io.StringIO()):
             with self.assertRaises(SystemExit) as error:

@@ -8,26 +8,38 @@ mod tests {
 
     #[test]
     fn queries_typed_session_status() -> Result<(), Box<dyn std::error::Error>> {
-        let root = tempfile::tempdir()?;
-        let socket = root.path().join("agent.sock");
-        let listener = UnixListener::bind(&socket)?;
-        let server = thread::spawn(move || -> Result<(), std::io::Error> {
-            let (mut stream, _) = listener.accept()?;
-            let mut frame = String::new();
-            BufReader::new(&mut stream).read_line(&mut frame)?;
-            if frame != "{\"op\":\"status\",\"session\":\"default\"}\n" {
-                return Err(std::io::Error::other("unexpected status frame"));
+        for (kind, session) in [
+            ("status", "default"),
+            ("done", "default"),
+            ("status", "other"),
+        ] {
+            let root = tempfile::tempdir()?;
+            let socket = root.path().join("agent.sock");
+            let listener = UnixListener::bind(&socket)?;
+            let server = thread::spawn(move || -> Result<(), std::io::Error> {
+                let (mut stream, _) = listener.accept()?;
+                let mut frame = String::new();
+                BufReader::new(&mut stream).read_line(&mut frame)?;
+                assert_eq!(frame, "{\"op\":\"status\",\"session\":\"default\"}\n");
+                writeln!(
+                    stream,
+                    "{}",
+                    serde_json::json!({
+                        "type": kind, "session": session, "status": "active", "step": 2,
+                    })
+                )
+            });
+            let result = status::status(&socket, "default");
+            server
+                .join()
+                .map_err(|error| format!("server panicked: {error:?}"))??;
+            if kind == "status" && session == "default" {
+                let response = result?;
+                assert_eq!((response.status.as_str(), response.step), ("active", 2));
+            } else {
+                assert_eq!(result, Err(RuntimeClientError::InvalidFrame));
             }
-            stream.write_all(
-                b"{\"type\":\"status\",\"session\":\"default\",\"status\":\"active\",\"step\":2}\n",
-            )
-        });
-        let result = status::status(&socket, "default")?;
-        server
-            .join()
-            .map_err(|error| format!("server panicked: {error:?}"))??;
-        assert_eq!(result.status, "active");
-        assert_eq!(result.step, 2);
+        }
         Ok(())
     }
 
