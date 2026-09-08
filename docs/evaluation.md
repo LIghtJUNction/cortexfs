@@ -77,7 +77,7 @@ Cargo exits successfully. An invocation with zero passing tests also fails.
 | `aliases` | Exact broker target, legacy compatibility, owner checks and path rejection | FUSE projection methods; no mounted filesystem required |
 | `senders` | Telegram/Discord/Slack actor identity; default-deny routes | Channel event adapters |
 | `routing` | Rejected users never dispatch; allowed users retain distinct sessions | Host bridge |
-| `schedule` | Delegated work selects the installed executor and requires its create authority | Schedule validation |
+| `schedule` | Delegated work selects the installed executor, requires its create authority, materializes handoffs and derives completion from child results | Schedule validation, materialization and completion |
 | `sdk` | Installed Agent and Tool SDK executables complete two declared native tool calls; canonical CLI failures and oversized input | Installer, SDK processes and host tool loop |
 
 Fixtures stay with their Rust modules. Adding a contract means extending those
@@ -90,8 +90,10 @@ python3 -m unittest discover -s evals/harness -p 'test_*.py' -v
 ```
 
 CI uses `--workspace` with the same `--locked --workspace --all-targets
---all-features` gate as before. Format, source-budget, Clippy and documentation
-gates remain separate. CI uploads the evidence even when tests fail.
+--all-features` gate as before. Workspace mode adds `--no-fail-fast` to collect
+results from later test binaries after a failure while retaining a failing exit
+status. Format, source-budget, Clippy and documentation gates remain separate.
+CI uploads the evidence even when tests fail.
 
 ## Evidence limits
 

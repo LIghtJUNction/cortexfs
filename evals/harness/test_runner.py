@@ -111,7 +111,7 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(run.main(["--workspace", "--output", str(output)]), 0)
         command = execute.call_args.args[0]
         self.assertEqual(command[1:], ["cargo", "test", "--locked", "--workspace", "--all-targets",
-                                      "--all-features", "--", "--test-threads=1", "--format=pretty", "--color=never"])
+                                      "--all-features", "--no-fail-fast", "--", "--test-threads=1", "--format=pretty", "--color=never"])
         report = json.loads((output / "report.json").read_text())
         self.assertEqual(report["schema"], "cortexfs.harness-evaluation/v1")
         self.assertEqual(report["suites"][0]["status"], "passed")

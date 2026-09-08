@@ -19,7 +19,7 @@ fn agent_schedule_completion_derives_done_delegated_nodes_from_child_status() {
         record_child_handoff_to_parent_context(
             &session,
             "exec-123",
-            "worker",
+            "executor",
             "default",
             "Task: execute the accepted plan\n",
         ),

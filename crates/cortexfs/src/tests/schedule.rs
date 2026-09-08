@@ -52,7 +52,7 @@ const THREE_STAGE_SCHEDULE: &str = r#"
       "handoff": "Task: execute the accepted plan\n",
       "deps": ["review"],
       "requires": [
-        {"class": "agent", "name": "worker", "permission": "create"}
+        {"class": "agent", "name": "executor", "permission": "create"}
       ]
     }
   ]
@@ -69,7 +69,7 @@ fn three_stage_schedule_fixture(
         "\
 allow planner_t tool:fs.read execute
 allow planner_t agent:reviewer create
-allow planner_t agent:worker create
+allow planner_t agent:executor create
 ",
     )?;
     Ok((root, session, policy, THREE_STAGE_SCHEDULE))
