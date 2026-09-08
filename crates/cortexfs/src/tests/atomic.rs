@@ -260,6 +260,25 @@ fn atomic_replace_text_preserves_foreign_owner_when_root() -> std::io::Result<()
 }
 
 #[test]
+fn atomic_replace_text_cleans_temp_when_target_disappears() -> std::io::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("state.txt");
+    fs::write(&path, "authorized\n")?;
+    let mut remove_target = || fs::remove_file(&path);
+    let result = atomic_replace_text_preserving_metadata_with_hook(
+        &path,
+        "replacement\n",
+        &mut remove_target,
+    );
+    assert_eq!(
+        result.err().map(|error| error.kind()),
+        Some(std::io::ErrorKind::NotFound)
+    );
+    assert!(fs::read_dir(temp.path())?.next().is_none());
+    Ok(())
+}
+
+#[test]
 fn atomic_replace_text_refuses_target_identity_swap_before_commit() -> std::io::Result<()> {
     let temp = tempfile::tempdir()?;
     let path = temp.path().join("state.txt");
@@ -307,37 +326,21 @@ fn atomic_replace_text_refuses_target_identity_swap_before_commit() -> std::io::
 }
 
 #[test]
-fn atomic_replace_text_with_mode_rejects_symlink_parent_without_writing_target()
--> std::io::Result<()> {
+fn atomic_replace_text_rejects_symlink_directories() -> std::io::Result<()> {
     let temp = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
-    let link_parent = temp.path().join("state");
-    assert!(symlink(outside.path(), &link_parent).is_ok());
-
-    let result = atomic_replace_text_with_mode(&link_parent.join("index"), "new\n", 0o600);
-
-    assert!(result.is_err());
-    assert!(!outside.path().join("index").exists());
-    Ok(())
-}
-
-#[test]
-fn atomic_replace_text_with_mode_rejects_symlink_intermediate_dir_without_writing_target()
--> std::io::Result<()> {
-    let temp = tempfile::tempdir()?;
-    let outside = tempfile::tempdir()?;
-    let outside_nested = outside.path().join("nested");
-    fs::create_dir_all(&outside_nested)?;
-    let outside_index = outside_nested.join("index");
-    fs::write(&outside_index, "outside\n")?;
-    let link_parent = temp.path().join("state");
-    assert!(symlink(outside.path(), &link_parent).is_ok());
-
-    let result =
-        atomic_replace_text_with_mode(&link_parent.join("nested").join("index"), "new\n", 0o600);
-
-    assert!(result.is_err());
-    assert_eq!(fs::read_to_string(&outside_index)?, "outside\n");
+    let link = temp.path().join("state");
+    fs::create_dir_all(outside.path().join("nested"))?;
+    symlink(outside.path(), &link)?;
+    for name in ["index", "nested/index"] {
+        let target = outside.path().join(name);
+        let path = link.join(name);
+        assert!(atomic_replace_text_with_mode(&path, "new\n", 0o600).is_err());
+        assert!(!target.exists());
+        fs::write(&target, "outside\n")?;
+        assert!(atomic_replace_text_with_mode(&path, "new\n", 0o600).is_err());
+        assert_eq!(fs::read_to_string(target)?, "outside\n");
+    }
     Ok(())
 }
 
@@ -402,40 +405,20 @@ fn append_jsonl_line_rejects_embedded_line_breaks() -> std::io::Result<()> {
 }
 
 #[test]
-fn append_jsonl_line_rejects_symlink_parent_without_writing_target() -> std::io::Result<()> {
+fn append_jsonl_line_rejects_symlink_directories() -> std::io::Result<()> {
     let temp = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
-    let link_parent = temp.path().join("session");
-    let outside_events = outside.path().join("events.jsonl");
-    fs::write(&outside_events, "outside\n")?;
-    assert!(symlink(outside.path(), &link_parent).is_ok());
-
-    let result = append_jsonl_line(&link_parent.join("events.jsonl"), "{\"type\":\"done\"}");
-
-    assert!(result.is_err());
-    assert_eq!(fs::read_to_string(&outside_events)?, "outside\n");
-    Ok(())
-}
-
-#[test]
-fn append_jsonl_line_rejects_symlink_intermediate_dir_without_writing_target() -> std::io::Result<()>
-{
-    let temp = tempfile::tempdir()?;
-    let outside = tempfile::tempdir()?;
-    let outside_session = outside.path().join("default");
-    fs::create_dir_all(&outside_session)?;
-    let outside_events = outside_session.join("events.jsonl");
-    fs::write(&outside_events, "outside\n")?;
-    let link_parent = temp.path().join("sessions");
-    assert!(symlink(outside.path(), &link_parent).is_ok());
-
-    let result = append_jsonl_line(
-        &link_parent.join("default").join("events.jsonl"),
-        "{\"type\":\"done\"}",
-    );
-
-    assert!(result.is_err());
-    assert_eq!(fs::read_to_string(&outside_events)?, "outside\n");
+    let link = temp.path().join("session");
+    fs::create_dir_all(outside.path().join("default"))?;
+    symlink(outside.path(), &link)?;
+    for name in ["events.jsonl", "default/events.jsonl"] {
+        let target = outside.path().join(name);
+        assert!(append_jsonl_line(&link.join(name), "{\"type\":\"done\"}").is_err());
+        assert!(!target.exists());
+        fs::write(&target, "outside\n")?;
+        assert!(append_jsonl_line(&link.join(name), "{\"type\":\"done\"}").is_err());
+        assert_eq!(fs::read_to_string(target)?, "outside\n");
+    }
     Ok(())
 }
 

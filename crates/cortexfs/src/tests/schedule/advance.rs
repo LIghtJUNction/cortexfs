@@ -43,7 +43,7 @@ fn agent_schedule_advance_records_next_ready_handoffs_from_parent_state() {
             .join("child")
             .join("exec-123")
             .join("agent"),
-        "worker\n",
+        "executor\n",
     );
     assert_file_text(
         &session
@@ -68,7 +68,7 @@ fn agent_schedule_advance_defaults_child_session_to_parent_session() {
     let root = clean_test_dir("agent-schedule-parent-session");
     let session = root.join("feature");
     create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:worker create\n"));
+    let policy = ok!(PolicyV0::parse("allow planner_t agent:executor create\n"));
     let schedule = r#"
 {
   "version": 1,
@@ -81,7 +81,7 @@ fn agent_schedule_advance_defaults_child_session_to_parent_session() {
       "handoff": "Task: implement\n",
       "max_steps": 8,
       "requires": [
-        {"class": "agent", "name": "worker", "permission": "create"}
+        {"class": "agent", "name": "executor", "permission": "create"}
       ]
     }
   ]

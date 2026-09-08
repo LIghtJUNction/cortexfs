@@ -62,5 +62,10 @@ pub fn status(socket: &Path, session: &str) -> Result<RuntimeStatus, RuntimeClie
                 .to_owned(),
         ));
     }
-    serde_json::from_value(value).map_err(|_error| RuntimeClientError::InvalidFrame)
+    let response: RuntimeStatus =
+        serde_json::from_value(value).map_err(|_error| RuntimeClientError::InvalidFrame)?;
+    if response.kind != "status" || response.session != session {
+        return Err(RuntimeClientError::InvalidFrame);
+    }
+    Ok(response)
 }

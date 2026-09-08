@@ -6,8 +6,10 @@ mod tests {
         decode_native_request, decode_response_events, encode_model_request,
         encode_response_events, transcode_request, transcode_response,
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::borrow::Cow;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     const CHAT: &[u8] = br#"{"model":"chat-model","messages":[{"role":"user","content":"hi"}]}"#;
     const RESPONSES: &[u8] = br#"{"model":"responses-model","input":"hi"}"#;
@@ -59,116 +61,97 @@ mod tests {
         };
         let value = serde_json::to_value(event).unwrap_or_default();
         assert_eq!(
-            value.get("type").and_then(|item| item.as_str()),
+            value.get("type").and_then(Value::as_str),
             Some("text_delta")
         );
-        assert_eq!(
-            value.get("run").and_then(|item| item.as_str()),
-            Some("run-1")
-        );
+        assert_eq!(value.get("run").and_then(Value::as_str), Some("run-1"));
     }
 
     #[test]
-    fn native_ir_borrows_unescaped_wire_strings() {
-        let decoded = decode_native_request(WireProtocol::OpenAiChat, CHAT);
-        assert!(decoded.is_ok());
-        if let Ok(NativeRequest::OpenAiChat(request)) = decoded {
-            assert!(matches!(&request.model, Cow::Borrowed(_)));
-            assert!(matches!(
-                request
-                    .messages
-                    .first()
-                    .and_then(|message| message.content.as_ref()),
-                Some(cortexfs_protocol::openaichat::Content::Text(Cow::Borrowed(
-                    _
-                )))
-            ));
-        }
+    fn native_ir_borrows_unescaped_wire_strings() -> TestResult {
+        let NativeRequest::OpenAiChat(request) =
+            decode_native_request(WireProtocol::OpenAiChat, CHAT)?
+        else {
+            return Err("unexpected native protocol".into());
+        };
+        assert!(matches!(&request.model, Cow::Borrowed(_)));
+        assert!(matches!(
+            request
+                .messages
+                .first()
+                .and_then(|message| message.content.as_ref()),
+            Some(cortexfs_protocol::openaichat::Content::Text(Cow::Borrowed(
+                _
+            )))
+        ));
+        Ok(())
     }
 
     #[test]
-    fn every_dialect_decodes_and_encodes_the_semantic_ir() {
+    fn every_dialect_decodes_and_encodes_the_semantic_ir() -> TestResult {
         for (protocol, input) in cases() {
-            let decoded = decode_model_request(protocol, input);
-            assert!(decoded.is_ok(), "{protocol}: {decoded:?}");
-            if let Ok(request) = decoded {
-                assert!(request.validate().is_ok());
-                let encoded = encode_model_request(protocol, &request);
-                assert!(encoded.is_ok(), "{protocol}: {encoded:?}");
-                if let Ok(bytes) = encoded {
-                    assert!(serde_json::from_slice::<serde_json::Value>(&bytes).is_ok());
-                }
-            }
+            let request = decode_model_request(protocol, input)?;
+            request.validate()?;
+            let encoded = encode_model_request(protocol, &request)?;
+            serde_json::from_slice::<Value>(&encoded)?;
         }
+        Ok(())
     }
 
     #[test]
-    fn conversion_matrix_covers_four_request_dialects() {
+    fn conversion_matrix_covers_four_request_dialects() -> TestResult {
         for (source, input) in cases() {
             for (target, _) in cases() {
-                let converted = transcode_request(source, target, input);
-                assert!(converted.is_ok(), "{source}->{target}: {converted:?}");
-                if let Ok(converted) = converted {
-                    assert!(serde_json::from_slice::<serde_json::Value>(&converted.bytes).is_ok());
-                    let reparsed = decode_model_request(target, &converted.bytes);
-                    assert!(reparsed.is_ok(), "{source}->{target}: {reparsed:?}");
-                    let expected = if source == target {
-                        BridgePath::Identity
-                    } else if matches!(
-                        (source, target),
-                        (WireProtocol::OpenAiChat, WireProtocol::Gemini)
-                            | (WireProtocol::Gemini, WireProtocol::OpenAiChat)
-                    ) {
-                        BridgePath::Direct
-                    } else {
-                        BridgePath::ViaIr
-                    };
-                    assert_eq!(converted.path, expected);
-                }
+                let converted = transcode_request(source, target, input)?;
+                serde_json::from_slice::<Value>(&converted.bytes)?;
+                decode_model_request(target, &converted.bytes)?;
+                let expected = if source == target {
+                    BridgePath::Identity
+                } else if matches!(
+                    (source, target),
+                    (WireProtocol::OpenAiChat, WireProtocol::Gemini)
+                        | (WireProtocol::Gemini, WireProtocol::OpenAiChat)
+                ) {
+                    BridgePath::Direct
+                } else {
+                    BridgePath::ViaIr
+                };
+                assert_eq!(converted.path, expected);
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn identity_route_preserves_bytes_exactly() {
-        let result = transcode_request(WireProtocol::OpenAiChat, WireProtocol::OpenAiChat, CHAT);
-        assert!(result.is_ok());
-        if let Ok(result) = result {
-            assert_eq!(result.path, BridgePath::Identity);
-            assert_eq!(result.bytes, CHAT);
-        }
+    fn identity_route_preserves_bytes_exactly() -> TestResult {
+        let result = transcode_request(WireProtocol::OpenAiChat, WireProtocol::OpenAiChat, CHAT)?;
+        assert_eq!(result.path, BridgePath::Identity);
+        assert_eq!(result.bytes, CHAT);
+        Ok(())
     }
 
     #[test]
-    fn responses_context_reference_is_semantic_metadata() {
+    fn responses_context_reference_is_semantic_metadata() -> TestResult {
         let input =
             br#"{"model":"responses-model","previous_response_id":"resp_42","input":"next"}"#;
-        let decoded = decode_model_request(WireProtocol::OpenAiResponses, input);
-        assert!(decoded.is_ok());
-        if let Ok(request) = decoded {
-            assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
-            assert_eq!(
-                request
-                    .context
-                    .reference
-                    .as_ref()
-                    .map(|item| item.value.as_str()),
-                Some("resp_42")
-            );
-            let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request);
-            assert!(encoded.is_ok());
-            if let Ok(bytes) = encoded {
-                let value = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default();
-                assert_eq!(
-                    value
-                        .get("previous_response_id")
-                        .and_then(|item| item.as_str()),
-                    Some("resp_42")
-                );
-            }
-            let portable = encode_model_request(WireProtocol::OpenAiChat, &request);
-            assert!(portable.is_err());
-        }
+        let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
+        assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
+        assert_eq!(
+            request
+                .context
+                .reference
+                .as_ref()
+                .map(|item| item.value.as_str()),
+            Some("resp_42")
+        );
+        let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
+        let value: Value = serde_json::from_slice(&encoded)?;
+        assert_eq!(
+            value.get("previous_response_id").and_then(Value::as_str),
+            Some("resp_42")
+        );
+        assert!(encode_model_request(WireProtocol::OpenAiChat, &request).is_err());
+        Ok(())
     }
 
     #[test]
@@ -182,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn response_events_roundtrip_through_all_native_dialects() {
+    fn response_events_roundtrip_through_all_native_dialects() -> TestResult {
         let cases = [
             (WireProtocol::OpenAiChat, CHAT_RESPONSE),
             (WireProtocol::OpenAiResponses, RESPONSES_RESPONSE),
@@ -190,44 +173,58 @@ mod tests {
             (WireProtocol::Anthropic, ANTHROPIC_RESPONSE),
         ];
         for (protocol, input) in cases {
-            let events = decode_response_events(protocol, input);
-            assert!(events.is_ok(), "{protocol}: {events:?}");
-            if let Ok(events) = events {
-                assert!(
-                    events
-                        .iter()
-                        .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
-                );
-                let encoded = encode_response_events(protocol, &events);
-                assert!(encoded.is_ok(), "{protocol}: {encoded:?}");
-                if let Ok(encoded) = encoded {
-                    assert!(serde_json::from_slice::<serde_json::Value>(&encoded).is_ok());
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn response_conversion_matrix_supports_all_directions() {
-        let cases = [
-            (WireProtocol::OpenAiChat, CHAT_RESPONSE),
-            (WireProtocol::OpenAiResponses, RESPONSES_RESPONSE),
-            (WireProtocol::Gemini, GEMINI_RESPONSE),
-            (WireProtocol::Anthropic, ANTHROPIC_RESPONSE),
-        ];
-        for (source, input) in cases {
+            let events = decode_response_events(protocol, input)?;
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
+            );
+            let encoded = encode_response_events(protocol, &events)?;
+            serde_json::from_slice::<Value>(&encoded)?;
             for (target, _) in cases {
-                let converted = transcode_response(source, target, input);
-                assert!(converted.is_ok(), "{source}->{target}: {converted:?}");
-                if let Ok(converted) = converted {
-                    assert!(serde_json::from_slice::<serde_json::Value>(&converted.bytes).is_ok());
-                }
+                let converted = transcode_response(protocol, target, input)?;
+                serde_json::from_slice::<Value>(&converted.bytes)?;
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn response_conversion_preserves_terminal_status() -> Result<(), Box<dyn std::error::Error>> {
+    fn response_usage_overflow_returns_a_conversion_error() -> TestResult {
+        for output in [0_u64, 1] {
+            let input = serde_json::to_vec(&json!({
+                "id": "run", "model": "model", "content": [],
+                "usage": {"input_tokens": u64::MAX, "output_tokens": output},
+            }))?;
+            for (target, _) in cases() {
+                let mut events = decode_response_events(WireProtocol::Anthropic, &input)?;
+                let result = encode_response_events(target, &events);
+                if output == 1 && target != WireProtocol::Anthropic {
+                    assert_eq!(
+                        result,
+                        Err(cortexfs_protocol::ConversionError::InvalidField {
+                            protocol: target,
+                            field: "usage".to_owned(),
+                        })
+                    );
+                } else {
+                    let decoded = decode_response_events(target, &result?)?;
+                    assert!(decoded.iter().any(|event| matches!(event,
+                        ModelEvent::Usage { usage, .. }
+                            if usage.input_tokens == u64::MAX && usage.output_tokens == output)));
+                }
+                events.push(ModelEvent::Usage {
+                    run: "run".to_owned(),
+                    usage: cortexfs_protocol::Usage::default(),
+                });
+                encode_response_events(target, &events)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn response_conversion_preserves_terminal_status() -> TestResult {
         for status in [EventStatus::Ok, EventStatus::Error, EventStatus::Cancelled] {
             let events = [
                 ModelEvent::Start {
@@ -256,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_native_failure_status_is_not_success() -> Result<(), Box<dyn std::error::Error>> {
+    fn responses_native_failure_status_is_not_success() -> TestResult {
         for (native, status) in [
             ("completed", EventStatus::Ok),
             ("failed", EventStatus::Error),
@@ -273,9 +270,9 @@ mod tests {
                 if *actual == status)
             );
             let encoded = encode_response_events(WireProtocol::OpenAiResponses, &events)?;
-            let value: serde_json::Value = serde_json::from_slice(&encoded)?;
+            let value: Value = serde_json::from_slice(&encoded)?;
             assert_eq!(
-                value.get("status").and_then(serde_json::Value::as_str),
+                value.get("status").and_then(Value::as_str),
                 Some(if native == "incomplete" {
                     "failed"
                 } else {
@@ -287,37 +284,30 @@ mod tests {
     }
 
     #[test]
-    fn direct_route_keeps_image_and_tool_schema() {
+    fn direct_route_keeps_image_and_tool_schema() -> TestResult {
         let input = br#"{"model":"gemini-model","messages":[{"role":"user","content":[{"type":"text","text":"find"},{"type":"image_url","image_url":{"url":"https://example.invalid/a.png"}}]}],"tools":[{"type":"function","function":{"name":"lookup","description":"lookup data","parameters":{"type":"object"}}}]}"#;
-        let converted = transcode_request(WireProtocol::OpenAiChat, WireProtocol::Gemini, input);
-        assert!(converted.is_ok());
-        if let Ok(converted) = converted {
-            assert_eq!(converted.path, BridgePath::Direct);
-            let value =
-                serde_json::from_slice::<serde_json::Value>(&converted.bytes).unwrap_or_default();
-            assert!(value.get("tools").is_some());
-            assert!(value.get("contents").is_some());
-        }
+        let converted = transcode_request(WireProtocol::OpenAiChat, WireProtocol::Gemini, input)?;
+        assert_eq!(converted.path, BridgePath::Direct);
+        let value: Value = serde_json::from_slice(&converted.bytes)?;
+        assert!(value.get("tools").is_some());
+        assert!(value.get("contents").is_some());
+        Ok(())
     }
 
     #[test]
-    fn response_tool_call_becomes_a_normalized_event() {
-        let events = decode_response_events(WireProtocol::OpenAiChat, CHAT_TOOL_RESPONSE);
-        assert!(events.is_ok());
-        if let Ok(events) = events {
-            assert!(
-                events
-                    .iter()
-                    .any(|event| matches!(event, ModelEvent::ToolCall { .. }))
-            );
-            let encoded = encode_response_events(WireProtocol::Anthropic, &events);
-            assert!(encoded.is_ok());
-        }
+    fn response_tool_call_becomes_a_normalized_event() -> TestResult {
+        let events = decode_response_events(WireProtocol::OpenAiChat, CHAT_TOOL_RESPONSE)?;
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ModelEvent::ToolCall { .. }))
+        );
+        encode_response_events(WireProtocol::Anthropic, &events)?;
+        Ok(())
     }
 
     #[test]
-    fn output_text_fallback_preserves_provider_event_order()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn output_text_fallback_preserves_provider_event_order() -> TestResult {
         let chat = decode_response_events(
         WireProtocol::OpenAiChat,
         br#"{"id":"r","model":"m","choices":[{"message":{"content":"primary"},"finish_reason":"stop"}],"output_text":"fallback","usage":{"prompt_tokens":3,"completion_tokens":4}}"#,
