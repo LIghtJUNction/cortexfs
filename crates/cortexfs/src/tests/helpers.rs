@@ -78,7 +78,12 @@ impl Drop for TestDir {
 macro_rules! ok {
     ($result:expr) => {{
         let result = $result;
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "{}: {:?}",
+            stringify!($result),
+            result.as_ref().err()
+        );
         let Ok(value) = result else { return };
         value
     }};

@@ -226,7 +226,7 @@ def main(argv=None):
               "Typed v2 frames do not verify a persistent concurrent v2 runtime.",
               "Focused contracts do not prove mounted FUSE, systemd/cgroup or kernel sandbox integration.",
               "Existing platform-conditional test branches may return early; inspect raw logs and fixture sources."]}
-    plans = [{"id": "workspace", "cargo_args": ["--workspace", "--all-targets", "--all-features"]}] if args.workspace else suites
+    plans = [{"id": "workspace", "cargo_args": ["--workspace", "--all-targets", "--all-features", "--no-fail-fast"]}] if args.workspace else suites
     invocations = {}
     for plan in plans:
         command = [str(ROOT / "scripts/serialize-cargo.sh"), "cargo", "test", "--locked"]

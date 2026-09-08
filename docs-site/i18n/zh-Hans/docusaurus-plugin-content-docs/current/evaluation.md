@@ -53,7 +53,7 @@ Cargo 使用 `--locked`；首次下载依赖可能需要网络。上面的命令
 | `aliases` | 精确 broker 目标、旧路径兼容、所有者校验及非法路径拒绝 | FUSE 投影方法，无需实际挂载文件系统 |
 | `senders` | Telegram、Discord、Slack 发送者身份；路由默认拒绝 | 渠道事件适配器 |
 | `routing` | 被拒绝的用户不会触发分发；获准用户保留独立会话 | 主机桥接层 |
-| `schedule` | 委派工作选择已安装的 executor，并要求相应创建权限 | 调度验证 |
+| `schedule` | 委派工作选择已安装的 executor，要求相应创建权限，写入交接记录并根据子任务结果判定完成 | 调度验证、交接记录与完成状态 |
 | `sdk` | 安装后的 Agent 与 Tool SDK 可执行文件完成两次已声明的原生工具调用；标准 CLI 失败与超大输入 | 安装器、SDK 进程与主机工具循环 |
 
 夹具继续与 Rust 模块放在一起。新增契约时扩展这些测试，并在清单注册证据，无需在评估器中实现另一套 Agent 循环。运行器回归测试检查失败报告、零测试拒绝、覆盖缺失与进程清理：
@@ -62,7 +62,7 @@ Cargo 使用 `--locked`；首次下载依赖可能需要网络。上面的命令
 python3 -m unittest discover -s evals/harness -p 'test_*.py' -v
 ```
 
-CI 使用 `--workspace`，保留原有 `--locked --workspace --all-targets --all-features` 门槛。格式、源码预算、Clippy 与文档检查仍独立执行。测试失败时，CI 也会上传证据。
+CI 使用 `--workspace`，保留原有 `--locked --workspace --all-targets --all-features` 门槛。工作区模式添加 `--no-fail-fast`，在某个测试程序失败后继续收集其他测试程序的结果，最终仍返回失败退出码。格式、源码预算、Clippy 与文档检查仍独立执行。测试失败时，CI 也会上传证据。
 
 ## 证据的适用范围
 

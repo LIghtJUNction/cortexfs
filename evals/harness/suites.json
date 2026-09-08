@@ -213,7 +213,7 @@
     },
     {
       "id": "schedule",
-      "title": "Delegated executor defaults and handoff authority",
+      "title": "Delegated executor defaults, handoffs and completion",
       "cargo_args": [
         "-p",
         "cortexfs",
@@ -225,6 +225,8 @@
         "crates/cortexfs/src/tests/schedule/advance.rs",
         "crates/cortexfs/src/tests/schedule/completion.rs",
         "crates/cortexfs/src/tests/schedule/handoffs.rs",
+        "crates/cortexfs/src/tests/schedule/validation.rs",
+        "crates/cortexfs/src/tests/schedule/validation/ready.rs",
         "crates/cortexfs/src/tests/schedule/validation/rules.rs"
       ],
       "required_tests": [
