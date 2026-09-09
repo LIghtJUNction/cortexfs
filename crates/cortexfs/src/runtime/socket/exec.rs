@@ -1891,6 +1891,7 @@ printf "{\"type\":\"message\",\"run\":\"run1\",\"role\":\"assistant\",\"content\
     {
         let root = tempfile::tempdir()?;
         fs::create_dir_all(root.path().join("default"))?;
+        fs::write(root.path().join("default/messages.jsonl"), "")?;
         fs::write(
             root.path().join("agent"),
             r#"#!/bin/sh
