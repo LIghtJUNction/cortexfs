@@ -261,7 +261,11 @@ fn agent_prompt_history_skips_oversized_lines_before_rendering() {
 
     let history = format_history_messages_jsonl(&messages, 10_000);
 
-    assert_eq!(history, "- assistant: small");
+    assert!(history.lines().any(|line| line == "- assistant: small"));
+    assert!(history.contains("WARNING: historical messages exceeded"));
+    assert!(!history.contains("- user:"));
+    assert!(!history.contains("xxx"));
+    assert!(history.len() <= 10_000);
 }
 
 #[test]
