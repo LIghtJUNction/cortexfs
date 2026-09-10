@@ -146,7 +146,7 @@ fn write_worker_schedule_plan(session: &Path) {
   "nodes": [
     {
       "id": "implement",
-      "kind": "react",
+      "kind": "react", "agent": "worker",
       "child": "work-123",
       "handoff": "Task: implement the accepted plan\n",
       "max_steps": 8,
