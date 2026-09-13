@@ -2,7 +2,7 @@ use crate::message::{Message, message_from_json_line};
 
 mod render;
 
-const MAX_MESSAGE_LINE_BYTES: usize = 16 * 1024;
+const MAX_MESSAGE_LINE_BYTES: usize = 64 * 1024;
 const EMPTY_HISTORY: &str = "(no historical messages injected)";
 
 /// In-memory normalized view of durable session messages.

@@ -28,6 +28,18 @@ mod tests {
     }
 
     #[test]
+    fn history_accepts_large_user_messages_within_history_line_limit() {
+        let content = "x".repeat(48_500);
+        let line = serde_json::json!({"role": "user", "content": content}).to_string();
+        let history = History::from_jsonl(&line);
+
+        assert_eq!(
+            history.messages().first().map(Message::content),
+            Some(content.as_str())
+        );
+    }
+
+    #[test]
     fn default_summarizer_joins_omitted_messages() {
         let history = History::from_messages([
             Message::new("user", "first message with enough detail"),

@@ -252,7 +252,7 @@ fn agent_prompt_history_session_reads_only_bounded_recent_tail() {
 }
 
 #[test]
-fn agent_prompt_history_skips_oversized_lines_before_rendering() {
+fn agent_prompt_history_bounds_large_lines_during_rendering() {
     let messages = format!(
         "{}\n{}\n",
         serde_json::json!({"role": "user", "content": "x".repeat(20_000)}),
@@ -261,7 +261,8 @@ fn agent_prompt_history_skips_oversized_lines_before_rendering() {
 
     let history = format_history_messages_jsonl(&messages, 10_000);
 
-    assert_eq!(history, "- assistant: small");
+    assert!(history.starts_with("- assistant: small\n"));
+    assert!(history.contains("historical messages exceeded the 10000 character budget"));
 }
 
 #[test]
