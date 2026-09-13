@@ -309,16 +309,14 @@ fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() 
     let source = clean_test_dir("ctx-agent-start-git-ro");
     let home = clean_test_dir("ctx-agent-start-git-home");
     assert!(fs::create_dir_all(&home).is_ok());
-    assert!(
-        git_command(&home)
-            .arg("-c")
-            .arg("core.hooksPath=/dev/null")
-            .arg("init")
-            .arg("-q")
-            .arg(&source)
-            .status()
-            .is_ok_and(|status| status.success())
-    );
+    assert!(git_command(&home)
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
+        .arg("init")
+        .arg("-q")
+        .arg(&source)
+        .status()
+        .is_ok_and(|status| status.success()));
     write_text_file(&source.join(".git").join("host-marker"), "host metadata\n");
     let args = AgentStartArgs {
         name: "executor".to_owned(),
@@ -348,11 +346,9 @@ fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() 
         return;
     };
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/workspace/.git"));
-    assert!(
-        !bwrap
-            .iter()
-            .any(|arg| arg == &source.join(".git").display().to_string())
-    );
+    assert!(!bwrap
+        .iter()
+        .any(|arg| arg == &source.join(".git").display().to_string()));
     assert!(output.status.success(), "masked sandbox failed: {output:?}");
     assert!(!source.join(".git").join("sandbox-only").exists());
 
@@ -433,11 +429,9 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
         "/dev/null",
         "/workspace/.git"
     ));
-    assert!(
-        !bwrap
-            .iter()
-            .any(|arg| arg == &external.display().to_string())
-    );
+    assert!(!bwrap
+        .iter()
+        .any(|arg| arg == &external.display().to_string()));
 
     assert!(fs::remove_file(source.join(".git")).is_ok());
     assert!(std::os::unix::fs::symlink(&external, source.join(".git")).is_ok());
@@ -447,11 +441,9 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
         "/dev/null",
         "/workspace/.git"
     ));
-    assert!(
-        !bwrap
-            .iter()
-            .any(|arg| arg == &source.join(".git").display().to_string())
-    );
+    assert!(!bwrap
+        .iter()
+        .any(|arg| arg == &source.join(".git").display().to_string()));
 }
 
 #[test]
@@ -462,16 +454,14 @@ fn agent_start_policy_git_overlays_keep_declared_order() {
     assert!(fs::create_dir_all(&home).is_ok());
     assert!(fs::create_dir_all(&decoy).is_ok());
     write_text_file(&decoy.join("decoy"), "decoy\n");
-    assert!(
-        git_command(&home)
-            .arg("-c")
-            .arg("core.hooksPath=/dev/null")
-            .arg("init")
-            .arg("-q")
-            .arg(&source)
-            .status()
-            .is_ok_and(|status| status.success())
-    );
+    assert!(git_command(&home)
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
+        .arg("init")
+        .arg("-q")
+        .arg(&source)
+        .status()
+        .is_ok_and(|status| status.success()));
     let args = AgentStartArgs {
         name: "executor".to_owned(),
         session: "test".to_owned(),
@@ -931,15 +921,11 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
             && command
                 .args
                 .contains(&"--property=RestartSec=250ms".to_owned())
-            && command
-                .args
-                .contains(&"--property=MemoryMax=1G".to_owned())
+            && command.args.contains(&"--property=MemoryMax=1G".to_owned())
             && command
                 .args
                 .contains(&"--property=CPUQuota=200%".to_owned())
-            && command
-                .args
-                .contains(&"--property=TasksMax=256".to_owned())
+            && command.args.contains(&"--property=TasksMax=256".to_owned())
             && command
                 .args
                 .contains(&"--property=OOMPolicy=stop".to_owned())
@@ -1153,8 +1139,12 @@ fn agent_attach_missing_terminal_suggests_start_command() {
 #[test]
 fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
     let socket = unique_test_dir("agent-attach-missing-terminal-unsafe-session").join("main.sock");
-    let result =
-        stream_terminal_socket(&socket, true, "executor", "safe; touch CORTEXFS_HINT_PWNED #");
+    let result = stream_terminal_socket(
+        &socket,
+        true,
+        "executor",
+        "safe; touch CORTEXFS_HINT_PWNED #",
+    );
     assert!(matches!(
         result,
         Err(ref error)
@@ -1176,10 +1166,16 @@ fn agent_start_chat_socket_command_uses_socket_activation() {
     assert!(command.args.contains(&"--user".to_owned()));
     assert!(contains_arg_pair(&command.args, "--unit", &unit));
     assert!(command.args.contains(&"--collect".to_owned()));
-    assert!(command.args.contains(&"--property=MemoryMax=512M".to_owned()));
-    assert!(command.args.contains(&"--property=CPUQuota=100%".to_owned()));
+    assert!(command
+        .args
+        .contains(&"--property=MemoryMax=512M".to_owned()));
+    assert!(command
+        .args
+        .contains(&"--property=CPUQuota=100%".to_owned()));
     assert!(command.args.contains(&"--property=TasksMax=128".to_owned()));
-    assert!(command.args.contains(&"--property=OOMPolicy=stop".to_owned()));
+    assert!(command
+        .args
+        .contains(&"--property=OOMPolicy=stop".to_owned()));
     assert!(contains_arg_pair(
         &command.args,
         "--socket-property",
@@ -1191,12 +1187,10 @@ fn agent_start_chat_socket_command_uses_socket_activation() {
         "SocketMode=0666"
     ));
     assert!(contains_arg_pair(&command.args, "--agent", "executor"));
-    assert!(
-        command
-            .args
-            .iter()
-            .any(|arg| arg.ends_with("cortexfs-agent-runtime"))
-    );
+    assert!(command
+        .args
+        .iter()
+        .any(|arg| arg.ends_with("cortexfs-agent-runtime")));
 }
 
 #[test]
@@ -1235,12 +1229,20 @@ fn agent_start_chat_unit_normalizes_existing_relative_root() {
 fn agent_socket_path_prefers_current_user_agent_override() {
     let root = clean_test_dir("ctx-agent-user-socket-override");
     let uid = current_uid_for_test();
-    let control = root.join("home").join(&uid).join("agent").join("executor.d");
+    let control = root
+        .join("home")
+        .join(&uid)
+        .join("agent")
+        .join("executor.d");
     assert!(fs::create_dir_all(&control).is_ok());
 
     assert_eq!(
         agent_socket_path(&root, "executor"),
-        Ok(root.join("home").join(uid).join("agent").join("executor.sock"))
+        Ok(root
+            .join("home")
+            .join(uid)
+            .join("agent")
+            .join("executor.sock"))
     );
 }
 
