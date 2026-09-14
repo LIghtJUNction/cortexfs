@@ -1,5 +1,6 @@
 use crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX;
 use crate::object::runner::requests::agent_continuation_messages;
+use crate::object::runner::responses::parse_anthropic_message_content;
 use cortexfs_protocol::{Message, ModelRequest, ToolCall, WireProtocol, encode_model_request};
 use serde_json::{Value, json};
 
@@ -20,33 +21,32 @@ fn continuation_encodes_native_openai_tool_result() -> Result<(), Box<dyn std::e
     let messages = agent_continuation_messages(&context).ok_or("missing continuation")?;
 
     let responses = encoded(WireProtocol::OpenAiResponses, messages.clone())?;
-    assert_eq!(
-        responses.pointer("/input/1/type"),
-        Some(&json!("function_call"))
-    );
-    assert_eq!(
-        responses.pointer("/input/1/call_id"),
-        Some(&json!("call-1"))
-    );
-    assert_eq!(
-        responses.pointer("/input/2/type"),
-        Some(&json!("function_call_output"))
-    );
-    assert_eq!(
-        responses.pointer("/input/2/call_id"),
-        Some(&json!("call-1"))
-    );
+    for (pointer, expected) in [
+        ("/input/1/type", "function_call"),
+        ("/input/1/call_id", "call-1"),
+        ("/input/2/type", "function_call_output"),
+        ("/input/2/call_id", "call-1"),
+    ] {
+        assert_eq!(responses.pointer(pointer), Some(&json!(expected)));
+    }
 
     let chat = encoded(WireProtocol::OpenAiChat, messages)?;
-    assert_eq!(
-        chat.pointer("/messages/0/tool_calls/0/function/name"),
-        Some(&json!("tsh"))
-    );
-    assert_eq!(
-        chat.pointer("/messages/1/tool_call_id"),
-        Some(&json!("call-1"))
-    );
+    for (pointer, expected) in [
+        ("/messages/0/tool_calls/0/function/name", "tsh"),
+        ("/messages/1/tool_call_id", "call-1"),
+    ] {
+        assert_eq!(chat.pointer(pointer), Some(&json!(expected)));
+    }
     Ok(())
+}
+
+#[test]
+fn failed_provider_turn_wins_over_tool_call() {
+    let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"error"}"#;
+    assert_eq!(
+        parse_anthropic_message_content(response),
+        Err("provider response failed".to_owned())
+    );
 }
 
 fn encoded(
