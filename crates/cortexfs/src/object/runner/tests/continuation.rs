@@ -1,5 +1,6 @@
 use crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX;
 use crate::object::runner::requests::agent_continuation_messages;
+use crate::object::runner::responses::parse_anthropic_message_content;
 use cortexfs_protocol::{Message, ModelRequest, ToolCall, WireProtocol, encode_model_request};
 use serde_json::{Value, json};
 
@@ -47,6 +48,15 @@ fn continuation_encodes_native_openai_tool_result() -> Result<(), Box<dyn std::e
         Some(&json!("call-1"))
     );
     Ok(())
+}
+
+#[test]
+fn failed_provider_turn_wins_over_tool_call() {
+    let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"error"}"#;
+    assert_eq!(
+        parse_anthropic_message_content(response),
+        Err("provider response failed".to_owned())
+    );
 }
 
 fn encoded(
