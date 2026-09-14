@@ -46,7 +46,9 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
 
 fn message(source: &Message) -> Result<Value, ConversionError> {
     if source.role.as_str() == "tool" {
-        return Ok(json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": source.tool_call_id, "content": source.content.text_value()}]}));
+        return Ok(
+            json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": source.tool_call_id, "content": source.content.text_value()}]}),
+        );
     }
     let mut blocks = parts(&source.content)?;
     for call in &source.tool_calls {
