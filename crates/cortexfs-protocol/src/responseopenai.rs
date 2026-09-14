@@ -17,19 +17,21 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         .and_then(|items| items.first())
         .and_then(Value::as_object)
     {
-        if let Some(message) = choice.get("message").and_then(Value::as_object) {
-            text_events(&mut events, &run, message.get("content"));
-            if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-                for call in calls {
-                    events.push(tool_call(&run, call)?);
-                }
-            }
-        }
         let status = match choice.get("finish_reason").and_then(Value::as_str) {
             Some("error") => EventStatus::Error,
             Some("cancelled") => EventStatus::Cancelled,
             _ => EventStatus::Ok,
         };
+        if let Some(message) = choice.get("message").and_then(Value::as_object) {
+            text_events(&mut events, &run, message.get("content"));
+            if status == EventStatus::Ok
+                && let Some(calls) = message.get("tool_calls").and_then(Value::as_array)
+            {
+                for call in calls {
+                    events.push(tool_call(&run, call)?);
+                }
+            }
+        }
         events.push(ModelEvent::Done {
             run: run.clone(),
             status,
