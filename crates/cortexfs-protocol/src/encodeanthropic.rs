@@ -45,25 +45,16 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
 }
 
 fn message(source: &Message) -> Result<Value, ConversionError> {
-    let role = if source.role.as_str() == "tool" {
-        "user"
-    } else {
-        source.role.as_str()
-    };
-    let mut blocks = if source.role.as_str() == "tool" {
-        Vec::new()
-    } else {
-        parts(&source.content)?
-    };
     if source.role.as_str() == "tool" {
-        blocks.push(json!({"type": "tool_result", "tool_use_id": source.tool_call_id, "content": source.content.text_value()}));
+        return Ok(json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": source.tool_call_id, "content": source.content.text_value()}]}));
     }
+    let mut blocks = parts(&source.content)?;
     for call in &source.tool_calls {
         blocks.push(
             json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments}),
         );
     }
-    Ok(json!({"role": role, "content": blocks}))
+    Ok(json!({"role": source.role.as_str(), "content": blocks}))
 }
 
 fn parts(content: &Content) -> Result<Vec<Value>, ConversionError> {
