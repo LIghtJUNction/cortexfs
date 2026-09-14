@@ -50,14 +50,18 @@ fn generation(request: &ModelRequest) -> Map<String, Value> {
 }
 
 fn content(source: &Message) -> Result<Value, ConversionError> {
-    let role = if source.role.as_str() == "assistant" {
-        "model"
-    } else {
-        source.role.as_str()
+    let role = match source.role.as_str() {
+        "assistant" => "model",
+        "tool" => "user",
+        other => other,
     };
     let mut value = Map::new();
     value.insert("role".to_owned(), Value::String(role.to_owned()));
-    let mut values = parts(&source.content, role)?;
+    let mut values = if source.role.as_str() == "tool" {
+        Vec::new()
+    } else {
+        parts(&source.content, role)?
+    };
     values.extend(
         source
             .tool_calls
