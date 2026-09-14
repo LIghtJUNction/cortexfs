@@ -126,17 +126,6 @@ fn gemini_response_status(value: &Value) -> Result<(), String> {
 }
 
 fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
-    if let Some(call) = events.iter().find_map(tool_call_content) {
-        return Ok(call);
-    }
-    let text = events
-        .iter()
-        .filter_map(|event| match *event {
-            ModelEvent::TextDelta { ref text, .. }
-            | ModelEvent::ReasoningDelta { ref text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<String>();
     if events.iter().any(|event| {
         matches!(
             event,
@@ -148,6 +137,17 @@ fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
     }) {
         return Err("provider response failed".to_owned());
     }
+    if let Some(call) = events.iter().find_map(tool_call_content) {
+        return Ok(call);
+    }
+    let text = events
+        .iter()
+        .filter_map(|event| match *event {
+            ModelEvent::TextDelta { ref text, .. }
+            | ModelEvent::ReasoningDelta { ref text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
     if text.is_empty() {
         Err("provider response missing content".to_owned())
     } else {
