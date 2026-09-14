@@ -7,10 +7,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
     let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
-    let mut events = vec![ModelEvent::Start {
-        run: run.clone(),
-        model,
-    }];
+    let mut events = vec![ModelEvent::Start { run: run.clone(), model }];
     if let Some(choice) = map
         .get("choices")
         .and_then(Value::as_array)
@@ -32,20 +29,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                 }
             }
         }
-        events.push(ModelEvent::Done {
-            run: run.clone(),
-            status,
-        });
+        events.push(ModelEvent::Done { run: run.clone(), status });
     }
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
-    if !events
-        .iter()
-        .any(|event| matches!(event, ModelEvent::Done { .. }))
-    {
-        events.push(ModelEvent::Done {
-            run,
-            status: EventStatus::Ok,
-        });
+    if !events.iter().any(|event| matches!(event, ModelEvent::Done { .. })) {
+        events.push(ModelEvent::Done { run, status: EventStatus::Ok });
     }
     Ok(events)
 }
