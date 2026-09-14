@@ -50,7 +50,11 @@ fn message(source: &Message) -> Result<Value, ConversionError> {
     } else {
         source.role.as_str()
     };
-    let mut blocks = parts(&source.content)?;
+    let mut blocks = if source.role.as_str() == "tool" {
+        Vec::new()
+    } else {
+        parts(&source.content)?
+    };
     if source.role.as_str() == "tool" {
         blocks.push(json!({"type": "tool_result", "tool_use_id": source.tool_call_id, "content": source.content.text_value()}));
     }
