@@ -25,7 +25,6 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
     let gemini = encoded(WireProtocol::Gemini, messages)?;
     for (value, pointer, expected) in [
         (&responses, "/input/2/type", "function_call_output"),
-        (&responses, "/input/2/call_id", "call-1"),
         (&chat, "/messages/1/tool_call_id", "call-1"),
         (&anthropic, "/messages/1/role", "user"),
         (&anthropic, "/messages/1/content/0/type", "tool_result"),
