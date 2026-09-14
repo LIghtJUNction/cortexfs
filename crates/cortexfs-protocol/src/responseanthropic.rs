@@ -6,10 +6,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
     let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
-    let mut events = vec![ModelEvent::Start {
-        run: run.clone(),
-        model,
-    }];
+    let mut events = vec![ModelEvent::Start { run: run.clone(), model }];
     let status = match map.get("stop_reason").and_then(Value::as_str) {
         Some("error") => EventStatus::Error,
         Some("cancelled") => EventStatus::Cancelled,
@@ -21,10 +18,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         }
     }
     if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {
-        events.push(ModelEvent::Usage {
-            run: run.clone(),
-            usage,
-        });
+        events.push(ModelEvent::Usage { run: run.clone(), usage });
     }
     events.push(ModelEvent::Done { run, status });
     Ok(events)
@@ -40,18 +34,12 @@ fn block_events(
     match crate::responseutil::text(map.get("type")).as_deref() {
         Some("text") => {
             if let Some(text) = crate::responseutil::text(map.get("text")) {
-                events.push(ModelEvent::TextDelta {
-                    run: run.to_owned(),
-                    text,
-                });
+                events.push(ModelEvent::TextDelta { run: run.to_owned(), text });
             }
         }
         Some("thinking") => {
             if let Some(text) = crate::responseutil::text(map.get("thinking")) {
-                events.push(ModelEvent::ReasoningDelta {
-                    run: run.to_owned(),
-                    text,
-                });
+                events.push(ModelEvent::ReasoningDelta { run: run.to_owned(), text });
             }
         }
         Some("tool_use") if allow_tools => events.push(ModelEvent::ToolCall {
