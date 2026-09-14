@@ -40,8 +40,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
     }
     root.insert("stream".to_owned(), Value::Bool(request.stream));
     crate::encode::options(&mut root, request);
-    let value = Value::Object(root);
-    crate::encode::bytes(WireProtocol::Anthropic, &value)
+    crate::encode::bytes(WireProtocol::Anthropic, &Value::Object(root))
 }
 
 fn message(source: &Message) -> Result<Value, ConversionError> {
