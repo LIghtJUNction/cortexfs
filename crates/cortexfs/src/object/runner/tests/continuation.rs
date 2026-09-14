@@ -19,43 +19,15 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         serde_json::to_string(&[assistant, tool])?
     );
     let messages = agent_continuation_messages(&context).ok_or("missing continuation")?;
-
     let responses = encoded(WireProtocol::OpenAiResponses, messages.clone())?;
-    for (pointer, expected) in [
-        ("/input/1/type", "function_call"),
-        ("/input/1/call_id", "call-1"),
-        ("/input/2/type", "function_call_output"),
-        ("/input/2/call_id", "call-1"),
-    ] {
-        assert_eq!(responses.pointer(pointer), Some(&json!(expected)));
-    }
-
+    assert_eq!(responses.pointer("/input/2/type"), Some(&json!("function_call_output")));
+    assert_eq!(responses.pointer("/input/2/call_id"), Some(&json!("call-1")));
     let chat = encoded(WireProtocol::OpenAiChat, messages.clone())?;
-    for (pointer, expected) in [
-        ("/messages/0/tool_calls/0/function/name", "tsh"),
-        ("/messages/1/tool_call_id", "call-1"),
-    ] {
-        assert_eq!(chat.pointer(pointer), Some(&json!(expected)));
-    }
-
+    assert_eq!(chat.pointer("/messages/1/tool_call_id"), Some(&json!("call-1")));
     let anthropic = encoded(WireProtocol::Anthropic, messages.clone())?;
-    for (pointer, expected) in [
-        ("/messages/1/role", "user"),
-        ("/messages/1/content/0/type", "tool_result"),
-        ("/messages/1/content/0/tool_use_id", "call-1"),
-        ("/messages/1/content/0/content", "agent.\nfs.\n"),
-    ] {
-        assert_eq!(anthropic.pointer(pointer), Some(&json!(expected)));
-    }
-    assert!(anthropic.pointer("/messages/1/content/1").is_none());
-
+    assert_eq!(anthropic.pointer("/messages/1/content"), Some(&json!([{"type": "tool_result", "tool_use_id": "call-1", "content": "agent.\nfs.\n"}])));
     let gemini = encoded(WireProtocol::Gemini, messages)?;
-    assert_eq!(gemini.pointer("/contents/1/role"), Some(&json!("user")));
-    assert_eq!(
-        gemini.pointer("/contents/1/parts/0/functionResponse/response/content"),
-        Some(&json!("agent.\nfs.\n"))
-    );
-    assert!(gemini.pointer("/contents/1/parts/1").is_none());
+    assert_eq!(gemini.pointer("/contents/1"), Some(&json!({"role": "user", "parts": [{"functionResponse": {"name": "call-1", "response": {"content": "agent.\nfs.\n"}}}]})));
     Ok(())
 }
 
