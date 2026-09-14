@@ -34,8 +34,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         root.insert("generationConfig".to_owned(), Value::Object(config));
     }
     crate::encode::options(&mut root, request);
-    let value = Value::Object(root);
-    crate::encode::bytes(WireProtocol::Gemini, &value)
+    crate::encode::bytes(WireProtocol::Gemini, &Value::Object(root))
 }
 
 fn generation(request: &ModelRequest) -> Map<String, Value> {
@@ -60,8 +59,6 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
     } else {
         source.role.as_str()
     };
-    let mut value = Map::new();
-    value.insert("role".to_owned(), Value::String(role.to_owned()));
     let mut values = parts(&source.content, role)?;
     values.extend(
         source
@@ -69,8 +66,7 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
             .iter()
             .map(|call| json!({"functionCall": {"name": call.name, "args": call.arguments}})),
     );
-    value.insert("parts".to_owned(), Value::Array(values));
-    Ok(Value::Object(value))
+    Ok(json!({"role": role, "parts": values}))
 }
 
 fn parts(content: &Content, role: &str) -> Result<Vec<Value>, ConversionError> {
