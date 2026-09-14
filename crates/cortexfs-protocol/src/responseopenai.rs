@@ -7,34 +7,36 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
     let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
-    let mut events = vec![ModelEvent::Start { run: run.clone(), model }];
-    if let Some(choice) = map
+    let mut events = vec![ModelEvent::Start {
+        run: run.clone(),
+        model,
+    }];
+    let choice = map
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
-        .and_then(Value::as_object)
-    {
-        let status = match choice.get("finish_reason").and_then(Value::as_str) {
+        .and_then(Value::as_object);
+    let status = choice.map_or(EventStatus::Ok, |choice| {
+        match choice.get("finish_reason").and_then(Value::as_str) {
             Some("error") => EventStatus::Error,
             Some("cancelled") => EventStatus::Cancelled,
             _ => EventStatus::Ok,
-        };
-        if let Some(message) = choice.get("message").and_then(Value::as_object) {
-            text_events(&mut events, &run, message.get("content"));
-            if status == EventStatus::Ok
-                && let Some(calls) = message.get("tool_calls").and_then(Value::as_array)
-            {
-                for call in calls {
-                    events.push(tool_call(&run, call)?);
-                }
+        }
+    });
+    if let Some(choice) = choice
+        && let Some(message) = choice.get("message").and_then(Value::as_object)
+    {
+        text_events(&mut events, &run, message.get("content"));
+        if status == EventStatus::Ok
+            && let Some(calls) = message.get("tool_calls").and_then(Value::as_array)
+        {
+            for call in calls {
+                events.push(tool_call(&run, call)?);
             }
         }
-        events.push(ModelEvent::Done { run: run.clone(), status });
     }
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
-    if !events.iter().any(|event| matches!(event, ModelEvent::Done { .. })) {
-        events.push(ModelEvent::Done { run, status: EventStatus::Ok });
-    }
+    events.push(ModelEvent::Done { run, status });
     Ok(events)
 }
 
