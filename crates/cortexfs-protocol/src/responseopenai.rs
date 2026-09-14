@@ -11,30 +11,40 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model,
     }];
-    let choice = map
+    if let Some(choice) = map
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
-        .and_then(Value::as_object);
-    let status = choice.map_or(EventStatus::Ok, |choice| {
-        match choice.get("finish_reason").and_then(Value::as_str) {
+        .and_then(Value::as_object)
+    {
+        if let Some(message) = choice.get("message").and_then(Value::as_object) {
+            text_events(&mut events, &run, message.get("content"));
+            if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for call in calls {
+                    events.push(tool_call(&run, call)?);
+                }
+            }
+        }
+        let status = match choice.get("finish_reason").and_then(Value::as_str) {
             Some("error") => EventStatus::Error,
             Some("cancelled") => EventStatus::Cancelled,
             _ => EventStatus::Ok,
-        }
-    });
-    if let Some(choice) = choice
-        && let Some(message) = choice.get("message").and_then(Value::as_object)
-    {
-        text_events(&mut events, &run, message.get("content"));
-        if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-            for call in calls {
-                events.push(tool_call(&run, call)?);
-            }
-        }
+        };
+        events.push(ModelEvent::Done {
+            run: run.clone(),
+            status,
+        });
     }
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
-    events.push(ModelEvent::Done { run, status });
+    if !events
+        .iter()
+        .any(|event| matches!(event, ModelEvent::Done { .. }))
+    {
+        events.push(ModelEvent::Done {
+            run,
+            status: EventStatus::Ok,
+        });
+    }
     Ok(events)
 }
 
