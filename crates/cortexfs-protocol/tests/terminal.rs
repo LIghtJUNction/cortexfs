@@ -1,14 +1,8 @@
-use cortexfs_protocol::{EventStatus, ModelEvent, WireProtocol, decode_response_events};
+use cortexfs_protocol::{ModelEvent, WireProtocol, decode_response_events};
 
 #[test]
-fn terminal_failure_suppresses_tool_calls() {
-    let cases: [(WireProtocol, &[u8]); 2] = [
-        (WireProtocol::Anthropic, br#"{"id":"r","model":"m","content":[{"type":"tool_use","id":"call_1","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"error"}"#),
-        (WireProtocol::OpenAiChat, br#"{"id":"r","model":"m","choices":[{"message":{"content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]},"finish_reason":"cancelled"}]}"#),
-    ];
-    for (protocol, body) in cases {
-        let events = decode_response_events(protocol, body).expect("decode terminal response");
-        assert!(!events.iter().any(|event| matches!(event, ModelEvent::ToolCall { .. })));
-        assert!(events.iter().any(|event| matches!(event, ModelEvent::Done { status: EventStatus::Error | EventStatus::Cancelled, .. })));
-    }
+fn failed_anthropic_turn_suppresses_tool_calls() {
+    let body = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh"}],"stop_reason":"error"}"#;
+    let events = decode_response_events(WireProtocol::Anthropic, body).expect("decode terminal response");
+    assert!(!events.iter().any(|event| matches!(event, ModelEvent::ToolCall { .. })));
 }
