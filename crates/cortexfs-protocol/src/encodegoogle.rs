@@ -51,7 +51,9 @@ fn generation(request: &ModelRequest) -> Map<String, Value> {
 
 fn content(source: &Message) -> Result<Value, ConversionError> {
     if source.role.as_str() == "tool" {
-        return Ok(json!({"role": "user", "parts": [{"functionResponse": {"name": source.tool_call_id, "response": {"content": source.content.text_value()}}}]}));
+        return Ok(
+            json!({"role": "user", "parts": [{"functionResponse": {"name": source.tool_call_id, "response": {"content": source.content.text_value()}}}]}),
+        );
     }
     let role = if source.role.as_str() == "assistant" {
         "model"
