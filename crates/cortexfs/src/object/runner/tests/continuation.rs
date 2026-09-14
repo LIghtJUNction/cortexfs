@@ -5,7 +5,7 @@ use cortexfs_protocol::{Message, ModelRequest, ToolCall, WireProtocol, encode_mo
 use serde_json::{Value, json};
 
 #[test]
-fn continuation_encodes_native_openai_tool_result() -> Result<(), Box<dyn std::error::Error>> {
+fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::Error>> {
     let mut assistant = Message::assistant("");
     assistant.tool_calls.push(ToolCall {
         id: "call-1".to_owned(),
@@ -30,13 +30,32 @@ fn continuation_encodes_native_openai_tool_result() -> Result<(), Box<dyn std::e
         assert_eq!(responses.pointer(pointer), Some(&json!(expected)));
     }
 
-    let chat = encoded(WireProtocol::OpenAiChat, messages)?;
+    let chat = encoded(WireProtocol::OpenAiChat, messages.clone())?;
     for (pointer, expected) in [
         ("/messages/0/tool_calls/0/function/name", "tsh"),
         ("/messages/1/tool_call_id", "call-1"),
     ] {
         assert_eq!(chat.pointer(pointer), Some(&json!(expected)));
     }
+
+    let anthropic = encoded(WireProtocol::Anthropic, messages.clone())?;
+    for (pointer, expected) in [
+        ("/messages/1/role", "user"),
+        ("/messages/1/content/0/type", "tool_result"),
+        ("/messages/1/content/0/tool_use_id", "call-1"),
+        ("/messages/1/content/0/content", "agent.\nfs.\n"),
+    ] {
+        assert_eq!(anthropic.pointer(pointer), Some(&json!(expected)));
+    }
+    assert!(anthropic.pointer("/messages/1/content/1").is_none());
+
+    let gemini = encoded(WireProtocol::Gemini, messages)?;
+    assert_eq!(gemini.pointer("/contents/1/role"), Some(&json!("user")));
+    assert_eq!(
+        gemini.pointer("/contents/1/parts/0/functionResponse/response/content"),
+        Some(&json!("agent.\nfs.\n"))
+    );
+    assert!(gemini.pointer("/contents/1/parts/1").is_none());
     Ok(())
 }
 
