@@ -24,7 +24,7 @@ fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
     assert!(frame.contains(r#""type":"tool_call""#), "{frame}");
     let frame = r#"{"type":"tool_call","run":"existing","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#;
     assert_eq!(normalize_agent_model_frame(frame, "run-1"), frame);
-    assert_eq!(normalize_agent_model_frame("plain text", "run-1"), "plain text");
+    assert_eq!(normalize_agent_model_frame("plain", "run-1"), "plain");
 }
 
 #[test]
