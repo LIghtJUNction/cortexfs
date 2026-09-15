@@ -49,7 +49,8 @@ fn tool_call_arguments_reject_excessive_limits() {
     let call = agent_tool_call_from_value(&value);
 
     assert!(matches!(call, Err(ref error) if error.message().contains("argument count limit")));
-    let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"input":"x".repeat(8 * 1024)}});
+    let value =
+        serde_json::json!({"id":"c","name":"tsh","arguments":{"input":"x".repeat(8 * 1024)}});
     let call = agent_tool_call_from_value(&value);
 
     assert!(matches!(call, Err(ref error) if error.message().contains("byte limit")));
@@ -101,7 +102,9 @@ fn multiple_tool_calls_fail_closed() {
     let call = |id| serde_json::json!({"type":"tool_call","id":id,"name":"tsh"}).to_string();
     let frames = [call("call-1"), call("call-2")];
 
-    assert!(matches!(first_tool_call(&frames), Err(ref error) if error.message().contains("multiple tool calls")));
+    assert!(
+        matches!(first_tool_call(&frames), Err(ref error) if error.message().contains("multiple tool calls"))
+    );
 }
 
 #[test]
