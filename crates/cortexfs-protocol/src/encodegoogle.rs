@@ -61,12 +61,9 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
         source.role.as_str()
     };
     let mut values = parts(&source.content, role)?;
-    values.extend(
-        source
-            .tool_calls
-            .iter()
-            .map(|call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}})),
-    );
+    values.extend(source.tool_calls.iter().map(
+        |call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}}),
+    ));
     Ok(json!({"role": role, "parts": values}))
 }
 
