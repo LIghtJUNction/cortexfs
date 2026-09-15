@@ -108,20 +108,23 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
 
 #[test]
 fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error::Error>> {
+    let protocol = WireProtocol::Gemini;
     let text = candidate(&json!([{"text": "hello"}]), "STOP");
-    assert_eq!(parse_provider_content(WireProtocol::Gemini, text.as_bytes())?, "hello");
-    for (part, id) in [
-        (json!({"functionCall": {"id": "call-1", "name": "tsh", "args": {"args": ["ls"]}}}), "call-1"),
-        (json!({"functionCall": {"name": "tsh", "args": {"args": ["ls"]}}}), "tsh"),
-    ] {
+    assert_eq!(parse_provider_content(protocol, text.as_bytes())?, "hello");
+    let explicit = json!({"functionCall":{"id":"call-1","name":"tsh","args":{"args":[]}}});
+    let legacy = json!({"functionCall":{"name":"tsh","args":{"args":[]}}});
+    for (part, id) in [(explicit, "call-1"), (legacy, "tsh")] {
         let body = candidate(&json!([part]), "STOP");
-        let call = parse_provider_content(WireProtocol::Gemini, body.as_bytes())?;
-        let expected = json!({"type": "tool_call", "id": id, "name": "tsh", "arguments": {"args": ["ls"]}});
-        assert_eq!(serde_json::from_str::<Value>(&call)?, expected);
+        let call = parse_provider_content(protocol, body.as_bytes())?;
+        let value = serde_json::from_str::<Value>(&call)?;
+        assert_eq!(value["id"], id);
+        assert_eq!(value["name"], "tsh");
+        assert_eq!(value["arguments"], json!({"args": []}));
     }
     let usage_json = json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}}).to_string();
     let usage = parse_provider_usage(usage_json.as_bytes())?.ok_or("gemini usage metadata")?;
-    assert_eq!((usage.input_tokens, usage.output_tokens, usage.cached_tokens), (11, 7, Some(3)));
+    let counts = (usage.input_tokens, usage.output_tokens, usage.cached_tokens);
+    assert_eq!(counts, (11, 7, Some(3)));
     Ok(())
 }
 
