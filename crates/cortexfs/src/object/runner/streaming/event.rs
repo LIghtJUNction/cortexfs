@@ -40,6 +40,9 @@ pub(crate) fn openai_stream_event(line: &str) -> Result<OpenAiStreamFrame, Strin
     if let Some(usage) = token_usage_from_value(&value) {
         return Ok(chat_frame(OpenAiStreamEvent::Usage(usage), terminal));
     }
+    if value.pointer("/choices/0/delta/tool_calls/1").is_some() {
+        return Err("multi-call".to_owned());
+    }
     if let Some(tool_call) = value.pointer("/choices/0/delta/tool_calls/0") {
         return Ok(chat_frame(
             OpenAiStreamEvent::ToolCallDelta(openai_stream_tool_call_delta(tool_call)),

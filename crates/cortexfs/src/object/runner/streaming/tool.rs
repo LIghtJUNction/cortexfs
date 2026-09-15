@@ -7,6 +7,7 @@ use std::io::{self, Write};
 #[derive(Default)]
 pub(crate) struct OpenAiToolCallStream {
     index: Option<usize>,
+    multiple: bool,
     id: Option<String>,
     name: Option<String>,
     arguments: String,
@@ -22,12 +23,10 @@ pub(crate) struct OpenAiToolCallDelta {
 
 impl OpenAiToolCallStream {
     pub(crate) fn push(&mut self, delta: OpenAiToolCallDelta) {
-        // The agent runtime ABI executes one tool call per iteration.  Some
-        // OpenAI-compatible gateways still emit extra indices despite the
-        // request's parallel_tool_calls=false; keep the first call isolated.
         if let Some(index) = delta.index {
             if let Some(active) = self.index {
                 if active != index {
+                    self.multiple = true;
                     return;
                 }
             } else {
@@ -81,6 +80,9 @@ pub(crate) fn emit_openai_stream_tool_call(
     emitter: &mut OpenAiStreamTextEmitter<'_>,
     tool_call_stream: &mut OpenAiToolCallStream,
 ) -> io::Result<bool> {
+    if tool_call_stream.multiple {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "multi-call"));
+    }
     let Some(tool_call) = tool_call_stream.finish()? else {
         return Ok(false);
     };

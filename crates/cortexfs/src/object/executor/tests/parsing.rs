@@ -3,7 +3,6 @@ fn tool_call_text_parses_tsh_argv() {
     let call = tool_call_from_text(
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
     );
-
     assert!(matches!(
         call,
         Ok(Some(ref call))
@@ -19,60 +18,32 @@ fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
         "run-1",
     );
-
     assert!(frame.contains(r#""run":"run-1""#), "{frame}");
     assert!(frame.contains(r#""type":"tool_call""#), "{frame}");
     let frame = r#"{"type":"tool_call","run":"existing","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#;
-
     assert_eq!(normalize_agent_model_frame(frame, "run-1"), frame);
-    assert_eq!(
-        normalize_agent_model_frame("plain text", "run-1"),
-        "plain text"
-    );
+    assert_eq!(normalize_agent_model_frame("plain", "run-1"), "plain");
 }
 
 #[test]
 fn tool_call_arguments_accept_command_string() {
-    let value = serde_json::json!({
-        "type": "tool_call",
-        "id": "call-1",
-        "name": "tsh",
-        "arguments": {
-            "command": "fs.read README.md"
-        }
-    });
+    let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"command":"fs.read x"}});
     let call = agent_tool_call_from_value(&value);
-
     assert!(matches!(
         call,
         Ok(Some(ref call))
-            if call.args == [OsString::from("fs.read"), OsString::from("README.md")]
+            if call.args == [OsString::from("fs.read"), OsString::from("x")]
     ));
 }
 
 #[test]
 fn tool_call_arguments_reject_excessive_limits() {
-    let value = serde_json::json!({
-        "type": "tool_call",
-        "id": "call-1",
-        "name": "tsh",
-        "arguments": {
-            "args": vec!["x"; 65]
-        }
-    });
+    let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"args":vec!["x"; 65]}});
     let call = agent_tool_call_from_value(&value);
-
     assert!(matches!(call, Err(ref error) if error.message().contains("argument count limit")));
-    let value = serde_json::json!({
-        "type": "tool_call",
-        "id": "call-1",
-        "name": "tsh",
-        "arguments": {
-            "command": format!("fs.read {}", "x".repeat(8 * 1024))
-        }
-    });
+    let value =
+        serde_json::json!({"id":"c","name":"tsh","arguments":{"command":"x".repeat(8 * 1024 + 1)}});
     let call = agent_tool_call_from_value(&value);
-
     assert!(matches!(call, Err(ref error) if error.message().contains("byte limit")));
 }
 
@@ -112,22 +83,39 @@ fn assistant_delta_text_is_not_treated_as_a_tool_call() {
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}后续说明。"#,
     ] {
         let frames = [serde_json::json!({ "type": "delta", "text": text }).to_string()];
-
         assert!(matches!(first_tool_call(&frames), Ok(None)), "{text}");
     }
 }
 
 #[test]
-fn passthrough_tools_use_absolute_program_paths() {
-    assert_eq!(passthrough_tool_program("bash"), Some("/usr/bin/bash"));
-    assert_eq!(passthrough_tool_program("tmux"), Some("/usr/bin/tmux"));
-    assert_eq!(passthrough_tool_program("zellij"), Some("/usr/bin/zellij"));
-    assert_eq!(passthrough_tool_program("tsh"), Some("/usr/bin/tsh"));
-    assert_eq!(passthrough_tool_program("shell.exec"), None);
-    assert_eq!(passthrough_tool_program("fs.read"), None);
-    assert!(!is_passthrough_tool("shell.exec"));
-    assert!(!is_passthrough_tool("fs.read"));
+fn multiple_tool_calls_fail_closed() {
+    let frames = ["call-1", "call-2"]
+        .map(|id| serde_json::json!({"type":"tool_call","id":id,"name":"tsh"}).to_string());
+    assert!(first_tool_call(&frames).is_err());
+}
 
+#[test]
+fn streamed_multiple_tool_calls_fail_before_emission() {
+    assert!(openai_stream_event(r#"data:{"choices":[{"delta":{"tool_calls":[{},{}]}}]}"#).is_err());
+    let call = |index| streaming::OpenAiToolCallDelta {
+        index: Some(index),
+        id: Some(format!("call-{index}")),
+        name: Some("tsh".to_owned()),
+        arguments: "{}".to_owned(),
+    };
+    let mut stream = OpenAiToolCallStream::default();
+    stream.push(call(0));
+    stream.push(call(1));
+    let mut output = Vec::new();
+    let mut emitter = OpenAiStreamTextEmitter::new("run-1");
+    assert!(
+        streaming::emit_openai_stream_tool_call(&mut output, &mut emitter, &mut stream).is_err()
+    );
+    assert!(output.is_empty());
+}
+
+#[test]
+fn passthrough_tools_use_absolute_program_paths() {
     for (name, program) in [
         ("bash", "/usr/bin/bash"),
         ("tmux", "/usr/bin/tmux"),
@@ -137,6 +125,10 @@ fn passthrough_tools_use_absolute_program_paths() {
         assert!(Path::new(program).is_absolute());
         assert_eq!(passthrough_tool_program(name), Some(program));
         assert!(is_passthrough_tool(name));
+    }
+    for name in ["shell.exec", "fs.read"] {
+        assert_eq!(passthrough_tool_program(name), None);
+        assert!(!is_passthrough_tool(name));
     }
 }
 
@@ -177,3 +169,4 @@ fn passthrough_tool_gets_clean_runtime_environment() {
     );
 }
 use super::*;
+use crate::object::runner::streaming;
