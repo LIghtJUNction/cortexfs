@@ -31,8 +31,6 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         (&anthropic, "/messages/1/content/0/type", "tool_result"),
         (&anthropic, "/messages/1/content/0/tool_use_id", "call-1"),
         (&anthropic, "/messages/1/content/0/content", "agent.\nfs.\n"),
-        (&gemini, "/contents/1/role", "user"),
-        (&gemini, "/contents/0/parts/1/functionCall/id", "call-1"),
         (&gemini, "/contents/0/parts/1/functionCall/name", "tsh"),
         (&gemini, "/contents/1/parts/0/functionResponse/id", "call-1"),
         (&gemini, "/contents/1/parts/0/functionResponse/name", "tsh"),
@@ -47,6 +45,17 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
     assert!(chat.pointer("/messages/1/name").is_none());
     assert!(anthropic.pointer("/messages/1/content/1").is_none());
     assert!(gemini.pointer("/contents/1/parts/1").is_none());
+
+    let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}}]}]}"#;
+    let decoded = cortexfs_protocol::decode_model_request(WireProtocol::Gemini, input)?;
+    let decoded = serde_json::to_value(decoded)?;
+    assert_eq!(decoded.pointer("/messages/0/tool_calls/0/id"), Some(&json!("call-2")));
+    let direct =
+        cortexfs_protocol::transcode_request(WireProtocol::Gemini, WireProtocol::OpenAiChat, input)?;
+    let direct: Value = serde_json::from_slice(&direct.bytes)?;
+    for pointer in ["/messages/0/tool_calls/0/id", "/messages/1/tool_call_id"] {
+        assert_eq!(direct.pointer(pointer).and_then(Value::as_str), Some("call-2"));
+    }
     Ok(())
 }
 

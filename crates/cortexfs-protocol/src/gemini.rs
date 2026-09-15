@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// Borrowed Gemini `generateContent` request IR.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,6 +68,8 @@ pub struct File<'a> {
 /// Gemini function call and function response.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call<'a> {
+    #[serde(default, skip_serializing_if = "Option::is_none", borrow)]
+    pub id: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub name: Cow<'a, str>,
     #[serde(borrow)]
@@ -77,6 +78,8 @@ pub struct Call<'a> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Response<'a> {
+    #[serde(default, skip_serializing_if = "Option::is_none", borrow)]
+    pub id: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub name: Cow<'a, str>,
     #[serde(borrow)]
