@@ -169,7 +169,10 @@ def execute(command, log, timeout):
                         )
             except subprocess.TimeoutExpired:
                 stream.flush()
-                timeout_evidence = capture_timeout_evidence(process, log)
+                try:
+                    timeout_evidence = capture_timeout_evidence(process, log)
+                except OSError as failure:
+                    print(f"{log.stem}: timeout evidence unavailable: {failure}", flush=True)
                 stop_group(process)
                 outcome, returncode = "timeout", process.returncode
             except KeyboardInterrupt:
