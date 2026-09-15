@@ -35,7 +35,11 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         (&gemini, "/contents/0/parts/1/functionCall/name", "tsh"),
         (&gemini, "/contents/1/parts/0/functionResponse/id", "call-1"),
         (&gemini, "/contents/1/parts/0/functionResponse/name", "tsh"),
-        (&gemini, "/contents/1/parts/0/functionResponse/response/content", "agent.\nfs.\n"),
+        (
+            &gemini,
+            "/contents/1/parts/0/functionResponse/response/content",
+            "agent.\nfs.\n",
+        ),
     ] {
         assert_eq!(value.pointer(pointer), Some(&json!(expected)));
     }
