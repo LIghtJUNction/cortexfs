@@ -81,7 +81,7 @@ pub(crate) fn emit_openai_stream_tool_call(
     tool_call_stream: &mut OpenAiToolCallStream,
 ) -> io::Result<bool> {
     if tool_call_stream.multiple {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "multiple tool calls"));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "multi-call"));
     }
     let Some(tool_call) = tool_call_stream.finish()? else {
         return Ok(false);
