@@ -41,6 +41,7 @@ pub struct Part<'a> {
     pub function_call: Option<Call<'a>>,
     #[serde(default, borrow)]
     pub function_response: Option<Response<'a>>,
+    #[serde(default)]
     pub thought: Option<bool>,
     #[serde(default, borrow)]
     pub thought_signature: Option<Cow<'a, str>>,
