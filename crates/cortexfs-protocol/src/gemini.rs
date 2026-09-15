@@ -30,6 +30,7 @@ pub struct Content<'a> {
 
 /// Gemini text, media, thought, and tool-call part.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Part<'a> {
     #[serde(default, borrow)]
     pub text: Option<Cow<'a, str>>,
