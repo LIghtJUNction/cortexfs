@@ -17,4 +17,4 @@ pub(crate) use drain::call_openai_sse_streaming;
 pub(crate) use event::{OpenAiStreamEvent, openai_stream_event};
 pub(crate) use pipe::{OpenAiStreamApi, StreamFailure, read_provider_stream_line};
 pub(crate) use text::OpenAiStreamTextEmitter;
-pub(crate) use tool::OpenAiToolCallStream;
+pub(crate) use tool::{OpenAiToolCallStream, emit_openai_stream_tool_call};
