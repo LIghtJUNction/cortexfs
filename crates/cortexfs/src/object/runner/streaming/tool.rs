@@ -23,7 +23,6 @@ pub(crate) struct OpenAiToolCallDelta {
 
 impl OpenAiToolCallStream {
     pub(crate) fn push(&mut self, delta: OpenAiToolCallDelta) {
-        // The serial Agent ABI rejects extra streamed tool-call indices.
         if let Some(index) = delta.index {
             if let Some(active) = self.index {
                 if active != index {
