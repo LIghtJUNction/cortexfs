@@ -1,4 +1,7 @@
-use super::{openai_chat_body_with_agent_tools, openai_responses_body_with_agent_tools};
+use super::{
+    openai_chat_body_with_agent_tools, openai_responses_body_with_agent_tools, request_body,
+};
+use cortexfs_protocol::WireProtocol;
 use serde_json::{Value, json};
 
 #[test]
@@ -36,6 +39,27 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
                 "Invoke CortexFS tool shell. Pass exact tsh argv in args. The host returns a bounded UTF-8 observation with status ok or error; inspect errors before the next call."
             ))
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_agent_tools_stay_provider_native() -> Result<(), Box<dyn std::error::Error>> {
+    for (protocol, tool_name) in [
+        (WireProtocol::Anthropic, "/tools/0/name"),
+        (WireProtocol::Gemini, "/tools/0/functionDeclarations/0/name"),
+    ] {
+        let body = request_body(
+            protocol,
+            "model",
+            "hello",
+            false,
+            cortexfs::ModelEffort::Auto,
+            true,
+        );
+        let value = serde_json::from_str::<Value>(&body)?;
+        assert_eq!(value.pointer(tool_name), Some(&json!("tsh")));
+        assert_eq!(value.get("parallel_tool_calls"), None);
     }
     Ok(())
 }
