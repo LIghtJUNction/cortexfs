@@ -44,6 +44,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
     ] {
         assert_eq!(value.pointer(pointer), Some(&json!(expected)));
     }
+    assert!(chat.pointer("/messages/1/name").is_none());
     assert!(anthropic.pointer("/messages/1/content/1").is_none());
     assert!(gemini.pointer("/contents/1/parts/1").is_none());
     Ok(())
