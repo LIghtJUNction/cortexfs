@@ -32,6 +32,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         (&anthropic, "/messages/1/content/0/type", "tool_result"),
         (&anthropic, "/messages/1/content/0/tool_use_id", "call-1"),
         (&anthropic, "/messages/1/content/0/content", "agent.\nfs.\n"),
+        (&gemini, "/contents/0/parts/1/functionCall/id", "call-1"),
         (&gemini, "/contents/0/parts/1/functionCall/name", "tsh"),
         (&gemini, "/contents/1/parts/0/functionResponse/id", "call-1"),
         (&gemini, "/contents/1/parts/0/functionResponse/name", "tsh"),
@@ -46,12 +47,13 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
     assert!(chat.pointer("/messages/1/name").is_none());
     assert!(anthropic.pointer("/messages/1/content/1").is_none());
     assert!(gemini.pointer("/contents/1/parts/1").is_none());
-    let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}}]}]}"#;
+    let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}},{"functionCall":{"name":"legacy","args":{"args":[]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}}]},{"role":"user","parts":[{"functionResponse":{"name":"legacy","response":{"output":"ok"}}}]}]}"#;
     let decoded = serde_json::to_string(&decode_model_request(WireProtocol::Gemini, input)?)?;
-    assert!(decoded.contains(r#""id":"call-2""#));
+    assert!(decoded.contains(r#""id":"call-2""#) && decoded.contains(r#""id":"legacy""#));
     let direct = transcode_request(WireProtocol::Gemini, WireProtocol::OpenAiChat, input)?;
     let direct = String::from_utf8(direct.bytes)?;
     assert!(direct.contains(r#""id":"call-2""#) && direct.contains(r#""tool_call_id":"call-2""#));
+    assert!(direct.contains(r#""id":"legacy""#) && direct.contains(r#""tool_call_id":"legacy""#));
     Ok(())
 }
 
