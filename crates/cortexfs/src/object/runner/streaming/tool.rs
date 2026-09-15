@@ -23,8 +23,7 @@ pub(crate) struct OpenAiToolCallDelta {
 
 impl OpenAiToolCallStream {
     pub(crate) fn push(&mut self, delta: OpenAiToolCallDelta) {
-        // The agent runtime ABI executes one tool call per iteration. Some
-        // compatible gateways still emit extra indices despite disabling parallel calls.
+        // The serial Agent ABI rejects extra streamed tool-call indices.
         if let Some(index) = delta.index {
             if let Some(active) = self.index {
                 if active != index {
@@ -83,10 +82,7 @@ pub(crate) fn emit_openai_stream_tool_call(
     tool_call_stream: &mut OpenAiToolCallStream,
 ) -> io::Result<bool> {
     if tool_call_stream.multiple {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "multiple tool calls in one model turn",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "multiple tool calls"));
     }
     let Some(tool_call) = tool_call_stream.finish()? else {
         return Ok(false);
