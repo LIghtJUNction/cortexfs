@@ -50,22 +50,10 @@ fn generation(request: &ModelRequest) -> Map<String, Value> {
 
 fn content(source: &Message) -> Result<Value, ConversionError> {
     if source.role.as_str() == "tool" {
-        let name = source
-            .name
-            .as_deref()
-            .or(source.tool_call_id.as_deref())
-            .unwrap_or_default();
-        let mut response = Map::from_iter([
-            ("name".to_owned(), json!(name)),
-            (
-                "response".to_owned(),
-                json!({"content": source.content.text_value()}),
-            ),
-        ]);
-        if let Some(id) = source.tool_call_id.as_ref() {
-            response.insert("id".to_owned(), json!(id));
-        }
-        return Ok(json!({"role": "user", "parts": [{"functionResponse": response}]}));
+        let name = source.name.as_ref().or(source.tool_call_id.as_ref());
+        return Ok(
+            json!({"role": "user", "parts": [{"functionResponse": {"id": source.tool_call_id, "name": name, "response": {"content": source.content.text_value()}}}]}),
+        );
     }
     let role = if source.role.as_str() == "assistant" {
         "model"
@@ -73,9 +61,12 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
         source.role.as_str()
     };
     let mut values = parts(&source.content, role)?;
-    values.extend(source.tool_calls.iter().map(
-        |call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}}),
-    ));
+    values.extend(
+        source
+            .tool_calls
+            .iter()
+            .map(|call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}})),
+    );
     Ok(json!({"role": role, "parts": values}))
 }
 
