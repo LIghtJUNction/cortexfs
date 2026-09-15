@@ -42,7 +42,7 @@ fn tool_call_arguments_reject_excessive_limits() {
     let call = agent_tool_call_from_value(&value);
     assert!(matches!(call, Err(ref error) if error.message().contains("argument count limit")));
     let value =
-        serde_json::json!({"id":"c","name":"tsh","arguments":{"input":"x".repeat(8 * 1024)}});
+        serde_json::json!({"id":"c","name":"tsh","arguments":{"command":"x".repeat(8 * 1024 + 1)}});
     let call = agent_tool_call_from_value(&value);
     assert!(matches!(call, Err(ref error) if error.message().contains("byte limit")));
 }
