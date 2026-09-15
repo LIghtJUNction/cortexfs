@@ -31,6 +31,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         (&anthropic, "/messages/1/content/0/type", "tool_result"),
         (&anthropic, "/messages/1/content/0/tool_use_id", "call-1"),
         (&anthropic, "/messages/1/content/0/content", "agent.\nfs.\n"),
+        (&gemini, "/contents/1/role", "user"),
         (&gemini, "/contents/0/parts/1/functionCall/id", "call-1"),
         (&gemini, "/contents/0/parts/1/functionCall/name", "tsh"),
         (&gemini, "/contents/1/parts/0/functionResponse/id", "call-1"),
