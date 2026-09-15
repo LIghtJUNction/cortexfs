@@ -20,11 +20,7 @@ pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>
 }
 
 pub(crate) fn tool_call_args_strings(tool_call: &AgentToolCall) -> Vec<String> {
-    tool_call
-        .args
-        .iter()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect()
+    tool_call.args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect()
 }
 
 pub(crate) fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentToolCall>, ExecError> {
