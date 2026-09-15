@@ -10,11 +10,10 @@ pub(crate) struct AgentToolCall {
 pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>, ExecError> {
     let mut first = None;
     for frame in frames {
-        if let Some(call) = tool_call_from_event_frame(frame)? {
-            if first.is_some() {
-                return Err(ExecError::new("multiple tool calls in one model turn"));
-            }
-            first = Some(call);
+        if let Some(call) = tool_call_from_event_frame(frame)?
+            && first.replace(call).is_some()
+        {
+            return Err(ExecError::new("multiple tool calls in one model turn"));
         }
     }
     Ok(first)
