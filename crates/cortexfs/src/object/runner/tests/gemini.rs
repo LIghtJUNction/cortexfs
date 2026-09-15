@@ -113,15 +113,19 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
         parse_provider_content(WireProtocol::Gemini, text.as_bytes())?,
         "hello"
     );
-    let call = candidate(
-        &json!([{"functionCall": {"name": "tsh", "args": {"args": ["ls"]}}}]),
-        "STOP",
-    );
-    let call = parse_provider_content(WireProtocol::Gemini, call.as_bytes())?;
-    assert_eq!(
-        serde_json::from_str::<Value>(&call)?,
-        json!({"type": "tool_call", "id": "tsh", "name": "tsh", "arguments": {"args": ["ls"]}})
-    );
+    for (part, id) in [
+        (json!({"functionCall": {"id": "call-1", "name": "tsh", "args": {"args": ["ls"]}}}), "call-1"),
+        (json!({"functionCall": {"name": "tsh", "args": {"args": ["ls"]}}}), "tsh"),
+    ] {
+        let call = parse_provider_content(
+            WireProtocol::Gemini,
+            candidate(&json!([part]), "STOP").as_bytes(),
+        )?;
+        assert_eq!(
+            serde_json::from_str::<Value>(&call)?,
+            json!({"type": "tool_call", "id": id, "name": "tsh", "arguments": {"args": ["ls"]}})
+        );
+    }
     let usage = parse_provider_usage(
         json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}})
             .to_string()
