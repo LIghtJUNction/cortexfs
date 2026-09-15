@@ -1,6 +1,10 @@
 use crate::gemini::Content as NativeContent;
 use crate::{Content, ContentPart, ConversionError, Message, Role, ToolCall};
-use serde_json::{Value, json};
+use serde_json::{Value, json, value::RawValue};
+
+fn raw(field: &str, value: &RawValue) -> Result<Value, ConversionError> {
+    crate::semantic::raw_value(crate::WireProtocol::Gemini, field, value)
+}
 
 pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionError> {
     let role = source.role.as_ref().map_or("user", |value| value.as_ref());
@@ -8,13 +12,9 @@ pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionE
     for part in &source.parts {
         if let Some(call) = part.function_call.as_ref() {
             calls.push(ToolCall {
-                id: call.name.to_string(),
+                id: call.id.as_ref().unwrap_or(&call.name).to_string(),
                 name: call.name.to_string(),
-                arguments: crate::semantic::raw_value(
-                    crate::WireProtocol::Gemini,
-                    "contents[].functionCall.args",
-                    call.args,
-                )?,
+                arguments: raw("contents[].functionCall.args", call.args)?,
             });
         }
     }
@@ -48,11 +48,7 @@ pub(super) fn content(source: &NativeContent<'_>) -> Result<Content, ConversionE
         if let Some(response) = part.function_response.as_ref() {
             values.push(ContentPart::Data {
                 name: "gemini.function_response".to_owned(),
-                value: crate::semantic::raw_value(
-                    crate::WireProtocol::Gemini,
-                    "contents[].functionResponse.response",
-                    response.response,
-                )?,
+                value: raw("contents[].functionResponse.response", response.response)?,
             });
         }
         if part.thought == Some(true) {
@@ -72,14 +68,8 @@ pub(super) fn tool(
         name: source.name.to_string(),
         description: source.description.as_ref().map(ToString::to_string),
         parameters: source.parameters.map_or_else(
-            || Ok(Value::Object(serde_json::Map::new())),
-            |raw| {
-                crate::semantic::raw_value(
-                    crate::WireProtocol::Gemini,
-                    "tools[].functionDeclarations[].parameters",
-                    raw,
-                )
-            },
+            || Ok(json!({})),
+            |value| raw("tools[].functionDeclarations[].parameters", value),
         )?,
     })
 }

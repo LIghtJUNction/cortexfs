@@ -1,7 +1,10 @@
 use crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX;
 use crate::object::runner::requests::agent_continuation_messages;
 use crate::object::runner::responses::parse_anthropic_message_content;
-use cortexfs_protocol::{Message, ModelRequest, ToolCall, WireProtocol, encode_model_request};
+use cortexfs_protocol::{
+    Message, ModelRequest, ToolCall, WireProtocol, decode_model_request, encode_model_request,
+    transcode_request,
+};
 use serde_json::{Value, json};
 
 #[test]
@@ -47,6 +50,13 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
     assert!(chat.pointer("/messages/1/name").is_none());
     assert!(anthropic.pointer("/messages/1/content/1").is_none());
     assert!(gemini.pointer("/contents/1/parts/1").is_none());
+    let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}},{"functionCall":{"name":"legacy","args":{"args":[]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}}]},{"role":"user","parts":[{"functionResponse":{"name":"legacy","response":{"output":"ok"}}}]}]}"#;
+    let decoded = serde_json::to_string(&decode_model_request(WireProtocol::Gemini, input)?)?;
+    assert!(decoded.contains(r#""id":"call-2""#) && decoded.contains(r#""id":"legacy""#));
+    let direct = transcode_request(WireProtocol::Gemini, WireProtocol::OpenAiChat, input)?;
+    let direct = String::from_utf8(direct.bytes)?;
+    assert!(direct.contains(r#""id":"call-2""#) && direct.contains(r#""tool_call_id":"call-2""#));
+    assert!(direct.contains(r#""id":"legacy""#) && direct.contains(r#""tool_call_id":"legacy""#));
     Ok(())
 }
 

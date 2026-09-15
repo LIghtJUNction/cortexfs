@@ -3,16 +3,10 @@ use crate::openaichat::{Content as OpenAiContent, Function, ImageUrl, Message, P
 use std::borrow::Cow;
 
 pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
-    let role = content.role.as_ref().map_or_else(
-        || Cow::Borrowed("user"),
-        |value| {
-            if value.as_ref() == "model" {
-                Cow::Borrowed("assistant")
-            } else {
-                Cow::clone(value)
-            }
-        },
-    );
+    let mut role = content.role.clone().unwrap_or(Cow::Borrowed("user"));
+    if role == "model" {
+        role = Cow::Borrowed("assistant");
+    }
     let mut text = Vec::new();
     let mut parts = Vec::new();
     let mut calls = Vec::new();
@@ -33,7 +27,7 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
         }
         if let Some(call) = part.function_call.as_ref() {
             calls.push(ToolCall {
-                id: Cow::clone(&call.name),
+                id: call.id.as_ref().unwrap_or(&call.name).clone(),
                 kind: Cow::Borrowed("function"),
                 function: Function {
                     name: Cow::clone(&call.name),
@@ -44,15 +38,16 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
             });
         }
         if let Some(response) = part.function_response.as_ref() {
-            result = Some((Cow::clone(&response.name), response.response.get()));
+            let id = response.id.as_ref().unwrap_or(&response.name).clone();
+            result = Some((Cow::clone(&response.name), id, response.response.get()));
         }
     }
-    if let Some((name, value)) = result {
+    if let Some((name, id, value)) = result {
         return Message {
             role: Cow::Borrowed("tool"),
             content: Some(OpenAiContent::Text(Cow::Borrowed(value))),
-            name: Some(name.clone()),
-            tool_call_id: Some(name),
+            name: Some(name),
+            tool_call_id: Some(id),
             tool_calls: Vec::new(),
         };
     }
