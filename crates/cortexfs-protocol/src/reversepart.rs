@@ -3,16 +3,10 @@ use crate::openaichat::{Content as OpenAiContent, Function, ImageUrl, Message, P
 use std::borrow::Cow;
 
 pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
-    let role = content
-        .role
-        .as_ref()
-        .map_or(Cow::Borrowed("user"), |value| {
-            if value.as_ref() == "model" {
-                Cow::Borrowed("assistant")
-            } else {
-                Cow::clone(value)
-            }
-        });
+    let mut role = content.role.clone().unwrap_or(Cow::Borrowed("user"));
+    if role == "model" {
+        role = Cow::Borrowed("assistant");
+    }
     let mut text = Vec::new();
     let mut parts = Vec::new();
     let mut calls = Vec::new();
@@ -33,7 +27,7 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
         }
         if let Some(call) = part.function_call.as_ref() {
             calls.push(ToolCall {
-                id: call.id.clone().unwrap_or_else(|| Cow::clone(&call.name)),
+                id: call.id.as_ref().unwrap_or(&call.name).clone(),
                 kind: Cow::Borrowed("function"),
                 function: Function {
                     name: Cow::clone(&call.name),
