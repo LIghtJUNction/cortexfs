@@ -101,7 +101,7 @@ fn multiple_tool_calls_fail_closed() {
 
 #[test]
 fn streamed_multiple_tool_calls_fail_before_emission() {
-    let call = |index| crate::object::runner::streaming::OpenAiToolCallDelta {
+    let call = |index| streaming::OpenAiToolCallDelta {
         index: Some(index),
         id: Some(format!("call-{index}")),
         name: Some("tsh".to_owned()),
@@ -112,14 +112,7 @@ fn streamed_multiple_tool_calls_fail_before_emission() {
     stream.push(call(1));
     let mut output = Vec::new();
     let mut emitter = OpenAiStreamTextEmitter::new("run-1");
-    assert!(
-        crate::object::runner::streaming::emit_openai_stream_tool_call(
-            &mut output,
-            &mut emitter,
-            &mut stream,
-        )
-        .is_err()
-    );
+    assert!(streaming::emit_openai_stream_tool_call(&mut output, &mut emitter, &mut stream).is_err());
     assert!(output.is_empty());
 }
 
@@ -177,4 +170,5 @@ fn passthrough_tool_gets_clean_runtime_environment() {
         "passthrough environment was not clean: {result:?}"
     );
 }
+use crate::object::runner::streaming;
 use super::*;
