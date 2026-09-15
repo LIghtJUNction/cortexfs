@@ -100,17 +100,16 @@ fn multiple_tool_calls_fail_closed() {
 }
 
 #[test]
-fn streamed_multiple_tool_calls_fail_before_emission() -> Result<(), String> {
+fn streamed_multiple_tool_calls_fail_before_emission() {
+    let call = |index| runner::streaming::OpenAiToolCallDelta {
+        index: Some(index),
+        id: Some(format!("call-{index}")),
+        name: Some("tsh".to_owned()),
+        arguments: "{}".to_owned(),
+    };
     let mut stream = OpenAiToolCallStream::default();
-    for line in [
-        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"tsh","arguments":"{}"}}]}}]}"#,
-        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"tsh","arguments":"{}"}}]}}]}"#,
-    ] {
-        let OpenAiStreamEvent::ToolCallDelta(delta) = openai_stream_event(line)?.event else {
-            return Err("expected tool call delta".to_owned());
-        };
-        stream.push(delta);
-    }
+    stream.push(call(0));
+    stream.push(call(1));
     let mut output = Vec::new();
     let mut emitter = OpenAiStreamTextEmitter::new("run-1");
     assert!(
@@ -118,7 +117,6 @@ fn streamed_multiple_tool_calls_fail_before_emission() -> Result<(), String> {
             .is_err()
     );
     assert!(output.is_empty());
-    Ok(())
 }
 
 #[test]
