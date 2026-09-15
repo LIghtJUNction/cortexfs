@@ -30,12 +30,18 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
         }
         assert_eq!(value.get("tool_choice"), Some(&json!("auto")));
         assert_eq!(value.get("parallel_tool_calls"), Some(&json!(false)));
-        assert_eq!(
-            value.pointer(&format!("{function}/description")),
-            Some(&json!(
-                "Invoke CortexFS tool shell. Pass exact tsh argv in args. The host returns a bounded UTF-8 observation with status ok or error; inspect errors before the next call."
-            ))
-        );
+    }
+    for (protocol, path) in [
+        (cortexfs_protocol::WireProtocol::Anthropic, "/tools/0/name"),
+        (
+            cortexfs_protocol::WireProtocol::Gemini,
+            "/tools/0/functionDeclarations/0/name",
+        ),
+    ] {
+        let body = super::request_body(protocol, "model", "hello", false, effort, true);
+        let value = serde_json::from_str::<Value>(&body)?;
+        assert_eq!(value.pointer(path), Some(&json!("tsh")));
+        assert_eq!(value.get("parallel_tool_calls"), None);
     }
     Ok(())
 }
