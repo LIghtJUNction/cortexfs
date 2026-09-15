@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(__file__).with_name("suites.json")
 PROGRESS_INTERVAL = 30.0
 TEST = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)\b")
+INCOMPLETE_TEST = re.compile(r"^test (\S+) \.\.\. ?$")
 SUMMARY = re.compile(
     r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; "
     r"(\d+) ignored; (\d+) measured; (\d+) filtered out;"
@@ -58,6 +59,69 @@ def inspect_log(path):
     return counts, tests, summaries
 
 
+def incomplete_test(path):
+    current = None
+    with path.open(encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            if match := INCOMPLETE_TEST.match(line.rstrip("\n")):
+                current = match[1]
+            elif TEST.match(line):
+                current = None
+    return current
+
+
+def proc_text(path):
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+
+
+def process_snapshot(pid):
+    proc = Path("/proc") / str(pid)
+    stat = proc_text(proc / "stat")
+    suffix = stat.split(") ", 1)[1].split() if stat and ") " in stat else []
+    try:
+        cmdline = (proc / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+    except OSError:
+        cmdline = None
+    try:
+        fds = {entry.name: os.readlink(entry) for entry in (proc / "fd").iterdir()}
+    except OSError:
+        fds = {}
+    return {
+        "pid": pid,
+        "ppid": int(suffix[1]) if len(suffix) > 1 and suffix[1].isdigit() else None,
+        "state": suffix[0] if suffix else None,
+        "wchan": proc_text(proc / "wchan"),
+        "cmdline": cmdline,
+        "stack": proc_text(proc / "stack"),
+        "fds": fds,
+    }
+
+
+def capture_timeout_evidence(process, log):
+    members = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        try:
+            if os.getpgid(pid) == process.pid:
+                members.append(process_snapshot(pid))
+        except OSError:
+            continue
+    evidence = {
+        "schema": "cortexfs.harness-timeout/v1",
+        "active_test": incomplete_test(log),
+        "process_group": process.pid,
+        "processes": sorted(members, key=lambda item: item["pid"]),
+    }
+    path = log.with_suffix(".timeout.json")
+    path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+    return path.name
+
+
 def stop_group(process):
     # The lock wrapper, Cargo, rustc and test children share this process group.
     for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -77,6 +141,7 @@ def execute(command, log, timeout):
     started = time.monotonic()
     deadline = started + timeout
     outcome, returncode, error = "completed", None, None
+    timeout_evidence = None
     environment = {**os.environ, "CARGO_TERM_COLOR": "never", "RUST_BACKTRACE": "1"}
     with log.open("x", encoding="utf-8") as stream:
         try:
@@ -103,6 +168,8 @@ def execute(command, log, timeout):
                             flush=True,
                         )
             except subprocess.TimeoutExpired:
+                stream.flush()
+                timeout_evidence = capture_timeout_evidence(process, log)
                 stop_group(process)
                 outcome, returncode = "timeout", process.returncode
             except KeyboardInterrupt:
@@ -116,7 +183,7 @@ def execute(command, log, timeout):
         "error": error, "status": "passed" if passed else "failed",
         "wall_seconds": round(time.monotonic() - started, 3),
         "counts": counts, "summary_count": summaries, "tests": tests,
-        "log": log.name,
+        "log": log.name, "timeout_evidence": timeout_evidence,
     }
 
 
@@ -164,6 +231,8 @@ def write_report(output, report):
             f"{counts['passed']} passed, {counts['failed']} failed, "
             f"{counts['ignored']} ignored; {invocation['wall_seconds']} s."
         )
+        if invocation.get("timeout_evidence"):
+            lines.append(f"  - Timeout evidence: [{invocation['timeout_evidence']}]({invocation['timeout_evidence']})")
     missing = [check["name"] for suite in report["suites"] for check in suite["checks"]
                if not check["passed"]]
     if missing:
