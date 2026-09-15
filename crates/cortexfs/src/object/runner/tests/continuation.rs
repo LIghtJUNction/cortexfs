@@ -19,6 +19,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         serde_json::to_string(&[assistant, tool])?
     );
     let messages = agent_continuation_messages(&context).ok_or("missing continuation")?;
+    assert_eq!(messages[1].name.as_deref(), Some("tsh"));
     let responses = encoded(WireProtocol::OpenAiResponses, messages.clone())?;
     let chat = encoded(WireProtocol::OpenAiChat, messages.clone())?;
     let anthropic = encoded(WireProtocol::Anthropic, messages.clone())?;
@@ -30,12 +31,11 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         (&anthropic, "/messages/1/content/0/type", "tool_result"),
         (&anthropic, "/messages/1/content/0/tool_use_id", "call-1"),
         (&anthropic, "/messages/1/content/0/content", "agent.\nfs.\n"),
-        (&gemini, "/contents/1/role", "user"),
-        (
-            &gemini,
-            "/contents/1/parts/0/functionResponse/response/content",
-            "agent.\nfs.\n",
-        ),
+        (&gemini, "/contents/0/parts/1/functionCall/id", "call-1"),
+        (&gemini, "/contents/0/parts/1/functionCall/name", "tsh"),
+        (&gemini, "/contents/1/parts/0/functionResponse/id", "call-1"),
+        (&gemini, "/contents/1/parts/0/functionResponse/name", "tsh"),
+        (&gemini, "/contents/1/parts/0/functionResponse/response/content", "agent.\nfs.\n"),
     ] {
         assert_eq!(value.pointer(pointer), Some(&json!(expected)));
     }
