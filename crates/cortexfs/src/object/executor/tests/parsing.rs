@@ -3,7 +3,6 @@ fn tool_call_text_parses_tsh_argv() {
     let call = tool_call_from_text(
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
     );
-
     assert!(matches!(
         call,
         Ok(Some(ref call))
@@ -19,7 +18,6 @@ fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
         "run-1",
     );
-
     assert!(frame.contains(r#""run":"run-1""#), "{frame}");
     assert!(frame.contains(r#""type":"tool_call""#), "{frame}");
     let frame = r#"{"type":"tool_call","run":"existing","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#;
@@ -31,7 +29,6 @@ fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
 fn tool_call_arguments_accept_command_string() {
     let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"command":"fs.read x"}});
     let call = agent_tool_call_from_value(&value);
-
     assert!(matches!(
         call,
         Ok(Some(ref call))
@@ -43,12 +40,10 @@ fn tool_call_arguments_accept_command_string() {
 fn tool_call_arguments_reject_excessive_limits() {
     let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"args":vec!["x"; 65]}});
     let call = agent_tool_call_from_value(&value);
-
     assert!(matches!(call, Err(ref error) if error.message().contains("argument count limit")));
     let value =
         serde_json::json!({"id":"c","name":"tsh","arguments":{"input":"x".repeat(8 * 1024)}});
     let call = agent_tool_call_from_value(&value);
-
     assert!(matches!(call, Err(ref error) if error.message().contains("byte limit")));
 }
 
@@ -101,6 +96,7 @@ fn multiple_tool_calls_fail_closed() {
 
 #[test]
 fn streamed_multiple_tool_calls_fail_before_emission() {
+    assert!(openai_stream_event(r#"data:{"choices":[{"delta":{"tool_calls":[{},{}]}}]}"#).is_err());
     let call = |index| streaming::OpenAiToolCallDelta {
         index: Some(index),
         id: Some(format!("call-{index}")),
