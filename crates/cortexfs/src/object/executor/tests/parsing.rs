@@ -33,44 +33,23 @@ fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
 
 #[test]
 fn tool_call_arguments_accept_command_string() {
-    let value = serde_json::json!({
-        "type": "tool_call",
-        "id": "call-1",
-        "name": "tsh",
-        "arguments": {
-            "command": "fs.read README.md"
-        }
-    });
+    let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"command":"fs.read x"}});
     let call = agent_tool_call_from_value(&value);
 
     assert!(matches!(
         call,
         Ok(Some(ref call))
-            if call.args == [OsString::from("fs.read"), OsString::from("README.md")]
+            if call.args == [OsString::from("fs.read"), OsString::from("x")]
     ));
 }
 
 #[test]
 fn tool_call_arguments_reject_excessive_limits() {
-    let value = serde_json::json!({
-        "type": "tool_call",
-        "id": "call-1",
-        "name": "tsh",
-        "arguments": {
-            "args": vec!["x"; 65]
-        }
-    });
+    let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"args":vec!["x"; 65]}});
     let call = agent_tool_call_from_value(&value);
 
     assert!(matches!(call, Err(ref error) if error.message().contains("argument count limit")));
-    let value = serde_json::json!({
-        "type": "tool_call",
-        "id": "call-1",
-        "name": "tsh",
-        "arguments": {
-            "command": format!("fs.read {}", "x".repeat(8 * 1024))
-        }
-    });
+    let value = serde_json::json!({"id":"c","name":"tsh","arguments":{"input":"x".repeat(8 * 1024)}});
     let call = agent_tool_call_from_value(&value);
 
     assert!(matches!(call, Err(ref error) if error.message().contains("byte limit")));
@@ -115,6 +94,14 @@ fn assistant_delta_text_is_not_treated_as_a_tool_call() {
 
         assert!(matches!(first_tool_call(&frames), Ok(None)), "{text}");
     }
+}
+
+#[test]
+fn multiple_tool_calls_fail_closed() {
+    let call = |id| serde_json::json!({"type":"tool_call","id":id,"name":"tsh"}).to_string();
+    let frames = [call("call-1"), call("call-2")];
+
+    assert!(matches!(first_tool_call(&frames), Err(ref error) if error.message().contains("multiple tool calls")));
 }
 
 #[test]
