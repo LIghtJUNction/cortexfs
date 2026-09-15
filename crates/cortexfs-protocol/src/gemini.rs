@@ -75,7 +75,7 @@ pub struct Call<'a> {
     pub args: &'a RawValue,
 }
 
-#[expect(clippy::struct_field_names, reason = "Gemini wire field is named response")]
+#[expect(clippy::struct_field_names, reason = "Gemini wire schema")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Response<'a> {
     #[serde(default, skip_serializing_if = "Option::is_none", borrow)]
