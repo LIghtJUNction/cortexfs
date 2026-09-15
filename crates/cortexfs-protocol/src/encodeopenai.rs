@@ -43,7 +43,11 @@ fn message(source: &Message) -> Result<Value, ConversionError> {
         "content".to_owned(),
         crate::encode::text_or_parts(&source.content, "text", "image_url")?,
     );
-    if source.role.as_str() != "tool" && let Some(name) = source.name.as_ref() {
+    if let Some(name) = source
+        .name
+        .as_ref()
+        .filter(|_| source.role.as_str() != "tool")
+    {
         value.insert("name".to_owned(), Value::String(name.clone()));
     }
     if let Some(id) = source.tool_call_id.as_ref() {
