@@ -121,11 +121,18 @@ fn model_request(
 }
 
 pub(crate) fn agent_continuation_messages(context: &str) -> Option<[Message; 2]> {
-    context
+    let [assistant, mut tool]: [Message; 2] = context
         .lines()
         .rev()
         .find_map(|line| line.strip_prefix(crate::agent::TOOL_CONTINUATION_CONTEXT_PREFIX))
-        .and_then(|value| serde_json::from_str(value).ok())
+        .and_then(|value| serde_json::from_str(value).ok())?;
+    if tool.name.is_none()
+        && let Some(id) = tool.tool_call_id.as_deref()
+        && let Some(call) = assistant.tool_calls.iter().find(|call| call.id == id)
+    {
+        tool.name = Some(call.name.clone());
+    }
+    Some([assistant, tool])
 }
 
 fn protocol_tool(name: String) -> ToolDefinition {
