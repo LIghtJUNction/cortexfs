@@ -117,9 +117,9 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
         let body = candidate(&json!([part]), "STOP");
         let call = parse_provider_content(protocol, body.as_bytes())?;
         let value = serde_json::from_str::<Value>(&call)?;
-        assert_eq!(value["id"], id);
-        assert_eq!(value["name"], "tsh");
-        assert_eq!(value["arguments"], json!({"args": []}));
+        assert_eq!(value.get("id"), Some(&json!(id)));
+        assert_eq!(value.get("name"), Some(&json!("tsh")));
+        assert_eq!(value.get("arguments"), Some(&json!({"args": []})));
     }
     let usage_json = json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}}).to_string();
     let usage = parse_provider_usage(usage_json.as_bytes())?.ok_or("gemini usage metadata")?;
