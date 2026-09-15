@@ -5,7 +5,7 @@ use cortexfs_protocol::{Message, ModelRequest, ToolCall, WireProtocol, encode_mo
 use serde_json::{Value, json};
 
 #[test]
-fn continuation_encodes_native_openai_tool_result() -> Result<(), Box<dyn std::error::Error>> {
+fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::Error>> {
     let mut assistant = Message::assistant("");
     assistant.tool_calls.push(ToolCall {
         id: "call-1".to_owned(),
@@ -19,24 +19,28 @@ fn continuation_encodes_native_openai_tool_result() -> Result<(), Box<dyn std::e
         serde_json::to_string(&[assistant, tool])?
     );
     let messages = agent_continuation_messages(&context).ok_or("missing continuation")?;
-
     let responses = encoded(WireProtocol::OpenAiResponses, messages.clone())?;
-    for (pointer, expected) in [
-        ("/input/1/type", "function_call"),
-        ("/input/1/call_id", "call-1"),
-        ("/input/2/type", "function_call_output"),
-        ("/input/2/call_id", "call-1"),
+    let chat = encoded(WireProtocol::OpenAiChat, messages.clone())?;
+    let anthropic = encoded(WireProtocol::Anthropic, messages.clone())?;
+    let gemini = encoded(WireProtocol::Gemini, messages)?;
+    for (value, pointer, expected) in [
+        (&responses, "/input/2/type", "function_call_output"),
+        (&chat, "/messages/1/tool_call_id", "call-1"),
+        (&anthropic, "/messages/1/role", "user"),
+        (&anthropic, "/messages/1/content/0/type", "tool_result"),
+        (&anthropic, "/messages/1/content/0/tool_use_id", "call-1"),
+        (&anthropic, "/messages/1/content/0/content", "agent.\nfs.\n"),
+        (&gemini, "/contents/1/role", "user"),
+        (
+            &gemini,
+            "/contents/1/parts/0/functionResponse/response/content",
+            "agent.\nfs.\n",
+        ),
     ] {
-        assert_eq!(responses.pointer(pointer), Some(&json!(expected)));
+        assert_eq!(value.pointer(pointer), Some(&json!(expected)));
     }
-
-    let chat = encoded(WireProtocol::OpenAiChat, messages)?;
-    for (pointer, expected) in [
-        ("/messages/0/tool_calls/0/function/name", "tsh"),
-        ("/messages/1/tool_call_id", "call-1"),
-    ] {
-        assert_eq!(chat.pointer(pointer), Some(&json!(expected)));
-    }
+    assert!(anthropic.pointer("/messages/1/content/1").is_none());
+    assert!(gemini.pointer("/contents/1/parts/1").is_none());
     Ok(())
 }
 
