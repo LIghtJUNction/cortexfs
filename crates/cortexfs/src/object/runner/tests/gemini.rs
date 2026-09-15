@@ -109,33 +109,19 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
 #[test]
 fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error::Error>> {
     let text = candidate(&json!([{"text": "hello"}]), "STOP");
-    assert_eq!(
-        parse_provider_content(WireProtocol::Gemini, text.as_bytes())?,
-        "hello"
-    );
+    assert_eq!(parse_provider_content(WireProtocol::Gemini, text.as_bytes())?, "hello");
     for (part, id) in [
         (json!({"functionCall": {"id": "call-1", "name": "tsh", "args": {"args": ["ls"]}}}), "call-1"),
         (json!({"functionCall": {"name": "tsh", "args": {"args": ["ls"]}}}), "tsh"),
     ] {
-        let call = parse_provider_content(
-            WireProtocol::Gemini,
-            candidate(&json!([part]), "STOP").as_bytes(),
-        )?;
-        assert_eq!(
-            serde_json::from_str::<Value>(&call)?,
-            json!({"type": "tool_call", "id": id, "name": "tsh", "arguments": {"args": ["ls"]}})
-        );
+        let body = candidate(&json!([part]), "STOP");
+        let call = parse_provider_content(WireProtocol::Gemini, body.as_bytes())?;
+        let expected = json!({"type": "tool_call", "id": id, "name": "tsh", "arguments": {"args": ["ls"]}});
+        assert_eq!(serde_json::from_str::<Value>(&call)?, expected);
     }
-    let usage = parse_provider_usage(
-        json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}})
-            .to_string()
-            .as_bytes(),
-    )?
-    .ok_or("gemini usage metadata")?;
-    assert_eq!(
-        (usage.input_tokens, usage.output_tokens, usage.cached_tokens),
-        (11, 7, Some(3))
-    );
+    let usage_json = json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}}).to_string();
+    let usage = parse_provider_usage(usage_json.as_bytes())?.ok_or("gemini usage metadata")?;
+    assert_eq!((usage.input_tokens, usage.output_tokens, usage.cached_tokens), (11, 7, Some(3)));
     Ok(())
 }
 
