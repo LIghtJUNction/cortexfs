@@ -44,10 +44,7 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
             });
         }
         if let Some(response) = part.function_response.as_ref() {
-            let id = response
-                .id
-                .clone()
-                .unwrap_or_else(|| Cow::clone(&response.name));
+            let id = response.id.as_ref().unwrap_or(&response.name).clone();
             result = Some((Cow::clone(&response.name), id, response.response.get()));
         }
     }
