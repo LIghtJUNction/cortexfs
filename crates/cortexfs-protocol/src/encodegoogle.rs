@@ -50,8 +50,9 @@ fn generation(request: &ModelRequest) -> Map<String, Value> {
 
 fn content(source: &Message) -> Result<Value, ConversionError> {
     if source.role.as_str() == "tool" {
+        let name = source.name.as_ref().or(source.tool_call_id.as_ref());
         return Ok(
-            json!({"role": "user", "parts": [{"functionResponse": {"name": source.tool_call_id, "response": {"content": source.content.text_value()}}}]}),
+            json!({"role": "user", "parts": [{"functionResponse": {"id": source.tool_call_id, "name": name, "response": {"content": source.content.text_value()}}}]}),
         );
     }
     let role = if source.role.as_str() == "assistant" {
@@ -60,12 +61,9 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
         source.role.as_str()
     };
     let mut values = parts(&source.content, role)?;
-    values.extend(
-        source
-            .tool_calls
-            .iter()
-            .map(|call| json!({"functionCall": {"name": call.name, "args": call.arguments}})),
-    );
+    values.extend(source.tool_calls.iter().map(
+        |call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}}),
+    ));
     Ok(json!({"role": role, "parts": values}))
 }
 

@@ -35,15 +35,13 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
 
 fn message(source: &Message) -> Result<Value, ConversionError> {
     let mut value = Map::new();
-    value.insert(
-        "role".to_owned(),
-        Value::String(source.role.as_str().to_owned()),
-    );
+    let role = source.role.as_str();
+    value.insert("role".to_owned(), Value::String(role.to_owned()));
     value.insert(
         "content".to_owned(),
         crate::encode::text_or_parts(&source.content, "text", "image_url")?,
     );
-    if let Some(name) = source.name.as_ref() {
+    if let Some(name) = source.name.as_ref().filter(|_| role != "tool") {
         value.insert("name".to_owned(), Value::String(name.clone()));
     }
     if let Some(id) = source.tool_call_id.as_ref() {

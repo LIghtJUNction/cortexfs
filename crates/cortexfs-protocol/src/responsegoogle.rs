@@ -41,11 +41,13 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                     .and_then(Value::as_object)
                 {
                     let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
+                    let name = crate::responseutil::text(call.get("name")).unwrap_or_default();
                     events.push(ModelEvent::ToolCall {
                         run: run.clone(),
                         call: crate::ToolCall {
-                            id: crate::responseutil::text(call.get("name")).unwrap_or_default(),
-                            name: crate::responseutil::text(call.get("name")).unwrap_or_default(),
+                            id: crate::responseutil::text(call.get("id"))
+                                .unwrap_or_else(|| name.clone()),
+                            name,
                             arguments: args,
                         },
                     });
@@ -83,12 +85,9 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
 pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> {
     let summary = crate::responseutil::summary(WireProtocol::Gemini, events)?;
     let mut parts = vec![json!({"text": summary.text})];
-    parts.extend(
-        summary
-            .calls
-            .iter()
-            .map(|call| json!({"functionCall": {"name": call.name, "args": call.arguments}})),
-    );
+    parts.extend(summary.calls.iter().map(
+        |call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}}),
+    ));
     let mut root = Map::from_iter([
         (String::from("responseId"), json!(summary.run)),
         (String::from("modelVersion"), json!(summary.model)),
