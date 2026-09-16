@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
     use cortexfs_protocol::{
-        BridgePath, Content, ContextOwnership, EventStatus, Message, ModelEvent, ModelRequest,
-        NativeRequest, ProtocolError, ToolDefinition, WireProtocol, decode_model_request,
-        decode_native_request, decode_response_events, encode_model_request,
-        encode_response_events, transcode_request, transcode_response,
+        BridgePath, ContextOwnership, EventStatus, Message, ModelEvent, ModelRequest, NativeRequest,
+        ProtocolError, ToolDefinition, WireProtocol, decode_model_request, decode_native_request,
+        decode_response_events, encode_model_request, encode_response_events, transcode_request,
+        transcode_response,
     };
     use serde_json::{Value, json};
     use std::borrow::Cow;
@@ -33,24 +33,20 @@ mod tests {
     }
 
     #[test]
-    fn request_is_provider_neutral_and_validates_tools() {
-        let mut request = ModelRequest::new(
-            "example/model",
-            vec![
-                Message::system("follow the contract"),
-                Message::user("hello"),
-            ],
-        );
+    fn request_is_provider_neutral_and_validates_tools() -> TestResult {
+        let mut request = ModelRequest::new("example/model", vec![Message::user("hello")]);
         request.tools.push(ToolDefinition {
             name: "tsh".to_owned(),
             description: Some("run a bounded tool".to_owned()),
             parameters: json!({"type":"object"}),
         });
-        assert!(request.validate().is_ok());
-        assert_eq!(
-            request.messages.get(1).map(|message| &message.content),
-            Some(&Content::text("hello"))
-        );
+        request.validate()?;
+        for protocol in [WireProtocol::OpenAiChat, WireProtocol::OpenAiResponses] {
+            let encoded = String::from_utf8(encode_model_request(protocol, &request)?)?;
+            assert!(encoded.contains("\"parameters\":{\"type\":\"object\"}"));
+            assert!(!encoded.contains("\"strict\""), "{protocol:?}");
+        }
+        Ok(())
     }
 
     #[test]
