@@ -55,7 +55,7 @@ Prompt 文本和 skill 元数据不授予权限。
 
 CortexFS 保留编码 agent 工具箱通常没有的 Unix 文件系统 ABI 与 Linux 权限模型。
 其**内部优雅度标准**仍对标 Pi 工具包
-([badlogic/pi-mono](https://github.com/badlogic/pi-mono))：严格分层、最小工具循环、
+([earendil-works/pi](https://github.com/earendil-works/pi))：严格分层、最小工具循环、
 以事件事实而非 UI 决策为中心、包可独立使用、通过扩展而非第二套框架成长。
 刻意省略与刻意实现同等重要。
 

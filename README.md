@@ -99,7 +99,7 @@ existing agent/session/tool/channel boundaries. It does not introduce parallel
 `workflow`, `hook`, `plugin`, or `memory` roots.
 
 Internally, elegance tracks the Pi toolkit
-([badlogic/pi-mono](https://github.com/badlogic/pi-mono)): `cortexfs-protocol`
+([earendil-works/pi](https://github.com/earendil-works/pi)): `cortexfs-protocol`
 stays the provider-neutral IR (no HTTP, secrets, or agent loop);
 agent runtime + object runner own the minimal tool loop and event facts;
 `ctx`, terminals, and channel adapters are replaceable surfaces around the

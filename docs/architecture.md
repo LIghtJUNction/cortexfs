@@ -59,7 +59,7 @@ policy evaluator may only further restrict that authority.
 
 CortexFS keeps a Unix filesystem ABI and Linux authority model that coding
 agent toolkits do not. Its **internal elegance bar** still matches the Pi
-toolkit ([badlogic/pi-mono](https://github.com/badlogic/pi-mono)): strict
+toolkit ([earendil-works/pi](https://github.com/earendil-works/pi)): strict
 layers, a minimal tool loop, event facts instead of UI decisions, packages
 usable alone, and extension without a second framework. What you leave out
 matters as much as what you ship.
