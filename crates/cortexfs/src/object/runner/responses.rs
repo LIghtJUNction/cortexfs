@@ -97,11 +97,8 @@ fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(
     Ok(())
 }
 
-/// Rejects a Gemini `generateContent` body that carries no usable candidate.
-///
-/// The Gemini decoder only maps `SAFETY` to an error status, so the runner
-/// mirrors the `openai.chat` path and refuses truncated or filtered answers
-/// before they reach the session recorder as ordinary text.
+/// Rejects a Gemini `generateContent` body that carries no usable candidate,
+/// preserving the native finish reason in the runner's user-visible error.
 fn gemini_response_status(value: &Value) -> Result<(), String> {
     if let Some(message) = value
         .pointer("/error/message")
