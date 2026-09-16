@@ -263,27 +263,27 @@ mod tests {
             ("completed", EventStatus::Ok),
             ("failed", EventStatus::Error),
             ("incomplete", EventStatus::Error),
+            ("queued", EventStatus::Error),
+            ("in_progress", EventStatus::Error),
+            ("future_status", EventStatus::Error),
             ("cancelled", EventStatus::Cancelled),
         ] {
-            let input = json!({"id": "run", "model": "model", "output": [], "status": native});
-            let events = decode_response_events(
-                WireProtocol::OpenAiResponses,
-                &serde_json::to_vec(&input)?,
+            let input = serde_json::to_vec(
+                &json!({"id": "run", "model": "model", "output": [], "status": native}),
             )?;
+            let events = decode_response_events(WireProtocol::OpenAiResponses, &input)?;
             assert!(
                 matches!(events.last(), Some(ModelEvent::Done { status: actual, .. })
                 if *actual == status)
             );
             let encoded = encode_response_events(WireProtocol::OpenAiResponses, &events)?;
             let value: Value = serde_json::from_slice(&encoded)?;
-            assert_eq!(
-                value.get("status").and_then(Value::as_str),
-                Some(if native == "incomplete" {
-                    "failed"
-                } else {
-                    native
-                })
-            );
+            let expected = match status {
+                EventStatus::Ok => "completed",
+                EventStatus::Error => "failed",
+                EventStatus::Cancelled => "cancelled",
+            };
+            assert_eq!(value.get("status").and_then(Value::as_str), Some(expected));
         }
         Ok(())
     }
