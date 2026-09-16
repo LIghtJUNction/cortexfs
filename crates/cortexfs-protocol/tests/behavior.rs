@@ -170,11 +170,18 @@ mod tests {
         ];
         for (protocol, input) in cases {
             let events = decode_response_events(protocol, input)?;
-            assert!(events.iter().any(|event| matches!(event, ModelEvent::TextDelta { .. })));
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
+            );
             if protocol == WireProtocol::Gemini {
                 assert!(events.iter().any(|event| matches!(
                     event,
-                    ModelEvent::Done { status: EventStatus::Error, .. }
+                    ModelEvent::Done {
+                        status: EventStatus::Error,
+                        ..
+                    }
                 )));
             }
             let encoded = encode_response_events(protocol, &events)?;
