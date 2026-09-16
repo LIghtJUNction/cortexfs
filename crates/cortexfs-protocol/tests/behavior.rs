@@ -315,7 +315,7 @@ mod tests {
     fn output_text_fallback_preserves_provider_event_order() -> TestResult {
         let chat = decode_response_events(
         WireProtocol::OpenAiChat,
-        br#"{"id":"r","model":"m","choices":[{"message":{"content":"primary"},"finish_reason":"content_filter"}],"output_text":"fallback","usage":{"prompt_tokens":3,"completion_tokens":4}}"#,
+        br#"{"id":"r","model":"m","choices":[{"message":{"content":"primary"},"finish_reason":"future_reason"}],"output_text":"fallback","usage":{"prompt_tokens":3,"completion_tokens":4}}"#,
     )?;
         assert!(matches!(
             chat.as_slice(),
