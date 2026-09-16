@@ -17,7 +17,7 @@ mod tests {
         br#"{"model":"gemini-model","contents":[{"role":"user","parts":[{"text":"hi"}]}]}"#;
     const ANTHROPIC: &[u8] =
         br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#;
-    const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
+    const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
     const RESPONSES_RESPONSE: &[u8] = br#"{"id":"responses-run","model":"responses-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":3,"output_tokens":2}}"#;
     const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"TOO_MANY_TOOL_CALLS"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
     const ANTHROPIC_RESPONSE: &[u8] = br#"{"id":"anthropic-run","model":"claude-model","role":"assistant","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#;
@@ -175,7 +175,7 @@ mod tests {
                     .iter()
                     .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
             );
-            if protocol == WireProtocol::Gemini {
+            if matches!(protocol, WireProtocol::Gemini | WireProtocol::OpenAiChat) {
                 assert!(events.iter().any(|event| matches!(
                     event,
                     ModelEvent::Done {
@@ -315,11 +315,11 @@ mod tests {
     fn output_text_fallback_preserves_provider_event_order() -> TestResult {
         let chat = decode_response_events(
         WireProtocol::OpenAiChat,
-        br#"{"id":"r","model":"m","choices":[{"message":{"content":"primary"},"finish_reason":"stop"}],"output_text":"fallback","usage":{"prompt_tokens":3,"completion_tokens":4}}"#,
+        br#"{"id":"r","model":"m","choices":[{"message":{"content":"primary"},"finish_reason":"content_filter"}],"output_text":"fallback","usage":{"prompt_tokens":3,"completion_tokens":4}}"#,
     )?;
         assert!(matches!(
             chat.as_slice(),
-            [ModelEvent::Start { .. }, ModelEvent::TextDelta { text, .. }, ModelEvent::Done { .. }, ModelEvent::Usage { usage, .. }]
+            [ModelEvent::Start { .. }, ModelEvent::TextDelta { text, .. }, ModelEvent::Done { status: EventStatus::Error, .. }, ModelEvent::Usage { usage, .. }]
                 if text == "primary" && usage.input_tokens == 3 && usage.output_tokens == 4
         ));
         let responses = decode_response_events(
