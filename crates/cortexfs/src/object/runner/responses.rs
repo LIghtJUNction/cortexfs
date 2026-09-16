@@ -97,8 +97,7 @@ fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(
     Ok(())
 }
 
-/// Rejects a Gemini `generateContent` body that carries no usable candidate,
-/// preserving the native finish reason in the runner's user-visible error.
+/// Rejects unusable Gemini candidates while preserving the native finish reason.
 fn gemini_response_status(value: &Value) -> Result<(), String> {
     if let Some(message) = value
         .pointer("/error/message")
