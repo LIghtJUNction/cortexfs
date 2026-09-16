@@ -61,8 +61,8 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
-fn failed_provider_turn_wins_over_tool_call() {
-    let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"error"}"#;
+fn unusable_provider_turn_wins_over_tool_call() {
+    let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"max_tokens"}"#;
     assert_eq!(
         parse_anthropic_message_content(response),
         Err("provider response failed".to_owned())
