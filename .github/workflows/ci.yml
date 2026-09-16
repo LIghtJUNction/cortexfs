@@ -112,12 +112,12 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       # Same flags as pre-commit. Serialize timing and approval protocol fixtures.
-      # Use a dedicated exec tmpfs for ephemeral test state: fixture #!/bin/sh
-      # agents must be executable, while runner ext4 fsync stalls must not block CI.
+      # Use a short exec tmpfs path: AF_UNIX fixtures are path-length sensitive,
+      # while runner ext4 fsync stalls must not block ephemeral test state.
       - name: cargo test
         timeout-minutes: 110
         env:
-          TMPDIR: /mnt/cortexfs-test-tmp
+          TMPDIR: /t
           CARGO_HOME: /tmp/cortexfs-test-cargo
           CARGO_TARGET_DIR: /tmp/cortexfs-test-target
         run: |
