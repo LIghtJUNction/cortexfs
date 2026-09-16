@@ -120,6 +120,14 @@ status   dynamic status
 log      short call log or pointer to log location
 ```
 
+The remaining control files describe the selected adapter rather than repeat
+model metadata: `default` exposes the non-secret base endpoint used by the
+executor, `session` declares whether a CortexFS model socket exists, `status`
+reports the projection lifecycle, and `effort` is the provider-neutral default
+reasoning effort. They are inspection and routing inputs; model facts such as
+context limits and capabilities come from `limit`/`metadata.json`, while an
+Agent's effective context choices live under `agent/<name>.d/`.
+
 ## Hard Context Limit
 
 Every model control directory contains a read-only `limit` file:
@@ -156,20 +164,45 @@ poller, or hot-reload path.
 the trusted hard ceiling; `recommended` is the conservative working window
 chosen by `cortexfs-metadatas`; `compact` is the token threshold at which a
 context compiler should compact before the working window is exhausted. The
-default policy uses 50% of the hard limit as the working window, then compacts
-at 90% of that working window. For a 1,000,000-token model this is 500,000
-recommended tokens and a 450,000-token compaction trigger. Both values are
+default metadata policy uses 50% of the hard limit as the working window, then
+compacts at 90% of that working window. For a 1,000,000-token model this is
+500,000 recommended tokens and a 450,000-token compaction trigger. A metadata
+record may provide more precise recommendations, but both values are always
 bounded by `limit`.
 
 `metadata.json` is a read-only JSON document owned by `cortexfs-metadatas`. Its
-`metadata.models_dev` member retains the complete official models.dev model
-object, including fields not yet normalized by the Rust API. The `effective`
-member reports the host projection after provider overrides.
+`metadata` object contains the normalized CortexFS fields (identity, aliases,
+limits, modalities, capabilities, reasoning, lifecycle and provenance). When
+the record came from the official models.dev catalog, `metadata.models_dev`
+contains the exact provider-serving model object and
+`metadata.models_dev_base` contains the matching provider-independent model
+object. Together they retain provider details plus model-only fields that the
+serving record does not repeat, including benchmarks and weights. This includes
+description, family, knowledge cutoff, dates, attachment, reasoning options,
+interleaved reasoning, structured output, temperature, modalities, open
+weights, limits and pricing.
+The document's `effective` object reports the host projection after any
+explicit provider override; it is distinct from the upstream hard limit.
+
+`cap` is intentionally a stable positive capability index, not a dump of every
+upstream field. `supported` facts become capability words; `unsupported` and
+`unknown` facts remain visible in `metadata.json` and are not advertised as
+usable. Transport capabilities that are not model facts, such as streaming on
+the OpenAI Chat/Responses adapter, may also be added to `cap` after the model
+facts are resolved. This keeps the Agent-facing file useful without losing the
+complete upstream record.
+
+The catalog refresh validates the current raw `models.dev` document directly.
+A missing required field, identity mismatch, unsafe model id, oversized
+response, or malformed cache is rejected atomically; the previous valid cache
+remains in place. Optional upstream facts are retained exactly when present
+and become `unknown` in the normalized Rust view when omitted.
 
 Agents keep their effective choices in `agent/<name>.d/window` and
 `agent/<name>.d/compact`. `auto` follows the selected model's `recommended`
-and `compact` files; a positive value is an intentional smaller per-Agent
-setting.
+and `compact` files; a positive explicit value is an intentional per-Agent
+attenuation and may not exceed the applicable model/Agent ceiling. Thus model
+metadata remains read-only while an Agent can safely choose a smaller budget.
 
 The resolver uses this precedence:
 
@@ -198,11 +231,37 @@ and each value must be in `1..=4294967295`. Invalid local limit declarations
 make that provider config invalid; they are not silently ignored. A local
 entry overrides catalog data for the same projected model.
 
-CortexFS obtains catalog limits through the external `models-dev` library.
+Provider configuration may also override stable semantic capabilities for
+individual declared models:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["text-model", "vision-model"],
+  "model_capabilities": {
+    "text-model": ["chat", "stream"],
+    "vision-model": ["chat", "stream", "vision"]
+  }
+}
+```
+
+Each key must name `default_model` or an entry in `models`. Values must be
+unique stable capability words from the list below. Provider-private, unknown,
+or duplicate words make the provider configuration invalid. An explicit empty
+list is valid and projects an empty `cap` file. Models without an override use
+the adapter-derived capability projection.
+
+CortexFS obtains the catalog from the raw `models.dev/catalog.json` endpoint.
+The refresh path atomically caches the complete validated upstream document,
+then rebuilds normalized records from it at load time. It retains each serving
+and base model object verbatim in `metadata.models_dev` and
+`metadata.models_dev_base`, and publishes them through the read-only
+`metadata.json` file interface.
 Catalog provider and model map keys are matched exactly to the projected
 `<provider>/<model>` identity; transport hosts and aggregator names are not
 guessed as original providers. Only stable CortexFS provider/model names and
-positive limits enter the cache.
+positive limits enter the normalized cache.
 
 The host cache is bounded, versioned data with this shape:
 
@@ -222,19 +281,19 @@ the last valid cache unchanged. A missing, malformed, oversized, wrong-schema,
 or unsafe cache supplies no limit. Catalog cache content contains no provider
 credentials and is backend state, not a new `/ctx` namespace.
 
-Model fallback is declared in the single global `model/route` file, not in a
-model `.d/` directory. Each rule names the primary model and an ordered list of
-provider/model candidates:
+Model fallback is part of the single global `model/route` file, not a hidden
+per-model control file. This keeps transport routing and model failover
+observable in one route ABI. A model fallback rule uses the following form:
 
 ```text
-model(deepseek-v4-flash-0731) -> lmm/deepseek-v4-flash-0731, openai/gpt-5.6
+model-fallback(openai/gpt-5.6) -> openai/gpt-5.6-sol, local/backup
 ```
 
-The runtime tries candidates in order when the primary model is unavailable or
-fails before producing a successful answer. Each candidate still uses the
-normal provider registry, secret lookup, and the same `/ctx/model/route`
-egress rules. The separate `fallback: direct` line remains the transport
-default; it is not a model fallback chain.
+When the selected model is unavailable or fails before producing a successful
+answer, the runtime tries fallback models in order. Each candidate still uses
+the normal provider registry, secret lookup, and `/ctx/model/route` egress
+rules. The separate `fallback: direct` line remains the transport default and
+must not be confused with `model-fallback(...)`.
 
 `driver` may be a legacy single driver name:
 
@@ -265,20 +324,34 @@ use-case route first, then `default`. This lets direct model usage choose a
 classic chat driver while agents prefer a richer Responses-style driver with a
 chat fallback. Driver names are adapter names, not stable model names.
 
-Secrets are never stored in model files or `.d/` control files. Provider
-credentials use this priority:
+Adapter names and the provider `formats` entry that selects each one by default:
 
 ```text
-root-owned CortexFS system secret store
-unconfigured
+openai-chat         openai.chat         POST <base>/chat/completions
+openai-responses    openai.responses    POST <base>/responses
+anthropic-messages  anthropic.messages  POST <base>/messages
+google-generative   google.generative   POST <base>/models/<model>:generateContent
 ```
 
-The API key is read from
-`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`. Provider JSON must not
-declare API-key environment variable names, and API keys must not be placed in
-process environments. If the system secret is absent, the model is not
-configured and must return a stable error unless the endpoint supports
-unauthenticated requests.
+The OpenAI and Anthropic adapters normalize the provider base URL to a `/v1`
+suffix. `google-generative` uses the base URL verbatim instead, because Gemini
+carries its API version there (`.../v1beta`) and binds the model into the
+request path; it authenticates an API key with `x-goog-api-key` and an OAuth
+access token with `Authorization: Bearer`. An adapter name outside this set
+fails with a stable error before any request is sent.
+
+Only `openai-chat` and `openai-responses` replay a tool result into the next
+request, so only those two advertise agent tools. `anthropic-messages` and
+`google-generative` serve text completion; an agent that needs a tool loop must
+route its `agent` use case to an OpenAI adapter.
+
+Secrets are never stored in model files or `.d/` control files. Host credential
+lookup selects an [authentication profile](#authentication-profiles) before
+trying migration-only legacy stores. New credentials live in the root-owned
+CortexFS system secret store. Provider JSON must not declare API-key environment
+variable names, and users must not provision API keys through process
+environments. If no credential resolves, the model returns a stable error unless
+the endpoint supports unauthenticated requests.
 
 OAuth providers use the same rule: access tokens are bearer credentials and
 remain provider-runtime state, not model ABI state. A provider config may
@@ -292,21 +365,204 @@ declare OAuth Authorization Code + PKCE metadata:
     "auth_url": "https://auth.example.com/oauth/authorize",
     "token_url": "https://auth.example.com/oauth/token",
     "redirect_uri": "http://127.0.0.1:8765/callback",
-    "scopes": ["model.read", "offline_access"]
+    "scopes": ["model.read", "offline_access"],
+    "device": {
+      "request_url": "https://auth.example.com/device/code",
+      "token_url": "https://auth.example.com/device/token",
+      "verification_uri": "https://auth.example.com/device"
+    }
   }
 }
 ```
 
-OAuth token environment names are generated from provider identity, for example
-`CTX_EXAMPLE_OAUTH_ACCESS_TOKEN` and `CTX_EXAMPLE_OAUTH_REFRESH_TOKEN`; users do
-not configure those names in provider JSON. If the generated access-token
-variable is absent or empty, the runtime looks up
-`service=cortexfs:<provider> account=oauth:access`. Refresh tokens, when used by
-a provider adapter or CLI wrapper, use `account=oauth:refresh` by default. PKCE
-uses `S256`; the verifier and callback state are short-lived local flow state
-and must not be written into `/ctx/model`.
-`ctx provider oauth login PROVIDER` is the host-side helper that performs this
-PKCE login flow and writes tokens to the system keychain.
+Legacy OAuth lookup can still read generated names such as
+`CTX_EXAMPLE_OAUTH_ACCESS_TOKEN` and `CTX_EXAMPLE_OAUTH_REFRESH_TOKEN`, followed
+by `service=cortexfs:<provider>` keychain accounts `oauth:access` and
+`oauth:refresh`. These are migration sources for the default profile; users do
+not configure their environment names in provider JSON. PKCE uses `S256`; its
+verifier and callback state are short-lived local flow state and must not be
+written into `/ctx/model`. `ctx auth login` and the existing
+`ctx provider oauth login PROVIDER` helper persist new logins as profile
+bundles, with no new environment or keychain writes.
+
+## Provider Authentication Framework
+
+Provider JSON may advertise more than one authentication method without
+coupling a model to a provider-specific login command:
+
+```json
+{
+  "base_url": "https://api.example.com/v1",
+  "auth": [
+    {"type": "api_key", "slot": "default"},
+    {"type": "oauth", "flow": "authorization_code", "slot": "subscription"}
+  ],
+  "oauth": {
+    "client_id": "cortexfs-example",
+    "auth_url": "https://auth.example.com/authorize",
+    "token_url": "https://auth.example.com/token",
+    "redirect_uri": "http://127.0.0.1:8765/callback",
+    "scopes": ["model.read", "offline_access"],
+    "device": {
+      "request_url": "https://auth.example.com/device/code",
+      "token_url": "https://auth.example.com/device/token",
+      "verification_uri": "https://auth.example.com/device"
+    }
+  }
+}
+```
+
+`type` is `api_key` or `oauth`; OAuth `flow` is `authorization_code` or
+`device_code`. `slot` is a logical credential slot and is not a keychain
+account name. When `auth` is absent, CortexFS retains the compatibility
+defaults of an API-key `default` slot plus an authorization-code OAuth method
+when the legacy `oauth` block is present. Invalid slots or an OAuth method
+without OAuth metadata fail closed during provider snapshot loading.
+
+Adapters implement one provider-neutral boundary (`id`, supported methods,
+authorization URL, login, device challenge, refresh, persistence, and model
+listing) and return the normalized credential shape. The host can inject the
+HTTP transport, clock, challenge notifier, and sleep callback for deterministic
+tests; Agents never receive that transport or provider-native response types.
+The built-in registry provides OpenAI-compatible, Codex-specific, and
+Anthropic API-key adapters, plus a GitHub OAuth adapter when the host supplies
+its app registration. Authentication metadata describes the transport and
+credential type; it does not establish subscription entitlement or official
+compatibility with a provider's inference service.
+
+```json
+{
+  "type": "oauth",
+  "provider": "example",
+  "access_token": "…",
+  "refresh_token": "…",
+  "expires_at": 123456789,
+  "scopes": ["model.read"]
+}
+```
+
+API-key credentials use `type: "api_key"`, `provider`, and `key`. These are
+in-memory adapter envelopes only. Raw credentials never enter `/ctx`, model
+objects, `.d/` controls, or model history; the existing root-owned secret
+store remains the persistence boundary. Inspect the declared methods with:
+
+```text
+ctx provider auth methods PROVIDER
+```
+
+The command prints `method<TAB>flow<TAB>slot` and never prints secret material.
+Model listing remains provider-neutral and feeds the existing model projection
+and bounded host caches; it does not create an `/ctx/identity` namespace. The
+existing hardened host discovery request is issued through the selected
+adapter's model transport and parser, so provider-specific model envelopes do
+not leak into the model ABI.
+`device_code` is part of the shared declaration grammar. An OAuth `device`
+block supplies standard device-code endpoints for host-configured adapters.
+The GitHub adapter supplies GitHub's device endpoints when that block is
+omitted; `api.githubcopilot.com` also maps to the stable
+`github-copilot` provider name when no explicit host name is supplied. Adapters
+implement the standard device challenge, bounded
+polling, and normalized credential persistence. The CLI prints the
+verification URI and user code but never stores the device code in `/ctx`.
+
+### Authentication support boundaries
+
+API-key transport, host-configured OAuth, and official subscription clients
+have different integration contracts. The current support boundaries are:
+
+| Provider or path | CortexFS implementation | Official subscription integration |
+| --- | --- | --- |
+| OpenAI / compatible APIs | API-key requests through the selected protocol adapter | API billing is separate from ChatGPT subscription usage. See [OpenAI authentication](https://developers.openai.com/codex/auth). |
+| Host OAuth service or gateway | Authorization Code + S256 PKCE, device flow, refresh, and credential profiles with host-supplied endpoints | Requires an endpoint and app registration that support those flows; OAuth alone conveys no model or subscription entitlement. |
+| Codex / ChatGPT | Codex-specific OAuth and direct backend transport | The documented integration surface is [Codex App Server](https://developers.openai.com/codex/app-server), which owns login and refresh. The current CortexFS direct HTTP adapter is not an App Server integration or an official compatibility guarantee. |
+| Anthropic / Claude | API-key adapter; generic OAuth metadata can describe a supported host gateway | Claude subscription login belongs to the unmodified official Claude Code client. CortexFS does not implement Claude.ai subscription login or token import. See [Anthropic credential-use boundaries](https://code.claude.com/docs/en/legal-and-compliance). |
+| GitHub Copilot | GitHub OAuth/device transport with a host-owned app registration | GitHub documents third-party subscription access through [Copilot SDK](https://docs.github.com/en/copilot/how-tos/copilot-sdk/setup/github-oauth). The current direct HTTP adapter does not establish SDK or inference-endpoint compatibility. |
+| Google / Gemini | API-key preset using Gemini's OpenAI-compatible endpoint; native GenerateContent adapter | Google login for Gemini Code Assist belongs to Gemini CLI. Google excludes third-party direct use of Gemini CLI OAuth from its supported service access. See [Gemini CLI service boundaries](https://geminicli.com/docs/resources/tos-privacy/). |
+
+The default GitHub adapter advertises device flow. The host must register its
+own app and enable that flow. GitHub's browser authorization-code exchange
+requires a client secret even with PKCE; the current generic OAuth metadata
+does not provide confidential-client secret exchange. An explicitly declared
+browser method is usable only with a compatible host endpoint. See
+[GitHub authorization flows](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
+
+Refresh must retain a replacement access/refresh token pair together and handle
+expiry using the provider's response, without a universal token lifetime.
+GitHub's expiring user tokens rotate both values; its SDK leaves that lifecycle
+to the host. See [GitHub token refresh](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens).
+Successful authentication or model discovery does not by itself verify
+inference, tool replay, or access to a particular subscription model.
+
+### Authentication profiles
+
+The host stores one complete API-key or OAuth credential bundle per logical
+profile. The secret-store entry is private host state at:
+
+```text
+/var/lib/cortexfs/secrets/provider/<provider>/auth-<profile>
+```
+
+It is atomically replaced as one JSON bundle with a monotonic revision; access
+token, rotated refresh token, expiry, and scopes never occupy separate durable
+files. The bundle is mode `0600` and is not projected into `/ctx`.
+
+```text
+ctx auth methods PROVIDER
+ctx auth login
+ctx auth login PROVIDER --profile PROFILE
+ctx auth login PROVIDER --method api-key --stdin --profile PROFILE
+ctx auth status PROVIDER --profile PROFILE
+ctx auth refresh PROVIDER --profile PROFILE
+```
+
+With no provider argument and an interactive terminal, `ctx auth login` lists
+each declared method from configured providers together with the built-in
+provider presets. It never selects the first entry implicitly. Choosing an
+unconfigured built-in provider installs that preset before login; the menu
+labels this write before selection. API keys use a hidden system password
+prompt, while OAuth choices continue through the declared browser or device
+flow. Without a terminal, omitting `PROVIDER` is a usage error.
+
+`key(PROFILE)` in an existing `model/route` group selects that profile for the
+route; without it, lookup uses `default`. Discovery uses `default`, while
+direct model execution and host egress resolve the profile selected for each
+provider candidate. The shared host lookup order is:
+
+| Priority | Source | Condition |
+| --- | --- | --- |
+| 1 | `auth-<profile>` bundle | Validate provider identity, credential type, and expiry; a present but invalid or unrefreshable profile returns an error. |
+| 2 | Legacy raw API-key slot | When profile lookup supplies no credential and the provider permits API-key authentication. `default` uses the first advertised API-key slot; a named profile uses the same-named raw slot without requiring a separate advertised slot. |
+| 3 | Legacy OAuth state | Only for `default` with OAuth configured and no prior credential. Codex's legacy system state precedes its other configured OAuth migration sources. |
+| 4 | Unconfigured | No credential resolved. Named profiles do not inherit another profile's OAuth tokens. |
+
+Raw slots beginning with `auth-` are reserved for profile bundles and never
+qualify for API-key fallback. A typed profile may itself be named `auth-work`:
+its bundle is stored as `auth-auth-work`. If that profile is absent, the
+resolver must not reinterpret the raw `auth-work` bundle as an API key.
+
+Existing host-supplied invocation credentials remain bound to their exact
+provider/profile pair before filesystem lookup. An agent using the authenticated
+egress socket receives a run-scoped capability; the host injects the selected
+upstream credential.
+
+When a stored OAuth expiry is within five minutes, resolution refreshes it if
+a refresh token exists and atomically saves the replacement bundle before
+returning it. Without a refresh token, a still-valid access token remains usable
+until its recorded expiry; an expired token fails. Missing expiry metadata does
+not establish a lifetime or schedule a refresh.
+
+Host egress resolves credentials for all planned provider candidates at run
+startup, including fallback candidates. Each target keeps the resulting token
+for that run; it does not refresh per request or recover from token expiry
+during the run. A subsequent run resolves credentials again. Within one egress
+plan, candidates for the same provider must share the same authority, base path,
+and profile. Conflicting profiles fail with `AuthorityConflict`; this plan does
+not support multiple identities for one provider.
+
+New API-key and OAuth logins write a profile bundle. Legacy sources remain
+migration fallbacks and do not override a stored profile. These credential
+mechanics do not change the
+[official subscription integration boundaries](#authentication-support-boundaries).
 
 ## Provider Presets
 
@@ -320,15 +576,28 @@ ctx provider preset install PRESET
 ctx provider preset install compatible --name NAME --base-url URL [--model MODEL]
 ```
 
-`list` prints `name<TAB>auth<TAB>file`. Built-in presets include `openai`,
-`codex`, `anthropic`, `google`, and the OpenAI-compatible aggregator set
-(`openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `xai`,
-`moonshot`, `minimax`, `zhipu`, `qwen`, `siliconflow`, `volcengine`).
-`compatible` writes the same JSON shape for a custom base URL.
+`list` prints `name<TAB>auth<TAB>file`. Built-in presets:
+
+```text
+openai, codex, anthropic, google
+openrouter, groq, deepseek, mistral, together, fireworks, xai
+moonshot, minimax, zhipu, qwen, siliconflow, volcengine
+```
+
+Canonical names for the first four are `openai`, `codex`, `anthropic`, and
+`google`. `codex` configures the Codex-specific OAuth/backend path described
+under [Authentication support boundaries](#authentication-support-boundaries);
+`gemini` aliases the API-key `google` preset.
+Aggregator and regional OpenAI-compatible presets set an explicit `name` so
+`/ctx/model/<provider>` stays a stable object, not a transport host.
+`compatible` writes the same shape for any OpenAI-compatible base URL,
+including a local runtime; it is not an Ollama-specific path.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
 preset uses `anthropic.messages`, so the runner sends `POST /v1/messages` with
-the required Anthropic version header.
+the required Anthropic version header. Neither preset enables consumer
+subscription OAuth. Installing a preset writes configuration; it does not
+verify credentials, model availability, or subscription access.
 
 ## One-Shot Exec
 
@@ -461,8 +730,17 @@ chat
 stream
 session
 vision
+image_input
+image_output
 audio_input
 audio_output
+video_input
+video_output
+pdf_input
+pdf_output
+attachment
+temperature
+interleaved
 json_schema
 tool_call_syntax
 reasoning
@@ -482,6 +760,9 @@ native_stateful
 native_stateless
 ```
 
+`attachment` means the model accepts file attachments; it does not grant file
+access. `temperature` means the adapter can expose temperature control, and
+`interleaved` means reasoning content can be interleaved with normal output.
 `tool_call_syntax` only means the model event stream may contain
 tool-call-shaped events. It does not mean the model can execute tools. It
 grants no tool permission.
@@ -511,6 +792,10 @@ Example:
 {"type":"usage","run":"r1","input_tokens":10,"output_tokens":1}
 {"type":"done","run":"r1","status":"ok"}
 ```
+
+`usage` requires `input_tokens` and `output_tokens`. When reported by a
+provider, optional `cached_tokens` and `cache_write_tokens` record cache reads
+and writes without changing those totals.
 
 Error example:
 

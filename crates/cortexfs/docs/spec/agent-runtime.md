@@ -693,9 +693,19 @@ Context compaction for prompt history uses `agent/<name>.d/compact.strategy`:
 
 ```text
 truncate   keep the newest messages and drop older ones (default)
-summarize  summarize omitted messages with the built-in provider-neutral summarizer
+summarize  add bounded excerpts from omitted messages using the built-in summarizer
 <name>     run agent/<name>.d/compact.d/<name> as an external summarizer
 ```
+
+If the newest message alone exceeds the history byte budget, the host retains
+a UTF-8-safe excerpt with a `[truncated]` marker when the budget can hold it.
+The built-in `summarize` strategy joins older message text into bullet excerpts;
+it does not call a model or generate a semantic summary. Recent messages take
+priority over both built-in excerpts and custom summaries. Each pass rebuilds
+from durable history, so repeated compaction does not recursively summarize a
+previous lossy result.
+History JSONL parsing accepts individual lines up to 64 KiB, matching the host
+history-read cap; larger or invalid lines are ignored in the disposable view.
 
 Custom compaction executables receive one bounded JSONL frame on stdin:
 
@@ -704,9 +714,11 @@ Custom compaction executables receive one bounded JSONL frame on stdin:
 ```
 
 Exit zero with bounded stdout text continues the run; the host inserts that text
-as `Summary of earlier context:` above the retained recent messages. Non-zero
-exit, timeout, or oversize output falls back to the truncate strategy for that
-run. Compaction never rewrites durable `messages.jsonl`.
+as `Summary of earlier context:` above the retained recent messages. Empty
+output, non-zero exit, timeout, or oversize output falls back to the truncate
+strategy for that run. The five-second deadline also bounds a compactor that
+does not read its input; stdin and output are serviced concurrently. Compaction
+never rewrites durable `messages.jsonl`.
 
 Agent-local hooks use the existing `agent/<name>.d/hooks/pre.d/` and
 `post.d/` directories. The runtime runs them in lexical order immediately
