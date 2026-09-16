@@ -13,13 +13,16 @@ fn openai_unusable_finish_reasons_are_errors() -> Result<(), Box<dyn std::error:
             }]
         }))?;
         let events = decode_response_events(WireProtocol::OpenAiChat, &input)?;
-        assert!(events.iter().any(|event| matches!(
-            event,
-            ModelEvent::Done {
-                status: EventStatus::Error,
-                ..
-            }
-        )), "{reason}: {events:?}");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ModelEvent::Done {
+                    status: EventStatus::Error,
+                    ..
+                }
+            )),
+            "{reason}: {events:?}"
+        );
     }
     Ok(())
 }
