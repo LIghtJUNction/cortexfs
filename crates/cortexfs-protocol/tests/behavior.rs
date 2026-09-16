@@ -19,7 +19,7 @@ mod tests {
         br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#;
     const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
     const RESPONSES_RESPONSE: &[u8] = br#"{"id":"responses-run","model":"responses-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":3,"output_tokens":2}}"#;
-    const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
+    const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"TOO_MANY_TOOL_CALLS"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
     const ANTHROPIC_RESPONSE: &[u8] = br#"{"id":"anthropic-run","model":"claude-model","role":"assistant","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#;
     const CHAT_TOOL_RESPONSE: &[u8] = br#"{"id":"chat-tool-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"rust\"}"}}]},"finish_reason":"tool_calls"}]}"#;
 
@@ -170,11 +170,13 @@ mod tests {
         ];
         for (protocol, input) in cases {
             let events = decode_response_events(protocol, input)?;
-            assert!(
-                events
-                    .iter()
-                    .any(|event| matches!(event, ModelEvent::TextDelta { .. }))
-            );
+            assert!(events.iter().any(|event| matches!(event, ModelEvent::TextDelta { .. })));
+            if protocol == WireProtocol::Gemini {
+                assert!(matches!(
+                    events.last(),
+                    Some(ModelEvent::Done { status: EventStatus::Error, .. })
+                ));
+            }
             let encoded = encode_response_events(protocol, &events)?;
             serde_json::from_slice::<Value>(&encoded)?;
             for (target, _) in cases {
