@@ -77,6 +77,19 @@ def proc_text(path):
         return None
 
 
+def thread_snapshot(task):
+    stat = proc_text(task / "stat")
+    suffix = stat.split(") ", 1)[1].split() if stat and ") " in stat else []
+    return {
+        "tid": int(task.name),
+        "state": suffix[0] if suffix else None,
+        "comm": proc_text(task / "comm"),
+        "wchan": proc_text(task / "wchan"),
+        "stack": proc_text(task / "stack"),
+        "syscall": proc_text(task / "syscall"),
+    }
+
+
 def process_snapshot(pid):
     proc = Path("/proc") / str(pid)
     stat = proc_text(proc / "stat")
@@ -89,6 +102,10 @@ def process_snapshot(pid):
         fds = {entry.name: os.readlink(entry) for entry in (proc / "fd").iterdir()}
     except OSError:
         fds = {}
+    try:
+        threads = [thread_snapshot(task) for task in (proc / "task").iterdir() if task.name.isdigit()]
+    except OSError:
+        threads = []
     return {
         "pid": pid,
         "ppid": int(suffix[1]) if len(suffix) > 1 and suffix[1].isdigit() else None,
@@ -97,6 +114,7 @@ def process_snapshot(pid):
         "cmdline": cmdline,
         "stack": proc_text(proc / "stack"),
         "fds": fds,
+        "threads": sorted(threads, key=lambda item: item["tid"]),
     }
 
 
