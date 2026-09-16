@@ -35,7 +35,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         .collect();
     root.insert("input".to_owned(), Value::Array(input));
     if !request.tools.is_empty() {
-        root.insert("tools".to_owned(), Value::Array(request.tools.iter().map(|tool| json!({"type": "function", "name": tool.name, "description": tool.description, "parameters": tool.parameters, "strict": true})).collect()));
+        root.insert("tools".to_owned(), Value::Array(request.tools.iter().map(|tool| json!({"type": "function", "name": tool.name, "description": tool.description, "parameters": tool.parameters})).collect()));
     }
     if let Some(choice) = request.tool_choice.as_ref() {
         root.insert("tool_choice".to_owned(), choice_value(choice));

@@ -21,13 +21,13 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
             ("parameters/properties/args/minItems", json!(1)),
             ("parameters/required", json!(["args"])),
             ("parameters/additionalProperties", json!(false)),
-            ("strict", json!(true)),
         ] {
             assert_eq!(
                 value.pointer(&format!("{function}/{field}")),
                 Some(&expected)
             );
         }
+        assert_eq!(value.pointer(&format!("{function}/strict")), None);
         assert_eq!(value.get("tool_choice"), Some(&json!("auto")));
         assert_eq!(value.get("parallel_tool_calls"), Some(&json!(false)));
     }
