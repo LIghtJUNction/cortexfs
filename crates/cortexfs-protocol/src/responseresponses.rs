@@ -19,9 +19,9 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     events.push(ModelEvent::Done {
         run,
         status: match map.get("status").and_then(Value::as_str) {
-            Some("failed" | "incomplete") => EventStatus::Error,
+            Some("completed") | None => EventStatus::Ok,
             Some("cancelled") => EventStatus::Cancelled,
-            _ => EventStatus::Ok,
+            Some(_) => EventStatus::Error,
         },
     });
     Ok(events)
