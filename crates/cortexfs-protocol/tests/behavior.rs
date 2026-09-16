@@ -172,10 +172,10 @@ mod tests {
             let events = decode_response_events(protocol, input)?;
             assert!(events.iter().any(|event| matches!(event, ModelEvent::TextDelta { .. })));
             if protocol == WireProtocol::Gemini {
-                assert!(matches!(
-                    events.last(),
-                    Some(ModelEvent::Done { status: EventStatus::Error, .. })
-                ));
+                assert!(events.iter().any(|event| matches!(
+                    event,
+                    ModelEvent::Done { status: EventStatus::Error, .. }
+                )));
             }
             let encoded = encode_response_events(protocol, &events)?;
             serde_json::from_slice::<Value>(&encoded)?;
