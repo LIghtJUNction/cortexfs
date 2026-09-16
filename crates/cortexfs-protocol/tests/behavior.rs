@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
     use cortexfs_protocol::{
-        BridgePath, ContextOwnership, EventStatus, Message, ModelEvent, ModelRequest, NativeRequest,
-        ProtocolError, ToolDefinition, WireProtocol, decode_model_request, decode_native_request,
-        decode_response_events, encode_model_request, encode_response_events, transcode_request,
-        transcode_response,
+        BridgePath, ContextOwnership, EventStatus, Message, ModelEvent, ModelRequest,
+        NativeRequest, ProtocolError, ToolDefinition, WireProtocol, decode_model_request,
+        decode_native_request, decode_response_events, encode_model_request,
+        encode_response_events, transcode_request, transcode_response,
     };
     use serde_json::{Value, json};
     use std::borrow::Cow;
