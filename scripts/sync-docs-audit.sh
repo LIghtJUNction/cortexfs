@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DOCS_DIR="${ROOT_DIR}/docs"
 I18N_DIR="${ROOT_DIR}/docs-site/i18n/zh-Hans/docusaurus-plugin-content-docs/current"
+BUNDLED_DOCS_DIR="${ROOT_DIR}/crates/cortexfs/docs"
+MANUAL_SOURCE="${ROOT_DIR}/crates/cortexfs/src/support/manuals.rs"
 
 if (($# > 0)); then
   echo "Usage: $(basename "$0")" >&2
@@ -103,13 +105,38 @@ if [[ -d "${I18N_DIR}" ]]; then
   done < <(rg --files "${I18N_DIR}" -g '*.md' -g '!.git*')
 fi
 
+echo "[sync-docs-audit] canonical->bundled manual check"
+
+BUNDLED_DRIFT=0
+MANUAL_COUNT=0
+while IFS= read -r include; do
+  rel=${include#*../../docs/}
+  rel=${rel%\")}
+  canonical="${DOCS_DIR}/${rel}"
+  bundled="${BUNDLED_DOCS_DIR}/${rel}"
+  ((MANUAL_COUNT += 1))
+  if [[ ! -f "${canonical}" || ! -f "${bundled}" ]]; then
+    echo "[bundled-missing] ${rel}"
+    ((BUNDLED_DRIFT += 1))
+  elif ! cmp -s "${canonical}" "${bundled}"; then
+    echo "[bundled-drift] ${rel}"
+    ((BUNDLED_DRIFT += 1))
+  fi
+done < <(rg -o 'include_str!\("\.\./\.\./docs/[^\"]+"\)' "${MANUAL_SOURCE}")
+
+if ((MANUAL_COUNT == 0)); then
+  echo "[bundled-missing] no manual sources found in ${MANUAL_SOURCE}"
+  BUNDLED_DRIFT=1
+fi
+
 echo "[sync-docs-audit] summary"
 echo "  translations: ${TRANSLATION}"
 echo "  fallbacks: ${FALLBACK}"
 echo "  mirrors: ${MIRROR}"
 echo "  orphan: ${ORPHAN}"
+echo "  bundled drift: ${BUNDLED_DRIFT}"
 
-if [[ "${MIRROR}" -eq 0 && "${ORPHAN}" -eq 0 ]]; then
+if [[ "${MIRROR}" -eq 0 && "${ORPHAN}" -eq 0 && "${BUNDLED_DRIFT}" -eq 0 ]]; then
   echo "[sync-docs-audit] status: ok"
   exit 0
 fi
