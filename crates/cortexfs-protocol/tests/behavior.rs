@@ -95,10 +95,11 @@ mod tests {
                 let at = |path| value.pointer(path);
                 assert_eq!(at("/messages/1/content/0/signature"), Some(&json!("sig")));
                 assert_eq!(at("/messages/1/content/2/type"), Some(&json!("tool_use")));
-                assert_eq!(at("/messages/2/content/0/type"), Some(&json!("tool_result")));
-                assert_eq!(at("/messages/2/content/0/tool_use_id"), Some(&json!("call-1")));
-                assert_eq!(at("/messages/2/content/0/content"), Some(&json!("lookup failed")));
-                assert_eq!(at("/messages/2/content/0/is_error"), Some(&json!(true)));
+                let result = value.pointer("/messages/2/content/0").and_then(Value::as_object);
+                assert_eq!(result.and_then(|v| v.get("type")), Some(&json!("tool_result")));
+                assert_eq!(result.and_then(|v| v.get("tool_use_id")), Some(&json!("call-1")));
+                assert_eq!(result.and_then(|v| v.get("content")), Some(&json!("lookup failed")));
+                assert_eq!(result.and_then(|v| v.get("is_error")), Some(&json!(true)));
             }
         }
         Ok(())
