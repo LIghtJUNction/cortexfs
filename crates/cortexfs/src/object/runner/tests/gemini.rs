@@ -5,9 +5,7 @@ use crate::object::runner::{
 use cortexfs_protocol::EventStatus::Error;
 use cortexfs_protocol::{ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
-
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-
 fn direct(base_url: &str) -> ResolvedTransport {
     ResolvedTransport::Direct {
         base_url: base_url.to_owned(),
@@ -134,7 +132,9 @@ fn responses_surface_provider_errors_and_refused_candidates() {
         ),
     ] {
         let out = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
-        assert!(matches!(out.get(1), Some(ModelEvent::Error { .. })) || expected.contains("finished"));
+        assert!(
+            matches!(out.get(1), Some(ModelEvent::Error { .. })) || expected.contains("finished")
+        );
         let done = out.last();
         assert!(matches!(done, Some(ModelEvent::Done { status: Error, .. })));
         let actual = parse_provider_content(protocol, response.as_bytes()).err();
