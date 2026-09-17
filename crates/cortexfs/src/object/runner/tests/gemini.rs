@@ -2,7 +2,7 @@ use crate::object::runner::{
     ProviderCredential, ResolvedTransport, parse_provider_content, parse_provider_usage,
     provider_request_body, provider_request_target,
 };
-use cortexfs_protocol::{ModelEvent, WireProtocol, decode_response_events};
+use cortexfs_protocol::{EventStatus, ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -37,8 +37,10 @@ fn generate_content_target_keeps_the_provider_api_version() -> Result<(), String
         (format!("{BASE_URL}/"), "gemini-2.5-flash"),
         (BASE_URL.to_owned(), "models/gemini-2.5-flash"),
     ] {
-        let expected_pair = (expected.clone(), vec!["x-goog-api-key: secret".to_owned()]);
-        assert_eq!(target(&direct(&base_url), &key, model)?, expected_pair);
+        assert_eq!(
+            target(&direct(&base_url), &key, model)?,
+            (expected.clone(), vec!["x-goog-api-key: secret".to_owned()])
+        );
     }
     Ok(())
 }
@@ -136,13 +138,11 @@ fn responses_surface_provider_errors_and_refused_candidates() {
             "provider response finished with MAX_TOKENS",
         ),
     ] {
-        let decoded = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
-        assert!(decoded.iter().any(|event| matches!(event, ModelEvent::Error { .. })));
-        assert!(decoded.last().is_some_and(|event| matches!(event, ModelEvent::Done { .. })));
-        assert_eq!(
-            parse_provider_content(protocol, response.as_bytes()).err(),
-            Some(expected.to_owned())
-        );
+        let out = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
+        assert!(out.iter().any(|event| matches!(event, ModelEvent::Error { .. })));
+        assert!(matches!(out.last(), Some(ModelEvent::Done { status: EventStatus::Error, .. })));
+        let actual = parse_provider_content(protocol, response.as_bytes()).err();
+        assert_eq!(actual, Some(expected.to_owned()));
     }
 }
 
