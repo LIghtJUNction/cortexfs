@@ -90,8 +90,10 @@ pub fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Resu
         run_shell_exec_command(&command).map_err(|error| io::Error::other(error.to_string()))?;
     writer.write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
-    let signal_code = output.status.signal().map(|signal| 128 + signal);
-    let code = output.status.code().or(signal_code);
+    let code = output
+        .status
+        .code()
+        .or_else(|| output.status.signal().map(|signal| 128 + signal));
     Ok(code
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
@@ -105,4 +107,13 @@ pub fn shell_exec_command() -> Command {
         .env("PATH", "/usr/bin:/bin")
         .env("GIT_OPTIONAL_LOCKS", "0");
     command
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shell_exec_cli_reports_signal_exit_code() {
+        let code = super::run_shell_exec_cli(&["kill -TERM $$".into()], &mut Vec::new());
+        assert!(matches!(code, Ok(code) if code == std::process::ExitCode::from(143)));
+    }
 }
