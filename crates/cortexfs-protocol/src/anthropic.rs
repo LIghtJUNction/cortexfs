@@ -34,13 +34,23 @@ pub struct Message<'a> {
     pub content: Content<'a>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
-#[serde(bound(deserialize = "'de: 'a"))]
 pub enum Content<'a> {
-    #[serde(borrow)]
     Text(Cow<'a, str>),
     Blocks(Vec<Block<'a>>),
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for Content<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <&RawValue>::deserialize(deserializer)?;
+        if raw.get().trim_start().starts_with('"') {
+            serde_json::from_str(raw.get()).map(Self::Text)
+        } else {
+            serde_json::from_str(raw.get()).map(Self::Blocks)
+        }
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 /// Anthropic text, image, thinking, and tool block.
