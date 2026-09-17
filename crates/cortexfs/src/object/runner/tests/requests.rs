@@ -1,4 +1,4 @@
-use crate::object::runner::responses::parse_provider_content;
+use crate::object::runner::responses::parse_provider_content as parse;
 use cortexfs_protocol::WireProtocol;
 use serde_json::{Value, json};
 
@@ -41,9 +41,9 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
 fn responses_runner_filters_provider_content() {
     for status in ["queued", "in_progress", "future_status"] {
         let body = json!({"status":status,"output_text":"ignored"}).to_string();
-        let actual = parse_provider_content(WireProtocol::OpenAiResponses, body.as_bytes()).err();
+        let actual = parse(WireProtocol::OpenAiResponses, body.as_bytes()).err();
         assert_eq!(actual, Some(format!("provider response {status}")));
     }
     let b = br#"{"content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"public"}]}"#;
-    assert_eq!(parse_provider_content(WireProtocol::Anthropic, b), Ok("public".into()));
+    assert_eq!(parse(WireProtocol::Anthropic, b), Ok("public".into()));
 }
