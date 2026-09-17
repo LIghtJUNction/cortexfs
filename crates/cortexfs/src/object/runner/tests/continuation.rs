@@ -64,7 +64,7 @@ fn unusable_provider_turns_fail_closed() {
         Err("provider response failed".to_owned())
     );
     for reason in ["cancelled", "error", "future_reason"] {
-        let line = format!(r#"data: {{"choices":[{{"finish_reason":"{reason}"}}],"usage":{{"prompt_tokens":1,"completion_tokens":1}}}}"#);
+        let line = format!(r#"data: {{"choices":[{{"finish_reason":"{reason}"}}]}}"#);
         assert!(crate::object::runner::streaming::openai_stream_event(&line).is_err());
     }
 }
