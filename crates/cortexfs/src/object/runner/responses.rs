@@ -78,9 +78,9 @@ fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(
         return Ok(());
     }
     if let Some((path, status)) = match value.get("status").and_then(Value::as_str) {
-        Some(status @ ("failed" | "cancelled")) => Some(("/error/message", status)),
+        Some("completed") | None => None,
         Some("incomplete") => Some(("/incomplete_details/reason", "incomplete")),
-        _ => None,
+        Some(status) => Some(("/error/message", status)),
     } {
         return Err(value
             .pointer(path)
