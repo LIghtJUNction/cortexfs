@@ -3,7 +3,7 @@ use crate::wait::{WaitError, wait_capped_child_output};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, ExitCode, Output, Stdio};
 use std::time::Duration;
 
@@ -46,10 +46,8 @@ impl Tool for ShellExecTool {
 }
 
 pub fn run_shell_exec_command(command: &str) -> Result<Output, ShellExecError> {
-    run_shell_exec_command_with_timeout(
-        command,
-        Duration::from_secs(crate::SHELL_EXEC_TIMEOUT_SECONDS),
-    )
+    let timeout = Duration::from_secs(crate::SHELL_EXEC_TIMEOUT_SECONDS);
+    run_shell_exec_command_with_timeout(command, timeout)
 }
 
 pub fn run_shell_exec_command_with_timeout(
@@ -92,7 +90,11 @@ pub fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Resu
         run_shell_exec_command(&command).map_err(|error| io::Error::other(error.to_string()))?;
     writer.write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
-    Ok(crate::exit_code_from_status(output.status))
+    let signal_code = output.status.signal().map(|signal| 128 + signal);
+    let code = output.status.code().or(signal_code);
+    Ok(code
+        .and_then(|code| u8::try_from(code).ok())
+        .map_or_else(|| ExitCode::from(1), ExitCode::from))
 }
 
 #[must_use]
