@@ -1,4 +1,5 @@
-use {crate::object::runner::responses::parse_provider_content, cortexfs_protocol::WireProtocol};
+use crate::object::runner::responses::parse_provider_content;
+use cortexfs_protocol::WireProtocol;
 use serde_json::{Value, json};
 
 #[test]
