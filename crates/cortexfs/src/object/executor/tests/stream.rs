@@ -195,8 +195,8 @@ fn openai_response_content_parses_output_parts() {
         (br#"{"status":"failed","error":{"message":"quota"},"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[]}"}]}"#.as_slice(), Err("quota")),
         (br#"{"status":"cancelled","output_text":"ignored"}"#.as_slice(), Err("provider response cancelled")),
         (br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"content":[{"type":"output_text","text":"ignored"}]}]}"#.as_slice(), Err("max_output_tokens")),
-        (br#"{"status":"queued","output_text":"ignored"}"#.as_slice(), Err("provider response queued")),
-        (br#"{"status":"future_status","output_text":"ignored"}"#.as_slice(), Err("provider response future_status")),
+        (br#"{"status":"failed","output_text":"ignored"}"#.as_slice(), Err("provider response failed")),
+        (br#"{"status":"incomplete","output_text":"ignored"}"#.as_slice(), Err("provider response incomplete")),
     ] {
         assert_eq!(parse_openai_response_content(response), expected.map(str::to_owned).map_err(str::to_owned));
     }
@@ -720,6 +720,10 @@ fn agent_driver_route_falls_back_from_responses_to_chat() -> Result<(), Box<dyn 
         format!(
             "{{\"name\":\"fixture\",\"base_url\":\"{base_url}/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
         ),
+    )?;
+    fs::write(
+        control.join("driver"),
+        "default=openai-chat\nagent=openai-responses,openai-chat\n",
     )?;
     let status = std::process::Command::new(std::env::current_exe()?)
         .arg("agent_driver_route_falls_back_from_responses_to_chat")
