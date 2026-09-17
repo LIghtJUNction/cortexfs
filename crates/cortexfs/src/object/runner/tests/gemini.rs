@@ -2,11 +2,10 @@ use crate::object::runner::{
     ProviderCredential, ResolvedTransport, parse_provider_content, parse_provider_usage,
     provider_request_body, provider_request_target,
 };
-use cortexfs_protocol::WireProtocol;
+use cortexfs_protocol::EventStatus::Error;
+use cortexfs_protocol::{ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
-
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-
 fn direct(base_url: &str) -> ResolvedTransport {
     ResolvedTransport::Direct {
         base_url: base_url.to_owned(),
@@ -48,10 +47,8 @@ fn generate_content_target_keeps_the_provider_api_version() -> Result<(), String
 #[test]
 fn generate_content_target_rejects_path_traversal_and_wrong_credentials() {
     let key = ProviderCredential::GoogleApiKey("secret".to_owned());
-    assert_eq!(
-        target(&direct(BASE_URL), &key, "../models/other"),
-        Err("invalid Gemini model name".to_owned())
-    );
+    let invalid = target(&direct(BASE_URL), &key, "../models/other");
+    assert_eq!(invalid, Err("invalid Gemini model name".to_owned()));
     for credential in [
         ProviderCredential::AnthropicApiKey("secret".to_owned()),
         ProviderCredential::Codex {
@@ -59,17 +56,12 @@ fn generate_content_target_rejects_path_traversal_and_wrong_credentials() {
             account_id: "account".to_owned(),
         },
     ] {
-        assert_eq!(
-            target(&direct(BASE_URL), &credential, "gemini-2.5-flash"),
-            Err("invalid Gemini credential".to_owned())
-        );
+        let invalid = target(&direct(BASE_URL), &credential, "gemini-2.5-flash");
+        assert_eq!(invalid, Err("invalid Gemini credential".to_owned()));
     }
-    assert_eq!(
-        provider_request_target(&direct(BASE_URL), None, WireProtocol::Gemini, "m", "run")
-            .err()
-            .as_deref(),
-        Some("missing Gemini credential")
-    );
+    let missing =
+        provider_request_target(&direct(BASE_URL), None, WireProtocol::Gemini, "m", "run");
+    assert_eq!(missing.err().as_deref(), Some("missing Gemini credential"));
 }
 
 #[test]
@@ -92,17 +84,11 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
         true,
     )?;
     let value = serde_json::from_str::<Value>(&body)?;
-    assert_eq!(value.get("model"), None);
-    assert_eq!(value.get("parallel_tool_calls"), None);
-    assert_eq!(value.get("stream"), None);
-    assert_eq!(
-        value.pointer("/tools/0/functionDeclarations/0/name"),
-        Some(&json!("tsh"))
-    );
-    assert_eq!(
-        value.pointer("/contents/0/parts/0/text"),
-        Some(&json!("hello"))
-    );
+    let absent = ["model", "parallel_tool_calls", "stream"];
+    assert!(absent.iter().all(|key| value.get(*key).is_none()));
+    let name = value.pointer("/tools/0/functionDeclarations/0/name");
+    let text = value.pointer("/contents/0/parts/0/text");
+    assert_eq!((name, text), (Some(&json!("tsh")), Some(&json!("hello"))));
     Ok(())
 }
 
@@ -130,6 +116,7 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
 
 #[test]
 fn responses_surface_provider_errors_and_refused_candidates() {
+    let protocol = WireProtocol::Gemini;
     for (response, expected) in [
         (
             json!({"error": {"code": 400, "message": "API key not valid"}}).to_string(),
@@ -144,11 +131,17 @@ fn responses_surface_provider_errors_and_refused_candidates() {
             "provider response finished with MAX_TOKENS",
         ),
     ] {
-        assert_eq!(
-            parse_provider_content(WireProtocol::Gemini, response.as_bytes()).err(),
-            Some(expected.to_owned())
+        let out = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
+        assert!(
+            matches!(out.get(1), Some(ModelEvent::Error { .. })) || expected.contains("finished")
         );
+        let done = out.last();
+        assert!(matches!(done, Some(ModelEvent::Done { status: Error, .. })));
+        let actual = parse_provider_content(protocol, response.as_bytes()).err();
+        assert_eq!(actual, Some(expected.to_owned()));
     }
+    let missing_model = json!({"candidates": [{"finishReason": "STOP"}]}).to_string();
+    assert!(decode_response_events(protocol, missing_model.as_bytes()).is_err());
 }
 
 fn candidate(parts: &Value, finish_reason: &str) -> String {

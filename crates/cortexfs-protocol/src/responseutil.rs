@@ -74,11 +74,13 @@ pub(super) fn number(value: Option<&Value>) -> Option<u64> {
 pub(super) fn usage(map: Option<&Map<String, Value>>) -> Option<Usage> {
     let input = number(
         map.and_then(|value| value.get("input_tokens"))
-            .or_else(|| map.and_then(|value| value.get("prompt_tokens"))),
+            .or_else(|| map.and_then(|value| value.get("prompt_tokens")))
+            .or_else(|| map.and_then(|value| value.get("promptTokenCount"))),
     )?;
     let output = number(
         map.and_then(|value| value.get("output_tokens"))
-            .or_else(|| map.and_then(|value| value.get("completion_tokens"))),
+            .or_else(|| map.and_then(|value| value.get("completion_tokens")))
+            .or_else(|| map.and_then(|value| value.get("candidatesTokenCount"))),
     )?;
     Some(Usage {
         input_tokens: input,
