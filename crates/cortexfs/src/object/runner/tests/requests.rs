@@ -1,5 +1,4 @@
-use crate::object::runner::responses::parse_provider_content;
-use cortexfs_protocol::WireProtocol;
+use {crate::object::runner::responses::parse_provider_content, cortexfs_protocol::WireProtocol};
 use serde_json::{Value, json};
 
 #[test]
@@ -36,6 +35,7 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
     }
     Ok(())
 }
+
 #[test]
 fn responses_runner_filters_provider_content() {
     for status in ["queued", "in_progress", "future_status"] {
