@@ -13,13 +13,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
             tool_calls: Vec::new(),
         });
     }
-    messages.extend(
-        source
-            .messages
-            .iter()
-            .map(message)
-            .collect::<Result<Vec<_>, _>>()?,
-    );
+    messages.extend(source.messages.iter().map(message).collect::<Result<Vec<_>, _>>()?);
     let mut result = ModelRequest::new(source.model.as_ref(), messages);
     result.max_output_tokens = Some(source.max_tokens);
     result.stream = source.stream;
