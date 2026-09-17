@@ -44,6 +44,6 @@ fn responses_runner_filters_provider_content() {
         let actual = parse_provider_content(WireProtocol::OpenAiResponses, body.as_bytes()).err();
         assert_eq!(actual, Some(format!("provider response {status}")));
     }
-    let body = br#"{"id":"r","model":"m","content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"public"}],"stop_reason":"end_turn"}"#;
-    assert_eq!(parse_provider_content(WireProtocol::Anthropic, body), Ok("public".into()));
+    let b = br#"{"content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"public"}]}"#;
+    assert_eq!(parse_provider_content(WireProtocol::Anthropic, b), Ok("public".into()));
 }
