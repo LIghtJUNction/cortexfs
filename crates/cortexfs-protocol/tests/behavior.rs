@@ -8,15 +8,13 @@ mod tests {
     };
     use serde_json::{Value, json};
     use std::borrow::Cow;
-
     type TestResult = Result<(), Box<dyn std::error::Error>>;
-
     const CHAT: &[u8] = br#"{"model":"chat-model","messages":[{"role":"user","content":"hi"}]}"#;
     const RESPONSES: &[u8] = br#"{"model":"responses-model","input":"hi"}"#;
     const GEMINI: &[u8] =
         br#"{"model":"gemini-model","contents":[{"role":"user","parts":[{"text":"hi"}]}]}"#;
     const ANTHROPIC: &[u8] =
-        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#;
+        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"sig"},{"type":"text","text":"visible"}]}]}"#;
     const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
     const RESPONSES_RESPONSE: &[u8] = br#"{"id":"responses-run","model":"responses-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":3,"output_tokens":2}}"#;
     const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"TOO_MANY_TOOL_CALLS"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
@@ -31,7 +29,6 @@ mod tests {
             (WireProtocol::Anthropic, ANTHROPIC),
         ]
     }
-
     #[test]
     fn request_is_provider_neutral_and_validates_tools() -> TestResult {
         let mut request = ModelRequest::new("example/model", vec![Message::user("hello")]);
@@ -89,7 +86,11 @@ mod tests {
             let request = decode_model_request(protocol, input)?;
             request.validate()?;
             let encoded = encode_model_request(protocol, &request)?;
-            serde_json::from_slice::<Value>(&encoded)?;
+            let value: Value = serde_json::from_slice(&encoded)?;
+            if protocol == WireProtocol::Anthropic {
+                assert_eq!(value["messages"][1]["content"][0]["type"], "thinking");
+                assert_eq!(value["messages"][1]["content"][0]["signature"], "sig");
+            }
         }
         Ok(())
     }
