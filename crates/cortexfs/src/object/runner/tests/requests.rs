@@ -18,7 +18,8 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
             ("parameters/required", json!(["args"])),
             ("parameters/additionalProperties", json!(false)),
         ] {
-            assert!(value.pointer(&format!("{function}/{field}")) == Some(&expected));
+            let pointer = format!("{function}/{field}");
+            assert_eq!(value.pointer(&pointer), Some(&expected));
         }
         assert_eq!(value.pointer(&format!("{function}/strict")), None);
         assert_eq!(value.get("tool_choice"), Some(&json!("auto")));
