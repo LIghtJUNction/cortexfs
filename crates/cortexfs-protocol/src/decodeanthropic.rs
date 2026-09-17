@@ -1,10 +1,12 @@
 use crate::anthropic::{Block, Content as NativeContent, Request};
+use crate::semantic::raw_value;
 use crate::{
     Content, ContentPart, ContextState, ConversionError, Message, ModelRequest, Role, ToolCall,
+    WireProtocol,
 };
 
 pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
-    let source: Request<'_> = crate::semantic::parse(crate::WireProtocol::Anthropic, input)?;
+    let source: Request<'_> = crate::semantic::parse(WireProtocol::Anthropic, input)?;
     let mut messages = Vec::new();
     if let Some(system) = source.system.as_ref() {
         messages.push(Message {
@@ -28,7 +30,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
         );
     }
     for (name, raw) in &source.extra {
-        let value = crate::semantic::raw_value(crate::WireProtocol::Anthropic, name, raw)?;
+        let value = raw_value(WireProtocol::Anthropic, name, raw)?;
         result.options.insert(name.to_string(), value);
     }
     result.context = ContextState::client_owned();
@@ -68,11 +70,7 @@ fn content(source: &NativeContent<'_>) -> Result<(Content, Vec<ToolCall>), Conve
             Block::ToolUse { id, name, input } => calls.push(ToolCall {
                 id: id.to_string(),
                 name: name.to_string(),
-                arguments: crate::semantic::raw_value(
-                    crate::WireProtocol::Anthropic,
-                    "messages[].content[].input",
-                    input,
-                )?,
+                arguments: raw_value(WireProtocol::Anthropic, "messages[].content[].input", input)?,
             }),
             Block::ToolResult {
                 tool_use_id,
@@ -91,8 +89,8 @@ fn tool(source: &crate::anthropic::Tool<'_>) -> Result<crate::ToolDefinition, Co
     Ok(crate::ToolDefinition {
         name: source.name.to_string(),
         description: source.description.as_ref().map(ToString::to_string),
-        parameters: crate::semantic::raw_value(
-            crate::WireProtocol::Anthropic,
+        parameters: raw_value(
+            WireProtocol::Anthropic,
             "tools[].input_schema",
             source.input_schema,
         )?,
