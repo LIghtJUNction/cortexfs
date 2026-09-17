@@ -34,67 +34,57 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         .get("candidates")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
-        .and_then(Value::as_object);
-    if let Some(candidate) = candidate {
-        if let Some(parts) = candidate
-            .get("content")
-            .and_then(Value::as_object)
-            .and_then(|content| content.get("parts"))
-            .and_then(Value::as_array)
-        {
-            for part in parts {
-                if let Some(text) =
-                    crate::responseutil::text(part.as_object().and_then(|item| item.get("text")))
-                {
-                    events.push(ModelEvent::TextDelta {
-                        run: run.clone(),
-                        text,
-                    });
-                }
-                if let Some(call) = part
-                    .as_object()
-                    .and_then(|item| item.get("functionCall"))
-                    .and_then(Value::as_object)
-                {
-                    let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
-                    let name = crate::responseutil::text(call.get("name")).unwrap_or_default();
-                    events.push(ModelEvent::ToolCall {
-                        run: run.clone(),
-                        call: crate::ToolCall {
-                            id: crate::responseutil::text(call.get("id"))
-                                .unwrap_or_else(|| name.clone()),
-                            name,
-                            arguments: args,
-                        },
-                    });
-                }
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid("candidates"))?;
+    if let Some(parts) = candidate
+        .get("content")
+        .and_then(Value::as_object)
+        .and_then(|content| content.get("parts"))
+        .and_then(Value::as_array)
+    {
+        for part in parts {
+            if let Some(text) =
+                crate::responseutil::text(part.as_object().and_then(|item| item.get("text")))
+            {
+                events.push(ModelEvent::TextDelta {
+                    run: run.clone(),
+                    text,
+                });
+            }
+            if let Some(call) = part
+                .as_object()
+                .and_then(|item| item.get("functionCall"))
+                .and_then(Value::as_object)
+            {
+                let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
+                let name = crate::responseutil::text(call.get("name")).unwrap_or_default();
+                events.push(ModelEvent::ToolCall {
+                    run: run.clone(),
+                    call: crate::ToolCall {
+                        id: crate::responseutil::text(call.get("id"))
+                            .unwrap_or_else(|| name.clone()),
+                        name,
+                        arguments: args,
+                    },
+                });
             }
         }
-        let status = match candidate.get("finishReason").and_then(Value::as_str) {
-            Some("STOP") | None => EventStatus::Ok,
-            Some("CANCELLED") => EventStatus::Cancelled,
-            Some(_) => EventStatus::Error,
-        };
-        events.push(ModelEvent::Done {
-            run: run.clone(),
-            status,
-        });
     }
+    let status = match candidate.get("finishReason").and_then(Value::as_str) {
+        Some("STOP") | None => EventStatus::Ok,
+        Some("CANCELLED") => EventStatus::Cancelled,
+        Some(_) => EventStatus::Error,
+    };
+    events.push(ModelEvent::Done {
+        run: run.clone(),
+        status,
+    });
     if let Some(usage) =
         crate::responseutil::usage(crate::responseutil::object(map.get("usageMetadata")))
     {
         events.push(ModelEvent::Usage {
             run: run.clone(),
             usage,
-        });
-    }
-    if !events
-        .iter()
-        .any(|event| matches!(event, ModelEvent::Done { .. }))
-    {
-        events.push(ModelEvent::Done {
-            run,
-            status: EventStatus::Ok,
         });
     }
     Ok(events)
