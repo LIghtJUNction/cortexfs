@@ -90,10 +90,7 @@ pub fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Resu
         run_shell_exec_command(&command).map_err(|error| io::Error::other(error.to_string()))?;
     writer.write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
-    let code = output
-        .status
-        .code()
-        .or_else(|| output.status.signal().map(|signal| 128 + signal));
+    let code = output.status.code().or_else(|| output.status.signal().map(|signal| 128 + signal));
     Ok(code
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
