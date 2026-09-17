@@ -16,7 +16,7 @@ mod tests {
     const ANTHROPIC: &[u8] =
         br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#;
     const ANTHROPIC_REPLAY: &[u8] =
-        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"sig"},{"type":"text","text":"visible"},{"type":"tool_use","id":"call-1","name":"lookup","input":{"q":"rust"}}]}]}"#;
+        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"sig"},{"type":"text","text":"visible"},{"type":"tool_use","id":"call-1","name":"lookup","input":{"q":"rust"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"lookup failed","is_error":true}]}]}"#;
     const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
     const RESPONSES_RESPONSE: &[u8] = br#"{"id":"responses-run","model":"responses-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":3,"output_tokens":2}}"#;
     const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"TOO_MANY_TOOL_CALLS"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
@@ -92,13 +92,14 @@ mod tests {
             let encoded = encode_model_request(protocol, &request)?;
             let value: Value = serde_json::from_slice(&encoded)?;
             if protocol == WireProtocol::Anthropic {
-                assert_eq!(
-                    value.pointer("/messages/1/content/0"),
-                    Some(&json!({"type":"thinking","thinking":"secret","signature":"sig"}))
-                );
-                assert!(value.pointer("/messages/1/content/3").is_none());
-                let kind = value.pointer("/messages/1/content/2/type");
-                assert_eq!(kind.and_then(Value::as_str), Some("tool_use"));
+                let blocks = &value["messages"][1]["content"];
+                assert_eq!(blocks[0]["signature"], "sig");
+                assert_eq!(blocks[2]["type"], "tool_use");
+                let result = &value["messages"][2]["content"][0];
+                assert_eq!(result["type"], "tool_result");
+                assert_eq!(result["tool_use_id"], "call-1");
+                assert_eq!(result["content"], "lookup failed");
+                assert_eq!(result["is_error"], true);
             }
         }
         Ok(())
