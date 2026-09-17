@@ -1,4 +1,4 @@
-use crate::responsegooglepart::{invalid, provider_error, usage};
+use crate::responsegooglepart::{invalid, provider_error};
 use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
 use serde_json::{Map, Value, json};
 
@@ -70,7 +70,9 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             status,
         });
     }
-    if let Some(usage) = usage(crate::responseutil::object(map.get("usageMetadata"))) {
+    if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(
+        map.get("usageMetadata"),
+    )) {
         events.push(ModelEvent::Usage {
             run: run.clone(),
             usage,
