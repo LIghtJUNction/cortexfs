@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
-use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// Borrowed Anthropic Messages request IR.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -22,7 +20,7 @@ pub struct Request<'a> {
     #[serde(default, borrow)]
     pub thinking: Option<Thinking<'a>>,
     #[serde(default, borrow)]
-    pub extra: BTreeMap<Cow<'a, str>, &'a RawValue>,
+    pub extra: BTreeMap<Cow<'a, str>, &'a serde_json::value::RawValue>,
 }
 
 /// Anthropic message with text and native content blocks.
@@ -34,11 +32,9 @@ pub struct Message<'a> {
     pub content: Content<'a>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
-#[serde(bound(deserialize = "'de: 'a"))]
 pub enum Content<'a> {
-    #[serde(borrow)]
     Text(Cow<'a, str>),
     Blocks(Vec<Block<'a>>),
 }
@@ -66,7 +62,7 @@ pub enum Block<'a> {
         #[serde(borrow)]
         name: Cow<'a, str>,
         #[serde(borrow)]
-        input: &'a RawValue,
+        input: &'a serde_json::value::RawValue,
     },
     #[serde(rename = "tool_result")]
     ToolResult {
@@ -86,9 +82,8 @@ pub struct Tool<'a> {
     pub name: Cow<'a, str>,
     #[serde(default, borrow)]
     pub description: Option<Cow<'a, str>>,
-    #[serde(rename = "input_schema")]
-    #[serde(borrow)]
-    pub input_schema: &'a RawValue,
+    #[serde(rename = "input_schema", borrow)]
+    pub input_schema: &'a serde_json::value::RawValue,
 }
 
 /// Anthropic tool selection.

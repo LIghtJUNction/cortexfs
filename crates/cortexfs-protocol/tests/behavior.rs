@@ -16,7 +16,7 @@ mod tests {
     const ANTHROPIC: &[u8] =
         br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#;
     const ANTHROPIC_REPLAY: &[u8] =
-        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"sig"},{"type":"text","text":"visible"}]}]}"#;
+        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"sig"},{"type":"text","text":"visible"},{"type":"tool_use","id":"call-1","name":"lookup","input":{"q":"rust"}}]}]}"#;
     const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
     const RESPONSES_RESPONSE: &[u8] = br#"{"id":"responses-run","model":"responses-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":3,"output_tokens":2}}"#;
     const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"TOO_MANY_TOOL_CALLS"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
@@ -96,6 +96,9 @@ mod tests {
                     value.pointer("/messages/1/content/0"),
                     Some(&json!({"type":"thinking","thinking":"secret","signature":"sig"}))
                 );
+                assert!(value.pointer("/messages/1/content/3").is_none());
+                let kind = value.pointer("/messages/1/content/2/type");
+                assert_eq!(kind.and_then(Value::as_str), Some("tool_use"));
             }
         }
         Ok(())
