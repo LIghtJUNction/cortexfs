@@ -1,9 +1,9 @@
-use crate::shellerror::ShellExecError;
 use crate::wait::{WaitError, wait_capped_child_output};
+use crate::{SHELL_EXEC_TIMEOUT_SECONDS, shellerror::ShellExecError};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, ExitCode, Output, Stdio};
 use std::time::Duration;
 
@@ -46,10 +46,7 @@ impl Tool for ShellExecTool {
 }
 
 pub fn run_shell_exec_command(command: &str) -> Result<Output, ShellExecError> {
-    run_shell_exec_command_with_timeout(
-        command,
-        Duration::from_secs(crate::SHELL_EXEC_TIMEOUT_SECONDS),
-    )
+    run_shell_exec_command_with_timeout(command, Duration::from_secs(SHELL_EXEC_TIMEOUT_SECONDS))
 }
 
 pub fn run_shell_exec_command_with_timeout(
@@ -92,7 +89,9 @@ pub fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Resu
         run_shell_exec_command(&command).map_err(|error| io::Error::other(error.to_string()))?;
     writer.write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
-    Ok(crate::exit_code_from_status(output.status))
+    let signal_code = output.status.signal().map(|signal| signal + 128);
+    let code = output.status.code().or(signal_code);
+    Ok(ExitCode::from(u8::try_from(code.unwrap_or(1)).unwrap_or(1)))
 }
 
 #[must_use]
@@ -103,4 +102,13 @@ pub fn shell_exec_command() -> Command {
         .env("PATH", "/usr/bin:/bin")
         .env("GIT_OPTIONAL_LOCKS", "0");
     command
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shell_exec_cli_reports_signal_exit_code() {
+        let code = super::run_shell_exec_cli(&["kill -TERM $$".into()], &mut Vec::new());
+        assert!(matches!(code, Ok(code) if code == std::process::ExitCode::from(143)));
+    }
 }
