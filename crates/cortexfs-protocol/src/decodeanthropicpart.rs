@@ -1,5 +1,4 @@
-use crate::ContentPart;
-use crate::anthropic::Block;
+use crate::{ContentPart, anthropic::Block};
 
 pub(super) fn part(source: &Block<'_>) -> Option<ContentPart> {
     match *source {
