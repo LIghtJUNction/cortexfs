@@ -52,40 +52,47 @@ fn message(source: &crate::anthropic::Message<'_>) -> Result<Message, Conversion
 }
 
 fn content(source: &NativeContent<'_>) -> Result<(Content, Vec<ToolCall>), ConversionError> {
-    if let NativeContent::Text(text) = source {
-        return Ok((Content::text(text.as_ref()), Vec::new()));
-    }
-    let NativeContent::Blocks(blocks) = source else {
-        unreachable!()
-    };
-    let mut parts = Vec::new();
-    let mut calls = Vec::new();
-    for block in blocks {
-        match block {
-            Block::Text { text } => parts.push(ContentPart::text(text.as_ref())),
-            Block::Thinking {
-                thinking,
-                signature,
-            } => parts.push(ContentPart::Data {
-                name: "anthropic.thinking".to_owned(),
-                value: serde_json::json!({"text": thinking, "signature": signature}),
-            }),
-            Block::ToolUse { id, name, input } => calls.push(ToolCall {
-                id: id.to_string(),
-                name: name.to_string(),
-                arguments: raw_value(WireProtocol::Anthropic, "messages[].content[].input", input)?,
-            }),
-            Block::ToolResult {
-                tool_use_id,
-                content,
-                is_error,
-            } => parts.push(ContentPart::Data {
-                name: format!("anthropic.tool_result:{tool_use_id}"),
-                value: serde_json::json!({"content": content, "is_error": is_error}),
-            }),
+    match source {
+        &NativeContent::Text(ref text) => Ok((Content::text(text.as_ref()), Vec::new())),
+        &NativeContent::Blocks(ref blocks) => {
+            let mut parts = Vec::new();
+            let mut calls = Vec::new();
+            for block in blocks {
+                match block {
+                    &Block::Text { ref text } => parts.push(ContentPart::text(text.as_ref())),
+                    &Block::Thinking {
+                        ref thinking,
+                        ref signature,
+                    } => parts.push(ContentPart::Data {
+                        name: "anthropic.thinking".to_owned(),
+                        value: serde_json::json!({"text": thinking, "signature": signature}),
+                    }),
+                    &Block::ToolUse {
+                        ref id,
+                        ref name,
+                        input,
+                    } => calls.push(ToolCall {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        arguments: raw_value(
+                            WireProtocol::Anthropic,
+                            "messages[].content[].input",
+                            input,
+                        )?,
+                    }),
+                    &Block::ToolResult {
+                        ref tool_use_id,
+                        ref content,
+                        is_error,
+                    } => parts.push(ContentPart::Data {
+                        name: format!("anthropic.tool_result:{tool_use_id}"),
+                        value: serde_json::json!({"content": content, "is_error": is_error}),
+                    }),
+                }
+            }
+            Ok((Content::Parts(parts), calls))
         }
     }
-    Ok((Content::Parts(parts), calls))
 }
 
 fn tool(source: &crate::anthropic::Tool<'_>) -> Result<crate::ToolDefinition, ConversionError> {
