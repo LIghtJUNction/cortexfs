@@ -59,11 +59,10 @@ fn parts(content: &Content) -> Result<Vec<Value>, ConversionError> {
             .iter()
             .map(|part| match *part {
                 crate::ContentPart::Text { ref text } => Ok(json!({"type": "text", "text": text})),
-                crate::ContentPart::Data {
-                    ref name,
-                    ref value,
-                } => Ok(if name == "anthropic.thinking" {
+                crate::ContentPart::Data { ref name, ref value } => Ok(if name == "anthropic.thinking" {
                     json!({"type": "thinking", "thinking": value.get("text"), "signature": value.get("signature")})
+                } else if let Some(tool_use_id) = name.strip_prefix("anthropic.tool_result:") {
+                    json!({"type": "tool_result", "tool_use_id": tool_use_id, "content": value.get("content"), "is_error": value.get("is_error")})
                 } else {
                     json!({"type": "text", "text": format!("{name}: {value}")})
                 }),
