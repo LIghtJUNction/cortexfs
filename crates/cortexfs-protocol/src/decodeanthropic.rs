@@ -18,9 +18,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
             tool_calls: Vec::new(),
         });
     }
-    for source_message in &source.messages {
-        messages.push(message(source_message)?);
-    }
+    messages.extend(source.messages.iter().map(message).collect::<Result<Vec<_>, _>>()?);
     let mut result = ModelRequest::new(source.model.as_ref(), messages);
     result.max_output_tokens = Some(source.max_tokens);
     result.stream = source.stream;
@@ -33,9 +31,8 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
         );
     }
     for (name, raw) in &source.extra {
-        result
-            .options
-            .insert(name.to_string(), raw_value(WireProtocol::Anthropic, name, raw)?);
+        let value = raw_value(WireProtocol::Anthropic, name, raw)?;
+        result.options.insert(name.to_string(), value);
     }
     result.context = ContextState::client_owned();
     Ok(result)
