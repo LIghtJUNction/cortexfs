@@ -92,8 +92,10 @@ mod tests {
             let encoded = encode_model_request(protocol, &request)?;
             let value: Value = serde_json::from_slice(&encoded)?;
             if protocol == WireProtocol::Anthropic {
-                assert_eq!(value["messages"][1]["content"][0]["type"], "thinking");
-                assert_eq!(value["messages"][1]["content"][0]["signature"], "sig");
+                assert_eq!(
+                    value.pointer("/messages/1/content/0"),
+                    Some(&json!({"type":"thinking","thinking":"secret","signature":"sig"}))
+                );
             }
         }
         Ok(())
@@ -151,7 +153,6 @@ mod tests {
         assert!(encode_model_request(WireProtocol::OpenAiChat, &request).is_err());
         Ok(())
     }
-
     #[test]
     fn invalid_provider_context_is_rejected_before_encoding() {
         let mut request = ModelRequest::new("model", vec![Message::user("hi")]);
@@ -161,7 +162,6 @@ mod tests {
             Err(ProtocolError::InvalidContext(_))
         ));
     }
-
     #[test]
     fn response_events_roundtrip_through_all_native_dialects() -> TestResult {
         let cases = [
