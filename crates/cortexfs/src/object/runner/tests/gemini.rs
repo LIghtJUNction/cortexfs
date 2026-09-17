@@ -2,7 +2,7 @@ use crate::object::runner::{
     ProviderCredential, ResolvedTransport, parse_provider_content, parse_provider_usage,
     provider_request_body, provider_request_target,
 };
-use cortexfs_protocol::{ModelEvent, WireProtocol, decode_response_events};
+use cortexfs_protocol::{EventStatus, ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -133,9 +133,9 @@ fn responses_surface_provider_errors_and_refused_candidates() {
         ),
     ] {
         let out = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
-        let error =
-            matches!(out.get(1), Some(ModelEvent::Error { .. })) || expected.contains("finished");
-        assert!(error && matches!(out.last(), Some(ModelEvent::Done { .. })));
+        let error = matches!(out.get(1), Some(ModelEvent::Error { .. }));
+        assert!(error || expected.contains("finished"));
+        assert!(matches!(out.last(), Some(ModelEvent::Done { status: EventStatus::Error, .. })));
         let actual = parse_provider_content(protocol, response.as_bytes()).err();
         assert_eq!(actual, Some(expected.to_owned()));
     }
