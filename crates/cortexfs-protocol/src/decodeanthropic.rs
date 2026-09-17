@@ -33,8 +33,9 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
         );
     }
     for (name, raw) in &source.extra {
-        let value = raw_value(WireProtocol::Anthropic, name, raw)?;
-        result.options.insert(name.to_string(), value);
+        result
+            .options
+            .insert(name.to_string(), raw_value(WireProtocol::Anthropic, name, raw)?);
     }
     result.context = ContextState::client_owned();
     Ok(result)
@@ -61,21 +62,30 @@ fn content(source: &NativeContent<'_>) -> Result<(Content, Vec<ToolCall>), Conve
     for block in blocks {
         match *block {
             Block::Text { ref text } => parts.push(ContentPart::text(text.as_ref())),
-            Block::Thinking { ref thinking, ref signature } => parts.push(ContentPart::Data {
+            Block::Thinking {
+                ref thinking,
+                ref signature,
+            } => parts.push(ContentPart::Data {
                 name: "anthropic.thinking".to_owned(),
                 value: serde_json::json!({"text": thinking, "signature": signature}),
             }),
-            Block::ToolUse { ref id, ref name, input } => calls.push(ToolCall {
+            Block::ToolUse {
+                ref id,
+                ref name,
+                input,
+            } => calls.push(ToolCall {
                 id: id.to_string(),
                 name: name.to_string(),
                 arguments: raw_value(WireProtocol::Anthropic, "messages[].content[].input", input)?,
             }),
-            Block::ToolResult { ref tool_use_id, ref content, is_error } => {
-                parts.push(ContentPart::Data {
-                    name: format!("anthropic.tool_result:{tool_use_id}"),
-                    value: serde_json::json!({"content": content, "is_error": is_error}),
-                })
-            }
+            Block::ToolResult {
+                ref tool_use_id,
+                ref content,
+                is_error,
+            } => parts.push(ContentPart::Data {
+                name: format!("anthropic.tool_result:{tool_use_id}"),
+                value: serde_json::json!({"content": content, "is_error": is_error}),
+            }),
         }
     }
     Ok((Content::Parts(parts), calls))
