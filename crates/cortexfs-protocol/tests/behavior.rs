@@ -92,14 +92,13 @@ mod tests {
             let encoded = encode_model_request(protocol, &request)?;
             let value: Value = serde_json::from_slice(&encoded)?;
             if protocol == WireProtocol::Anthropic {
-                let blocks = &value["messages"][1]["content"];
-                assert_eq!(blocks[0]["signature"], "sig");
-                assert_eq!(blocks[2]["type"], "tool_use");
-                let result = &value["messages"][2]["content"][0];
-                assert_eq!(result["type"], "tool_result");
-                assert_eq!(result["tool_use_id"], "call-1");
-                assert_eq!(result["content"], "lookup failed");
-                assert_eq!(result["is_error"], true);
+                let at = |path| value.pointer(path);
+                assert_eq!(at("/messages/1/content/0/signature"), Some(&json!("sig")));
+                assert_eq!(at("/messages/1/content/2/type"), Some(&json!("tool_use")));
+                assert_eq!(at("/messages/2/content/0/type"), Some(&json!("tool_result")));
+                assert_eq!(at("/messages/2/content/0/tool_use_id"), Some(&json!("call-1")));
+                assert_eq!(at("/messages/2/content/0/content"), Some(&json!("lookup failed")));
+                assert_eq!(at("/messages/2/content/0/is_error"), Some(&json!(true)));
             }
         }
         Ok(())
