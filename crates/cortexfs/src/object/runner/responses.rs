@@ -139,8 +139,7 @@ fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
     let text = events
         .iter()
         .filter_map(|event| match *event {
-            ModelEvent::TextDelta { ref text, .. }
-            | ModelEvent::ReasoningDelta { ref text, .. } => Some(text.as_str()),
+            ModelEvent::TextDelta { ref text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect::<String>();
