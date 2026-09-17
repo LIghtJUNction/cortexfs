@@ -5,10 +5,8 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
     crate::encode::check_context(request, WireProtocol::Anthropic)?;
     let mut root = Map::new();
     root.insert("model".to_owned(), Value::String(request.model.clone()));
-    root.insert(
-        "max_tokens".to_owned(),
-        json!(request.max_output_tokens.unwrap_or(4096)),
-    );
+    let max_tokens = request.max_output_tokens.unwrap_or(4096);
+    root.insert("max_tokens".to_owned(), json!(max_tokens));
     let systems = request
         .messages
         .iter()
@@ -18,17 +16,13 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
     if !systems.is_empty() {
         root.insert("system".to_owned(), Value::String(systems.join("\n")));
     }
-    root.insert(
-        "messages".to_owned(),
-        Value::Array(
-            request
-                .messages
-                .iter()
-                .filter(|message| message.role.as_str() != "system")
-                .map(message)
-                .collect::<Result<_, _>>()?,
-        ),
-    );
+    let messages = request
+        .messages
+        .iter()
+        .filter(|message| message.role.as_str() != "system")
+        .map(message)
+        .collect::<Result<_, _>>()?;
+    root.insert("messages".to_owned(), Value::Array(messages));
     if !request.tools.is_empty() {
         root.insert("tools".to_owned(), Value::Array(request.tools.iter().map(|tool| json!({"name": tool.name, "description": tool.description, "input_schema": tool.parameters})).collect()));
     }
@@ -68,7 +62,11 @@ fn parts(content: &Content) -> Result<Vec<Value>, ConversionError> {
                 crate::ContentPart::Data {
                     ref name,
                     ref value,
-                } => Ok(json!({"type": "text", "text": format!("{name}: {value}")})),
+                } => Ok(if name == "anthropic.thinking" {
+                    json!({"type": "thinking", "thinking": value.get("text"), "signature": value.get("signature")})
+                } else {
+                    json!({"type": "text", "text": format!("{name}: {value}")})
+                }),
                 crate::ContentPart::Image { .. } | crate::ContentPart::Audio { .. } => {
                     Err(ConversionError::UnsupportedField {
                         protocol: WireProtocol::Anthropic,
