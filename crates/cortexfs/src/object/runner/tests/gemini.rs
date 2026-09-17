@@ -139,8 +139,9 @@ fn responses_surface_provider_errors_and_refused_candidates() {
         ),
     ] {
         let out = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
-        assert!(out.iter().any(|event| matches!(event, ModelEvent::Error { .. })));
-        assert!(matches!(out.last(), Some(ModelEvent::Done { status: EventStatus::Error, .. })));
+        let error = matches!(out.get(1), Some(ModelEvent::Error { .. }));
+        let done = matches!(out.last(), Some(ModelEvent::Done { status: EventStatus::Error, .. }));
+        assert!(error && done);
         let actual = parse_provider_content(protocol, response.as_bytes()).err();
         assert_eq!(actual, Some(expected.to_owned()));
     }
