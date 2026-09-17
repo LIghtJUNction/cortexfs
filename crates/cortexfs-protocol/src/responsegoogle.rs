@@ -82,10 +82,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     if let Some(usage) =
         crate::responseutil::usage(crate::responseutil::object(map.get("usageMetadata")))
     {
-        events.push(ModelEvent::Usage {
-            run: run.clone(),
-            usage,
-        });
+        events.push(ModelEvent::Usage { run, usage });
     }
     Ok(events)
 }
