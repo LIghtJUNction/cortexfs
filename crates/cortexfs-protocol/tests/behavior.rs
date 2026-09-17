@@ -248,7 +248,7 @@ mod tests {
             for (source, _) in cases() {
                 let input = encode_response_events(source, &events)?;
                 for (target, _) in cases() {
-                    let converted = transcode_response(source, target, input)?;
+                    let converted = transcode_response(source, target, &input)?;
                     let decoded = decode_response_events(target, &converted.bytes)?;
                     assert!(
                         matches!(decoded.last(), Some(ModelEvent::Done { status: actual, .. })
