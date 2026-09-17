@@ -2,7 +2,7 @@ use crate::object::runner::{
     ProviderCredential, ResolvedTransport, parse_provider_content, parse_provider_usage,
     provider_request_body, provider_request_target,
 };
-use cortexfs_protocol::WireProtocol;
+use cortexfs_protocol::{EventStatus, ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -37,10 +37,8 @@ fn generate_content_target_keeps_the_provider_api_version() -> Result<(), String
         (format!("{BASE_URL}/"), "gemini-2.5-flash"),
         (BASE_URL.to_owned(), "models/gemini-2.5-flash"),
     ] {
-        assert_eq!(
-            target(&direct(&base_url), &key, model)?,
-            (expected.clone(), vec!["x-goog-api-key: secret".to_owned()])
-        );
+        let actual = target(&direct(&base_url), &key, model)?;
+        assert_eq!(actual, (expected.clone(), vec!["x-goog-api-key: secret".to_owned()]));
     }
     Ok(())
 }
@@ -48,10 +46,8 @@ fn generate_content_target_keeps_the_provider_api_version() -> Result<(), String
 #[test]
 fn generate_content_target_rejects_path_traversal_and_wrong_credentials() {
     let key = ProviderCredential::GoogleApiKey("secret".to_owned());
-    assert_eq!(
-        target(&direct(BASE_URL), &key, "../models/other"),
-        Err("invalid Gemini model name".to_owned())
-    );
+    let invalid = target(&direct(BASE_URL), &key, "../models/other");
+    assert_eq!(invalid, Err("invalid Gemini model name".to_owned()));
     for credential in [
         ProviderCredential::AnthropicApiKey("secret".to_owned()),
         ProviderCredential::Codex {
@@ -59,17 +55,11 @@ fn generate_content_target_rejects_path_traversal_and_wrong_credentials() {
             account_id: "account".to_owned(),
         },
     ] {
-        assert_eq!(
-            target(&direct(BASE_URL), &credential, "gemini-2.5-flash"),
-            Err("invalid Gemini credential".to_owned())
-        );
+        let invalid = target(&direct(BASE_URL), &credential, "gemini-2.5-flash");
+        assert_eq!(invalid, Err("invalid Gemini credential".to_owned()));
     }
-    assert_eq!(
-        provider_request_target(&direct(BASE_URL), None, WireProtocol::Gemini, "m", "run")
-            .err()
-            .as_deref(),
-        Some("missing Gemini credential")
-    );
+    let missing = provider_request_target(&direct(BASE_URL), None, WireProtocol::Gemini, "m", "run");
+    assert_eq!(missing.err().as_deref(), Some("missing Gemini credential"));
 }
 
 #[test]
@@ -99,10 +89,7 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
         value.pointer("/tools/0/functionDeclarations/0/name"),
         Some(&json!("tsh"))
     );
-    assert_eq!(
-        value.pointer("/contents/0/parts/0/text"),
-        Some(&json!("hello"))
-    );
+    assert_eq!(value.pointer("/contents/0/parts/0/text"), Some(&json!("hello")));
     Ok(())
 }
 
@@ -144,6 +131,8 @@ fn responses_surface_provider_errors_and_refused_candidates() {
             "provider response finished with MAX_TOKENS",
         ),
     ] {
+        let events = decode_response_events(WireProtocol::Gemini, response.as_bytes()).unwrap_or_default();
+        assert!(events.iter().any(|event| matches!(event, ModelEvent::Done { status: EventStatus::Error, .. })));
         assert_eq!(
             parse_provider_content(WireProtocol::Gemini, response.as_bytes()).err(),
             Some(expected.to_owned())
