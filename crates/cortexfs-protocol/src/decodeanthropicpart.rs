@@ -1,7 +1,6 @@
 use crate::anthropic::{Block, Content};
 use serde::Deserialize;
 use serde_json::value::RawValue;
-
 impl<'de: 'a, 'a> Deserialize<'de> for Content<'a> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = <&RawValue>::deserialize(deserializer)?;
@@ -15,7 +14,6 @@ impl<'de: 'a, 'a> Deserialize<'de> for Content<'a> {
         .map_err(serde::de::Error::custom)
     }
 }
-
 fn block<'a>(raw: &'a RawValue) -> serde_json::Result<Block<'a>> {
     #[derive(Deserialize)]
     struct ToolUse<'a> {
