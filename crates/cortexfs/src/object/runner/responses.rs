@@ -27,10 +27,10 @@ pub(crate) fn openai_chat_finish_reason(value: &Value) -> Result<Option<&str>, S
         .pointer("/choices/0/finish_reason")
         .and_then(Value::as_str)
         .filter(|reason| !reason.trim().is_empty());
-    if let Some(reason @ ("length" | "content_filter")) = reason {
-        return Err(format!("provider response finished with {reason}"));
+    match reason {
+        Some("stop" | "tool_calls" | "function_call") | None => Ok(reason),
+        Some(reason) => Err(format!("provider response finished with {reason}")),
     }
-    Ok(reason)
 }
 pub(crate) fn openai_chat_tool_call_content(value: &Value) -> Option<String> {
     let function = value.get("function")?;
