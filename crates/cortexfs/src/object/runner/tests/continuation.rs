@@ -39,11 +39,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
         (&gemini, "/contents/0/parts/1/functionCall/name", "tsh"),
         (&gemini, "/contents/1/parts/0/functionResponse/id", "call-1"),
         (&gemini, "/contents/1/parts/0/functionResponse/name", "tsh"),
-        (
-            &gemini,
-            "/contents/1/parts/0/functionResponse/response/content",
-            "agent.\nfs.\n",
-        ),
+        (&gemini, "/contents/1/parts/0/functionResponse/response/content", "agent.\nfs.\n"),
     ] {
         assert_eq!(value.pointer(pointer), Some(&json!(expected)));
     }
@@ -61,12 +57,16 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
-fn unusable_provider_turn_wins_over_tool_call() {
+fn unusable_provider_turns_fail_closed() {
     let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"max_tokens"}"#;
     assert_eq!(
         parse_anthropic_message_content(response),
         Err("provider response failed".to_owned())
     );
+    for reason in ["cancelled", "error", "future_reason"] {
+        let line = format!(r#"data: {{"choices":[{{"finish_reason":"{reason}"}}],"usage":{{"prompt_tokens":1,"completion_tokens":1}}}}"#);
+        assert!(crate::object::runner::streaming::openai_stream_event(&line).is_err());
+    }
 }
 
 fn encoded(
