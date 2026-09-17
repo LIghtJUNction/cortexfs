@@ -95,11 +95,11 @@ mod tests {
                 let at = |path| value.pointer(path);
                 assert_eq!(at("/messages/1/content/0/signature"), Some(&json!("sig")));
                 assert_eq!(at("/messages/1/content/2/type"), Some(&json!("tool_use")));
-                let result = |field| value.pointer(&format!("/messages/2/content/0/{field}"));
-                assert_eq!(result("type").and_then(Value::as_str), Some("tool_result"));
-                assert_eq!(result("tool_use_id").and_then(Value::as_str), Some("call-1"));
-                assert_eq!(result("content").and_then(Value::as_str), Some("lookup failed"));
-                assert_eq!(result("is_error").and_then(Value::as_bool), Some(true));
+                let r = |field| value.pointer(&format!("/messages/2/content/0/{field}"));
+                assert_eq!(r("type").and_then(Value::as_str), Some("tool_result"));
+                assert_eq!(r("tool_use_id").and_then(Value::as_str), Some("call-1"));
+                assert_eq!(r("content").and_then(Value::as_str), Some("lookup failed"));
+                assert_eq!(r("is_error").and_then(Value::as_bool), Some(true));
             }
         }
         Ok(())
