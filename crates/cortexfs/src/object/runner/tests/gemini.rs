@@ -95,13 +95,14 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
 
 #[test]
 fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error::Error>> {
+    let protocol = WireProtocol::Gemini;
     let text = candidate(&json!([{"text": "hello"}]), "STOP");
-    assert_eq!(parse_provider_content(WireProtocol::Gemini, text.as_bytes())?, "hello");
+    assert_eq!(parse_provider_content(protocol, text.as_bytes())?, "hello");
     let explicit = json!({"functionCall":{"id":"call-1","name":"tsh","args":{"args":[]}}});
     let legacy = json!({"functionCall":{"name":"tsh","args":{"args":[]}}});
     for (part, id) in [(explicit, "call-1"), (legacy, "tsh")] {
         let body = candidate(&json!([part]), "STOP");
-        let call = parse_provider_content(WireProtocol::Gemini, body.as_bytes())?;
+        let call = parse_provider_content(protocol, body.as_bytes())?;
         let value = serde_json::from_str::<Value>(&call)?;
         assert_eq!(value.get("id"), Some(&json!(id)));
         assert_eq!(value.get("name"), Some(&json!("tsh")));
