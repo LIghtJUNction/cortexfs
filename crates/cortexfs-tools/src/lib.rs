@@ -30,7 +30,6 @@ pub(crate) mod waitread;
 use cortexfs_tool_sdk::ToolError;
 use std::io;
 use std::path::PathBuf;
-use std::process::ExitCode;
 
 pub const MAX_FS_READ_BYTES: u64 = 1024 * 1024;
 pub const MAX_FS_WRITE_BYTES: usize = 64 * 1024;
@@ -71,13 +70,6 @@ pub use shellerror::ShellExecError;
 pub fn ctx_root_from_env() -> PathBuf {
     std::env::var_os("CTX_ROOT")
         .map_or_else(|| PathBuf::from(cortexfs_paths::CTX_ROOT), PathBuf::from)
-}
-
-pub(crate) fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
-    status
-        .code()
-        .and_then(|code| u8::try_from(code).ok())
-        .map_or_else(|| ExitCode::from(1), ExitCode::from)
 }
 
 pub(crate) fn tool_error_to_io(error: &ToolError) -> io::Error {
