@@ -96,7 +96,7 @@ mod tests {
                     value.pointer("/messages/1/content/0"),
                     Some(&json!({"type":"thinking","thinking":"secret","signature":"sig"}))
                 );
-                assert_eq!(value["messages"][1]["content"].as_array().map(Vec::len), Some(3));
+                assert!(value.pointer("/messages/1/content/3").is_none());
                 assert_eq!(value["messages"][1]["content"][2]["type"], "tool_use");
             }
         }
