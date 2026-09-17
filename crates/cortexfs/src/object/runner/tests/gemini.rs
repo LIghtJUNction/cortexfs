@@ -18,8 +18,14 @@ fn target(
     credential: &ProviderCredential,
     model: &str,
 ) -> Result<(String, Vec<String>), String> {
-    provider_request_target(transport, Some(credential), WireProtocol::Gemini, model, "run")
-        .map(|(target, headers)| (target.url, headers))
+    provider_request_target(
+        transport,
+        Some(credential),
+        WireProtocol::Gemini,
+        model,
+        "run",
+    )
+    .map(|(target, headers)| (target.url, headers))
 }
 
 #[test]
@@ -79,17 +85,11 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
         true,
     )?;
     let value = serde_json::from_str::<Value>(&body)?;
-    assert_eq!(value.get("model"), None);
-    assert_eq!(value.get("parallel_tool_calls"), None);
-    assert_eq!(value.get("stream"), None);
-    assert_eq!(
-        value.pointer("/tools/0/functionDeclarations/0/name"),
-        Some(&json!("tsh"))
-    );
-    assert_eq!(
-        value.pointer("/contents/0/parts/0/text"),
-        Some(&json!("hello"))
-    );
+    let absent = (value.get("model"), value.get("parallel_tool_calls"), value.get("stream"));
+    assert_eq!(absent, (None, None, None));
+    let name = value.pointer("/tools/0/functionDeclarations/0/name");
+    let text = value.pointer("/contents/0/parts/0/text");
+    assert_eq!((name, text), (Some(&json!("tsh")), Some(&json!("hello"))));
     Ok(())
 }
 
@@ -110,8 +110,7 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
     }
     let usage_json = json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}}).to_string();
     let usage = parse_provider_usage(usage_json.as_bytes())?.ok_or("gemini usage metadata")?;
-    let counts = (usage.input_tokens, usage.output_tokens, usage.cached_tokens);
-    assert_eq!(counts, (11, 7, Some(3)));
+    assert_eq!((usage.input_tokens, usage.output_tokens, usage.cached_tokens), (11, 7, Some(3)));
     Ok(())
 }
 
@@ -133,7 +132,8 @@ fn responses_surface_provider_errors_and_refused_candidates() {
         ),
     ] {
         let out = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
-        let error = matches!(out.get(1), Some(ModelEvent::Error { .. })) || expected.contains("finished");
+        let error =
+            matches!(out.get(1), Some(ModelEvent::Error { .. })) || expected.contains("finished");
         assert!(error && matches!(out.last(), Some(ModelEvent::Done { .. })));
         let actual = parse_provider_content(protocol, response.as_bytes()).err();
         assert_eq!(actual, Some(expected.to_owned()));
