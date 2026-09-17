@@ -139,16 +139,14 @@ fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
     let text = events
         .iter()
         .filter_map(|event| match *event {
-            ModelEvent::TextDelta { ref text, .. }
-            | ModelEvent::ReasoningDelta { ref text, .. } => Some(text.as_str()),
+            ModelEvent::TextDelta { ref text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect::<String>();
     if text.is_empty() {
-        Err("provider response missing content".to_owned())
-    } else {
-        Ok(text)
+        return Err("provider response missing content".to_owned());
     }
+    Ok(text)
 }
 
 fn tool_call_content(event: &ModelEvent) -> Option<String> {
