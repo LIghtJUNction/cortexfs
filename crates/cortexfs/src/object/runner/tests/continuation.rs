@@ -6,9 +6,10 @@ use cortexfs_protocol::{
     transcode_request,
 };
 use serde_json::{Value, json};
+use std::error::Error;
 
 #[test]
-fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::Error>> {
+fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn Error>> {
     let mut assistant = Message::assistant("");
     assistant.tool_calls.push(ToolCall {
         id: "call-1".to_owned(),
@@ -61,18 +62,17 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
-fn unusable_provider_turn_wins_over_tool_call() {
+fn unusable_provider_turns_fail_closed() {
     let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"max_tokens"}"#;
-    assert_eq!(
-        parse_anthropic_message_content(response),
-        Err("provider response failed".to_owned())
-    );
+    let error = parse_anthropic_message_content(response).err();
+    assert_eq!(error.as_deref(), Some("provider response failed"));
+    for reason in ["cancelled", "error", "future_reason"] {
+        let line = format!(r#"data: {{"choices":[{{"finish_reason":"{reason}"}}]}}"#);
+        assert!(crate::object::runner::streaming::openai_stream_event(&line).is_err());
+    }
 }
 
-fn encoded(
-    protocol: WireProtocol,
-    messages: [Message; 2],
-) -> Result<Value, Box<dyn std::error::Error>> {
+fn encoded(protocol: WireProtocol, messages: [Message; 2]) -> Result<Value, Box<dyn Error>> {
     let bytes = encode_model_request(protocol, &ModelRequest::new("model", messages.into()))?;
     Ok(serde_json::from_slice(&bytes)?)
 }
