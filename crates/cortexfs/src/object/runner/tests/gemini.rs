@@ -2,7 +2,7 @@ use crate::object::runner::{
     ProviderCredential, ResolvedTransport, parse_provider_content, parse_provider_usage,
     provider_request_body, provider_request_target,
 };
-use cortexfs_protocol::{WireProtocol, decode_response_events};
+use cortexfs_protocol::{EventStatus, ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -138,7 +138,8 @@ fn responses_surface_provider_errors_and_refused_candidates() {
             "provider response finished with MAX_TOKENS",
         ),
     ] {
-        assert!(decode_response_events(WireProtocol::Gemini, response.as_bytes()).is_ok());
+        let decoded = decode_response_events(WireProtocol::Gemini, response.as_bytes()).unwrap_or_default();
+        assert!(matches!(decoded.last(), Some(ModelEvent::Done { status: EventStatus::Error, .. })));
         assert_eq!(
             parse_provider_content(WireProtocol::Gemini, response.as_bytes()).err(),
             Some(expected.to_owned())
