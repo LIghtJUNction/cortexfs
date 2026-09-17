@@ -97,7 +97,8 @@ mod tests {
                     Some(&json!({"type":"thinking","thinking":"secret","signature":"sig"}))
                 );
                 assert!(value.pointer("/messages/1/content/3").is_none());
-                assert_eq!(value["messages"][1]["content"][2]["type"], "tool_use");
+                let kind = value.pointer("/messages/1/content/2/type");
+                assert_eq!(kind.and_then(Value::as_str), Some("tool_use"));
             }
         }
         Ok(())
