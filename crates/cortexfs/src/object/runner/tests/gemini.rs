@@ -85,8 +85,8 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
         true,
     )?;
     let value = serde_json::from_str::<Value>(&body)?;
-    let absent = (value.get("model"), value.get("parallel_tool_calls"), value.get("stream"));
-    assert_eq!(absent, (None, None, None));
+    let absent = ["model", "parallel_tool_calls", "stream"];
+    assert!(absent.iter().all(|key| value.get(*key).is_none()));
     let name = value.pointer("/tools/0/functionDeclarations/0/name");
     let text = value.pointer("/contents/0/parts/0/text");
     assert_eq!((name, text), (Some(&json!("tsh")), Some(&json!("hello"))));
@@ -95,14 +95,16 @@ fn request_body_drops_path_bound_and_openai_only_fields() -> Result<(), Box<dyn 
 
 #[test]
 fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error::Error>> {
-    let protocol = WireProtocol::Gemini;
     let text = candidate(&json!([{"text": "hello"}]), "STOP");
-    assert_eq!(parse_provider_content(protocol, text.as_bytes())?, "hello");
+    assert_eq!(
+        parse_provider_content(WireProtocol::Gemini, text.as_bytes())?,
+        "hello"
+    );
     let explicit = json!({"functionCall":{"id":"call-1","name":"tsh","args":{"args":[]}}});
     let legacy = json!({"functionCall":{"name":"tsh","args":{"args":[]}}});
     for (part, id) in [(explicit, "call-1"), (legacy, "tsh")] {
         let body = candidate(&json!([part]), "STOP");
-        let call = parse_provider_content(protocol, body.as_bytes())?;
+        let call = parse_provider_content(WireProtocol::Gemini, body.as_bytes())?;
         let value = serde_json::from_str::<Value>(&call)?;
         assert_eq!(value.get("id"), Some(&json!(id)));
         assert_eq!(value.get("name"), Some(&json!("tsh")));
@@ -110,7 +112,8 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
     }
     let usage_json = json!({"usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 7, "cachedContentTokenCount": 3}}).to_string();
     let usage = parse_provider_usage(usage_json.as_bytes())?.ok_or("gemini usage metadata")?;
-    assert_eq!((usage.input_tokens, usage.output_tokens, usage.cached_tokens), (11, 7, Some(3)));
+    let counts = (usage.input_tokens, usage.output_tokens, usage.cached_tokens);
+    assert_eq!(counts, (11, 7, Some(3)));
     Ok(())
 }
 
