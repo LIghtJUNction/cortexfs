@@ -7,7 +7,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     if let Some(system) = source.system.as_ref() {
         messages.push(Message {
             role: Role::new("system"),
-            content: content(system)?,
+            content: content(system),
             name: None,
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -68,22 +68,22 @@ fn message(source: &crate::anthropic::Message<'_>) -> Result<Message, Conversion
     }
     Ok(Message {
         role: Role::new(source.role.as_ref()),
-        content: content(&source.content)?,
+        content: content(&source.content),
         name: None,
         tool_call_id: None,
         tool_calls: calls,
     })
 }
 
-fn content(source: &NativeContent<'_>) -> Result<Content, ConversionError> {
+fn content(source: &NativeContent<'_>) -> Content {
     match *source {
-        NativeContent::Text(ref text) => Ok(Content::text(text.as_ref())),
-        NativeContent::Blocks(ref blocks) => Ok(Content::Parts(
+        NativeContent::Text(ref text) => Content::text(text.as_ref()),
+        NativeContent::Blocks(ref blocks) => Content::Parts(
             blocks
                 .iter()
-                .map(crate::decodeanthropicpart::part)
-                .collect::<Result<_, _>>()?,
-        )),
+                .filter_map(crate::decodeanthropicpart::part)
+                .collect(),
+        ),
     }
 }
 
