@@ -14,6 +14,8 @@ mod tests {
     const GEMINI: &[u8] =
         br#"{"model":"gemini-model","contents":[{"role":"user","parts":[{"text":"hi"}]}]}"#;
     const ANTHROPIC: &[u8] =
+        br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#;
+    const ANTHROPIC_REPLAY: &[u8] =
         br#"{"model":"claude-model","max_tokens":32,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"sig"},{"type":"text","text":"visible"}]}]}"#;
     const CHAT_RESPONSE: &[u8] = br#"{"id":"chat-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#;
     const RESPONSES_RESPONSE: &[u8] = br#"{"id":"responses-run","model":"responses-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":3,"output_tokens":2}}"#;
@@ -45,7 +47,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn events_serialize_with_stable_type_tags() {
         let event = ModelEvent::TextDelta {
@@ -59,7 +60,6 @@ mod tests {
         );
         assert_eq!(value.get("run").and_then(Value::as_str), Some("run-1"));
     }
-
     #[test]
     fn native_ir_borrows_unescaped_wire_strings() -> TestResult {
         let NativeRequest::OpenAiChat(request) =
@@ -83,6 +83,7 @@ mod tests {
     #[test]
     fn every_dialect_decodes_and_encodes_the_semantic_ir() -> TestResult {
         for (protocol, input) in cases() {
+            let input = if protocol == WireProtocol::Anthropic { ANTHROPIC_REPLAY } else { input };
             let request = decode_model_request(protocol, input)?;
             request.validate()?;
             let encoded = encode_model_request(protocol, &request)?;
