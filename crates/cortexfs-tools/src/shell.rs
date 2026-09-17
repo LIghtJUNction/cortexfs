@@ -1,5 +1,5 @@
-use crate::shellerror::ShellExecError;
 use crate::wait::{WaitError, wait_capped_child_output};
+use crate::{SHELL_EXEC_TIMEOUT_SECONDS, shellerror::ShellExecError};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use std::ffi::OsString;
 use std::io::{self, Write};
@@ -46,8 +46,7 @@ impl Tool for ShellExecTool {
 }
 
 pub fn run_shell_exec_command(command: &str) -> Result<Output, ShellExecError> {
-    let timeout = Duration::from_secs(crate::SHELL_EXEC_TIMEOUT_SECONDS);
-    run_shell_exec_command_with_timeout(command, timeout)
+    run_shell_exec_command_with_timeout(command, Duration::from_secs(SHELL_EXEC_TIMEOUT_SECONDS))
 }
 
 pub fn run_shell_exec_command_with_timeout(
