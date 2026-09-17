@@ -79,11 +79,14 @@ mod tests {
         ));
         Ok(())
     }
-
     #[test]
     fn every_dialect_decodes_and_encodes_the_semantic_ir() -> TestResult {
         for (protocol, input) in cases() {
-            let input = if protocol == WireProtocol::Anthropic { ANTHROPIC_REPLAY } else { input };
+            let input = if protocol == WireProtocol::Anthropic {
+                ANTHROPIC_REPLAY
+            } else {
+                input
+            };
             let request = decode_model_request(protocol, input)?;
             request.validate()?;
             let encoded = encode_model_request(protocol, &request)?;
@@ -95,7 +98,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn conversion_matrix_covers_four_request_dialects() -> TestResult {
         for (source, input) in cases() {
@@ -119,7 +121,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn identity_route_preserves_bytes_exactly() -> TestResult {
         let result = transcode_request(WireProtocol::OpenAiChat, WireProtocol::OpenAiChat, CHAT)?;
@@ -127,7 +128,6 @@ mod tests {
         assert_eq!(result.bytes, CHAT);
         Ok(())
     }
-
     #[test]
     fn responses_context_reference_is_semantic_metadata() -> TestResult {
         let input =
