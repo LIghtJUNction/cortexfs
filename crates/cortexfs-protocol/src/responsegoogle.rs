@@ -7,7 +7,6 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run =
         crate::responseutil::text(map.get("responseId")).unwrap_or_else(|| "response".to_owned());
-    let error = provider_error(&root);
     let model = crate::responseutil::text(map.get("modelVersion"))
         .or_else(|| crate::responseutil::text(map.get("model")))
         .unwrap_or_else(|| "unknown".to_owned());
@@ -15,9 +14,15 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model,
     }];
-    if let Some(error) = error {
-        events.push(ModelEvent::Error { run: run.clone(), error });
-        events.push(ModelEvent::Done { run, status: EventStatus::Error });
+    if let Some(error) = provider_error(&root) {
+        events.push(ModelEvent::Error {
+            run: run.clone(),
+            error,
+        });
+        events.push(ModelEvent::Done {
+            run,
+            status: EventStatus::Error,
+        });
         return Ok(events);
     }
     let candidate = map
@@ -70,9 +75,9 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             status,
         });
     }
-    if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(
-        map.get("usageMetadata"),
-    )) {
+    if let Some(usage) =
+        crate::responseutil::usage(crate::responseutil::object(map.get("usageMetadata")))
+    {
         events.push(ModelEvent::Usage {
             run: run.clone(),
             usage,
