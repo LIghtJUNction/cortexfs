@@ -36,12 +36,13 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
     }
     Ok(())
 }
-
 #[test]
-fn responses_runner_rejects_nonterminal_statuses() {
+fn responses_runner_filters_provider_content() {
     for status in ["queued", "in_progress", "future_status"] {
         let body = json!({"status":status,"output_text":"ignored"}).to_string();
         let actual = parse_provider_content(WireProtocol::OpenAiResponses, body.as_bytes()).err();
         assert_eq!(actual, Some(format!("provider response {status}")));
     }
+    let body = br#"{"id":"r","model":"m","content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"public"}],"stop_reason":"end_turn"}"#;
+    assert_eq!(parse_provider_content(WireProtocol::Anthropic, body), Ok("public".into()));
 }
