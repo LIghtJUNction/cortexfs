@@ -37,11 +37,8 @@ fn generate_content_target_keeps_the_provider_api_version() -> Result<(), String
         (format!("{BASE_URL}/"), "gemini-2.5-flash"),
         (BASE_URL.to_owned(), "models/gemini-2.5-flash"),
     ] {
-        let actual = target(&direct(&base_url), &key, model)?;
-        assert_eq!(
-            actual,
-            (expected.clone(), vec!["x-goog-api-key: secret".to_owned()])
-        );
+        let expected_pair = (expected.clone(), vec!["x-goog-api-key: secret".to_owned()]);
+        assert_eq!(target(&direct(&base_url), &key, model)?, expected_pair);
     }
     Ok(())
 }
@@ -138,8 +135,11 @@ fn responses_surface_provider_errors_and_refused_candidates() {
             "provider response finished with MAX_TOKENS",
         ),
     ] {
-        let decoded = decode_response_events(WireProtocol::Gemini, response.as_bytes()).unwrap_or_default();
-        assert!(matches!(decoded.last(), Some(ModelEvent::Done { status: EventStatus::Error, .. })));
+        let decoded = decode_response_events(WireProtocol::Gemini, response.as_bytes());
+        let decoded = decoded.unwrap_or_default();
+        let err = decoded.iter().any(|event| matches!(event, ModelEvent::Error { .. }));
+        let end = decoded.last();
+        assert!(err && matches!(end, Some(ModelEvent::Done { status: EventStatus::Error, .. })));
         assert_eq!(
             parse_provider_content(WireProtocol::Gemini, response.as_bytes()).err(),
             Some(expected.to_owned())
