@@ -40,18 +40,6 @@ pub enum Content<'a> {
     Blocks(Vec<Block<'a>>),
 }
 
-impl<'de: 'a, 'a> Deserialize<'de> for Content<'a> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = <&RawValue>::deserialize(deserializer)?;
-        if raw.get().trim_start().starts_with('"') {
-            serde_json::from_str(raw.get()).map(Self::Text)
-        } else {
-            serde_json::from_str(raw.get()).map(Self::Blocks)
-        }
-        .map_err(serde::de::Error::custom)
-    }
-}
-
 /// Anthropic text, image, thinking, and tool block.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -95,8 +83,7 @@ pub struct Tool<'a> {
     pub name: Cow<'a, str>,
     #[serde(default, borrow)]
     pub description: Option<Cow<'a, str>>,
-    #[serde(rename = "input_schema")]
-    #[serde(borrow)]
+    #[serde(rename = "input_schema", borrow)]
     pub input_schema: &'a RawValue,
 }
 
