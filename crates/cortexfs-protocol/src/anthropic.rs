@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 /// Borrowed Anthropic Messages request IR.
 #[derive(Clone, Debug, Serialize, Deserialize)]
