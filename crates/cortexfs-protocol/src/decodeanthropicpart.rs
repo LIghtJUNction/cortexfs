@@ -11,11 +11,7 @@ pub(super) fn part(source: &Block<'_>) -> Option<ContentPart> {
             value: serde_json::json!({"text": thinking, "signature": signature}),
         }),
         Block::ToolUse { .. } => None,
-        Block::ToolResult {
-            ref tool_use_id,
-            ref content,
-            is_error,
-        } => Some(ContentPart::Data {
+        Block::ToolResult { ref tool_use_id, ref content, is_error } => Some(ContentPart::Data {
             name: format!("anthropic.tool_result:{tool_use_id}"),
             value: serde_json::json!({"content": content, "is_error": is_error}),
         }),
