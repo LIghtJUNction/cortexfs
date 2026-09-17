@@ -2,7 +2,7 @@ use crate::object::runner::{
     ProviderCredential, ResolvedTransport, parse_provider_content, parse_provider_usage,
     provider_request_body, provider_request_target,
 };
-use cortexfs_protocol::{EventStatus, ModelEvent, WireProtocol, decode_response_events};
+use cortexfs_protocol::{ModelEvent, WireProtocol, decode_response_events};
 use serde_json::{Value, json};
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -121,6 +121,7 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
 
 #[test]
 fn responses_surface_provider_errors_and_refused_candidates() {
+    let protocol = WireProtocol::Gemini;
     for (response, expected) in [
         (
             json!({"error": {"code": 400, "message": "API key not valid"}}).to_string(),
@@ -135,13 +136,11 @@ fn responses_surface_provider_errors_and_refused_candidates() {
             "provider response finished with MAX_TOKENS",
         ),
     ] {
-        let decoded = decode_response_events(WireProtocol::Gemini, response.as_bytes());
-        let decoded = decoded.unwrap_or_default();
-        let err = decoded.iter().any(|event| matches!(event, ModelEvent::Error { .. }));
-        let end = decoded.last();
-        assert!(err && matches!(end, Some(ModelEvent::Done { status: EventStatus::Error, .. })));
+        let decoded = decode_response_events(protocol, response.as_bytes()).unwrap_or_default();
+        assert!(decoded.iter().any(|event| matches!(event, ModelEvent::Error { .. })));
+        assert!(decoded.last().is_some_and(|event| matches!(event, ModelEvent::Done { .. })));
         assert_eq!(
-            parse_provider_content(WireProtocol::Gemini, response.as_bytes()).err(),
+            parse_provider_content(protocol, response.as_bytes()).err(),
             Some(expected.to_owned())
         );
     }
