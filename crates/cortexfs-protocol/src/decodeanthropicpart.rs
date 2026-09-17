@@ -19,15 +19,14 @@ impl<'de: 'a, 'a> Deserialize<'de> for Content<'a> {
 fn block<'a>(raw: &'a RawValue) -> serde_json::Result<Block<'a>> {
     #[derive(Deserialize)]
     struct ToolUse<'a> {
-        #[serde(rename = "type")]
-        kind: String,
+        r#type: String,
         id: String,
         name: String,
         #[serde(borrow)]
         input: &'a RawValue,
     }
     match serde_json::from_str::<ToolUse<'a>>(raw.get()) {
-        Ok(tool) if tool.kind == "tool_use" => Ok(Block::ToolUse {
+        Ok(tool) if tool.r#type == "tool_use" => Ok(Block::ToolUse {
             id: tool.id.into(),
             name: tool.name.into(),
             input: tool.input,
