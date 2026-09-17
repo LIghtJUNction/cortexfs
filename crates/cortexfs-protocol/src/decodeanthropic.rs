@@ -1,4 +1,5 @@
 use crate::anthropic::{Block, Content as NativeContent, Request};
+use crate::decodechoice::anthropic as choice;
 use crate::semantic::raw_value;
 use crate::{
     Content, ContentPart, ContextState, ConversionError, Message, ModelRequest, Role, ToolCall,
@@ -17,12 +18,14 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
             tool_calls: Vec::new(),
         });
     }
-    messages.extend(source.messages.iter().map(message).collect::<Result<Vec<_>, _>>()?);
+    for source_message in &source.messages {
+        messages.push(message(source_message)?);
+    }
     let mut result = ModelRequest::new(source.model.as_ref(), messages);
     result.max_output_tokens = Some(source.max_tokens);
     result.stream = source.stream;
     result.tools = source.tools.iter().map(tool).collect::<Result<_, _>>()?;
-    result.tool_choice = source.tool_choice.as_ref().map(crate::decodechoice::anthropic);
+    result.tool_choice = source.tool_choice.as_ref().map(choice);
     if let Some(thinking) = source.thinking.as_ref() {
         result.options.insert(
             "anthropic.thinking".to_owned(),
@@ -49,11 +52,11 @@ fn message(source: &crate::anthropic::Message<'_>) -> Result<Message, Conversion
 }
 
 fn content(source: &NativeContent<'_>) -> Result<(Content, Vec<ToolCall>), ConversionError> {
-    let NativeContent::Blocks(blocks) = source else {
-        let NativeContent::Text(text) = source else {
-            unreachable!()
-        };
+    if let NativeContent::Text(text) = source {
         return Ok((Content::text(text.as_ref()), Vec::new()));
+    }
+    let NativeContent::Blocks(blocks) = source else {
+        unreachable!()
     };
     let mut parts = Vec::new();
     let mut calls = Vec::new();
