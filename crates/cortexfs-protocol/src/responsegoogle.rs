@@ -1,4 +1,4 @@
-use crate::responsegooglepart::{invalid, missing, usage};
+use crate::responsegooglepart::{invalid, missing, provider_error, usage};
 use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
 use serde_json::{Map, Value, json};
 
@@ -7,13 +7,26 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run =
         crate::responseutil::text(map.get("responseId")).unwrap_or_else(|| "response".to_owned());
+    let error = provider_error(map);
     let model = crate::responseutil::text(map.get("modelVersion"))
         .or_else(|| crate::responseutil::text(map.get("model")))
+        .or_else(|| error.as_ref().map(|_| "unknown".to_owned()))
         .ok_or_else(|| missing("model"))?;
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
         model,
     }];
+    if let Some(error) = error {
+        events.push(ModelEvent::Error {
+            run: run.clone(),
+            error,
+        });
+        events.push(ModelEvent::Done {
+            run,
+            status: EventStatus::Error,
+        });
+        return Ok(events);
+    }
     let candidate = map
         .get("candidates")
         .and_then(Value::as_array)
