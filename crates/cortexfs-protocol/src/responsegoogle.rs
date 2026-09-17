@@ -7,14 +7,19 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run =
         crate::responseutil::text(map.get("responseId")).unwrap_or_else(|| "response".to_owned());
+    let error = provider_error(&root);
     let model = crate::responseutil::text(map.get("modelVersion"))
         .or_else(|| crate::responseutil::text(map.get("model")))
-        .unwrap_or_else(|| "unknown".to_owned());
+        .or_else(|| error.as_ref().map(|_| "unknown".to_owned()))
+        .ok_or_else(|| ConversionError::MissingField {
+            protocol: WireProtocol::Gemini,
+            field: "model".to_owned(),
+        })?;
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
         model,
     }];
-    if let Some(error) = provider_error(&root) {
+    if let Some(error) = error {
         events.push(ModelEvent::Error {
             run: run.clone(),
             error,
