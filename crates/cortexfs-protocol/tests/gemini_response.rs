@@ -1,4 +1,5 @@
 use cortexfs_protocol::{WireProtocol, decode_response_events};
+
 #[test]
 fn gemini_rejects_malformed_responses() {
     for input in [
