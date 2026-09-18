@@ -42,16 +42,19 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
 }
 
 fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
-    match source {
-        Item::Message { role, content } => {
+    match *source {
+        Item::Message {
+            ref role,
+            ref content,
+        } => {
             let mut message = Message::new(role.as_ref(), "");
             message.content = crate::decoderesponsepart::parts(content)?;
             Ok(message)
         }
         Item::FunctionCall {
-            call_id,
-            name,
-            arguments,
+            ref call_id,
+            ref name,
+            ref arguments,
         } => {
             let mut message = Message::assistant("");
             message.tool_calls.push(ToolCall {
@@ -60,12 +63,15 @@ fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
                 arguments: crate::semantic::json_value(
                     crate::WireProtocol::OpenAiResponses,
                     "input[].arguments",
-                    arguments,
+                    arguments.as_ref(),
                 )?,
             });
             Ok(message)
         }
-        Item::FunctionCallOutput { call_id, output } => {
+        Item::FunctionCallOutput {
+            ref call_id,
+            ref output,
+        } => {
             let mut message = Message::new("tool", output.as_ref());
             message.tool_call_id = Some(identifier(call_id, "input[].call_id")?);
             Ok(message)
