@@ -3,19 +3,25 @@ use serde_json::Value;
 
 pub(super) fn text_events(events: &mut Vec<ModelEvent>, run: &str, value: Option<&Value>) {
     if let Some(text) = crate::responseutil::text(value) {
-        events.push(ModelEvent::TextDelta { run: run.to_owned(), text });
+        events.push(ModelEvent::TextDelta {
+            run: run.to_owned(),
+            text,
+        });
     }
     if let Some(parts) = value.and_then(Value::as_array) {
         for part in parts.iter().filter_map(Value::as_object) {
             if let Some(text) = crate::responseutil::text(part.get("text")) {
-                events.push(ModelEvent::TextDelta { run: run.to_owned(), text });
+                events.push(ModelEvent::TextDelta {
+                    run: run.to_owned(),
+                    text,
+                });
             }
         }
     }
 }
 
 pub(super) fn tool_call(run: &str, value: &Value) -> Result<ModelEvent, ConversionError> {
-    let map = value.as_object().ok_or_else(|| invalid("choices[].message.tool_calls[]"))?;
+    let map = value.as_object().ok_or_else(|| invalid("tool_calls[]"))?;
     let function = crate::responseutil::object(map.get("function"))
         .ok_or_else(|| invalid("tool_calls[].function"))?;
     let required = |value, field| {
