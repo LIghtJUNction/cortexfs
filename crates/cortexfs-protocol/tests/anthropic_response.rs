@@ -1,4 +1,3 @@
-#[cfg(test)]
 mod tests {
     use cortexfs_protocol::{WireProtocol, decode_response_events};
     #[test]
