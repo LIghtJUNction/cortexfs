@@ -18,10 +18,10 @@ pub(crate) fn openai_responses_stream_event(
         Some("response.output_text.delta" | "response.refusal.delta") => {
             OpenAiStreamEvent::Delta(value_text(value, "delta")?)
         }
-        Some("response.output_text.done") => {
-            OpenAiStreamEvent::FinalText(value_text(value, "text")?)
+        Some("response.output_text.done") => OpenAiStreamEvent::FinalText(value_text(value, "text")?),
+        Some("response.refusal.done") => {
+            OpenAiStreamEvent::FinalText(value_text(value, "refusal")?)
         }
-        Some("response.refusal.done") => OpenAiStreamEvent::FinalText(value_text(value, "refusal")?),
         Some("response.content_part.done") => OpenAiStreamEvent::FinalText(
             value
                 .pointer("/part/text")
@@ -68,10 +68,10 @@ pub(crate) fn openai_responses_stream_event(
 }
 
 fn response_output_item_done(item: Option<&Value>) -> OpenAiStreamFrame {
-    let event = item.and_then(openai_response_tool_call_content).map_or_else(
-        || OpenAiStreamEvent::FinalText(response_output_item_text(item)),
-        OpenAiStreamEvent::ToolCall,
-    );
+    let event = match item.and_then(openai_response_tool_call_content) {
+        Some(call) => OpenAiStreamEvent::ToolCall(call),
+        None => OpenAiStreamEvent::FinalText(response_output_item_text(item)),
+    };
     response_frame(event, false)
 }
 
