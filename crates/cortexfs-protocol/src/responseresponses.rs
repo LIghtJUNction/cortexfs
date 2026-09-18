@@ -54,13 +54,9 @@ fn output_item(
             }
         }
         Some("function_call") => {
-            let call_id = map["call_id"]
-                .as_str()
-                .ok_or_else(|| invalid("output[].call_id"))?;
+            let call_id = map["call_id"].as_str().ok_or_else(|| invalid("output[].call_id"))?;
             let name = map["name"].as_str().ok_or_else(|| invalid("output[].name"))?;
-            let arguments = map["arguments"]
-                .as_str()
-                .ok_or_else(|| invalid("output[].arguments"))?;
+            let arguments = map["arguments"].as_str().ok_or_else(|| invalid("output[].arguments"))?;
             let arguments = crate::semantic::json_value(
                 WireProtocol::OpenAiResponses,
                 "output[].arguments",
