@@ -57,12 +57,21 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                 .and_then(Value::as_object)
             {
                 let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
-                let name = crate::responseutil::text(call.get("name")).unwrap_or_default();
+                if !args.is_object() {
+                    return Err(invalid("functionCall.args"));
+                }
+                let name = crate::responseutil::text(call.get("name"))
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| invalid("functionCall.name"))?;
+                let id = match call.get("id") {
+                    None => name.clone(),
+                    Some(Value::String(value)) => value.clone(),
+                    Some(_) => return Err(invalid("functionCall.id")),
+                };
                 events.push(ModelEvent::ToolCall {
                     run: run.clone(),
                     call: crate::ToolCall {
-                        id: crate::responseutil::text(call.get("id"))
-                            .unwrap_or_else(|| name.clone()),
+                        id,
                         name,
                         arguments: args,
                     },
