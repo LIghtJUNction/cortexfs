@@ -15,9 +15,7 @@ pub(super) fn text_events(events: &mut Vec<ModelEvent>, run: &str, value: Option
 }
 
 pub(super) fn tool_call(run: &str, value: &Value) -> Result<ModelEvent, ConversionError> {
-    let map = value
-        .as_object()
-        .ok_or_else(|| invalid("choices[].message.tool_calls[]"))?;
+    let map = value.as_object().ok_or_else(|| invalid("choices[].message.tool_calls[]"))?;
     let function = crate::responseutil::object(map.get("function"))
         .ok_or_else(|| invalid("tool_calls[].function"))?;
     let required = |value, field| {
