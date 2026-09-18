@@ -1,6 +1,5 @@
 use crate::openairesponses::{Input, Item, Request};
 use crate::{ContextState, ConversionError, Message, ModelRequest, ToolCall};
-
 pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     let source: Request<'_> = crate::semantic::parse(crate::WireProtocol::OpenAiResponses, input)?;
     let mut messages = Vec::new();
@@ -26,12 +25,11 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     for tool in &source.tools {
         result.tools.push(crate::decoderesponsepart::tool(tool)?);
     }
-    if let Some(reference) = source.previous_response_id.as_ref() {
+    if let Some(id) = source.previous_response_id.as_ref() {
         let kind = "openai.responses.previous_response_id";
-        result.context = ContextState::provider_owned(kind, reference.as_ref());
-    } else if let Some(reference) = source.conversation.as_ref() {
-        result.context =
-            ContextState::provider_owned("openai.responses.conversation", reference.as_ref());
+        result.context = ContextState::provider_owned(kind, id.as_ref());
+    } else if let Some(id) = source.conversation.as_ref() {
+        result.context = ContextState::provider_owned("openai.responses.conversation", id.as_ref());
     }
     for (name, raw) in &source.extra {
         let value = crate::semantic::raw_value(crate::WireProtocol::OpenAiResponses, name, raw)?;
@@ -76,7 +74,6 @@ fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
         }
     }
 }
-
 fn identifier(value: &str, field: &str) -> Result<String, ConversionError> {
     (!value.trim().is_empty())
         .then(|| value.to_owned())
