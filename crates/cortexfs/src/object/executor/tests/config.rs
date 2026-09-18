@@ -247,6 +247,7 @@ fn provider_secret_from_inherited_fd_reads_regular_secret_file()
     };
 
     let secret = provider_secret_from_inherited_fd_with_env("fixture", "default", env)?;
+
     assert_eq!(secret, Some("fd-secret".to_owned()));
     let _ignored = fs::remove_dir_all(root);
     Ok(())
