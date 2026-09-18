@@ -29,8 +29,14 @@ impl OpenAiToolCallStream {
             }
             self.index = Some(index);
         }
-        self.id = delta.id.filter(|id| !id.is_empty()).or_else(|| self.id.take());
-        self.name = delta.name.filter(|name| !name.is_empty()).or_else(|| self.name.take());
+        self.id = delta
+            .id
+            .filter(|id| !id.is_empty())
+            .or_else(|| self.id.take());
+        self.name = delta
+            .name
+            .filter(|name| !name.is_empty())
+            .or_else(|| self.name.take());
         self.arguments.push_str(&delta.arguments);
     }
 
@@ -39,10 +45,7 @@ impl OpenAiToolCallStream {
             return Ok(None);
         }
         reject_oversized_stream_tool_call_buffer(&self.arguments)?;
-        let name = self
-            .name
-            .as_deref()
-            .ok_or_else(|| invalid("stream tool call missing function name"))?;
+        let name = self.name.as_deref().ok_or_else(|| invalid("stream tool call missing name"))?;
         let id = self.id.as_deref().ok_or_else(|| invalid("stream tool call missing id"))?;
         let value = json!({"id": id, "function": {"name": name, "arguments": self.arguments}});
         let tool_call = openai_chat_tool_call_content(&value)
