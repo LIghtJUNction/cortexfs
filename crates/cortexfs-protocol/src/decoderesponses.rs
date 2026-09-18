@@ -22,8 +22,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
         });
     }
     let mut result = ModelRequest::new(source.model.as_ref(), messages);
-    result.stream = source.stream;
-    result.max_output_tokens = source.max_output_tokens;
+    (result.stream, result.max_output_tokens) = (source.stream, source.max_output_tokens);
     for tool in &source.tools {
         result.tools.push(crate::decoderesponsepart::tool(tool)?);
     }
@@ -40,15 +39,21 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     }
     Ok(result)
 }
-
 fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
-    match source {
-        &Item::Message { ref role, ref content } => {
+    match *source {
+        Item::Message {
+            ref role,
+            ref content,
+        } => {
             let mut message = Message::new(role.as_ref(), "");
             message.content = crate::decoderesponsepart::parts(content)?;
             Ok(message)
         }
-        &Item::FunctionCall { ref call_id, ref name, ref arguments } => {
+        Item::FunctionCall {
+            ref call_id,
+            ref name,
+            ref arguments,
+        } => {
             let mut message = Message::assistant("");
             message.tool_calls.push(ToolCall {
                 id: identifier(call_id, "input[].call_id")?,
@@ -61,7 +66,10 @@ fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
             });
             Ok(message)
         }
-        &Item::FunctionCallOutput { ref call_id, ref output } => {
+        Item::FunctionCallOutput {
+            ref call_id,
+            ref output,
+        } => {
             let mut message = Message::new("tool", output.as_ref());
             message.tool_call_id = Some(identifier(call_id, "input[].call_id")?);
             Ok(message)
