@@ -16,12 +16,10 @@ pub(crate) fn openai_responses_stream_event(
     }
     let event = match value.get("type").and_then(Value::as_str) {
         Some("response.output_text.delta" | "response.refusal.delta") => {
-            OpenAiStreamEvent::Delta(value_text(value, "delta"))
+            OpenAiStreamEvent::Delta(text(value, "delta")?)
         }
-        Some("response.output_text.done") => {
-            OpenAiStreamEvent::FinalText(value_text(value, "text"))
-        }
-        Some("response.refusal.done") => OpenAiStreamEvent::FinalText(value_text(value, "refusal")),
+        Some("response.output_text.done") => OpenAiStreamEvent::FinalText(text(value, "text")?),
+        Some("response.refusal.done") => OpenAiStreamEvent::FinalText(text(value, "refusal")?),
         Some("response.content_part.done") => OpenAiStreamEvent::FinalText(
             value
                 .pointer("/part/text")
@@ -85,12 +83,12 @@ fn response_frame(event: OpenAiStreamEvent, terminal: bool) -> OpenAiStreamFrame
     }
 }
 
-fn value_text(value: &Value, key: &str) -> String {
+fn text(value: &Value, key: &str) -> Result<String, String> {
     value
         .get(key)
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
+        .map(str::to_owned)
+        .ok_or_else(|| "missing text".into())
 }
 
 pub(crate) fn response_output_item_text(item: Option<&Value>) -> String {
