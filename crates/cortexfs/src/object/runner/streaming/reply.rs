@@ -86,8 +86,7 @@ fn response_frame(event: OpenAiStreamEvent, terminal: bool) -> OpenAiStreamFrame
 }
 
 fn value_text(value: &Value, key: &str) -> Result<String, String> {
-    let text = value.get(key).and_then(Value::as_str).ok_or("provider stream missing text")?;
-    Ok(text.to_owned())
+    value.get(key).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| "missing text".into())
 }
 
 pub(crate) fn response_output_item_text(item: Option<&Value>) -> String {
