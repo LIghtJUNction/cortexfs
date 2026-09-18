@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use cortexfs_protocol::{WireProtocol, decode_response_events};
-
     #[test]
     fn malformed_anthropic_tool_use_is_rejected() {
         for input in [
