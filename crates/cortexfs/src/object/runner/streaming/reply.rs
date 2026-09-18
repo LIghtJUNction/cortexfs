@@ -18,7 +18,9 @@ pub(crate) fn openai_responses_stream_event(
         Some("response.output_text.delta" | "response.refusal.delta") => {
             OpenAiStreamEvent::Delta(value_text(value, "delta")?)
         }
-        Some("response.output_text.done") => OpenAiStreamEvent::FinalText(value_text(value, "text")?),
+        Some("response.output_text.done") => {
+            OpenAiStreamEvent::FinalText(value_text(value, "text")?)
+        }
         Some("response.refusal.done") => {
             OpenAiStreamEvent::FinalText(value_text(value, "refusal")?)
         }
@@ -84,11 +86,8 @@ fn response_frame(event: OpenAiStreamEvent, terminal: bool) -> OpenAiStreamFrame
 }
 
 fn value_text(value: &Value, key: &str) -> Result<String, String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| format!("provider stream missing {key}"))
+    let text = value.get(key).and_then(Value::as_str).ok_or("provider stream missing text")?;
+    Ok(text.to_owned())
 }
 
 pub(crate) fn response_output_item_text(item: Option<&Value>) -> String {
