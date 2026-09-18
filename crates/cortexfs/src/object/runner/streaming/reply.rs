@@ -66,10 +66,12 @@ pub(crate) fn openai_responses_stream_event(
 }
 
 fn response_output_item_done(item: Option<&Value>) -> OpenAiStreamFrame {
-    let event = match item.and_then(openai_response_tool_call_content) {
-        Some(call) => OpenAiStreamEvent::ToolCall(call),
-        None => OpenAiStreamEvent::FinalText(response_output_item_text(item)),
-    };
+    let event = item
+        .and_then(openai_response_tool_call_content)
+        .map_or_else(
+            || OpenAiStreamEvent::FinalText(response_output_item_text(item)),
+            OpenAiStreamEvent::ToolCall,
+        );
     response_frame(event, false)
 }
 
