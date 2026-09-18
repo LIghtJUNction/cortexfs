@@ -37,14 +37,10 @@ fn output_item(
         Some("message") | None => {
             if let Some(parts) = map.get("content").and_then(Value::as_array) {
                 for part in parts {
-                    if let Some(text) = crate::responseutil::text(
-                        part.as_object().and_then(|item| item.get("text")),
-                    )
-                    .or_else(|| {
-                        crate::responseutil::text(
-                            part.as_object().and_then(|item| item.get("refusal")),
-                        )
-                    }) {
+                    let part = part.as_object();
+                    let text = crate::responseutil::text(part.and_then(|x| x.get("text")))
+                        .or_else(|| crate::responseutil::text(part.and_then(|x| x.get("refusal"))));
+                    if let Some(text) = text {
                         events.push(ModelEvent::TextDelta {
                             run: run.to_owned(),
                             text,
@@ -54,7 +50,11 @@ fn output_item(
             }
         }
         Some("function_call") => {
-            let required = |key| map.get(key).and_then(Value::as_str).ok_or_else(|| invalid(key));
+            let required = |key| {
+                map.get(key)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| invalid(key))
+            };
             let call_id = required("call_id")?;
             let name = required("name")?;
             let arguments = required("arguments")?;
