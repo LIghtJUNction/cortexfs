@@ -77,7 +77,6 @@ pub(crate) fn openai_stream_tool_call_delta(value: &Value) -> Result<OpenAiToolC
     };
     let index = value
         .get("index")
-        .filter(|value| !value.is_null())
         .map(|value| {
             value
                 .as_u64()
