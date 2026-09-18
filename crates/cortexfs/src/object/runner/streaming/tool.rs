@@ -29,14 +29,12 @@ impl OpenAiToolCallStream {
             }
             self.index = Some(index);
         }
-        self.id = delta
-            .id
-            .filter(|id| !id.is_empty())
-            .or_else(|| self.id.take());
-        self.name = delta
-            .name
-            .filter(|name| !name.is_empty())
-            .or_else(|| self.name.take());
+        if let Some(id) = delta.id.filter(|id| !id.is_empty()) {
+            self.id = Some(id);
+        }
+        if let Some(name) = delta.name.filter(|name| !name.is_empty()) {
+            self.name = Some(name);
+        }
         self.arguments.push_str(&delta.arguments);
     }
 
@@ -45,8 +43,12 @@ impl OpenAiToolCallStream {
             return Ok(None);
         }
         reject_oversized_stream_tool_call_buffer(&self.arguments)?;
-        let name = self.name.as_deref().ok_or_else(|| invalid("stream tool call missing name"))?;
-        let id = self.id.as_deref().ok_or_else(|| invalid("stream tool call missing id"))?;
+        let Some(name) = self.name.as_deref() else {
+            return Err(invalid("stream tool call missing function name"));
+        };
+        let Some(id) = self.id.as_deref() else {
+            return Err(invalid("stream tool call missing id"));
+        };
         let value = json!({"id": id, "function": {"name": name, "arguments": self.arguments}});
         let tool_call = openai_chat_tool_call_content(&value)
             .ok_or_else(|| invalid("invalid stream tool call"))?;
@@ -78,15 +80,14 @@ pub(crate) fn openai_stream_tool_call_delta(value: &Value) -> Result<OpenAiToolC
         Some(Value::String(value)) => Ok(Some(value.to_owned())),
         Some(_) => Err(format!("invalid stream tool call {path}")),
     };
-    let index = value
-        .get("index")
-        .map(|value| {
-            value
-                .as_u64()
-                .and_then(|value| usize::try_from(value).ok())
-                .ok_or_else(|| "invalid stream tool call index".to_owned())
-        })
-        .transpose()?;
+    let index = match value.get("index") {
+        None => None,
+        Some(value) => value
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .map(Some)
+            .ok_or_else(|| "invalid stream tool call index".to_owned())?,
+    };
     Ok(OpenAiToolCallDelta {
         index,
         id: string("/id")?,
@@ -105,8 +106,7 @@ mod tests {
 
     #[test]
     fn tool_call_delta_validates_field_types() {
-        for value in [json!({"id": 1}), json!({"index": "0"})] {
-            assert!(openai_stream_tool_call_delta(&value).is_err());
-        }
+        assert!(openai_stream_tool_call_delta(&json!({"id": 1})).is_err());
+        assert!(openai_stream_tool_call_delta(&json!({"index": "0"})).is_err());
     }
 }
