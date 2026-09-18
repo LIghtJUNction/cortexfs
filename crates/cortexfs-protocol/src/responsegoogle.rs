@@ -53,10 +53,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                     .ok_or_else(|| invalid("functionCall.name"))?;
                 let id = match call.get("id") {
                     None => name.clone(),
-                    Some(value) => value
-                        .as_str()
-                        .map(str::to_owned)
-                        .ok_or_else(|| invalid("functionCall.id"))?,
+                    Some(value) => text(Some(value)).ok_or_else(|| invalid("functionCall.id"))?,
                 };
                 events.push(ModelEvent::ToolCall {
                     run: run.clone(),
