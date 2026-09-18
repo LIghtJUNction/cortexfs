@@ -1,21 +1,14 @@
 use crate::{ConversionError, ModelEvent, WireProtocol};
 use serde_json::Value;
 
-fn text_event(run: &str, text: String) -> ModelEvent {
-    ModelEvent::TextDelta {
-        run: run.to_owned(),
-        text,
-    }
-}
-
 pub(super) fn text_events(events: &mut Vec<ModelEvent>, run: &str, value: Option<&Value>) {
     if let Some(text) = crate::responseutil::text(value) {
-        events.push(text_event(run, text));
+        events.push(ModelEvent::TextDelta { run: run.to_owned(), text });
     }
     if let Some(parts) = value.and_then(Value::as_array) {
         for part in parts.iter().filter_map(Value::as_object) {
             if let Some(text) = crate::responseutil::text(part.get("text")) {
-                events.push(text_event(run, text));
+                events.push(ModelEvent::TextDelta { run: run.to_owned(), text });
             }
         }
     }
