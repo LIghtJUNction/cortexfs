@@ -37,10 +37,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             if let Some(text) =
                 crate::responseutil::text(part.as_object().and_then(|item| item.get("text")))
             {
-                events.push(ModelEvent::TextDelta {
-                    run: run.clone(),
-                    text,
-                });
+                events.push(ModelEvent::TextDelta { run: run.clone(), text });
             }
             if let Some(call) = part
                 .as_object()
@@ -48,8 +45,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                 .and_then(Value::as_object)
             {
                 let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
-                args.as_object()
-                    .ok_or_else(|| invalid("functionCall.args"))?;
+                args.as_object().ok_or_else(|| invalid("functionCall.args"))?;
                 let name = crate::responseutil::text(call.get("name"))
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| invalid("functionCall.name"))?;
