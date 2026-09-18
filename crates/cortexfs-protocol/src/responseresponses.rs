@@ -67,7 +67,11 @@ fn output_item(
             )?;
             events.push(ModelEvent::ToolCall {
                 run: run.to_owned(),
-                call: crate::ToolCall { id: call_id, name, arguments },
+                call: crate::ToolCall {
+                    id: call_id,
+                    name,
+                    arguments,
+                },
             });
         }
         _ => {}
