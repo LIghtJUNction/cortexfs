@@ -15,19 +15,10 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             protocol: WireProtocol::Gemini,
             field: "model".to_owned(),
         })?;
-    let mut events = vec![ModelEvent::Start {
-        run: run.clone(),
-        model,
-    }];
+    let mut events = vec![ModelEvent::Start { run: run.clone(), model }];
     if let Some(error) = error {
-        events.push(ModelEvent::Error {
-            run: run.clone(),
-            error,
-        });
-        events.push(ModelEvent::Done {
-            run,
-            status: EventStatus::Error,
-        });
+        events.push(ModelEvent::Error { run: run.clone(), error });
+        events.push(ModelEvent::Done { run, status: EventStatus::Error });
         return Ok(events);
     }
     let candidate = map
@@ -57,9 +48,8 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                 .and_then(Value::as_object)
             {
                 let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
-                if !args.is_object() {
-                    return Err(invalid("functionCall.args"));
-                }
+                args.as_object()
+                    .ok_or_else(|| invalid("functionCall.args"))?;
                 let name = crate::responseutil::text(call.get("name"))
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| invalid("functionCall.name"))?;
@@ -84,10 +74,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some("CANCELLED") => EventStatus::Cancelled,
         Some(_) => EventStatus::Error,
     };
-    events.push(ModelEvent::Done {
-        run: run.clone(),
-        status,
-    });
+    events.push(ModelEvent::Done { run: run.clone(), status });
     if let Some(usage) =
         crate::responseutil::usage(crate::responseutil::object(map.get("usageMetadata")))
     {
