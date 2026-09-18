@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use cortexfs_protocol::{WireProtocol, decode_response_events};
+    use cortexfs_protocol::{WireProtocol, decode_model_request, decode_response_events};
     #[test]
     fn openai_rejects_incomplete_responses() {
         for input in [
@@ -14,5 +14,14 @@ mod tests {
         }
         let call = br#"{"output":[{"type":"function_call","call_id":"c","name":"f"}]}"#;
         assert!(decode_response_events(WireProtocol::OpenAiResponses, call).is_err());
+        let valid = br#"{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}]}"#;
+        assert!(decode_model_request(WireProtocol::OpenAiResponses, valid).is_ok());
+        for input in [
+            br#"{"model":"m","input":[{"type":"function_call","call_id":"","name":"f","arguments":"{}"}]}"#.as_slice(),
+            br#"{"model":"m","input":[{"type":"function_call","call_id":"c","name":" ","arguments":"{}"}]}"#.as_slice(),
+            br#"{"model":"m","input":[{"type":"function_call_output","call_id":"","output":"x"}]}"#.as_slice(),
+        ] {
+            assert!(decode_model_request(WireProtocol::OpenAiResponses, input).is_err());
+        }
     }
 }
