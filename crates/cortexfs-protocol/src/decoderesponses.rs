@@ -42,20 +42,13 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
 }
 
 fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
-    match *source {
-        Item::Message {
-            ref role,
-            ref content,
-        } => {
+    match source {
+        &Item::Message { ref role, ref content } => {
             let mut message = Message::new(role.as_ref(), "");
             message.content = crate::decoderesponsepart::parts(content)?;
             Ok(message)
         }
-        Item::FunctionCall {
-            ref call_id,
-            ref name,
-            ref arguments,
-        } => {
+        &Item::FunctionCall { ref call_id, ref name, ref arguments } => {
             let mut message = Message::assistant("");
             message.tool_calls.push(ToolCall {
                 id: identifier(call_id, "input[].call_id")?,
@@ -68,10 +61,7 @@ fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
             });
             Ok(message)
         }
-        Item::FunctionCallOutput {
-            ref call_id,
-            ref output,
-        } => {
+        &Item::FunctionCallOutput { ref call_id, ref output } => {
             let mut message = Message::new("tool", output.as_ref());
             message.tool_call_id = Some(identifier(call_id, "input[].call_id")?);
             Ok(message)
