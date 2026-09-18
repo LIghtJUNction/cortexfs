@@ -54,20 +54,20 @@ fn output_item(
             }
         }
         Some("function_call") => {
+            let call_id = crate::responseutil::text(map.get("call_id"))
+                .ok_or_else(|| invalid("output[].call_id"))?;
+            let name = crate::responseutil::text(map.get("name"))
+                .ok_or_else(|| invalid("output[].name"))?;
+            let arguments = crate::responseutil::text(map.get("arguments"))
+                .ok_or_else(|| invalid("output[].arguments"))?;
             let arguments = crate::semantic::json_value(
                 WireProtocol::OpenAiResponses,
                 "output[].arguments",
-                crate::responseutil::text(map.get("arguments"))
-                    .as_deref()
-                    .unwrap_or("{}"),
+                &arguments,
             )?;
             events.push(ModelEvent::ToolCall {
                 run: run.to_owned(),
-                call: crate::ToolCall {
-                    id: crate::responseutil::text(map.get("call_id")).unwrap_or_default(),
-                    name: crate::responseutil::text(map.get("name")).unwrap_or_default(),
-                    arguments,
-                },
+                call: crate::ToolCall { id: call_id, name, arguments },
             });
         }
         _ => {}
