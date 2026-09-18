@@ -57,11 +57,10 @@ fn block_events(
             call: crate::ToolCall {
                 id: crate::responseutil::text(map.get("id")).ok_or_else(|| invalid("id"))?,
                 name: crate::responseutil::text(map.get("name")).ok_or_else(|| invalid("name"))?,
-                arguments: map
-                    .get("input")
-                    .filter(|value| value.is_object())
-                    .cloned()
-                    .ok_or_else(|| invalid("input"))?,
+                arguments: match map.get("input") {
+                    Some(input) if input.is_object() => input.clone(),
+                    _ => return Err(invalid("input")),
+                },
             },
         }),
         _ => {}
@@ -74,7 +73,8 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
     let mut content = vec![json!({"type": "text", "text": summary.text})];
     content.extend(summary.calls.iter().map(|call| json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments})));
     let mut root = json!({"id": summary.run, "model": summary.model, "role": "assistant", "content": content, "stop_reason": crate::responseutil::finish(summary.status)});
-    let usage = |u: Usage| json!({"input_tokens": u.input_tokens, "output_tokens": u.output_tokens});
+    let usage =
+        |u: Usage| json!({"input_tokens": u.input_tokens, "output_tokens": u.output_tokens});
     if let (Some(u), Some(root)) = (summary.usage, root.as_object_mut()) {
         root.insert("usage".into(), usage(u));
     }
