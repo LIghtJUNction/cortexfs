@@ -10,8 +10,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model,
     }];
-    let content = map.get("content").and_then(Value::as_array);
-    for block in content.into_iter().flatten() {
+    for block in map.get("content").and_then(Value::as_array).into_iter().flatten() {
         block_events(&mut events, &run, block)?;
     }
     let status = match map.get("stop_reason").and_then(Value::as_str) {
@@ -74,8 +73,9 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
     let mut content = vec![json!({"type": "text", "text": summary.text})];
     content.extend(summary.calls.iter().map(|call| json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments})));
     let mut root = json!({"id": summary.run, "model": summary.model, "role": "assistant", "content": content, "stop_reason": crate::responseutil::finish(summary.status)});
+    let usage = |u| json!({"input_tokens": u.input_tokens, "output_tokens": u.output_tokens});
     if let (Some(u), Some(root)) = (summary.usage, root.as_object_mut()) {
-        root.insert("usage".into(), json!({"input_tokens": u.input_tokens, "output_tokens": u.output_tokens}));
+        root.insert("usage".into(), usage(u));
     }
     crate::encode::bytes(WireProtocol::Anthropic, &root)
 }
