@@ -10,8 +10,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model,
     }];
-    let content = map.get("content").and_then(Value::as_array);
-    for block in content.into_iter().flatten() {
+    for block in map.get("content").and_then(Value::as_array).into_iter().flatten() {
         block_events(&mut events, &run, block)?;
     }
     let status = match map.get("stop_reason").and_then(Value::as_str) {
@@ -20,7 +19,10 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some(_) => EventStatus::Error,
     };
     if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {
-        events.push(ModelEvent::Usage { run: run.clone(), usage });
+        events.push(ModelEvent::Usage {
+            run: run.clone(),
+            usage,
+        });
     }
     events.push(ModelEvent::Done { run, status });
     Ok(events)
