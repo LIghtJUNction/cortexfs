@@ -1,5 +1,5 @@
 use crate::openairesponses::{Input, Item, Request};
-use crate::{Content, ContextState, ConversionError, Message, ModelRequest, Role};
+use crate::{ContextState, ConversionError, Message, ModelRequest, ToolCall};
 
 pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     let source: Request<'_> = crate::semantic::parse(crate::WireProtocol::OpenAiResponses, input)?;
@@ -24,69 +24,60 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     let mut result = ModelRequest::new(source.model.as_ref(), messages);
     result.stream = source.stream;
     result.max_output_tokens = source.max_output_tokens;
-    result.tools = source
-        .tools
-        .iter()
-        .map(crate::decoderesponsepart::tool)
-        .collect::<Result<_, _>>()?;
+    for tool in &source.tools {
+        result.tools.push(crate::decoderesponsepart::tool(tool)?);
+    }
     if let Some(reference) = source.previous_response_id.as_ref() {
-        result.context = ContextState::provider_owned(
-            "openai.responses.previous_response_id",
-            reference.as_ref(),
-        );
+        let kind = "openai.responses.previous_response_id";
+        result.context = ContextState::provider_owned(kind, reference.as_ref());
     } else if let Some(reference) = source.conversation.as_ref() {
         result.context =
             ContextState::provider_owned("openai.responses.conversation", reference.as_ref());
     }
     for (name, raw) in &source.extra {
-        result.options.insert(
-            name.to_string(),
-            crate::semantic::raw_value(crate::WireProtocol::OpenAiResponses, name, raw)?,
-        );
+        let value = crate::semantic::raw_value(crate::WireProtocol::OpenAiResponses, name, raw)?;
+        result.options.insert(name.to_string(), value);
     }
     Ok(result)
 }
 
 fn item(source: &Item<'_>) -> Result<Message, ConversionError> {
-    match *source {
-        Item::Message {
-            ref role,
-            ref content,
-        } => Ok(Message {
-            role: Role::new(role.as_ref()),
-            content: crate::decoderesponsepart::parts(content)?,
-            name: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-        }),
+    match source {
+        Item::Message { role, content } => {
+            let mut message = Message::new(role.as_ref(), "");
+            message.content = crate::decoderesponsepart::parts(content)?;
+            Ok(message)
+        }
         Item::FunctionCall {
-            ref call_id,
-            ref name,
-            ref arguments,
-        } => Ok(Message {
-            role: Role::new("assistant"),
-            content: Content::text(""),
-            name: None,
-            tool_call_id: None,
-            tool_calls: vec![crate::ToolCall {
-                id: call_id.to_string(),
-                name: name.to_string(),
+            call_id,
+            name,
+            arguments,
+        } => {
+            let mut message = Message::assistant("");
+            message.tool_calls.push(ToolCall {
+                id: identifier(call_id, "input[].call_id")?,
+                name: identifier(name, "input[].name")?,
                 arguments: crate::semantic::json_value(
                     crate::WireProtocol::OpenAiResponses,
                     "input[].arguments",
-                    arguments.as_ref(),
+                    arguments,
                 )?,
-            }],
-        }),
-        Item::FunctionCallOutput {
-            ref call_id,
-            ref output,
-        } => Ok(Message {
-            role: Role::new("tool"),
-            content: Content::text(output.as_ref()),
-            name: None,
-            tool_call_id: Some(call_id.to_string()),
-            tool_calls: Vec::new(),
-        }),
+            });
+            Ok(message)
+        }
+        Item::FunctionCallOutput { call_id, output } => {
+            let mut message = Message::new("tool", output.as_ref());
+            message.tool_call_id = Some(identifier(call_id, "input[].call_id")?);
+            Ok(message)
+        }
     }
+}
+
+fn identifier(value: &str, field: &str) -> Result<String, ConversionError> {
+    (!value.trim().is_empty())
+        .then(|| value.to_owned())
+        .ok_or_else(|| ConversionError::InvalidField {
+            protocol: crate::WireProtocol::OpenAiResponses,
+            field: field.to_owned(),
+        })
 }
