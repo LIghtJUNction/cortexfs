@@ -76,8 +76,9 @@ pub(crate) fn emit_openai_stream_tool_call(
 
 pub(crate) fn openai_stream_tool_call_delta(value: &Value) -> Result<OpenAiToolCallDelta, String> {
     let string = |path| match value.pointer(path) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.to_owned())),
+        None => Ok(None),
+        Some(value) if value.is_null() => Ok(None),
+        Some(value) if value.is_string() => Ok(value.as_str().map(str::to_owned)),
         Some(_) => Err(format!("invalid stream tool call {path}")),
     };
     let index = match value.get("index") {
