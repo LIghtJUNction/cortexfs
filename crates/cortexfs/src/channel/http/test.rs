@@ -39,14 +39,14 @@ pub(crate) fn server<const N: usize>(
 fn read_request(stream: &TcpStream) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut length = 0_usize;
+    let mut line = String::new();
     loop {
-        let mut line = Vec::new();
-        reader.read_until(b'\n', &mut line)?;
-        if line == b"\r\n" || line.is_empty() {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 || line == "\r\n" {
             break;
         }
-        if let Some(value) = line.strip_prefix(b"Content-Length: ") {
-            length = String::from_utf8_lossy(value).trim().parse().unwrap_or(0);
+        if let Some(value) = line.strip_prefix("Content-Length: ") {
+            length = value.trim().parse().unwrap_or(0);
         }
     }
     let mut body = vec![0_u8; length];
@@ -55,27 +55,19 @@ fn read_request(stream: &TcpStream) -> std::io::Result<()> {
 
 fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    let address = listener.local_addr()?;
-    let request = request.as_bytes().to_vec();
-    let client = thread::spawn(move || {
-        let mut stream = TcpStream::connect(address).expect("connect test client");
-        stream.write_all(&request).expect("write test request");
-    });
-    let (mut stream, _) = listener.accept()?;
-    let result = super::read_request(&mut stream, 1024);
-    client.join().expect("join test client");
-    result
+    let mut client = TcpStream::connect(listener.local_addr()?)?;
+    client.write_all(request.as_bytes())?;
+    let (mut server, _) = listener.accept()?;
+    super::read_request(&mut server, 1024)
 }
 
 #[test]
-fn content_length_uses_http_decimal_grammar() {
+fn content_length_framing_is_strict() {
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: +2\r\n\r\n{}").is_err());
-    let valid = parse_raw("POST / HTTP/1.1\r\nContent-Length: 02\r\n\r\n{}").expect("valid length");
-    assert_eq!(valid.body, "{}");
-}
-
-#[test]
-fn duplicate_content_length_fails_closed() {
-    let request = "POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n{}";
-    assert!(parse_raw(request).is_err());
+    assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n{}").is_err());
+    assert_eq!(
+        parse_raw("POST / HTTP/1.1\r\nContent-Length: 02\r\n\r\n{}")?.body,
+        "{}"
+    );
+    Ok::<_, std::io::Error>(())
 }
