@@ -7,9 +7,10 @@ use crate::error::{Error, Result};
 
 fn content_length(value: Option<&str>) -> Result<usize> {
     let value = value.unwrap_or("0");
-    value
-        .parse()
-        .map_err(|_error| Error::Protocol("invalid content length".into()))
+    if value.starts_with('+') {
+        return Err(Error::Protocol("invalid content length".into()));
+    }
+    value.parse().map_err(|_error| Error::Protocol("invalid content length".into()))
 }
 
 pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, String>, String)> {
@@ -62,8 +63,7 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 #[cfg(test)]
 #[test]
 fn content_length_fails_closed() {
-    assert_eq!(content_length(None).unwrap(), 0);
-    assert_eq!(content_length(Some("2")).unwrap(), 2);
-    assert!(content_length(Some("x")).is_err());
+    assert_eq!((content_length(None).unwrap(), content_length(Some("2")).unwrap()), (0, 2));
+    assert!(content_length(Some("x")).is_err() && content_length(Some("+2")).is_err());
     assert!(content_length(Some("184467440737095516160")).is_err());
 }
