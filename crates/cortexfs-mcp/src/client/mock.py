@@ -24,15 +24,20 @@ for line in sys.stdin:
              "io.modelcontextprotocol/clientInfo":{"name":"ctxmcp","version":os.environ["PKG_VERSION"]},
              "io.modelcontextprotocol/clientCapabilities":{}}
    if meta!=expected: sys.exit(7)
+   if mode=="modernping":
+    print(json.dumps({"jsonrpc":"2.0","id":"modern-ping","method":"ping","params":{}}),flush=True)
+   if mode in ("modernheadermismatch","modernmissingclientcap"):
+    code=-32020 if mode=="modernheadermismatch" else -32021
+    print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":code,"message":"modern"}}),flush=True); continue
    if mode=="modernunsupported":
     error={"code":-32022,"message":"unsupported","data":{"supported":["2027-01-01"],"requested":"2026-07-28"}}
     print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":error}),flush=True); continue
    if mode=="modernmissingcap":
-    result={"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{}}
+    result={"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{},"ttlMs":0,"cacheScope":"private"}
    elif mode=="modernbadresult":
     result={}
    else:
-    result={"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}}}
+    result={"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"ttlMs":0,"cacheScope":"private"}
    print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":result}),flush=True); continue
   if mode=="legacyprobelate":
    time.sleep(.08)
@@ -90,11 +95,11 @@ for line in sys.stdin:
   if mode=="requiredtask": tool["execution"]={"taskSupport":"required"}
   if mode=="badtask": tool["execution"]={"taskSupport":"unknown"}
   result={"tools":[tool],"nextCursor":7 if mode=="badcursor" else "next"}
-  if mode.startswith("modern"): result["resultType"]="complete"
+  if mode.startswith("modern"): result.update(resultType="complete",ttlMs=0,cacheScope="private")
  elif m=="tools/list":
   result={"tools":[{"name":"echo" if mode=="duplicate" else "sum",
                     "description":"Sum","inputSchema":{"type":"object"}}]}
-  if mode.startswith("modern"): result["resultType"]="complete"
+  if mode.startswith("modern"): result.update(resultType="complete",ttlMs=0,cacheScope="private")
  elif m=="tools/call":
   if mode.startswith("modern"):
    meta=r.get("params",{}).get("_meta",{})
