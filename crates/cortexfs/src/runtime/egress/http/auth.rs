@@ -1,19 +1,15 @@
-use std::io::{Error, ErrorKind::PermissionDenied, Result};
-
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
-
 pub(super) fn bearer_matches(value: &str, token: &str) -> bool {
     value.split_once(' ').is_some_and(|(scheme, value)| {
         scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
     })
 }
-
 pub(super) fn authorize_provider_credential(
     request: &Request,
     target: &ProviderTarget,
     client_token: &str,
-) -> Result<()> {
+) -> std::io::Result<()> {
     let Some(credential) = target.credential.as_ref() else {
         return Ok(());
     };
@@ -24,7 +20,10 @@ pub(super) fn authorize_provider_credential(
     }) {
         return Ok(());
     }
-    Err(Error::new(PermissionDenied, "invalid provider egress credential"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "invalid provider egress credential",
+    ))
 }
 
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
@@ -46,16 +45,24 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
         ]);
         return request;
     }
-    request.headers.push(("authorization".into(), format!("Bearer {}", credential.token)));
+    request.headers.push((
+        "authorization".to_owned(),
+        format!("Bearer {}", credential.token),
+    ));
     if request.endpoint == "messages" {
-        request.headers.push(("anthropic-version".into(), "2023-06-01".into()));
+        request
+            .headers
+            .push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
     }
     if let Some(account_id) = credential.codex_account_id.as_deref() {
         request.headers.extend([
             ("chatgpt-account-id".to_owned(), account_id.to_owned()),
             ("originator".to_owned(), "ctx".to_owned()),
             ("session-id".to_owned(), credential.run.clone()),
-            ("user-agent".into(), concat!("cortexfs/", env!("CARGO_PKG_VERSION")).into()),
+            (
+                "user-agent".to_owned(),
+                concat!("cortexfs/", env!("CARGO_PKG_VERSION")).to_owned(),
+            ),
         ]);
     }
     request
