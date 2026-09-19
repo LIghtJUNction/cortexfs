@@ -33,11 +33,10 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     let mut request = lines.next().unwrap_or_default().split(' ');
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
-    let valid = reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_ok()
-        && !path.is_empty()
-        && matches!(request.next(), Some("HTTP/1.0" | "HTTP/1.1"))
-        && request.next().is_none();
-    if !valid {
+    if path.is_empty() || reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_err()
+        || !matches!(request.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+        || request.next().is_some()
+    {
         return Err(invalid("invalid HTTP request line"));
     }
     let mut headers = BTreeMap::new();
