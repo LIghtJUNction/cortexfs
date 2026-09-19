@@ -1,6 +1,6 @@
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
-pub(super) fn bearer_matches(value: &str, token: &str) -> bool {
+pub(super) fn is_bearer(value: &str, token: &str) -> bool {
     value.split_once(' ').is_some_and(|(scheme, value)| {
         scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
     })
@@ -15,7 +15,7 @@ pub(super) fn authorize_provider_credential(
     };
     if request.headers.iter().any(|(name, value)| {
         (name == "authorization"
-            && (bearer_matches(value, &credential.token) || bearer_matches(value, client_token)))
+            && (is_bearer(value, &credential.token) || is_bearer(value, client_token)))
             || (name == "x-api-key" && value == &credential.token)
     }) {
         return Ok(());
@@ -70,6 +70,6 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
 
 #[test]
 fn bearer_matching_follows_http_rules() {
-    assert!(bearer_matches("bEaReR   secret", "secret"));
-    assert!(!bearer_matches("Basic secret", "secret") && !bearer_matches("Bearer wrong", "secret"));
+    assert!(is_bearer("bEaReR   secret", "secret"));
+    assert!(!is_bearer("Basic secret", "secret") && !is_bearer("Bearer wrong", "secret"));
 }
