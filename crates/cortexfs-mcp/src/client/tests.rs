@@ -167,8 +167,7 @@ fn task_support_defaults_and_stable_values_are_decoded() -> io::Result<()> {
             Some(expected)
         );
     }
-    let mut bad = Client::start(&server("badtask"))?;
-    assert!(bad.tools().is_err());
+    assert!(Client::start(&server("badtask"))?.tools().is_err());
     Ok(())
 }
 
