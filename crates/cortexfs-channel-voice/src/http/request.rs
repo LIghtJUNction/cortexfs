@@ -9,7 +9,7 @@ fn content_length(value: Option<&str>) -> Result<usize> {
     let value = value.unwrap_or("0");
     value
         .parse()
-        .map_err(|_| Error::Protocol("invalid content length".into()))
+        .map_err(|_error| Error::Protocol("invalid content length".into()))
 }
 
 pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, String>, String)> {
