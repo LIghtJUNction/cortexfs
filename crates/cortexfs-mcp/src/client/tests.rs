@@ -21,9 +21,7 @@ fn server(mode: &str) -> Server {
 
 fn server_with_pid(mode: &str, path: &std::path::Path) -> Server {
     let mut value = server(mode);
-    value
-        .env
-        .insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
+    value.env.insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
     value
 }
 
@@ -89,15 +87,6 @@ fn modern_discovery_and_request_metadata_work_without_initialize() -> io::Result
         client.call("echo", &json!({"text":"hi"}))?.get("isError"),
         Some(&Value::Bool(false))
     );
-    Ok(())
-}
-
-#[test]
-fn modern_results_must_be_complete() -> io::Result<()> {
-    let mut missing = Client::start(&server("modernmissingresulttype"))?;
-    assert!(missing.tools().is_err());
-    let mut input = Client::start(&server("moderninputrequired"))?;
-    assert!(input.call("echo", &json!({})).is_err());
     Ok(())
 }
 
@@ -265,6 +254,8 @@ fn cursor_notifications_and_call_errors_are_strict() -> io::Result<()> {
     assert!(cursor.tools().is_err());
     let mut call = Client::start(&server("callerror"))?;
     assert!(call.call("echo", &json!({})).is_err());
+    assert!(Client::start(&server("modernmissingresulttype"))?.tools().is_err());
+    assert!(Client::start(&server("moderninputrequired"))?.call("echo", &json!({})).is_err());
     Ok(())
 }
 
