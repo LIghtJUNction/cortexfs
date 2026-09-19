@@ -81,9 +81,15 @@ MCP servers are tool sources, not CortexFS root objects. Do not expose:
 tools. Projection writes v2 manifest candidates only; it does not install,
 grant policy, or write `/ctx`:
 
-`ctxmcp` advertises stable MCP `2025-11-25` and accepts only the negotiated
-stable versions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
-Draft, unknown, and future versions are rejected.
+`ctxmcp` first speaks final MCP `2026-07-28` over stdio: it probes
+`server/discover`, keeps a successful discovery or `-32022` response on the
+modern path, and sends the standard request `_meta` on every modern request.
+Other discovery errors or a bounded timeout fall back on the same process to
+the legacy `initialize` lifecycle. That legacy path accepts only the stable
+versions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`; draft,
+unknown, and future versions are rejected. Modern results must have
+`resultType=complete`; input-required continuation is not implemented and
+fails closed.
 
 ```text
 /ctx/tool/github.search_issues
