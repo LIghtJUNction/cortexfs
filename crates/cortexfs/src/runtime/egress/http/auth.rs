@@ -13,7 +13,7 @@ pub(super) fn authorize_provider_credential(
     let Some(credential) = target.credential.as_ref() else {
         return Ok(());
     };
-    if request.headers.iter().any(|(name, value)| {
+    if request.headers.iter().any(|&(ref name, ref value)| {
         (name == "authorization"
             && (is_bearer(value, &credential.token) || is_bearer(value, client_token)))
             || (name == "x-api-key" && value == &credential.token)
