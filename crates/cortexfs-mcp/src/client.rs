@@ -324,16 +324,12 @@ impl Client {
                     .unwrap_or_default()
             )));
         }
-        let result = response
+        let modern = self.protocol.is_some();
+        response
             .get("result")
             .cloned()
-            .ok_or_else(|| invalid_data("missing JSON-RPC result"))?;
-        if self.protocol.is_some()
-            && result.get("resultType").and_then(Value::as_str) != Some("complete")
-        {
-            return Err(invalid_data("unsupported modern MCP result"));
-        }
-        Ok(result)
+            .filter(|result| !modern || result["resultType"] == "complete")
+            .ok_or_else(|| invalid_data("missing or unsupported JSON-RPC result"))
     }
 
     fn exchange(&mut self, method: &str, params: &Value) -> io::Result<Value> {
