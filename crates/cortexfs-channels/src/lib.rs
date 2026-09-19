@@ -52,11 +52,9 @@ pub use route::ChannelSessionRoute;
 pub use wire::{CHANNEL_ABI, ChannelEnvelope, ChannelEvent};
 
 fn validate_bounded_value(value: &str) -> Result<(), ChannelError> {
-    if value.is_empty() || value.len() > 256 || value.contains('\0') {
-        Err(ChannelError::InvalidValue(value.to_owned()))
-    } else {
-        Ok(())
-    }
+    (!value.is_empty() && value.len() <= 256 && !value.contains('\0'))
+        .then_some(())
+        .ok_or_else(|| ChannelError::InvalidValue(value.to_owned()))
 }
 
 #[cfg(test)]
