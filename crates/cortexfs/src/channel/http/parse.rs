@@ -43,8 +43,9 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
+            .filter(|&(name, _)| !name.is_empty() && name.trim_matches([' ', '\t']) == name)
+            .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
-        let name = name.trim().to_ascii_lowercase();
         if name == "content-length" && headers.contains_key(&name) {
             return Err(invalid("duplicate content length"));
         }
@@ -61,17 +62,13 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         return Err(invalid("HTTP body too large"));
     }
     let mut body = bytes.get(header_end..).unwrap_or_default().to_vec();
-    if body.len() < length {
-        let have = body.len();
-        body.resize(length, 0);
-        stream.read_exact(body.get_mut(have..).unwrap_or_default())?;
-    }
-    body.truncate(length);
-    let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
+    let have = body.len().min(length);
+    body.resize(length, 0);
+    stream.read_exact(body.get_mut(have..).unwrap_or_default())?;
     Ok(HttpRequest {
         method,
         path,
         headers,
-        body,
+        body: String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?,
     })
 }
