@@ -1,7 +1,7 @@
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 
-use super::{DiscordConfig, DiscordError, embed, message, request};
+use super::{DiscordConfig, DiscordError, embed, message, request, required_string};
 
 pub(super) fn register(
     client: &Client,
@@ -32,8 +32,8 @@ pub(super) fn autocomplete(
     config: &DiscordConfig,
     payload: &Value,
 ) -> Result<Value, DiscordError> {
-    let interaction = string(payload, "interaction_id")?;
-    let token = string(payload, "interaction_token")?;
+    let interaction = required_string(payload, "interaction_id")?;
+    let token = required_string(payload, "interaction_token")?;
     let choices = payload
         .get("choices")
         .and_then(Value::as_array)
@@ -59,8 +59,8 @@ pub(super) fn gate_prompt(
     command_id: &str,
     payload: &Value,
 ) -> Result<Value, DiscordError> {
-    let title = string(payload, "title")?;
-    let description = string(payload, "description")?;
+    let title = required_string(payload, "title")?;
+    let description = required_string(payload, "description")?;
     let choices = payload
         .get("choices")
         .and_then(Value::as_array)
@@ -88,8 +88,8 @@ pub(super) fn gate_finalize(
     channel: &str,
     payload: &Value,
 ) -> Result<Value, DiscordError> {
-    let message_id = string(payload, "message_id")?;
-    let outcome = string(payload, "outcome")?;
+    let message_id = required_string(payload, "message_id")?;
+    let outcome = required_string(payload, "outcome")?;
     message::edit_components(client, config, channel, message_id, outcome)
 }
 pub(super) fn draft_update(
@@ -98,23 +98,16 @@ pub(super) fn draft_update(
     channel: &str,
     payload: &Value,
 ) -> Result<Value, DiscordError> {
-    let message_id = string(payload, "message_id")?;
-    let text = string(payload, "text")?;
+    let message_id = required_string(payload, "message_id")?;
+    let text = required_string(payload, "text")?;
     message::edit(client, config, channel, message_id, text)?;
     Ok(json!({"message_id": message_id, "updated": true}))
 }
 fn button(value: &Value) -> Result<Value, DiscordError> {
-    let id = string(value, "id")?;
-    let label = string(value, "label")?;
+    let id = required_string(value, "id")?;
+    let label = required_string(value, "label")?;
     if id.len() > 100 || label.chars().count() > 80 {
         return Err(DiscordError::Invalid("choice"));
     }
     Ok(json!({"type": 2, "style": 1, "custom_id": id, "label": label}))
-}
-fn string<'a>(value: &'a Value, name: &'static str) -> Result<&'a str, DiscordError> {
-    value
-        .get(name)
-        .and_then(Value::as_str)
-        .filter(|text| !text.is_empty() && !text.contains('\0'))
-        .ok_or(DiscordError::Invalid(name))
 }
