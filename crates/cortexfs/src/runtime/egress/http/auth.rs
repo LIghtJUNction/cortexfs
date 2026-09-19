@@ -5,8 +5,7 @@ use crate::provider::auth::CredentialKind;
 
 pub(super) fn bearer_matches(value: &str, token: &str) -> bool {
     value.split_once(' ').is_some_and(|(scheme, value)| {
-        let value = value.trim_start_matches(' ');
-        !value.is_empty() && scheme.eq_ignore_ascii_case("bearer") && value == token
+        scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
     })
 }
 
@@ -18,16 +17,14 @@ pub(super) fn authorize_provider_credential(
     let Some(credential) = target.credential.as_ref() else {
         return Ok(());
     };
-    request
-        .headers
-        .iter()
-        .any(|(name, value)| {
-            (name == "authorization"
-                && (bearer_matches(value, &credential.token) || bearer_matches(value, client_token)))
-                || (name == "x-api-key" && value == &credential.token)
-        })
-        .then_some(())
-        .ok_or_else(|| Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
+    if request.headers.iter().any(|(name, value)| {
+        (name == "authorization"
+            && (bearer_matches(value, &credential.token) || bearer_matches(value, client_token)))
+            || (name == "x-api-key" && value == &credential.token)
+    }) {
+        return Ok(());
+    }
+    Err(Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
 }
 
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
@@ -58,11 +55,16 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
             ("chatgpt-account-id".to_owned(), account_id.to_owned()),
             ("originator".to_owned(), "ctx".to_owned()),
             ("session-id".to_owned(), credential.run.clone()),
-            (
-                "user-agent".to_owned(),
-                concat!("cortexfs/", env!("CARGO_PKG_VERSION")).to_owned(),
-            ),
+            ("user-agent".to_owned(), concat!("cortexfs/", env!("CARGO_PKG_VERSION")).to_owned()),
         ]);
     }
     request
+}
+
+#[cfg(test)]
+#[test]
+fn bearer_matching_follows_http_rules() {
+    assert!(bearer_matches("bEaReR   secret", "secret"));
+    assert!(!bearer_matches("Basic secret", "secret"));
+    assert!(!bearer_matches("Bearer wrong", "secret"));
 }
