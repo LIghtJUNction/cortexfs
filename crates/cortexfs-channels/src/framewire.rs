@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{validate_bounded_value, CHANNEL_SOCKET_ABI, ChannelError, ChannelFrame, ChannelFrameBody};
+use crate::{CHANNEL_SOCKET_ABI, ChannelError, ChannelFrame, ChannelFrameBody, valid_bounded};
 
 pub const MAX_CHANNEL_FRAME_BYTES: usize = 256 * 1024;
 
@@ -59,11 +59,11 @@ impl ChannelFrame {
         }
         match &self.frame {
             ChannelFrameBody::Inbound { event_id, message } => {
-                validate_bounded_value(event_id)?;
+                valid_bounded(event_id)?;
                 message.body.validate()
             }
             ChannelFrameBody::InboundEvent { event_id, event } => {
-                validate_bounded_value(event_id)?;
+                valid_bounded(event_id)?;
                 event.validate()
             }
             ChannelFrameBody::Deliver {
@@ -74,13 +74,13 @@ impl ChannelFrame {
                 request_id,
                 message,
             } => {
-                validate_bounded_value(request_id)?;
+                valid_bounded(request_id)?;
                 message.body.validate()
             }
             ChannelFrameBody::Effect {
                 request_id, effect, ..
             } => {
-                validate_bounded_value(request_id)?;
+                valid_bounded(request_id)?;
                 effect.validate()
             }
             ChannelFrameBody::Command {
@@ -95,12 +95,12 @@ impl ChannelFrame {
                 command_id,
                 ..
             } => {
-                validate_bounded_value(request_id)?;
-                validate_bounded_value(session)?;
-                validate_bounded_value(command_id)
+                valid_bounded(request_id)?;
+                valid_bounded(session)?;
+                valid_bounded(command_id)
             }
             ChannelFrameBody::ControlRequest { request_id, action } => {
-                validate_bounded_value(request_id)?;
+                valid_bounded(request_id)?;
                 action.validate().map_err(|error| {
                     ChannelError::InvalidMessage(format!("invalid control action: {error}"))
                 })
@@ -108,8 +108,8 @@ impl ChannelFrame {
             ChannelFrameBody::ControlResponse {
                 request_id, error, ..
             } => {
-                validate_bounded_value(request_id)?;
-                error.as_deref().map(validate_bounded_value).transpose().map(|_| ())
+                valid_bounded(request_id)?;
+                error.as_deref().map(valid_bounded).transpose().map(|_| ())
             }
             ChannelFrameBody::Error {
                 request_id,
@@ -117,9 +117,9 @@ impl ChannelFrame {
                 message,
                 ..
             } => {
-                request_id.as_deref().map(validate_bounded_value).transpose()?;
-                validate_bounded_value(code)?;
-                validate_bounded_value(message)
+                request_id.as_deref().map(valid_bounded).transpose()?;
+                valid_bounded(code)?;
+                valid_bounded(message)
             }
             ChannelFrameBody::Hello {
                 request_id,
@@ -130,14 +130,14 @@ impl ChannelFrame {
                 request_id,
                 channel,
             } => {
-                validate_bounded_value(request_id)?;
-                validate_bounded_value(channel.as_str())
+                valid_bounded(request_id)?;
+                valid_bounded(channel.as_str())
             }
             ChannelFrameBody::Start { request_id }
             | ChannelFrameBody::Stop { request_id }
             | ChannelFrameBody::Receipt { request_id, .. }
             | ChannelFrameBody::HealthRequest { request_id }
-            | ChannelFrameBody::HealthResponse { request_id, .. } => validate_bounded_value(request_id),
+            | ChannelFrameBody::HealthResponse { request_id, .. } => valid_bounded(request_id),
             ChannelFrameBody::Health { .. } | ChannelFrameBody::Event { .. } => Ok(()),
         }
     }
