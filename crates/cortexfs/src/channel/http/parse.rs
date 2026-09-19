@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-use std::io::{Error, ErrorKind, Read};
-use std::net::TcpStream;
+use std::{collections::BTreeMap, io::{Error, ErrorKind, Read}, net::TcpStream, str::from_utf8};
 
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -30,13 +28,16 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             break position + 4;
         }
     };
-    let header = std::str::from_utf8(bytes.get(..header_end).unwrap_or_default())
-        .map_err(|_error| invalid("HTTP headers are not UTF-8"))?;
+    let header = from_utf8(&bytes[..header_end]).map_err(|_| invalid("HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
     let mut request = lines.next().unwrap_or_default().split_whitespace();
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
-    if method.is_empty() || path.is_empty() {
+    let valid = reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_ok()
+        && !path.is_empty()
+        && matches!(request.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+        && request.next().is_none();
+    if !valid {
         return Err(invalid("invalid HTTP request line"));
     }
     let mut headers = BTreeMap::new();
