@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 use std::io::{Error, ErrorKind, Read};
 use std::net::TcpStream;
 
-const MAX_HEADER_BYTES: usize = 64 * 1024;
-
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
 }
@@ -25,7 +23,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             return Err(Error::new(ErrorKind::UnexpectedEof, "missing HTTP headers"));
         }
         bytes.extend_from_slice(&buffer[..read]);
-        if bytes.len() > MAX_HEADER_BYTES {
+        if bytes.len() > 64 * 1024 {
             return Err(invalid("HTTP headers too large"));
         }
         if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
@@ -43,7 +41,9 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     }
     let mut headers = BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
-        let (name, value) = line.split_once(':').ok_or_else(|| invalid("invalid HTTP header"))?;
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| invalid("invalid HTTP header"))?;
         let name = name.trim().to_ascii_lowercase();
         if name == "content-length" && headers.contains_key(&name) {
             return Err(invalid("duplicate content length"));
