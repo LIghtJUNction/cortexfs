@@ -22,11 +22,10 @@ pub(crate) struct OpenAiStreamFrame {
 }
 
 pub(crate) fn openai_stream_event(line: &str) -> Result<OpenAiStreamFrame, String> {
-    let line = line.trim();
-    if line.is_empty() || line.starts_with(':') || !line.starts_with("data:") {
+    let Some(data) = line.strip_prefix("data:") else {
         return Ok(chat_frame(OpenAiStreamEvent::Ignore, false));
-    }
-    let data = line.trim_start_matches("data:").trim();
+    };
+    let data = data.strip_prefix(' ').unwrap_or(data);
     if data == "[DONE]" {
         return Ok(chat_frame(OpenAiStreamEvent::Done, true));
     }

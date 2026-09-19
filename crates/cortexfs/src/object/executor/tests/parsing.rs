@@ -99,6 +99,7 @@ fn streamed_invalid_events_fail_before_emission() {
     assert!(openai_stream_event(r#"data:{"choices":[{"delta":{"tool_calls":[{},{}]}}]}"#).is_err());
     assert!(openai_stream_event(r#"data:{"type":"response.output_text.delta"}"#).is_err());
     assert!(openai_stream_event(r#"data:{"type":"response.refusal.done","refusal":1}"#).is_err());
+    assert!(openai_stream_event("data:data:{}").is_err());
     let call = |index| streaming::OpenAiToolCallDelta {
         index: Some(index),
         id: Some(format!("call-{index}")),
