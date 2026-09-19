@@ -21,7 +21,9 @@ fn server(mode: &str) -> Server {
 
 fn server_with_pid(mode: &str, path: &std::path::Path) -> Server {
     let mut value = server(mode);
-    value.env.insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
+    value
+        .env
+        .insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
     value
 }
 
@@ -60,14 +62,9 @@ fn assert_reaped(path: &std::path::Path) -> io::Result<()> {
         .parse::<i32>()
         .map(nix::unistd::Pid::from_raw)
         .map_err(io::Error::other)?;
-    assert_eq!(
-        nix::sys::signal::kill(pid, None),
-        Err(nix::errno::Errno::ESRCH)
-    );
-    assert_eq!(
-        nix::sys::signal::killpg(pid, None),
-        Err(nix::errno::Errno::ESRCH)
-    );
+    for result in [nix::sys::signal::kill(pid, None), nix::sys::signal::killpg(pid, None)] {
+        assert_eq!(result, Err(nix::errno::Errno::ESRCH));
+    }
     Ok(())
 }
 
@@ -254,8 +251,10 @@ fn cursor_notifications_and_call_errors_are_strict() -> io::Result<()> {
     assert!(cursor.tools().is_err());
     let mut call = Client::start(&server("callerror"))?;
     assert!(call.call("echo", &json!({})).is_err());
-    assert!(Client::start(&server("modernmissingresulttype"))?.tools().is_err());
-    assert!(Client::start(&server("moderninputrequired"))?.call("echo", &json!({})).is_err());
+    let mut missing = Client::start(&server("modernmissingresulttype"))?;
+    assert!(missing.tools().is_err());
+    let mut input = Client::start(&server("moderninputrequired"))?;
+    assert!(input.call("echo", &json!({})).is_err());
     Ok(())
 }
 
