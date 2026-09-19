@@ -1,3 +1,5 @@
+use std::io::{Error, ErrorKind, Result};
+
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
 
@@ -12,7 +14,7 @@ pub(super) fn authorize_provider_credential(
     request: &Request,
     target: &ProviderTarget,
     client_token: &str,
-) -> std::io::Result<()> {
+) -> Result<()> {
     let Some(credential) = target.credential.as_ref() else {
         return Ok(());
     };
@@ -27,25 +29,24 @@ pub(super) fn authorize_provider_credential(
             _ => false,
         })
         .then_some(())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "invalid provider egress credential",
-            )
-        })
+        .ok_or_else(|| Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
 }
 
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
         return request;
     };
-    request.headers.retain(|header| {
-        let name = header.0.as_str();
-        !matches!(name, "authorization" | "x-api-key" | "anthropic-version")
-            && !matches!(
-                name,
-                "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
-            )
+    request.headers.retain(|(name, _)| {
+        !matches!(
+            name.as_str(),
+            "authorization"
+                | "x-api-key"
+                | "anthropic-version"
+                | "chatgpt-account-id"
+                | "originator"
+                | "session-id"
+                | "user-agent"
+        )
     });
     if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
         request.headers.extend([
@@ -54,10 +55,7 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
         ]);
         return request;
     }
-    request.headers.push((
-        "authorization".to_owned(),
-        format!("Bearer {}", credential.token),
-    ));
+    request.headers.push(("authorization".to_owned(), format!("Bearer {}", credential.token)));
     if request.endpoint == "messages" {
         request
             .headers
