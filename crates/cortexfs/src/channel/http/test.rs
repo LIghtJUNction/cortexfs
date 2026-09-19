@@ -62,12 +62,12 @@ fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
 }
 
 #[test]
-fn content_length_framing_is_strict() {
+fn content_length_framing_is_strict() -> std::io::Result<()> {
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: +2\r\n\r\n{}").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n{}").is_err());
     assert_eq!(
         parse_raw("POST / HTTP/1.1\r\nContent-Length: 02\r\n\r\n{}")?.body,
         "{}"
     );
-    Ok::<_, std::io::Error>(())
+    Ok(())
 }
