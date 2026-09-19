@@ -10,7 +10,8 @@ fn required_string_validation_is_shared() {
     assert_eq!(required_string(&valid, "field").expect("valid field"), "value");
     for invalid in ["", "a\0b"] {
         let input = json!({"field": invalid});
-        assert!(matches!(required_string(&input, "field"), Err(DiscordError::Invalid("field"))));
+        let error = required_string(&input, "field");
+        assert!(matches!(error, Err(DiscordError::Invalid("field"))));
     }
 }
 
