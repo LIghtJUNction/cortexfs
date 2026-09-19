@@ -63,13 +63,10 @@ fn handle(
     if request.method != "POST" || request.path != config.path {
         return HttpResponse::error(404, "not found");
     }
-    if config.token.as_deref().is_some_and(|token| {
-        request
-            .headers
-            .get("authorization")
-            .and_then(|value| value.strip_prefix("Bearer "))
-            != Some(token)
-    }) {
+    if !crate::bearer_authorized(
+        request.headers.get("authorization").map(String::as_str),
+        config.token.as_deref(),
+    ) {
         return HttpResponse::error(401, "unauthorized");
     }
     let codec = GmailCodec;
