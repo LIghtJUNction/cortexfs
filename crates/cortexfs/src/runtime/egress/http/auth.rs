@@ -1,6 +1,6 @@
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
-use std::io::ErrorKind;
+use std::io::{Error, ErrorKind};
 pub(super) fn is_bearer(value: &str, token: &str) -> bool {
     value.split_once(' ').is_some_and(|(scheme, value)| {
         scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
@@ -21,18 +21,20 @@ pub(super) fn authorize_provider_credential(
     }) {
         return Ok(());
     }
-    Err(std::io::Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
+    Err(Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
 }
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
         return request;
     };
     request.headers.retain(|header| {
-        !matches!(header.0.as_str(), "authorization" | "x-api-key" | "anthropic-version")
-            && !matches!(
-                header.0.as_str(),
-                "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
-            )
+        !matches!(
+            header.0.as_str(),
+            "authorization" | "x-api-key" | "anthropic-version"
+        ) && !matches!(
+            header.0.as_str(),
+            "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
+        )
     });
     if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
         request.headers.extend([
@@ -51,14 +53,12 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
             .push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
     }
     if let Some(account_id) = credential.codex_account_id.as_deref() {
+        let user_agent = concat!("cortexfs/", env!("CARGO_PKG_VERSION")).to_owned();
         request.headers.extend([
             ("chatgpt-account-id".to_owned(), account_id.to_owned()),
             ("originator".to_owned(), "ctx".to_owned()),
             ("session-id".to_owned(), credential.run.clone()),
-            (
-                "user-agent".to_owned(),
-                concat!("cortexfs/", env!("CARGO_PKG_VERSION")).into(),
-            ),
+            ("user-agent".to_owned(), user_agent),
         ]);
     }
     request
