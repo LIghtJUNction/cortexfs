@@ -28,7 +28,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             break position + 4;
         }
     };
-    let header = from_utf8(&bytes[..header_end]).map_err(|_| invalid("HTTP headers are not UTF-8"))?;
+    let header = from_utf8(&bytes[..header_end]).map_err(|_| invalid("invalid HTTP headers"))?;
     let mut lines = header.split("\r\n");
     let mut request = lines.next().unwrap_or_default().split(' ');
     let method = request.next().unwrap_or_default().to_owned();
