@@ -43,7 +43,12 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
-            .filter(|&(name, _)| crate::support::http_token(name))
+            .filter(|&(name, _)| {
+                !name.is_empty()
+                    && name.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+                    })
+            })
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
         if name == "content-length" && headers.contains_key(&name) {
