@@ -21,7 +21,10 @@ pub(super) fn authorize_provider_credential(
     }) {
         return Ok(());
     }
-    Err(std::io::Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
+    Err(std::io::Error::new(
+        ErrorKind::PermissionDenied,
+        "invalid provider egress credential",
+    ))
 }
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
@@ -30,10 +33,8 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
     request.headers.retain(|header| {
         !matches!(
             header.0.as_str(),
-            "authorization" | "x-api-key" | "anthropic-version"
-        ) && !matches!(
-            header.0.as_str(),
-            "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
+            "authorization" | "x-api-key" | "anthropic-version" | "chatgpt-account-id"
+                | "originator" | "session-id" | "user-agent"
         )
     });
     if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
