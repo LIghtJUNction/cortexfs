@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ChannelError, MessageBody, MessageTarget, Participant, validate_bounded_value};
+use crate::{validate_bounded_value, ChannelError, MessageBody, MessageTarget, Participant};
 
 /// Shared context carried by an incoming non-message channel event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -47,16 +47,8 @@ impl ChannelEventContext {
     pub fn validate(&self) -> Result<(), ChannelError> {
         validate_bounded_value(self.target.channel.as_str())?;
         validate_bounded_value(self.target.conversation.as_str())?;
-        self.target
-            .thread
-            .as_deref()
-            .map(validate_bounded_value)
-            .transpose()?;
-        self.target
-            .reply_to
-            .as_deref()
-            .map(validate_bounded_value)
-            .transpose()?;
+        self.target.thread.as_deref().map(validate_bounded_value).transpose()?;
+        self.target.reply_to.as_deref().map(validate_bounded_value).transpose()?;
         if let Some(participant) = self.participant.as_ref() {
             validate_bounded_value(&participant.id)?;
         }
