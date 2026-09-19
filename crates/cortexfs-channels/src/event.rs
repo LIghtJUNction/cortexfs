@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ChannelError, MessageBody, MessageTarget, Participant};
+use crate::{ChannelError, MessageBody, MessageTarget, Participant, validate_bounded_value};
 
 /// Shared context carried by an incoming non-message channel event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -45,24 +45,24 @@ pub enum ChannelIncomingEvent {
 
 impl ChannelEventContext {
     pub fn validate(&self) -> Result<(), ChannelError> {
-        crate::validate_bounded_value(self.target.channel.as_str())?;
-        crate::validate_bounded_value(self.target.conversation.as_str())?;
+        validate_bounded_value(self.target.channel.as_str())?;
+        validate_bounded_value(self.target.conversation.as_str())?;
         self.target
             .thread
             .as_deref()
-            .map(crate::validate_bounded_value)
+            .map(validate_bounded_value)
             .transpose()?;
         self.target
             .reply_to
             .as_deref()
-            .map(crate::validate_bounded_value)
+            .map(validate_bounded_value)
             .transpose()?;
         if let Some(participant) = self.participant.as_ref() {
-            crate::validate_bounded_value(&participant.id)?;
+            validate_bounded_value(&participant.id)?;
         }
         for (key, value) in &self.metadata {
-            crate::validate_bounded_value(key)?;
-            crate::validate_bounded_value(value)?;
+            validate_bounded_value(key)?;
+            validate_bounded_value(value)?;
         }
         Ok(())
     }
@@ -131,18 +131,18 @@ impl ChannelIncomingEvent {
             Self::Reaction {
                 message_id, emoji, ..
             } => {
-                crate::validate_bounded_value(message_id)?;
-                crate::validate_bounded_value(emoji)
+                validate_bounded_value(message_id)?;
+                validate_bounded_value(emoji)
             }
             Self::Typing { .. } => Ok(()),
             Self::MessageEdited {
                 message_id, body, ..
             } => {
-                crate::validate_bounded_value(message_id)?;
+                validate_bounded_value(message_id)?;
                 body.validate()
             }
             Self::MessageDeleted { message_id, .. } | Self::Read { message_id, .. } => {
-                crate::validate_bounded_value(message_id)
+                validate_bounded_value(message_id)
             }
         }
     }
@@ -151,8 +151,8 @@ impl ChannelIncomingEvent {
 #[cfg(test)]
 #[test]
 fn bounded_values_match_wire_contract() {
-    assert!(crate::validate_bounded_value("").is_err());
-    assert!(crate::validate_bounded_value(&"x".repeat(256)).is_ok());
-    assert!(crate::validate_bounded_value(&"x".repeat(257)).is_err());
-    assert!(crate::validate_bounded_value("x\0").is_err());
+    assert!(validate_bounded_value("").is_err());
+    assert!(validate_bounded_value(&"x".repeat(256)).is_ok());
+    assert!(validate_bounded_value(&"x".repeat(257)).is_err());
+    assert!(validate_bounded_value("x\0").is_err());
 }
