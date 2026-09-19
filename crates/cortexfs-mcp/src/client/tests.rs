@@ -1,18 +1,16 @@
 use super::*;
-use std::collections::BTreeMap;
-use std::fs;
+use std::{collections::BTreeMap, fs};
 
 fn server(mode: &str) -> Server {
     Server {
         command: "/usr/bin/python3".to_owned(),
-        args: vec![
-            "-u".to_owned(),
-            "-c".to_owned(),
-            include_str!("mock.py").to_owned(),
-        ],
+        args: vec!["-u".to_owned(), "-c".to_owned(), include_str!("mock.py").to_owned()],
         env: BTreeMap::from([
             ("CTXMCP_MOCK".to_owned(), mode.to_owned()),
-            ("PKG_VERSION".to_owned(), env!("CARGO_PKG_VERSION").to_owned()),
+            (
+                "PKG_VERSION".to_owned(),
+                env!("CARGO_PKG_VERSION").to_owned(),
+            ),
         ]),
     }
 }
@@ -47,9 +45,7 @@ fn wait_pid(path: &std::path::Path, timeout: Duration) -> io::Result<nix::unistd
                     .map(nix::unistd::Pid::from_raw)
                     .map_err(io::Error::other);
             }
-            Err(error)
-                if error.kind() == io::ErrorKind::NotFound && Instant::now() < deadline =>
-            {
+            Err(error) if error.kind() == io::ErrorKind::NotFound && Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(error) => return Err(error),
@@ -106,7 +102,10 @@ fn invalid_negotiation_and_server_requests_are_rejected() {
         "missingtools",
         "badtools",
     ] {
-        assert!(Client::start(&server(mode)).is_err(), "mode {mode} accepted");
+        assert!(
+            Client::start(&server(mode)).is_err(),
+            "mode {mode} accepted"
+        );
     }
 }
 
@@ -135,12 +134,7 @@ fn server_ping_requests_with_string_and_number_ids_are_answered() -> io::Result<
 
 #[test]
 fn stable_legacy_protocol_versions_are_accepted() -> io::Result<()> {
-    for mode in [
-        "ok",
-        "stable20250618",
-        "stable20250326",
-        "legacy20241105",
-    ] {
+    for mode in ["ok", "stable20250618", "stable20250326", "legacy20241105"] {
         let mut client = Client::start(&server(mode))?;
         drop(client.tools()?);
     }
@@ -252,7 +246,10 @@ fn descendant_pipe_holder_is_killed_without_blocking_drop() -> io::Result<()> {
 #[test]
 fn cursor_notifications_and_call_errors_are_strict() -> io::Result<()> {
     for mode in ["invalidnotification", "slowframes"] {
-        assert!(Client::start(&server(mode)).is_err(), "mode {mode} accepted");
+        assert!(
+            Client::start(&server(mode)).is_err(),
+            "mode {mode} accepted"
+        );
     }
     let mut cursor = Client::start(&server("badcursor"))?;
     assert!(cursor.tools().is_err());
