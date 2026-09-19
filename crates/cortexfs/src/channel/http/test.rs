@@ -55,8 +55,7 @@ fn read_request(stream: &TcpStream) -> std::io::Result<()> {
 
 fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    let mut client = TcpStream::connect(listener.local_addr()?)?;
-    client.write_all(request.as_bytes())?;
+    TcpStream::connect(listener.local_addr()?)?.write_all(request.as_bytes())?;
     let (mut server, _) = listener.accept()?;
     super::read_request(&mut server, 1024)
 }
@@ -67,5 +66,6 @@ fn content_length_framing_fails_closed() {
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length:0\r\nContent-Length:0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length : 0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length\t: 0\r\n\r\n").is_err());
+    assert!(parse_raw("GET / HTTP/1.1\r\nBad@Header: x\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n").is_ok());
 }
