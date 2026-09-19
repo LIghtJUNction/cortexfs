@@ -61,10 +61,8 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
     request
 }
 
-#[cfg(test)]
 #[test]
 fn bearer_matching_follows_http_rules() {
     assert!(bearer_matches("bEaReR   secret", "secret"));
-    assert!(!bearer_matches("Basic secret", "secret"));
-    assert!(!bearer_matches("Bearer wrong", "secret"));
+    assert!(!bearer_matches("Basic secret", "secret") && !bearer_matches("Bearer wrong", "secret"));
 }
