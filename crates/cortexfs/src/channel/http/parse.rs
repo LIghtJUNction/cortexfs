@@ -22,7 +22,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         if read == 0 {
             return Err(Error::new(ErrorKind::UnexpectedEof, "missing HTTP headers"));
         }
-        bytes.extend_from_slice(&buffer[..read]);
+        bytes.extend(buffer.iter().take(read).copied());
         if bytes.len() > 64 * 1024 {
             return Err(invalid("HTTP headers too large"));
         }
@@ -30,7 +30,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             break position + 4;
         }
     };
-    let header = std::str::from_utf8(&bytes[..header_end])
+    let header = std::str::from_utf8(bytes.get(..header_end).unwrap_or_default())
         .map_err(|_error| invalid("HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
     let mut request = lines.next().unwrap_or_default().split_whitespace();
@@ -60,11 +60,11 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     if length > max_body {
         return Err(invalid("HTTP body too large"));
     }
-    let mut body = bytes[header_end..].to_vec();
+    let mut body = bytes.get(header_end..).unwrap_or_default().to_vec();
     if body.len() < length {
         let have = body.len();
         body.resize(length, 0);
-        stream.read_exact(&mut body[have..])?;
+        stream.read_exact(body.get_mut(have..).unwrap_or_default())?;
     }
     body.truncate(length);
     let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
