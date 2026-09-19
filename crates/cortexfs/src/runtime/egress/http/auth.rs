@@ -44,14 +44,9 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
         ]);
         return request;
     }
-    request.headers.push((
-        "authorization".to_owned(),
-        format!("Bearer {}", credential.token),
-    ));
+    request.headers.push(("authorization".to_owned(), format!("Bearer {}", credential.token)));
     if request.endpoint == "messages" {
-        request
-            .headers
-            .push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
+        request.headers.push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
     }
     if let Some(account_id) = credential.codex_account_id.as_deref() {
         request.headers.extend([
@@ -66,9 +61,12 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
     }
     request
 }
-
-#[test]
-fn bearer_matching_follows_http_rules() {
-    assert!(is_bearer("bEaReR   secret", "secret"));
-    assert!(!is_bearer("Basic secret", "secret") && !is_bearer("Bearer wrong", "secret"));
+#[cfg(test)]
+mod tests {
+    use super::is_bearer;
+    #[test]
+    fn bearer_matching_follows_http_rules() {
+        assert!(is_bearer("bEaReR   secret", "secret"));
+        assert!(!is_bearer("Basic secret", "secret") && !is_bearer("Bearer wrong", "secret"));
+    }
 }
