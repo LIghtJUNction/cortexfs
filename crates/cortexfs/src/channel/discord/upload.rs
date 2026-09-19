@@ -2,7 +2,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use reqwest::blocking::{Client, multipart};
 use serde_json::{Value, json};
 
-use super::{DiscordConfig, DiscordError, effect, embed, request};
+use super::{DiscordConfig, DiscordError, effect, embed, request, required_string};
 
 const MAX_ENCODED_BYTES: usize = 192 * 1024;
 const MAX_FILE_BYTES: usize = 128 * 1024;
@@ -14,11 +14,11 @@ pub(super) fn send(
     command_id: &str,
     payload: &Value,
 ) -> Result<Value, DiscordError> {
-    let filename = string(payload, "filename")?;
+    let filename = required_string(payload, "filename")?;
     if filename.len() > 128 || filename.contains(['/', '\\']) {
         return Err(DiscordError::Invalid("filename"));
     }
-    let encoded = string(payload, "data_base64")?;
+    let encoded = required_string(payload, "data_base64")?;
     if encoded.len() > MAX_ENCODED_BYTES {
         return Err(DiscordError::Invalid("data_base64"));
     }
@@ -54,12 +54,4 @@ pub(super) fn send(
             .part("files[0]", part);
         Ok(request::auth(client.post(&url).multipart(form), config))
     })
-}
-
-fn string<'a>(payload: &'a Value, name: &'static str) -> Result<&'a str, DiscordError> {
-    payload
-        .get(name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty() && !value.contains('\0'))
-        .ok_or(DiscordError::Invalid(name))
 }
