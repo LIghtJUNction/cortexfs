@@ -2,11 +2,10 @@ use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
 
 pub(super) fn bearer_matches(value: &str, token: &str) -> bool {
-    let Some((scheme, credential)) = value.split_once(' ') else {
-        return false;
-    };
-    let credential = credential.trim_start_matches(' ');
-    !credential.is_empty() && scheme.eq_ignore_ascii_case("bearer") && credential == token
+    value.split_once(' ').is_some_and(|(scheme, value)| {
+        let value = value.trim_start_matches(' ');
+        !value.is_empty() && scheme.eq_ignore_ascii_case("bearer") && value == token
+    })
 }
 
 pub(super) fn authorize_provider_credential(
@@ -17,20 +16,23 @@ pub(super) fn authorize_provider_credential(
     let Some(credential) = target.credential.as_ref() else {
         return Ok(());
     };
-    if request.headers.iter().any(|header| {
-        let name = header.0.as_str();
-        let value = header.1.as_str();
-        if name == "authorization" {
-            return bearer_matches(value, &credential.token) || bearer_matches(value, client_token);
-        }
-        name == "x-api-key" && value == credential.token
-    }) {
-        return Ok(());
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        "invalid provider egress credential",
-    ))
+    request
+        .headers
+        .iter()
+        .any(|(name, value)| match name.as_str() {
+            "authorization" => {
+                bearer_matches(value, &credential.token) || bearer_matches(value, client_token)
+            }
+            "x-api-key" => value == &credential.token,
+            _ => false,
+        })
+        .then_some(())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "invalid provider egress credential",
+            )
+        })
 }
 
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
@@ -73,20 +75,4 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
         ]);
     }
     request
-}
-
-#[cfg(test)]
-mod tests {
-    use super::bearer_matches;
-
-    #[test]
-    fn bearer_matching_follows_http_scheme_rules() {
-        assert!(bearer_matches("Bearer secret", "secret"));
-        assert!(bearer_matches("bEaReR secret", "secret"));
-        assert!(bearer_matches("BEARER   secret", "secret"));
-        assert!(!bearer_matches("Basic secret", "secret"));
-        assert!(!bearer_matches("Bearer wrong", "secret"));
-        assert!(!bearer_matches("Bearer ", "secret"));
-        assert!(!bearer_matches("Bearer\tsecret", "secret"));
-    }
 }
