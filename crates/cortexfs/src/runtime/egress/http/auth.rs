@@ -21,7 +21,7 @@ pub(super) fn authorize_provider_credential(
     }) {
         return Ok(());
     }
-    Err(Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
+    Err(Error::new(ErrorKind::PermissionDenied, "invalid provider credential"))
 }
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
