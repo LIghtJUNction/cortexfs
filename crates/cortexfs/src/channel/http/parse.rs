@@ -71,10 +71,5 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     }
     body.truncate(length);
     let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
-    Ok(HttpRequest {
-        method,
-        path,
-        headers,
-        body,
-    })
+    Ok(HttpRequest { method, path, headers, body })
 }
