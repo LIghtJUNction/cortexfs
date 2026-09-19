@@ -1,6 +1,6 @@
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
-use std::io::{Error, ErrorKind};
+use std::io::ErrorKind;
 pub(super) fn is_bearer(value: &str, token: &str) -> bool {
     value.split_once(' ').is_some_and(|(scheme, value)| {
         scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
@@ -21,7 +21,7 @@ pub(super) fn authorize_provider_credential(
     }) {
         return Ok(());
     }
-    Err(Error::new(ErrorKind::PermissionDenied, "invalid provider credential"))
+    Err(ErrorKind::PermissionDenied.into())
 }
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
