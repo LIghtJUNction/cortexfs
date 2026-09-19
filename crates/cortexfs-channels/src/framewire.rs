@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{CHANNEL_SOCKET_ABI, ChannelError, ChannelFrame, ChannelFrameBody};
+use crate::{validate_bounded_value, CHANNEL_SOCKET_ABI, ChannelError, ChannelFrame, ChannelFrameBody};
 
 pub const MAX_CHANNEL_FRAME_BYTES: usize = 256 * 1024;
 
@@ -59,11 +59,11 @@ impl ChannelFrame {
         }
         match &self.frame {
             ChannelFrameBody::Inbound { event_id, message } => {
-                valid(event_id)?;
+                validate_bounded_value(event_id)?;
                 message.body.validate()
             }
             ChannelFrameBody::InboundEvent { event_id, event } => {
-                valid(event_id)?;
+                validate_bounded_value(event_id)?;
                 event.validate()
             }
             ChannelFrameBody::Deliver {
@@ -74,13 +74,13 @@ impl ChannelFrame {
                 request_id,
                 message,
             } => {
-                valid(request_id)?;
+                validate_bounded_value(request_id)?;
                 message.body.validate()
             }
             ChannelFrameBody::Effect {
                 request_id, effect, ..
             } => {
-                valid(request_id)?;
+                validate_bounded_value(request_id)?;
                 effect.validate()
             }
             ChannelFrameBody::Command {
@@ -95,12 +95,12 @@ impl ChannelFrame {
                 command_id,
                 ..
             } => {
-                valid(request_id)?;
-                valid(session)?;
-                valid(command_id)
+                validate_bounded_value(request_id)?;
+                validate_bounded_value(session)?;
+                validate_bounded_value(command_id)
             }
             ChannelFrameBody::ControlRequest { request_id, action } => {
-                valid(request_id)?;
+                validate_bounded_value(request_id)?;
                 action.validate().map_err(|error| {
                     ChannelError::InvalidMessage(format!("invalid control action: {error}"))
                 })
@@ -108,8 +108,8 @@ impl ChannelFrame {
             ChannelFrameBody::ControlResponse {
                 request_id, error, ..
             } => {
-                valid(request_id)?;
-                error.as_deref().map(valid).transpose().map(|_| ())
+                validate_bounded_value(request_id)?;
+                error.as_deref().map(validate_bounded_value).transpose().map(|_| ())
             }
             ChannelFrameBody::Error {
                 request_id,
@@ -117,9 +117,9 @@ impl ChannelFrame {
                 message,
                 ..
             } => {
-                request_id.as_deref().map(valid).transpose()?;
-                valid(code)?;
-                valid(message)
+                request_id.as_deref().map(validate_bounded_value).transpose()?;
+                validate_bounded_value(code)?;
+                validate_bounded_value(message)
             }
             ChannelFrameBody::Hello {
                 request_id,
@@ -130,23 +130,15 @@ impl ChannelFrame {
                 request_id,
                 channel,
             } => {
-                valid(request_id)?;
-                valid(channel.as_str())
+                validate_bounded_value(request_id)?;
+                validate_bounded_value(channel.as_str())
             }
             ChannelFrameBody::Start { request_id }
             | ChannelFrameBody::Stop { request_id }
             | ChannelFrameBody::Receipt { request_id, .. }
             | ChannelFrameBody::HealthRequest { request_id }
-            | ChannelFrameBody::HealthResponse { request_id, .. } => valid(request_id),
+            | ChannelFrameBody::HealthResponse { request_id, .. } => validate_bounded_value(request_id),
             ChannelFrameBody::Health { .. } | ChannelFrameBody::Event { .. } => Ok(()),
         }
-    }
-}
-
-fn valid(value: &str) -> Result<(), ChannelError> {
-    if value.is_empty() || value.len() > 256 || value.contains('\0') {
-        Err(ChannelError::InvalidValue(value.to_owned()))
-    } else {
-        Ok(())
     }
 }
