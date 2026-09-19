@@ -1,5 +1,10 @@
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
+pub(super) fn is_bearer(value: &str, token: &str) -> bool {
+    value.split_once(' ').is_some_and(|(scheme, value)| {
+        scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
+    })
+}
 pub(super) fn authorize_provider_credential(
     request: &Request,
     target: &ProviderTarget,
@@ -8,13 +13,10 @@ pub(super) fn authorize_provider_credential(
     let Some(credential) = target.credential.as_ref() else {
         return Ok(());
     };
-    let bearer = format!("Bearer {}", credential.token);
-    let client_bearer = format!("Bearer {client_token}");
     if request.headers.iter().any(|header| {
-        let name = header.0.as_str();
-        let value = header.1.as_str();
-        (name == "authorization" && (value == bearer || value == client_bearer))
-            || (name == "x-api-key" && value == credential.token)
+        (header.0 == "authorization"
+            && (is_bearer(&header.1, &credential.token) || is_bearer(&header.1, client_token)))
+            || (header.0 == "x-api-key" && header.1 == credential.token)
     }) {
         return Ok(());
     }
@@ -23,18 +25,18 @@ pub(super) fn authorize_provider_credential(
         "invalid provider egress credential",
     ))
 }
-
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
         return request;
     };
     request.headers.retain(|header| {
-        let name = header.0.as_str();
-        !matches!(name, "authorization" | "x-api-key" | "anthropic-version")
-            && !matches!(
-                name,
-                "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
-            )
+        !matches!(
+            header.0.as_str(),
+            "authorization" | "x-api-key" | "anthropic-version"
+        ) && !matches!(
+            header.0.as_str(),
+            "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
+        )
     });
     if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
         request.headers.extend([
@@ -53,15 +55,19 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
             .push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
     }
     if let Some(account_id) = credential.codex_account_id.as_deref() {
+        let user_agent = concat!("cortexfs/", env!("CARGO_PKG_VERSION")).to_owned();
         request.headers.extend([
             ("chatgpt-account-id".to_owned(), account_id.to_owned()),
             ("originator".to_owned(), "ctx".to_owned()),
             ("session-id".to_owned(), credential.run.clone()),
-            (
-                "user-agent".to_owned(),
-                concat!("cortexfs/", env!("CARGO_PKG_VERSION")).to_owned(),
-            ),
+            ("user-agent".to_owned(), user_agent),
         ]);
     }
     request
+}
+#[cfg(test)]
+#[test]
+fn bearer_matching_follows_http_rules() {
+    assert!(is_bearer("bEaReR   secret", "secret"));
+    assert!(!is_bearer("Basic secret", "secret") && !is_bearer("Bearer wrong", "secret"));
 }
