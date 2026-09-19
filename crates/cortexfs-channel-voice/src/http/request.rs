@@ -66,5 +66,7 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 fn content_length_fails_closed() {
     assert_eq!(content_length(None).unwrap(), 0);
     assert_eq!(content_length(Some("2")).unwrap(), 2);
-    assert!(content_length(Some("nope")).is_err());
+    assert!(["nope", "184467440737095516160"]
+        .into_iter()
+        .all(|value| content_length(Some(value)).is_err()));
 }
