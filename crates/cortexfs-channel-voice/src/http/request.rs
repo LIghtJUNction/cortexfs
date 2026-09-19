@@ -10,7 +10,8 @@ fn content_length(value: Option<&str>) -> Result<usize> {
     if value.starts_with('+') {
         return Err(Error::Protocol("invalid content length".into()));
     }
-    value.parse().map_err(|error| Error::Protocol(error.to_string()))
+    let parsed = value.parse::<usize>();
+    parsed.map_err(|error| Error::Protocol(format!("invalid content length: {error}")))
 }
 
 pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, String>, String)> {
@@ -27,13 +28,11 @@ pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, Str
             return Err(Error::Protocol("webhook headers are too large".to_owned()));
         }
     };
-    let header_end = split + 4;
     let header = bytes
         .get(..split)
         .ok_or(Error::Protocol("invalid webhook headers".into()))?;
-    let header_text = String::from_utf8_lossy(header);
     let mut headers = BTreeMap::new();
-    for line in header_text.lines().skip(1) {
+    for line in String::from_utf8_lossy(header).lines().skip(1) {
         if let Some((name, value)) = line.split_once(':') {
             headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned());
         }
@@ -42,14 +41,14 @@ pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, Str
     if length > 1_048_576 {
         return Err(Error::Protocol("webhook body is too large".to_owned()));
     }
-    while bytes.len() < header_end + length {
+    while bytes.len() < split + 4 + length {
         let count = stream.read_buf(&mut bytes).await?;
         if count == 0 {
             return Err(Error::Protocol("webhook body ended early".to_owned()));
         }
     }
     let body = bytes
-        .get(header_end..header_end + length)
+        .get(split + 4..split + 4 + length)
         .ok_or(Error::Protocol("invalid webhook body".into()))?;
     Ok((headers, String::from_utf8_lossy(body).into_owned()))
 }
@@ -65,6 +64,7 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 fn content_length_fails_closed() {
     assert_eq!(content_length(None).unwrap(), 0);
     assert_eq!(content_length(Some("2")).unwrap(), 2);
-    let invalid = ["x", "+2", "184467440737095516160"];
-    assert!(invalid.into_iter().all(|value| content_length(Some(value)).is_err()));
+    assert!(content_length(Some("x")).is_err());
+    assert!(content_length(Some("+2")).is_err());
+    assert!(content_length(Some("184467440737095516160")).is_err());
 }
