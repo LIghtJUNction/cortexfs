@@ -102,6 +102,8 @@ for line in sys.stdin:
   result={"content":[{"type":"text","text":"ok"}],"isError":False}
   if mode.startswith("modern"): result["resultType"]="complete"
  else: result={}
+ if mode=="modernmissingresulttype": result.pop("resultType",None)
+ if mode=="moderninputrequired": result["resultType"]="input_required"
  if mode=="error" and m=="tools/list":
   print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32603,"message":"secret-value"}}),flush=True); continue
  if mode=="callerror" and m=="tools/call":
