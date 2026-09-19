@@ -1,9 +1,6 @@
 use std::net::TcpStream;
 
-use tungstenite::{
-    accept_hdr,
-    http::{HeaderMap, Response},
-};
+use tungstenite::{accept_hdr, http::Response};
 
 use super::{WebConfig, WebError};
 
