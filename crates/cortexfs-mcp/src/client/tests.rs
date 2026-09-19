@@ -1,4 +1,5 @@
 use super::*;
+use nix::{errno::Errno, sys::signal};
 use std::{collections::BTreeMap, fs};
 
 fn server(mode: &str) -> Server {
@@ -62,8 +63,8 @@ fn assert_reaped(path: &std::path::Path) -> io::Result<()> {
         .parse::<i32>()
         .map(nix::unistd::Pid::from_raw)
         .map_err(io::Error::other)?;
-    assert_eq!(nix::sys::signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
-    assert_eq!(nix::sys::signal::killpg(pid, None), Err(nix::errno::Errno::ESRCH));
+    assert_eq!(signal::kill(pid, None), Err(Errno::ESRCH));
+    assert_eq!(signal::killpg(pid, None), Err(Errno::ESRCH));
     Ok(())
 }
 
@@ -231,10 +232,7 @@ fn descendant_pipe_holder_is_killed_without_blocking_drop() -> io::Result<()> {
     drop(client);
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_reaped(&parent)?;
-    assert_eq!(
-        nix::sys::signal::kill(descendant_pid, None),
-        Err(nix::errno::Errno::ESRCH)
-    );
+    assert_eq!(signal::kill(descendant_pid, None), Err(Errno::ESRCH));
     Ok(())
 }
 
