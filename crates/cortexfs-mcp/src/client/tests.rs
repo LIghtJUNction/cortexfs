@@ -62,9 +62,8 @@ fn assert_reaped(path: &std::path::Path) -> io::Result<()> {
         .parse::<i32>()
         .map(nix::unistd::Pid::from_raw)
         .map_err(io::Error::other)?;
-    for result in [nix::sys::signal::kill(pid, None), nix::sys::signal::killpg(pid, None)] {
-        assert_eq!(result, Err(nix::errno::Errno::ESRCH));
-    }
+    assert_eq!(nix::sys::signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
+    assert_eq!(nix::sys::signal::killpg(pid, None), Err(nix::errno::Errno::ESRCH));
     Ok(())
 }
 
