@@ -1,13 +1,8 @@
-use std::{
-    io::{BufRead, BufReader, Read, Write},
-    net::{TcpListener, TcpStream},
-    thread,
-};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::thread;
 
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "the mock server is shared by crate-local channel tests"
-)]
+#[expect(clippy::redundant_pub_crate, reason = "shared by crate-local channel tests")]
 pub(crate) fn server<const N: usize>(
     prefix: &str,
     responses: [&str; N],
@@ -67,5 +62,9 @@ fn content_length_framing_fails_closed() {
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length : 0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length\t: 0\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\nBad@Header: x\r\n\r\n").is_err());
+    assert!(parse_raw("GET / HTTP/1.1 extra\r\n\r\n").is_err());
+    assert!(parse_raw("GET / HTTP/2.0\r\n\r\n").is_err());
+    assert!(parse_raw("GE@T / HTTP/1.1\r\n\r\n").is_err());
+    assert!(parse_raw("GET / HTTP/1.0\r\n\r\n").is_ok());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n").is_ok());
 }
