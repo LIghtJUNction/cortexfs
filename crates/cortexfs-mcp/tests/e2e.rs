@@ -21,6 +21,9 @@ for line in sys.stdin:
  r=json.loads(line)
  if "id" not in r: continue
  m=r.get("method")
+ if m=="server/discover":
+  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32601,"message":"unknown"}}),flush=True)
+  continue
  if m=="initialize":
   assert r.get("params",{}).get("capabilities")=={}
   result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"mock","version":"1"}}
