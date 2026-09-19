@@ -22,7 +22,9 @@ fn server(mode: &str) -> Server {
 
 fn server_with_pid(mode: &str, path: &std::path::Path) -> Server {
     let mut value = server(mode);
-    value.env.insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
+    value
+        .env
+        .insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
     value
 }
 
@@ -202,10 +204,8 @@ fn stderr_has_an_independent_hard_limit() -> io::Result<()> {
 
 #[test]
 fn rpc_errors_and_duplicate_names_are_rejected() -> io::Result<()> {
-    let mut error = Client::start(&server("error"))?;
-    assert!(error.tools().is_err());
-    let mut duplicate = Client::start(&server("duplicate"))?;
-    assert!(duplicate.tools().is_err());
+    assert!(Client::start(&server("error"))?.tools().is_err());
+    assert!(Client::start(&server("duplicate"))?.tools().is_err());
     Ok(())
 }
 
