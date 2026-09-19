@@ -62,8 +62,8 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 #[cfg(test)]
 #[test]
 fn content_length_fails_closed() {
-    assert_eq!(content_length(None).unwrap(), 0);
-    assert_eq!(content_length(Some("2")).unwrap(), 2);
+    assert_eq!(content_length(None).ok(), Some(0));
+    assert_eq!(content_length(Some("2")).ok(), Some(2));
     assert!(content_length(Some("x")).is_err());
     assert!(content_length(Some("+2")).is_err());
     assert!(content_length(Some("184467440737095516160")).is_err());
