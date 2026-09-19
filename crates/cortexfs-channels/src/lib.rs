@@ -51,5 +51,11 @@ pub use registry::ChannelRegistry;
 pub use route::ChannelSessionRoute;
 pub use wire::{CHANNEL_ABI, ChannelEnvelope, ChannelEvent};
 
+fn valid(value: &str) -> Result<(), ChannelError> {
+    (!value.is_empty() && value.len() <= 256 && !value.contains('\0'))
+        .then_some(())
+        .ok_or_else(|| ChannelError::InvalidValue(value.to_owned()))
+}
+
 #[cfg(test)]
 mod tests;

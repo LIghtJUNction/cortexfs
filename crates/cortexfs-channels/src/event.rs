@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ChannelError, MessageBody, MessageTarget, Participant};
+use crate::{ChannelError, MessageBody, MessageTarget, Participant, valid};
 
 /// Shared context carried by an incoming non-message channel event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -140,10 +140,11 @@ impl ChannelIncomingEvent {
     }
 }
 
-fn valid(value: &str) -> Result<(), ChannelError> {
-    if value.is_empty() || value.len() > 256 || value.contains('\0') {
-        Err(ChannelError::InvalidValue(value.to_owned()))
-    } else {
-        Ok(())
-    }
+#[cfg(test)]
+#[test]
+fn bounded_values_match_wire_contract() {
+    assert!(valid("").is_err());
+    assert!(valid(&"x".repeat(256)).is_ok());
+    assert!(valid(&"x".repeat(257)).is_err());
+    assert!(valid("x\0").is_err());
 }

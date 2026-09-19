@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{CHANNEL_SOCKET_ABI, ChannelError, ChannelFrame, ChannelFrameBody};
+use crate::{CHANNEL_SOCKET_ABI, ChannelError, ChannelFrame, ChannelFrameBody, valid};
 
 pub const MAX_CHANNEL_FRAME_BYTES: usize = 256 * 1024;
 
@@ -140,13 +140,5 @@ impl ChannelFrame {
             | ChannelFrameBody::HealthResponse { request_id, .. } => valid(request_id),
             ChannelFrameBody::Health { .. } | ChannelFrameBody::Event { .. } => Ok(()),
         }
-    }
-}
-
-fn valid(value: &str) -> Result<(), ChannelError> {
-    if value.is_empty() || value.len() > 256 || value.contains('\0') {
-        Err(ChannelError::InvalidValue(value.to_owned()))
-    } else {
-        Ok(())
     }
 }
