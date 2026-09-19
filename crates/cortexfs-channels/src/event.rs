@@ -45,16 +45,24 @@ pub enum ChannelIncomingEvent {
 
 impl ChannelEventContext {
     pub fn validate(&self) -> Result<(), ChannelError> {
-        valid(self.target.channel.as_str())?;
-        valid(self.target.conversation.as_str())?;
-        self.target.thread.as_deref().map(valid).transpose()?;
-        self.target.reply_to.as_deref().map(valid).transpose()?;
+        crate::validate_bounded_value(self.target.channel.as_str())?;
+        crate::validate_bounded_value(self.target.conversation.as_str())?;
+        self.target
+            .thread
+            .as_deref()
+            .map(crate::validate_bounded_value)
+            .transpose()?;
+        self.target
+            .reply_to
+            .as_deref()
+            .map(crate::validate_bounded_value)
+            .transpose()?;
         if let Some(participant) = self.participant.as_ref() {
-            valid(&participant.id)?;
+            crate::validate_bounded_value(&participant.id)?;
         }
         for (key, value) in &self.metadata {
-            valid(key)?;
-            valid(value)?;
+            crate::validate_bounded_value(key)?;
+            crate::validate_bounded_value(value)?;
         }
         Ok(())
     }
@@ -123,27 +131,28 @@ impl ChannelIncomingEvent {
             Self::Reaction {
                 message_id, emoji, ..
             } => {
-                valid(message_id)?;
-                valid(emoji)
+                crate::validate_bounded_value(message_id)?;
+                crate::validate_bounded_value(emoji)
             }
             Self::Typing { .. } => Ok(()),
             Self::MessageEdited {
                 message_id, body, ..
             } => {
-                valid(message_id)?;
+                crate::validate_bounded_value(message_id)?;
                 body.validate()
             }
             Self::MessageDeleted { message_id, .. } | Self::Read { message_id, .. } => {
-                valid(message_id)
+                crate::validate_bounded_value(message_id)
             }
         }
     }
 }
 
-fn valid(value: &str) -> Result<(), ChannelError> {
-    if value.is_empty() || value.len() > 256 || value.contains('\0') {
-        Err(ChannelError::InvalidValue(value.to_owned()))
-    } else {
-        Ok(())
-    }
+#[cfg(test)]
+#[test]
+fn bounded_values_match_wire_contract() {
+    assert!(crate::validate_bounded_value("").is_err());
+    assert!(crate::validate_bounded_value(&"x".repeat(256)).is_ok());
+    assert!(crate::validate_bounded_value(&"x".repeat(257)).is_err());
+    assert!(crate::validate_bounded_value("x\0").is_err());
 }
