@@ -25,7 +25,6 @@ pub(super) fn authorize_provider_credential(
         "invalid provider egress credential",
     ))
 }
-
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
         return request;

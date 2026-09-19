@@ -48,7 +48,9 @@ pub(super) fn relay(
     }
     let mut request = inject_provider_credential(request, target);
     if target.credential.is_none() {
-        request.headers.retain(|h| h.0 != "authorization" || !is_bearer(&h.1, client_token));
+        request
+            .headers
+            .retain(|h| h.0 != "authorization" || !is_bearer(&h.1, client_token));
     }
     run_curl(local, target, &request, shutdown)
 }
