@@ -33,10 +33,7 @@ pub(super) fn parse_headers(
         let (raw_name, raw_value) = line
             .split_once(':')
             .ok_or_else(|| invalid("invalid provider HTTP header"))?;
-        if raw_name.is_empty()
-            || !raw_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+        if !crate::support::http_token(raw_name)
             || raw_value
                 .bytes()
                 .any(|byte| (byte < b' ' && byte != b'\t') || byte == 0x7f)
