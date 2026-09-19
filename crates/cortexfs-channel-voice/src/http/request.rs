@@ -8,10 +8,8 @@ use tokio::{
 use crate::error::{Error, Result};
 
 fn content_length(value: Option<&str>) -> Result<usize> {
-    let value = value.unwrap_or("0");
-    value
-        .parse()
-        .map_err(|_error| Error::Protocol("invalid content length".to_owned()))
+    let parsed = value.unwrap_or("0").parse();
+    parsed.map_err(|_error| Error::Protocol("invalid content length".to_owned()))
 }
 
 pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, String>, String)> {
@@ -65,9 +63,6 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 fn content_length_fails_closed() {
     assert_eq!(content_length(None).unwrap(), 0);
     assert_eq!(content_length(Some("2")).unwrap(), 2);
-    assert!(
-        ["x", "184467440737095516160"]
-            .iter()
-            .all(|v| content_length(Some(v)).is_err())
-    );
+    assert!(content_length(Some("x")).is_err());
+    assert!(content_length(Some("184467440737095516160")).is_err());
 }
