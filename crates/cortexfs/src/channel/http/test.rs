@@ -52,3 +52,30 @@ fn read_request(stream: &TcpStream) -> std::io::Result<()> {
     let mut body = vec![0_u8; length];
     reader.read_exact(&mut body)
 }
+
+fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let address = listener.local_addr()?;
+    let request = request.as_bytes().to_vec();
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).expect("connect test client");
+        stream.write_all(&request).expect("write test request");
+    });
+    let (mut stream, _) = listener.accept()?;
+    let result = super::read_request(&mut stream, 1024);
+    client.join().expect("join test client");
+    result
+}
+
+#[test]
+fn content_length_uses_http_decimal_grammar() {
+    assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: +2\r\n\r\n{}").is_err());
+    let valid = parse_raw("POST / HTTP/1.1\r\nContent-Length: 02\r\n\r\n{}").expect("valid length");
+    assert_eq!(valid.body, "{}");
+}
+
+#[test]
+fn duplicate_content_length_fails_closed() {
+    let request = "POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n{}";
+    assert!(parse_raw(request).is_err());
+}
