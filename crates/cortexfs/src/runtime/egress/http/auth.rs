@@ -1,5 +1,6 @@
 use super::{ProviderTarget, Request};
 use crate::provider::auth::CredentialKind;
+use std::io::ErrorKind;
 pub(super) fn is_bearer(value: &str, token: &str) -> bool {
     value.split_once(' ').is_some_and(|(scheme, value)| {
         scheme.eq_ignore_ascii_case("bearer") && value.trim_start_matches(' ') == token
@@ -20,20 +21,16 @@ pub(super) fn authorize_provider_credential(
     }) {
         return Ok(());
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        "invalid provider egress credential",
-    ))
+    Err(std::io::Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
 }
 pub(super) fn inject_provider_credential(mut request: Request, target: &ProviderTarget) -> Request {
     let Some(credential) = target.credential.as_ref() else {
         return request;
     };
     request.headers.retain(|header| {
-        let name = header.0.as_str();
-        !matches!(name, "authorization" | "x-api-key" | "anthropic-version")
+        !matches!(header.0.as_str(), "authorization" | "x-api-key" | "anthropic-version")
             && !matches!(
-                name,
+                header.0.as_str(),
                 "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
             )
     });
@@ -58,7 +55,10 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
             ("chatgpt-account-id".to_owned(), account_id.to_owned()),
             ("originator".to_owned(), "ctx".to_owned()),
             ("session-id".to_owned(), credential.run.clone()),
-            ("user-agent".to_owned(), concat!("cortexfs/", env!("CARGO_PKG_VERSION")).into()),
+            (
+                "user-agent".to_owned(),
+                concat!("cortexfs/", env!("CARGO_PKG_VERSION")).into(),
+            ),
         ]);
     }
     request
