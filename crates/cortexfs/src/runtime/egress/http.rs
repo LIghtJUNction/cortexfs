@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use auth::{authorize_provider_credential, bearer_matches, inject_provider_credential};
+use auth::{authorize_provider_credential, inject_provider_credential, is_bearer};
 use curl::run_curl;
 use request::parse_request;
 
@@ -48,9 +48,7 @@ pub(super) fn relay(
     }
     let mut request = inject_provider_credential(request, target);
     if target.credential.is_none() {
-        request.headers.retain(|header| {
-            !(header.0 == "authorization" && bearer_matches(&header.1, client_token))
-        });
+        request.headers.retain(|h| h.0 != "authorization" || !is_bearer(&h.1, client_token));
     }
     run_curl(local, target, &request, shutdown)
 }
