@@ -3,12 +3,12 @@ use std::net::{TcpListener, TcpStream};
 
 pub(in crate::channel) fn server<const N: usize>(
     prefix: &str,
-    responses: [&str; N],
+    responses: [&'static str; N],
 ) -> std::io::Result<(String, std::thread::JoinHandle<()>)> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let address = format!("http://{}{prefix}", listener.local_addr()?);
     let server = std::thread::spawn(move || {
-        for body in responses.map(str::to_owned) {
+        for body in responses {
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
             };
