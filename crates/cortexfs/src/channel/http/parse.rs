@@ -30,7 +30,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     };
     let header = from_utf8(&bytes[..header_end]).map_err(|_| invalid("HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
-    let mut request = lines.next().unwrap_or_default().split_whitespace();
+    let mut request = lines.next().unwrap_or_default().split(' ');
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
     let valid = reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_ok()
