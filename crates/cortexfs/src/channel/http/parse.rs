@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io::{Error, ErrorKind, Read}, net::TcpStream, str::from_utf8};
+use std::{collections::BTreeMap, io::{Error, ErrorKind, Read}, net::TcpStream};
 
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -28,17 +28,16 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             break position + 4;
         }
     };
-    let header = from_utf8(&bytes[..header_end]).map_err(|_| invalid("invalid HTTP headers"))?;
+    let header = std::str::from_utf8(bytes.get(..header_end).unwrap_or_default())
+        .map_err(|_error| invalid("HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
-    let mut request = lines.next().unwrap_or_default().split(' ');
-    let method = request.next().unwrap_or_default().to_owned();
-    let path = request.next().unwrap_or_default().to_owned();
-    if path.is_empty() || reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_err()
-        || !matches!(request.next(), Some("HTTP/1.0" | "HTTP/1.1"))
-        || request.next().is_some()
-    {
-        return Err(invalid("invalid HTTP request line"));
-    }
+    let (method, path) = lines
+        .next()
+        .and_then(|line| line.strip_suffix(" HTTP/1.1").or_else(|| line.strip_suffix(" HTTP/1.0")))
+        .and_then(|line| line.split_once(' '))
+        .filter(|(_, path)| !path.is_empty() && path.bytes().all(|byte| !byte.is_ascii_whitespace()))
+        .filter(|(method, _)| reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_ok())
+        .ok_or_else(|| invalid("invalid HTTP request line"))?;
     let mut headers = BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
@@ -66,8 +65,8 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     body.resize(length, 0);
     stream.read_exact(body.get_mut(have..).unwrap_or_default())?;
     Ok(HttpRequest {
-        method,
-        path,
+        method: method.to_owned(),
+        path: path.to_owned(),
         headers,
         body: String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?,
     })
