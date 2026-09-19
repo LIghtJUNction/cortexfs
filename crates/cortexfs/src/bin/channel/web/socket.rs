@@ -1,9 +1,6 @@
 use std::net::TcpStream;
 
-use tungstenite::{
-    accept_hdr,
-    http::{HeaderMap, Response},
-};
+use tungstenite::{accept_hdr, http::Response};
 
 use super::{WebConfig, WebError};
 
@@ -35,7 +32,13 @@ pub(super) fn serve(stream: TcpStream, config: &WebConfig) -> Result<(), WebErro
             if request.uri().path() != path {
                 return Err(rejection(404, "not found"));
             }
-            if !authorized(request.headers(), token.as_deref()) {
+            if !crate::bearer_authorized(
+                request
+                    .headers()
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok()),
+                token.as_deref(),
+            ) {
                 return Err(rejection(401, "unauthorized"));
             }
             Ok(response)
@@ -44,17 +47,6 @@ pub(super) fn serve(stream: TcpStream, config: &WebConfig) -> Result<(), WebErro
     .map_err(|error| WebError::Handshake(error.to_string()))?;
     let request = frame::read_request(&mut socket)?;
     pump::serve(socket, config, &request)
-}
-
-fn authorized(headers: &HeaderMap, token: Option<&str>) -> bool {
-    let Some(token) = token else {
-        return true;
-    };
-    headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        == Some(token)
 }
 
 fn rejection(status: u16, body: &'static str) -> Rejection {

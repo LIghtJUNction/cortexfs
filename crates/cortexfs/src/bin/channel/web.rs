@@ -57,7 +57,10 @@ fn handle(config: &WebConfig, request: &HttpRequest) -> HttpResponse {
     if request.method != "POST" || request.path != config.path {
         return HttpResponse::error(404, "not found");
     }
-    if !authorized(request, config.token.as_deref()) {
+    if !crate::bearer_authorized(
+        request.headers.get("authorization").map(String::as_str),
+        config.token.as_deref(),
+    ) {
         return HttpResponse::error(401, "unauthorized");
     }
     let Ok(frame) = serde_json::from_str::<InteractionFrame>(&request.body) else {
@@ -91,15 +94,4 @@ fn handle(config: &WebConfig, request: &HttpRequest) -> HttpResponse {
         Ok(()) => HttpResponse::ndjson(body),
         Err(_error) => HttpResponse::error(502, "agent interaction failed"),
     }
-}
-
-fn authorized(request: &HttpRequest, token: Option<&str>) -> bool {
-    let Some(token) = token else {
-        return true;
-    };
-    request
-        .headers
-        .get("authorization")
-        .and_then(|value| value.strip_prefix("Bearer "))
-        == Some(token)
 }

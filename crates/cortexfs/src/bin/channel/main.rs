@@ -12,6 +12,20 @@ pub mod webhook;
 use std::io::Write as _;
 use std::process::ExitCode;
 
+fn bearer_authorized(value: Option<&str>, token: Option<&str>) -> bool {
+    let Some(token) = token else {
+        return true;
+    };
+    let Some((scheme, credential)) = value.and_then(|value| value.split_once(' ')) else {
+        return false;
+    };
+    let credential = credential.trim_start_matches(' ');
+    if credential.is_empty() || !scheme.eq_ignore_ascii_case("bearer") {
+        return false;
+    }
+    credential == token
+}
+
 fn main() -> ExitCode {
     install_crypto_provider();
     match run() {
@@ -33,7 +47,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::install_crypto_provider;
+    use super::{bearer_authorized, install_crypto_provider};
+
+    #[test]
+    fn bearer_auth_follows_http_scheme_rules() {
+        assert!(bearer_authorized(None, None));
+        assert!(bearer_authorized(Some("Bearer secret"), Some("secret")));
+        assert!(bearer_authorized(Some("bEaReR secret"), Some("secret")));
+        assert!(bearer_authorized(Some("BEARER   secret"), Some("secret")));
+        assert!(!bearer_authorized(None, Some("secret")));
+        assert!(!bearer_authorized(Some("Basic secret"), Some("secret")));
+        assert!(!bearer_authorized(Some("Bearer wrong"), Some("secret")));
+        assert!(!bearer_authorized(Some("Bearer "), Some("")));
+    }
 
     #[test]
     fn channel_startup_installs_rustls_provider() {
