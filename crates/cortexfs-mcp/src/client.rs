@@ -333,9 +333,9 @@ impl Client {
             .cloned()
             .filter(|result| {
                 self.protocol.is_none()
-                    || !result
+                    || result
                         .get("resultType")
-                        .is_some_and(|value| value.as_str() != Some("complete"))
+                        .is_none_or(|value| value.as_str() == Some("complete"))
             })
             .ok_or_else(|| invalid_data("missing or unsupported JSON-RPC result"))
     }
