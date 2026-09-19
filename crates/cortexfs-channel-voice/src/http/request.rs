@@ -1,31 +1,24 @@
 use std::collections::BTreeMap;
 
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 use crate::error::{Error, Result};
 
 fn content_length(value: Option<&str>) -> Result<usize> {
+    let value = value.unwrap_or("0");
     value
-        .unwrap_or("0")
         .parse()
         .map_err(|_| Error::Protocol("invalid content length".into()))
 }
 
 pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, String>, String)> {
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(4096);
     let split = loop {
-        let mut chunk = [0_u8; 4096];
-        let count = stream.read(&mut chunk).await?;
+        let count = stream.read_buf(&mut bytes).await?;
         if count == 0 {
             return Err(Error::Protocol("webhook request ended early".to_owned()));
         }
-        let part = chunk
-            .get(..count)
-            .ok_or(Error::Protocol("invalid read size".into()))?;
-        bytes.extend_from_slice(part);
         if let Some(index) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
             break index;
         }
@@ -49,19 +42,13 @@ pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, Str
         return Err(Error::Protocol("webhook body is too large".to_owned()));
     }
     while bytes.len() < header_end + length {
-        let mut chunk = [0_u8; 4096];
-        let count = stream.read(&mut chunk).await?;
+        let count = stream.read_buf(&mut bytes).await?;
         if count == 0 {
             return Err(Error::Protocol("webhook body ended early".to_owned()));
         }
-        let part = chunk
-            .get(..count)
-            .ok_or(Error::Protocol("invalid read size".into()))?;
-        bytes.extend_from_slice(part);
     }
-    let end = header_end + length;
     let body = bytes
-        .get(header_end..end)
+        .get(header_end..header_end + length)
         .ok_or(Error::Protocol("invalid webhook body".into()))?;
     Ok((headers, String::from_utf8_lossy(body).into_owned()))
 }
@@ -77,9 +64,6 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 fn content_length_fails_closed() {
     assert_eq!(content_length(None).unwrap(), 0);
     assert_eq!(content_length(Some("2")).unwrap(), 2);
-    assert!(
-        ["x", "184467440737095516160"]
-            .into_iter()
-            .all(|v| content_length(Some(v)).is_err())
-    );
+    assert!(content_length(Some("x")).is_err());
+    assert!(content_length(Some("184467440737095516160")).is_err());
 }
