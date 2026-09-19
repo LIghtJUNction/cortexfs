@@ -2,7 +2,21 @@ use reqwest::blocking::Client;
 use serde_json::{Value, json};
 
 use super::{Reply, config, join, receive, server, target};
-use crate::channel::discord::invoke;
+use crate::channel::discord::{DiscordError, invoke, required_string};
+
+#[test]
+fn required_string_validation_is_shared() {
+    let valid = json!({"field":"value"});
+    assert_eq!(required_string(&valid, "field").expect("valid field"), "value");
+    assert!(matches!(
+        required_string(&json!({"field":""}), "field"),
+        Err(DiscordError::Invalid("field"))
+    ));
+    assert!(matches!(
+        required_string(&json!({"field":"a\0b"}), "field"),
+        Err(DiscordError::Invalid("field"))
+    ));
+}
 
 #[test]
 fn command_operations_use_discord_api_routes() -> Result<(), Box<dyn std::error::Error>> {
