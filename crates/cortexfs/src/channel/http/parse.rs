@@ -57,9 +57,19 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         let (name, value) = line
             .split_once(':')
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid HTTP header"))?;
-        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned());
+        let name = name.trim().to_ascii_lowercase();
+        if name == "content-length" && headers.contains_key(&name) {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "duplicate content length",
+            ));
+        }
+        headers.insert(name, value.trim().to_owned());
     }
     let length = headers.get("content-length").map_or(Ok(0), |value| {
+        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(Error::new(ErrorKind::InvalidData, "invalid content length"));
+        }
         value
             .parse::<usize>()
             .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid content length"))
