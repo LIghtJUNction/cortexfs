@@ -4,6 +4,10 @@ use std::net::TcpStream;
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 
+fn invalid(message: &'static str) -> Error {
+    Error::new(ErrorKind::InvalidData, message)
+}
+
 /// Parsed request data needed by a platform webhook codec.
 #[derive(Clone, Debug)]
 pub struct HttpRequest {
@@ -23,45 +27,46 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         }
         bytes.extend_from_slice(&buffer[..read]);
         if bytes.len() > MAX_HEADER_BYTES {
-            return Err(Error::new(ErrorKind::InvalidData, "HTTP headers too large"));
+            return Err(invalid("HTTP headers too large"));
         }
         if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
             break position + 4;
         }
     };
     let header = std::str::from_utf8(&bytes[..header_end])
-        .map_err(|_error| Error::new(ErrorKind::InvalidData, "HTTP headers are not UTF-8"))?;
+        .map_err(|_error| invalid("HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
     let mut request = lines
         .next()
-        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "missing HTTP request line"))?
+        .ok_or_else(|| invalid("missing HTTP request line"))?
         .split_whitespace();
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
     if method.is_empty() || path.is_empty() {
-        return Err(Error::new(ErrorKind::InvalidData, "invalid HTTP request line"));
+        return Err(invalid("invalid HTTP request line"));
     }
     let mut headers = BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid HTTP header"))?;
+            .ok_or_else(|| invalid("invalid HTTP header"))?;
         let name = name.trim().to_ascii_lowercase();
-        if name == "content-length" && headers.contains_key(&name) {
-            return Err(Error::new(ErrorKind::InvalidData, "duplicate content length"));
+        if headers.insert(name.clone(), value.trim().to_owned()).is_some()
+            && name == "content-length"
+        {
+            return Err(invalid("duplicate content length"));
         }
-        headers.insert(name, value.trim().to_owned());
     }
     let length = headers.get("content-length").map_or(Ok(0), |value| {
-        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(Error::new(ErrorKind::InvalidData, "invalid content length"));
+        if !value.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(invalid("invalid content length"));
         }
         value
             .parse::<usize>()
-            .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid content length"))
+            .map_err(|_error| invalid("invalid content length"))
     })?;
     if length > max_body {
-        return Err(Error::new(ErrorKind::InvalidData, "HTTP body too large"));
+        return Err(invalid("HTTP body too large"));
     }
     let mut body = bytes.get(header_end..).unwrap_or_default().to_vec();
     while body.len() < length {
@@ -72,8 +77,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         body.extend_from_slice(&buffer[..read]);
     }
     body.truncate(length);
-    let body = String::from_utf8(body)
-        .map_err(|_error| Error::new(ErrorKind::InvalidData, "HTTP body is not UTF-8"))?;
+    let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
     Ok(HttpRequest {
         method,
         path,
