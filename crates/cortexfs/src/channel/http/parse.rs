@@ -36,10 +36,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     let header = std::str::from_utf8(&bytes[..header_end])
         .map_err(|_error| invalid("HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
-    let mut request = lines
-        .next()
-        .ok_or_else(|| invalid("missing HTTP request line"))?
-        .split_whitespace();
+    let mut request = lines.next().unwrap_or_default().split_whitespace();
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
     if method.is_empty() || path.is_empty() {
@@ -51,11 +48,10 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .split_once(':')
             .ok_or_else(|| invalid("invalid HTTP header"))?;
         let name = name.trim().to_ascii_lowercase();
-        if headers.insert(name.clone(), value.trim().to_owned()).is_some()
-            && name == "content-length"
-        {
+        if name == "content-length" && headers.contains_key(&name) {
             return Err(invalid("duplicate content length"));
         }
+        headers.insert(name, value.trim().to_owned());
     }
     let length = headers.get("content-length").map_or(Ok(0), |value| {
         if !value.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -68,7 +64,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     if length > max_body {
         return Err(invalid("HTTP body too large"));
     }
-    let mut body = bytes.get(header_end..).unwrap_or_default().to_vec();
+    let mut body = bytes[header_end..].to_vec();
     while body.len() < length {
         let read = stream.read(&mut buffer)?;
         if read == 0 {
@@ -78,10 +74,5 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     }
     body.truncate(length);
     let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
-    Ok(HttpRequest {
-        method,
-        path,
-        headers,
-        body,
-    })
+    Ok(HttpRequest { method, path, headers, body })
 }
