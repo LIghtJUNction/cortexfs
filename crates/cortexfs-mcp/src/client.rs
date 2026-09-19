@@ -182,8 +182,10 @@ impl Client {
             result => result?,
         };
         if let Some(error) = response.get("error") {
-            if error.get("code").and_then(Value::as_i64) != Some(-32022) {
-                return Ok(false);
+            match error.get("code").and_then(Value::as_i64) {
+                Some(-32020 | -32021) => return Err(invalid_data("modern MCP discovery error")),
+                Some(-32022) => {}
+                _ => return Ok(false),
             }
             let data = error
                 .get("data")
@@ -324,11 +326,10 @@ impl Client {
                     .unwrap_or_default()
             )));
         }
-        let modern = self.protocol.is_some();
         response
             .get("result")
             .cloned()
-            .filter(|result| !modern || result["resultType"] == "complete")
+            .filter(|result| self.protocol.is_none() || result["resultType"] == "complete")
             .ok_or_else(|| invalid_data("missing or unsupported JSON-RPC result"))
     }
 
@@ -340,6 +341,9 @@ impl Client {
             let value = self.read()?;
             if value.get("method").is_some() {
                 if value.get("id").is_some() {
+                    if self.protocol.is_some() || method == "server/discover" {
+                        return Err(invalid_data("unsupported modern MCP server request"));
+                    }
                     self.reply_server_request(&value)?;
                 } else if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
                     || value.get("method").and_then(Value::as_str).is_none()
