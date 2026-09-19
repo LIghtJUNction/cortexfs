@@ -1,16 +1,14 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::thread;
 
 pub(in crate::channel) fn server<const N: usize>(
     prefix: &str,
     responses: [&str; N],
-) -> std::io::Result<(String, thread::JoinHandle<()>)> {
+) -> std::io::Result<(String, std::thread::JoinHandle<()>)> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let address = format!("http://{}{prefix}", listener.local_addr()?);
-    let responses = responses.map(str::to_owned);
-    let server = thread::spawn(move || {
-        for body in responses {
+    let server = std::thread::spawn(move || {
+        for body in responses.map(str::to_owned) {
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
             };
@@ -35,16 +33,14 @@ fn read_request(stream: &TcpStream) -> std::io::Result<()> {
     let mut length = 0_usize;
     loop {
         let mut line = Vec::new();
-        reader.read_until(b'\n', &mut line)?;
-        if line == b"\r\n" || line.is_empty() {
+        if reader.read_until(b'\n', &mut line)? == 0 || line == b"\r\n" {
             break;
         }
         if let Some(value) = line.strip_prefix(b"Content-Length: ") {
             length = String::from_utf8_lossy(value).trim().parse().unwrap_or(0);
         }
     }
-    let mut body = vec![0_u8; length];
-    reader.read_exact(&mut body)
+    reader.read_exact(&mut vec![0_u8; length])
 }
 
 fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
