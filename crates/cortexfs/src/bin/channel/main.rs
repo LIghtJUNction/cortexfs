@@ -20,7 +20,10 @@ fn bearer_authorized(value: Option<&str>, token: Option<&str>) -> bool {
         return false;
     };
     let credential = credential.trim_start_matches(' ');
-    !credential.is_empty() && scheme.eq_ignore_ascii_case("bearer") && credential == token
+    if credential.is_empty() || !scheme.eq_ignore_ascii_case("bearer") {
+        return false;
+    }
+    credential == token
 }
 
 fn main() -> ExitCode {
