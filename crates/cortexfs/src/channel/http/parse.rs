@@ -8,7 +8,6 @@ fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
 }
 
-/// Parsed request data needed by a platform webhook codec.
 #[derive(Clone, Debug)]
 pub struct HttpRequest {
     pub method: String,
@@ -44,9 +43,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     }
     let mut headers = BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
-        let (name, value) = line
-            .split_once(':')
-            .ok_or_else(|| invalid("invalid HTTP header"))?;
+        let (name, value) = line.split_once(':').ok_or_else(|| invalid("invalid HTTP header"))?;
         let name = name.trim().to_ascii_lowercase();
         if name == "content-length" && headers.contains_key(&name) {
             return Err(invalid("duplicate content length"));
@@ -71,5 +68,10 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     }
     body.truncate(length);
     let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
-    Ok(HttpRequest { method, path, headers, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
