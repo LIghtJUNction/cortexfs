@@ -57,7 +57,10 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         let (name, value) = line
             .split_once(':')
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid HTTP header"))?;
-        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned());
+        if name.is_empty() || name.trim_matches([' ', '\t']) != name {
+            return Err(Error::new(ErrorKind::InvalidData, "invalid HTTP header"));
+        }
+        headers.insert(name.to_ascii_lowercase(), value.trim().to_owned());
     }
     let length = headers.get("content-length").map_or(Ok(0), |value| {
         value
