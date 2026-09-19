@@ -21,12 +21,10 @@ pub(super) fn authorize_provider_credential(
     request
         .headers
         .iter()
-        .any(|(name, value)| match name.as_str() {
-            "authorization" => {
-                bearer_matches(value, &credential.token) || bearer_matches(value, client_token)
-            }
-            "x-api-key" => value == &credential.token,
-            _ => false,
+        .any(|(name, value)| {
+            (name == "authorization"
+                && (bearer_matches(value, &credential.token) || bearer_matches(value, client_token)))
+                || (name == "x-api-key" && value == &credential.token)
         })
         .then_some(())
         .ok_or_else(|| Error::new(ErrorKind::PermissionDenied, "invalid provider egress credential"))
@@ -57,9 +55,7 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
     }
     request.headers.push(("authorization".to_owned(), format!("Bearer {}", credential.token)));
     if request.endpoint == "messages" {
-        request
-            .headers
-            .push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
+        request.headers.push(("anthropic-version".to_owned(), "2023-06-01".to_owned()));
     }
     if let Some(account_id) = credential.codex_account_id.as_deref() {
         request.headers.extend([
