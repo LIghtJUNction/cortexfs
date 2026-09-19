@@ -237,7 +237,7 @@ fn descendant_pipe_holder_is_killed_without_blocking_drop() -> io::Result<()> {
 }
 
 #[test]
-fn cursor_notifications_and_call_errors_are_strict() -> io::Result<()> {
+fn cursor_notifications_call_errors_and_result_types_follow_protocol() -> io::Result<()> {
     for mode in ["invalidnotification", "slowframes"] {
         assert!(Client::start(&server(mode)).is_err());
     }
@@ -245,8 +245,7 @@ fn cursor_notifications_and_call_errors_are_strict() -> io::Result<()> {
     assert!(cursor.tools().is_err());
     let mut call = Client::start(&server("callerror"))?;
     assert!(call.call("echo", &json!({})).is_err());
-    let mut missing = Client::start(&server("modernmissingresulttype"))?;
-    assert!(missing.tools().is_err());
+    drop(Client::start(&server("modernmissingresulttype"))?.tools()?);
     let mut input = Client::start(&server("moderninputrequired"))?;
     assert!(input.call("echo", &json!({})).is_err());
     Ok(())
