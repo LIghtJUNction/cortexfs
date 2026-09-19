@@ -32,8 +32,13 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
     request.headers.retain(|header| {
         !matches!(
             header.0.as_str(),
-            "authorization" | "x-api-key" | "anthropic-version" | "chatgpt-account-id"
-                | "originator" | "session-id" | "user-agent"
+            "authorization"
+                | "x-api-key"
+                | "anthropic-version"
+                | "chatgpt-account-id"
+                | "originator"
+                | "session-id"
+                | "user-agent"
         )
     });
     if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
