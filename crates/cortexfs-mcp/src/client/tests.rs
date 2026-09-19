@@ -93,6 +93,15 @@ fn modern_discovery_and_request_metadata_work_without_initialize() -> io::Result
 }
 
 #[test]
+fn modern_results_must_be_complete() -> io::Result<()> {
+    let mut missing = Client::start(&server("modernmissingresulttype"))?;
+    assert!(missing.tools().is_err());
+    let mut input = Client::start(&server("moderninputrequired"))?;
+    assert!(input.call("echo", &json!({})).is_err());
+    Ok(())
+}
+
+#[test]
 fn invalid_negotiation_and_server_requests_are_rejected() {
     for mode in [
         "modernunsupported",
