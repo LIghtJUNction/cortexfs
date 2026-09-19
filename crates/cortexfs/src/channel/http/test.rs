@@ -2,8 +2,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-#[expect(clippy::redundant_pub_crate, reason = "shared by crate-local channel tests")]
-pub(crate) fn server<const N: usize>(
+pub(in crate::channel) fn server<const N: usize>(
     prefix: &str,
     responses: [&str; N],
 ) -> std::io::Result<(String, thread::JoinHandle<()>)> {
