@@ -4,7 +4,11 @@ use std::{collections::BTreeMap, fs};
 fn server(mode: &str) -> Server {
     Server {
         command: "/usr/bin/python3".to_owned(),
-        args: vec!["-u".to_owned(), "-c".to_owned(), include_str!("mock.py").to_owned()],
+        args: vec![
+            "-u".to_owned(),
+            "-c".to_owned(),
+            include_str!("mock.py").to_owned(),
+        ],
         env: BTreeMap::from([
             ("CTXMCP_MOCK".to_owned(), mode.to_owned()),
             (
@@ -112,8 +116,7 @@ fn invalid_negotiation_and_server_requests_are_rejected() {
 #[test]
 fn legacy_probe_errors_and_timeouts_fall_back_on_the_same_process() -> io::Result<()> {
     for mode in ["ok", "legacyprobelate"] {
-        let mut client = Client::start(&server(mode))?;
-        drop(client.tools()?);
+        drop(Client::start(&server(mode))?.tools()?);
     }
     let mut client = Client::start(&server("ok"))?;
     assert_eq!(
@@ -126,8 +129,7 @@ fn legacy_probe_errors_and_timeouts_fall_back_on_the_same_process() -> io::Resul
 #[test]
 fn server_ping_requests_with_string_and_number_ids_are_answered() -> io::Result<()> {
     for mode in ["pingstr", "pingnum"] {
-        let mut client = Client::start(&server(mode))?;
-        drop(client.tools()?);
+        drop(Client::start(&server(mode))?.tools()?);
     }
     Ok(())
 }
@@ -135,8 +137,7 @@ fn server_ping_requests_with_string_and_number_ids_are_answered() -> io::Result<
 #[test]
 fn stable_legacy_protocol_versions_are_accepted() -> io::Result<()> {
     for mode in ["ok", "stable20250618", "stable20250326", "legacy20241105"] {
-        let mut client = Client::start(&server(mode))?;
-        drop(client.tools()?);
+        drop(Client::start(&server(mode))?.tools()?);
     }
     Ok(())
 }
