@@ -91,6 +91,9 @@ fn modern_discovery_and_request_metadata_work_without_initialize() -> io::Result
 fn invalid_negotiation_and_server_requests_are_rejected() {
     for mode in [
         "modernunsupported",
+        "modernheadermismatch",
+        "modernmissingclientcap",
+        "modernping",
         "modernmissingcap",
         "modernbadresult",
         "unsupportedrequest",
@@ -101,10 +104,7 @@ fn invalid_negotiation_and_server_requests_are_rejected() {
         "missingtools",
         "badtools",
     ] {
-        assert!(
-            Client::start(&server(mode)).is_err(),
-            "mode {mode} accepted"
-        );
+        assert!(Client::start(&server(mode)).is_err());
     }
 }
 
@@ -239,10 +239,7 @@ fn descendant_pipe_holder_is_killed_without_blocking_drop() -> io::Result<()> {
 #[test]
 fn cursor_notifications_and_call_errors_are_strict() -> io::Result<()> {
     for mode in ["invalidnotification", "slowframes"] {
-        assert!(
-            Client::start(&server(mode)).is_err(),
-            "mode {mode} accepted"
-        );
+        assert!(Client::start(&server(mode)).is_err());
     }
     let mut cursor = Client::start(&server("badcursor"))?;
     assert!(cursor.tools().is_err());
