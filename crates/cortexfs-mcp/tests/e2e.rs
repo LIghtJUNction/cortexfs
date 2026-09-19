@@ -26,7 +26,7 @@ for line in sys.stdin:
   result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"mock","version":"1"}}
  elif m=="tools/list": result={"tools":[{"name":"echo","title":"Echo title","description":"Echo safely","icons":[{"src":"data:image/svg+xml,echo","mimeType":"image/svg+xml","sizes":["any"]}],"annotations":{"readOnlyHint":True},"inputSchema":{"type":"object","properties":{"text":{"type":"string"}}},"outputSchema":{"type":"object"},"execution":{"taskSupport":"forbidden"},"_meta":{"fixture":"e2e"}}]}
  elif m=="tools/call": result={"content":[{"type":"text","text":"remote-ok"}],"isError":False}
- else: result={}
+ else: print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32601,"message":"unknown"}}),flush=True); continue
  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":result}),flush=True)
 "#;
     let value = json!({"mcpServers":{"demo":{"command":"/usr/bin/python3","args":["-u","-c",script],"env":{"MCP_SECRET":SECRET,"OBSERVED_ENV":observed}}}});

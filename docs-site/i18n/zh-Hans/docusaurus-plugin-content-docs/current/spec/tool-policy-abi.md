@@ -77,7 +77,7 @@ MCP server 只是工具来源，不是 CortexFS 根对象。不应暴露：
 
 `ctxmcp` 将显式选择的外部 stdio server 投影为普通工具。投影仅写入 v2 manifest 候选；不会安装权限、也不会授予 policy，不会写入 `/ctx`：
 
-`ctxmcp` 宣告稳定 MCP 版本 `2025-11-25`，并仅接受协商后稳定版本 `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`。草案/未知/未来版本拒绝。
+`ctxmcp` 在 stdio 上优先使用最终版 MCP `2026-07-28`：先探测 `server/discover`；成功发现或 `-32022` 响应都保持在 modern 路径，并在每个 modern 请求中发送标准 `_meta`。其他发现错误或有界超时会在同一进程上回退到旧版 `initialize` 生命周期。旧版路径仅接受稳定版本 `2025-11-25`、`2025-06-18`、`2025-03-26` 和 `2024-11-05`；草案、未知及未来版本拒绝。modern 结果必须带 `resultType=complete`；当前未实现 input-required continuation，因此会 fail closed。
 
 ```text
 /ctx/tool/github.search_issues
