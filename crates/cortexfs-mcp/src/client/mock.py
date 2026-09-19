@@ -38,6 +38,7 @@ for line in sys.stdin:
     result={}
    else:
     result={"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"ttlMs":0,"cacheScope":"private"}
+   if mode=="modernmissingresulttype": result.pop("resultType",None)
    print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":result}),flush=True); continue
   if mode=="legacyprobelate":
    time.sleep(.08)
