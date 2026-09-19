@@ -10,7 +10,7 @@ fn content_length(value: Option<&str>) -> Result<usize> {
     if value.starts_with('+') {
         return Err(Error::Protocol("invalid content length".into()));
     }
-    value.parse().map_err(|_error| Error::Protocol("invalid content length".into()))
+    value.parse().map_err(|error| Error::Protocol(error.to_string()))
 }
 
 pub(super) async fn read(stream: &mut TcpStream) -> Result<(BTreeMap<String, String>, String)> {
@@ -63,7 +63,8 @@ pub(super) async fn respond(stream: &mut TcpStream, status: &str) -> Result<()> 
 #[cfg(test)]
 #[test]
 fn content_length_fails_closed() {
-    assert_eq!((content_length(None).unwrap(), content_length(Some("2")).unwrap()), (0, 2));
-    assert!(content_length(Some("x")).is_err() && content_length(Some("+2")).is_err());
-    assert!(content_length(Some("184467440737095516160")).is_err());
+    assert_eq!(content_length(None).unwrap(), 0);
+    assert_eq!(content_length(Some("2")).unwrap(), 2);
+    let invalid = ["x", "+2", "184467440737095516160"];
+    assert!(invalid.into_iter().all(|value| content_length(Some(value)).is_err()));
 }
