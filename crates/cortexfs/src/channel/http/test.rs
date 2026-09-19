@@ -65,6 +65,7 @@ fn content_length_framing_fails_closed() {
     assert!(parse_raw("GET / HTTP/1.1 extra\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/2.0\r\n\r\n").is_err());
     assert!(parse_raw("GE@T / HTTP/1.1\r\n\r\n").is_err());
+    assert!(parse_raw("GET /foo\tbar HTTP/1.1\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.0\r\n\r\n").is_ok());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n").is_ok());
 }
