@@ -1,7 +1,7 @@
 use reqwest::blocking::Client;
 use serde_json::{Map, Value, json};
 
-use super::{DiscordConfig, DiscordError, effect, request};
+use super::{DiscordConfig, DiscordError, effect, request, required_string};
 
 pub(super) fn create(
     client: &Client,
@@ -9,11 +9,11 @@ pub(super) fn create(
     channel: &str,
     payload: &Value,
 ) -> Result<Value, DiscordError> {
-    let message = string(payload, "message_id")?;
+    let message = required_string(payload, "message_id")?;
     if !message.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(DiscordError::Invalid("message_id"));
     }
-    let name = string(payload, "name")?;
+    let name = required_string(payload, "name")?;
     if !(1..=100).contains(&name.chars().count()) {
         return Err(DiscordError::Invalid("name"));
     }
@@ -53,12 +53,4 @@ fn existing(client: &Client, config: &DiscordConfig, parent: &str, thread: &str)
                     .and_then(Value::as_u64)
                     .is_some_and(|kind| matches!(kind, 10..=12))
         })
-}
-
-fn string<'a>(payload: &'a Value, name: &'static str) -> Result<&'a str, DiscordError> {
-    payload
-        .get(name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty() && !value.contains('\0'))
-        .ok_or(DiscordError::Invalid(name))
 }

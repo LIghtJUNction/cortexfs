@@ -1,6 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use cortexfs_channels::{ChannelError, ChannelId, ChannelProgressPolicy};
+use serde_json::Value;
 
 use super::bridge::{AgentChannelBridge, ChannelBridgeError};
 
@@ -86,6 +87,17 @@ pub enum DiscordError {
     Bridge(#[from] ChannelBridgeError),
     #[error("Discord gateway protocol error: {0}")]
     Protocol(String),
+}
+
+pub(super) fn required_string<'a>(
+    value: &'a Value,
+    name: &'static str,
+) -> Result<&'a str, DiscordError> {
+    value
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty() && !text.contains('\0'))
+        .ok_or(DiscordError::Invalid(name))
 }
 
 pub fn run(config: &DiscordConfig, bridge: &AgentChannelBridge) -> Result<(), DiscordError> {
