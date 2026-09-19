@@ -21,11 +21,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         if read == 0 {
             return Err(Error::new(ErrorKind::UnexpectedEof, "missing HTTP headers"));
         }
-        bytes.extend_from_slice(
-            buffer
-                .get(..read)
-                .ok_or_else(|| Error::new(ErrorKind::InvalidData, "HTTP read exceeded buffer"))?,
-        );
+        bytes.extend_from_slice(&buffer[..read]);
         if bytes.len() > MAX_HEADER_BYTES {
             return Err(Error::new(ErrorKind::InvalidData, "HTTP headers too large"));
         }
@@ -33,12 +29,8 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             break position + 4;
         }
     };
-    let header = std::str::from_utf8(
-        bytes
-            .get(..header_end)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid HTTP header range"))?,
-    )
-    .map_err(|_error| Error::new(ErrorKind::InvalidData, "HTTP headers are not UTF-8"))?;
+    let header = std::str::from_utf8(&bytes[..header_end])
+        .map_err(|_error| Error::new(ErrorKind::InvalidData, "HTTP headers are not UTF-8"))?;
     let mut lines = header.split("\r\n");
     let mut request = lines
         .next()
@@ -47,10 +39,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
     if method.is_empty() || path.is_empty() {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "invalid HTTP request line",
-        ));
+        return Err(Error::new(ErrorKind::InvalidData, "invalid HTTP request line"));
     }
     let mut headers = BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
@@ -59,10 +48,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid HTTP header"))?;
         let name = name.trim().to_ascii_lowercase();
         if name == "content-length" && headers.contains_key(&name) {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "duplicate content length",
-            ));
+            return Err(Error::new(ErrorKind::InvalidData, "duplicate content length"));
         }
         headers.insert(name, value.trim().to_owned());
     }
@@ -83,11 +69,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         if read == 0 {
             return Err(Error::new(ErrorKind::UnexpectedEof, "truncated HTTP body"));
         }
-        body.extend_from_slice(
-            buffer.get(..read).ok_or_else(|| {
-                Error::new(ErrorKind::InvalidData, "HTTP body read exceeded buffer")
-            })?,
-        );
+        body.extend_from_slice(&buffer[..read]);
     }
     body.truncate(length);
     let body = String::from_utf8(body)
