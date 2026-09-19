@@ -53,24 +53,21 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         }
         headers.insert(name, value.trim().to_owned());
     }
-    let length = headers.get("content-length").map_or(Ok(0), |value| {
-        if !value.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(invalid("invalid content length"));
-        }
-        value
+    let length = match headers.get("content-length") {
+        None => 0,
+        Some(value) if value.bytes().all(|byte| byte.is_ascii_digit()) => value
             .parse::<usize>()
-            .map_err(|_error| invalid("invalid content length"))
-    })?;
+            .map_err(|_error| invalid("invalid content length"))?,
+        Some(_) => return Err(invalid("invalid content length")),
+    };
     if length > max_body {
         return Err(invalid("HTTP body too large"));
     }
     let mut body = bytes[header_end..].to_vec();
-    while body.len() < length {
-        let read = stream.read(&mut buffer)?;
-        if read == 0 {
-            return Err(Error::new(ErrorKind::UnexpectedEof, "truncated HTTP body"));
-        }
-        body.extend_from_slice(&buffer[..read]);
+    if body.len() < length {
+        let have = body.len();
+        body.resize(length, 0);
+        stream.read_exact(&mut body[have..])?;
     }
     body.truncate(length);
     let body = String::from_utf8(body).map_err(|_error| invalid("HTTP body is not UTF-8"))?;
