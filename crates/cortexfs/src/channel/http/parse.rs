@@ -43,7 +43,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
-            .filter(|(name, _)| !name.is_empty() && name.trim_matches([' ', '\t']) == *name)
+            .filter(|&(name, _)| !name.is_empty() && name.trim_matches([' ', '\t']) == name)
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
         if name == "content-length" && headers.contains_key(&name) {
@@ -64,7 +64,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     let mut body = bytes.get(header_end..).unwrap_or_default().to_vec();
     let have = body.len().min(length);
     body.resize(length, 0);
-    stream.read_exact(&mut body[have..])?;
+    stream.read_exact(body.get_mut(have..).unwrap_or_default())?;
     Ok(HttpRequest {
         method,
         path,
