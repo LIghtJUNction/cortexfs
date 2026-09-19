@@ -34,17 +34,13 @@ pub(super) fn inject_provider_credential(mut request: Request, target: &Provider
     let Some(credential) = target.credential.as_ref() else {
         return request;
     };
-    request.headers.retain(|(name, _)| {
-        !matches!(
-            name.as_str(),
-            "authorization"
-                | "x-api-key"
-                | "anthropic-version"
-                | "chatgpt-account-id"
-                | "originator"
-                | "session-id"
-                | "user-agent"
-        )
+    request.headers.retain(|header| {
+        let name = header.0.as_str();
+        !matches!(name, "authorization" | "x-api-key" | "anthropic-version")
+            && !matches!(
+                name,
+                "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
+            )
     });
     if request.endpoint == "messages" && credential.kind == CredentialKind::ApiKey {
         request.headers.extend([
