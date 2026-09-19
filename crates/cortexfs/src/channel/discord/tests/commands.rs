@@ -7,7 +7,10 @@ use crate::channel::discord::{DiscordError, invoke, required_string};
 #[test]
 fn required_string_validation_is_shared() {
     let valid = json!({"field":"value"});
-    assert_eq!(required_string(&valid, "field").expect("valid field"), "value");
+    assert_eq!(
+        required_string(&valid, "field").expect("valid field"),
+        "value"
+    );
     for invalid in ["", "a\0b"] {
         let input = json!({"field": invalid});
         let error = required_string(&input, "field");
