@@ -22,9 +22,7 @@ fn server(mode: &str) -> Server {
 
 fn server_with_pid(mode: &str, path: &std::path::Path) -> Server {
     let mut value = server(mode);
-    value
-        .env
-        .insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
+    value.env.insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
     value
 }
 
