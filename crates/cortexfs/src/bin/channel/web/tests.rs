@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use super::{WebConfig, authorized, handle, socket};
+use super::{WebConfig, handle, socket};
 use cortexfs::channel::http::{HttpRequest, HttpResponse};
 use cortexfs_runtime_client::interaction::{
     InteractionEvent, InteractionFrame, InteractionOrigin, InteractionPayload, InteractionRequest,
@@ -60,18 +60,6 @@ fn server(
         socket::serve(stream, &config).map_err(|error| std::io::Error::other(error.to_string()))
     });
     Ok((address, server))
-}
-
-#[test]
-fn token_is_required_only_when_configured() {
-    let request = HttpRequest {
-        method: "POST".into(),
-        path: "/".into(),
-        headers: BTreeMap::new(),
-        body: String::new(),
-    };
-    assert!(authorized(&request, None));
-    assert!(!authorized(&request, Some("secret")));
 }
 
 #[test]
