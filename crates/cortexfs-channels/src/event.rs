@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ChannelError, MessageBody, MessageTarget, Participant, valid_bounded};
+use crate::{ChannelError, MessageBody, MessageTarget, Participant, valid};
 
 /// Shared context carried by an incoming non-message channel event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -45,16 +45,16 @@ pub enum ChannelIncomingEvent {
 
 impl ChannelEventContext {
     pub fn validate(&self) -> Result<(), ChannelError> {
-        valid_bounded(self.target.channel.as_str())?;
-        valid_bounded(self.target.conversation.as_str())?;
-        self.target.thread.as_deref().map(valid_bounded).transpose()?;
-        self.target.reply_to.as_deref().map(valid_bounded).transpose()?;
+        valid(self.target.channel.as_str())?;
+        valid(self.target.conversation.as_str())?;
+        self.target.thread.as_deref().map(valid).transpose()?;
+        self.target.reply_to.as_deref().map(valid).transpose()?;
         if let Some(participant) = self.participant.as_ref() {
-            valid_bounded(&participant.id)?;
+            valid(&participant.id)?;
         }
         for (key, value) in &self.metadata {
-            valid_bounded(key)?;
-            valid_bounded(value)?;
+            valid(key)?;
+            valid(value)?;
         }
         Ok(())
     }
@@ -123,18 +123,18 @@ impl ChannelIncomingEvent {
             Self::Reaction {
                 message_id, emoji, ..
             } => {
-                valid_bounded(message_id)?;
-                valid_bounded(emoji)
+                valid(message_id)?;
+                valid(emoji)
             }
             Self::Typing { .. } => Ok(()),
             Self::MessageEdited {
                 message_id, body, ..
             } => {
-                valid_bounded(message_id)?;
+                valid(message_id)?;
                 body.validate()
             }
             Self::MessageDeleted { message_id, .. } | Self::Read { message_id, .. } => {
-                valid_bounded(message_id)
+                valid(message_id)
             }
         }
     }
@@ -143,8 +143,8 @@ impl ChannelIncomingEvent {
 #[cfg(test)]
 #[test]
 fn bounded_values_match_wire_contract() {
-    assert!(valid_bounded("").is_err());
-    assert!(valid_bounded(&"x".repeat(256)).is_ok());
-    assert!(valid_bounded(&"x".repeat(257)).is_err());
-    assert!(valid_bounded("x\0").is_err());
+    assert!(valid("").is_err());
+    assert!(valid(&"x".repeat(256)).is_ok());
+    assert!(valid(&"x".repeat(257)).is_err());
+    assert!(valid("x\0").is_err());
 }
