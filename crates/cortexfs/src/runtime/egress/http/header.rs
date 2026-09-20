@@ -44,8 +44,11 @@ pub(super) fn parse_headers(
         let value = raw_value.trim_matches([' ', '\t']);
         match name.as_str() {
             "content-length" => {
-                if length.is_some() || value.is_empty() || !value.bytes().all(u8::is_ascii_digit) {
+                if length.is_some() {
                     return Err(invalid("duplicate provider HTTP content length"));
+                }
+                if value.is_empty() || !value.bytes().all(u8::is_ascii_digit) {
+                    return Err(invalid("invalid provider HTTP content length"));
                 }
                 let parsed = value
                     .parse::<usize>()
