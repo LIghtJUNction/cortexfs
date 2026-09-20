@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::io::{Error, ErrorKind, Read};
-use std::net::TcpStream;
 
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -14,7 +13,10 @@ pub struct HttpRequest {
     pub body: String,
 }
 
-pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpRequest, Error> {
+pub fn read_request(
+    stream: &mut std::net::TcpStream,
+    max_body: usize,
+) -> Result<HttpRequest, Error> {
     let mut bytes = Vec::with_capacity(4096);
     let mut buffer = [0_u8; 4096];
     let header_end = loop {
