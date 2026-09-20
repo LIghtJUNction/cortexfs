@@ -359,7 +359,9 @@ impl Client {
                 }
                 continue;
             }
-            if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+            if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
+                || value.get("result").is_some() == value.get("error").is_some()
+            {
                 return Err(invalid_data("invalid JSON-RPC response"));
             }
             let response_id = value.get("id").and_then(Value::as_u64);
