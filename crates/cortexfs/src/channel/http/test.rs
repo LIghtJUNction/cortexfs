@@ -56,6 +56,5 @@ fn content_length_framing_fails_closed() -> std::io::Result<()> {
             .get("x-test")
             .is_some_and(|v| v == "\u{a0}b\u{a0}")
     );
-    assert!(parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").is_ok());
-    Ok(())
+    parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").map(|_| ())
 }
