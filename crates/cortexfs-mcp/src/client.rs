@@ -182,7 +182,7 @@ impl Client {
             result => result?,
         };
         if let Some(error) = response.get("error") {
-            match error.get("code").and_then(Value::as_i64) {
+            match error["code"].as_i64() {
                 Some(-32020 | -32021) => return Err(invalid_data("modern MCP discovery error")),
                 Some(-32022) => {}
                 _ => return Ok(false),
@@ -320,7 +320,10 @@ impl Client {
         };
         let response = self.exchange(method, &params)?;
         if let Some(error) = response.get("error") {
-            return Err(io::Error::other(format!("MCP request failed: {}", error["code"])));
+            return Err(io::Error::other(format!(
+                "MCP request failed: {}",
+                error["code"]
+            )));
         }
         response
             .get("result")
