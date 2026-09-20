@@ -41,17 +41,11 @@ pub(super) fn project_models(
         let custom_metadata = has_custom_limit || has_custom_cap;
         let resolved = resolve_model_metadata(&catalog, provider, &model, custom_metadata);
 
-        let mut cap = capability_text(
+        let cap = capability_text(
             &config.formats,
             config.model_capabilities.get(&model).map(Vec::as_slice),
             resolved.metadata,
         );
-        if cap.is_empty()
-            && resolved.metadata.is_none()
-            && !config.model_capabilities.contains_key(&model)
-        {
-            cap = String::from("chat\nstream\n");
-        }
 
         let limit = config
             .model_limits
@@ -217,8 +211,10 @@ fn capability_text(
             .any(|value| value.trim() == "openai.responses")
         {
             "chat\nstream\ntool_call_syntax\n".to_owned()
-        } else {
+        } else if supports_streaming_format(formats) {
             "chat\nstream\n".to_owned()
+        } else {
+            "chat\n".to_owned()
         };
     };
 
@@ -287,12 +283,9 @@ fn capability_text(
 }
 
 fn supports_streaming_format(formats: &[String]) -> bool {
-    formats.iter().any(|value| {
-        matches!(
-            value.trim(),
-            "openai.chat" | "openai.responses" | "anthropic.messages" | "gemini.generate_content"
-        )
-    })
+    formats
+        .iter()
+        .any(|value| matches!(value.trim(), "openai.chat" | "openai.responses"))
 }
 
 fn has_modalities(modalities: &[Modality], needle: Modality) -> bool {
@@ -421,7 +414,7 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: HashMap::new(),
             enabled: true,
-            formats: vec!["openai.chat".to_owned()],
+            formats: vec!["anthropic.messages".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
@@ -434,7 +427,7 @@ mod tests {
         assert_eq!(model.limit.tokens(), None);
         assert_eq!(model.recommended.tokens(), None);
         assert_eq!(model.compact.tokens(), None);
-        assert!(model.cap.contains("chat"));
+        assert_eq!(model.cap, "chat\n");
         assert!(
             model
                 .log
@@ -499,14 +492,14 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: capabilities,
             enabled: true,
-            formats: vec!["openai.chat".to_owned()],
+            formats: vec!["anthropic.messages".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
 
         let mut projected = Vec::new();
         project_models("local", &config, dir.path(), &mut projected);
-        assert_eq!(projected[0].cap, "chat\ntool_call_syntax\nstream\n");
+        assert_eq!(projected[0].cap, "chat\ntool_call_syntax\n");
         assert_eq!(projected[1].cap, "");
         Ok(())
     }
