@@ -414,7 +414,7 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: HashMap::new(),
             enabled: true,
-            formats: vec!["anthropic.messages".to_owned()],
+            formats: vec!["google.generative".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
