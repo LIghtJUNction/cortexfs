@@ -49,13 +49,11 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
         let (name, value) = line
             .split_once(':')
             .filter(|&(name, _)| reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok())
+            .filter(|&(_, value)| !value.bytes().any(|b| b.is_ascii_control() && b != b'\t'))
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
-        if name == "transfer-encoding" {
-            return Err(invalid("invalid HTTP framing"));
-        }
-        if headers.insert(name, value.trim().to_owned()).is_some() {
-            return Err(invalid("duplicate HTTP header"));
+        if name == "transfer-encoding" || headers.insert(name, value.trim().to_owned()).is_some() {
+            return Err(invalid("invalid HTTP header"));
         }
     }
     if version == "HTTP/1.1" && !headers.contains_key("host") {

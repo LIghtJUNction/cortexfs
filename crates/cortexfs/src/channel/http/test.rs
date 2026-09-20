@@ -41,7 +41,7 @@ fn content_length_framing_fails_closed() {
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length:0\r\nContent-Length:0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length : 0\r\n\r\n").is_err());
-    assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length\t: 0\r\n\r\n").is_err());
+    assert!(parse_raw("GET / HTTP/1.1\r\nHost:x\r\nX-Line-Signature:a\0b\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\nBad@Header: x\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1 extra\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/2.0\r\n\r\n").is_err());
@@ -53,6 +53,6 @@ fn content_length_framing_fails_closed() {
         parse_raw("GET / HTTP/1.1\r\nHost:x\r\nX-Line-Signature:a\r\nx-line-signature:b\r\n\r\n")
             .is_err()
     );
-    assert!(parse_raw("GET / HTTP/1.0\r\n\r\n").is_ok());
+    assert!(parse_raw("GET / HTTP/1.0\r\nX-Test:a\tb\r\n\r\n").is_ok());
     assert!(parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").is_ok());
 }
