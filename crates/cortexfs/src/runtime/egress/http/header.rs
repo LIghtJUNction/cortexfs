@@ -33,10 +33,7 @@ pub(super) fn parse_headers(
         let (raw_name, raw_value) = line
             .split_once(':')
             .ok_or_else(|| invalid("invalid provider HTTP header"))?;
-        if raw_name.is_empty()
-            || !raw_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+        if reqwest::header::HeaderName::from_bytes(raw_name.as_bytes()).is_err()
             || raw_value
                 .bytes()
                 .any(|byte| (byte < b' ' && byte != b'\t') || byte == 0x7f)
@@ -109,4 +106,19 @@ pub(super) fn read_line(input: &mut impl BufRead) -> io::Result<String> {
         return Err(invalid("invalid provider HTTP line"));
     }
     String::from_utf8(bytes).map_err(|_error| invalid("provider HTTP line is not UTF-8"))
+}
+
+#[cfg(test)]
+#[test]
+fn rejects_malformed_field_name() {
+    let target = ProviderTarget {
+        provider: String::new(),
+        profile: String::new(),
+        base_url: String::new(),
+        authority: String::new(),
+        base_path: String::new(),
+        credential: None,
+    };
+    let mut input = io::BufReader::new(b"Authorization : x\r\nContent-Length: 0\r\n\r\n".as_slice());
+    assert!(parse_headers(&mut input, &target, 0).is_err());
 }
