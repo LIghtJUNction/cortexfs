@@ -96,6 +96,8 @@ fn invalid_negotiation_and_server_requests_are_rejected() {
         "modernping",
         "modernmissingcap",
         "modernbadresult",
+        "baderrorcode",
+        "baderrormessage",
         "unsupportedrequest",
         "malformedping",
         "unknownversion",
