@@ -110,8 +110,9 @@ for line in sys.stdin:
  else: result={}
  if mode=="modernmissingresulttype": result.pop("resultType",None)
  if mode=="moderninputrequired": result["resultType"]="input_required"
- if mode=="error" and m=="tools/list":
-  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32603,"message":"secret-value"}}),flush=True); continue
+ if mode=="bothoutcomes" and m=="tools/list":
+  error={"code":-32603,"message":"secret-value"}
+  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":result,"error":error}),flush=True); continue
  if mode=="callerror" and m=="tools/call":
   print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32603,"message":"failed"}}),flush=True); continue
  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":result}),flush=True)
