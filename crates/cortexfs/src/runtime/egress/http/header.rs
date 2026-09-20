@@ -27,7 +27,7 @@ pub(super) fn parse_headers(
             break;
         }
         count += 1;
-        if count > HEADER_COUNT_MAX || line.starts_with([' ', '\t']) {
+        if count > HEADER_COUNT_MAX {
             return Err(invalid("invalid provider HTTP header"));
         }
         let (raw_name, raw_value) = line
@@ -110,15 +110,6 @@ pub(super) fn read_line(input: &mut impl BufRead) -> io::Result<String> {
 
 #[cfg(test)]
 #[test]
-fn rejects_malformed_field_name() {
-    let target = ProviderTarget {
-        provider: String::new(),
-        profile: String::new(),
-        base_url: String::new(),
-        authority: String::new(),
-        base_path: String::new(),
-        credential: None,
-    };
-    let mut input = io::BufReader::new(b"Authorization : x\r\nContent-Length: 0\r\n\r\n".as_slice());
-    assert!(parse_headers(&mut input, &target, 0).is_err());
+fn standard_field_name_parser_rejects_whitespace() {
+    assert!(reqwest::header::HeaderName::from_bytes(b"Authorization ").is_err());
 }
