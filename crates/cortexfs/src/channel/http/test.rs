@@ -47,14 +47,12 @@ fn content_length_framing_fails_closed() -> std::io::Result<()> {
     assert!(parse_raw("GET / HTTP/2.0\r\n\r\n").is_err());
     assert!(parse_raw("GE@T / HTTP/1.1\r\n\r\n").is_err());
     assert!(parse_raw("GET /foo\tbar HTTP/1.1\r\n\r\n").is_err());
+    assert!(parse_raw("GET /foo\0bar HTTP/1.1\r\n\r\n").is_err());
+    assert!(parse_raw("GET /foo\u{7f}bar HTTP/1.1\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\nHost: one\r\nHost: two\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\nHost:x\r\nX:a\r\nx:b\r\n\r\n").is_err());
     let r = parse_raw("GET / HTTP/1.0\r\nX-Test: \t\u{a0}b\u{a0}\t \r\n\r\n")?;
-    assert!(
-        r.headers
-            .get("x-test")
-            .is_some_and(|v| v == "\u{a0}b\u{a0}")
-    );
+    assert!(matches!(r.headers.get("x-test"), Some(v) if v == "\u{a0}b\u{a0}"));
     parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").map(|_| ())
 }
