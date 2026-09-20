@@ -22,7 +22,9 @@ fn server(mode: &str) -> Server {
 
 fn server_with_pid(mode: &str, path: &std::path::Path) -> Server {
     let mut value = server(mode);
-    value.env.insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
+    value
+        .env
+        .insert("PID_FILE".to_owned(), path.to_string_lossy().into_owned());
     value
 }
 
@@ -57,10 +59,7 @@ fn wait_pid(path: &std::path::Path, timeout: Duration) -> io::Result<nix::unistd
 }
 
 fn assert_reaped(path: &std::path::Path) -> io::Result<()> {
-    let pid = fs::read_to_string(path)?
-        .parse::<i32>()
-        .map(nix::unistd::Pid::from_raw)
-        .map_err(io::Error::other)?;
+    let pid = wait_pid(path, Duration::ZERO)?;
     assert_eq!(signal::kill(pid, None), Err(Errno::ESRCH));
     assert_eq!(signal::killpg(pid, None), Err(Errno::ESRCH));
     Ok(())
