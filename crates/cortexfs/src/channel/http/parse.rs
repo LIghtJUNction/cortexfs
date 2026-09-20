@@ -37,9 +37,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     let path = request.next().unwrap_or_default().to_owned();
     let version = request.next().unwrap_or_default();
     if path.is_empty()
-        || path
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
+        || path.bytes().any(|byte| byte.is_ascii_control() || byte == b' ')
         || reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_err()
         || !matches!(version, "HTTP/1.0" | "HTTP/1.1")
         || request.next().is_some()
