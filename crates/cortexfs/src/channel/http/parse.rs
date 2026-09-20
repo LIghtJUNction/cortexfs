@@ -50,7 +50,9 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .filter(|&(name, _)| reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok())
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
-        if name == "transfer-encoding" || (name == "content-length" && headers.contains_key(&name)) {
+        if name == "transfer-encoding"
+            || (name == "content-length" && headers.contains_key(&name))
+        {
             return Err(invalid("invalid HTTP framing"));
         }
         headers.insert(name, value.trim().to_owned());
