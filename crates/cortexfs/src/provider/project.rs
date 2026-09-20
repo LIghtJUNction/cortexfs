@@ -281,12 +281,9 @@ fn capability_text(
 }
 
 fn uses_streaming_adapter(formats: &[String]) -> bool {
-    !formats.iter().any(|value| {
-        matches!(
-            value.trim(),
-            "anthropic.messages" | "google.generative"
-        )
-    })
+    !formats
+        .iter()
+        .any(|value| matches!(value.trim(), "anthropic.messages" | "google.generative"))
 }
 
 fn has_modalities(modalities: &[Modality], needle: Modality) -> bool {
