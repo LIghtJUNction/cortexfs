@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use std::io::{Error, ErrorKind, Read};
+use std::net::TcpStream;
 
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -9,14 +9,11 @@ fn invalid(message: &'static str) -> Error {
 pub struct HttpRequest {
     pub method: String,
     pub path: String,
-    pub headers: BTreeMap<String, String>,
+    pub headers: std::collections::BTreeMap<String, String>,
     pub body: String,
 }
 
-pub fn read_request(
-    stream: &mut std::net::TcpStream,
-    max_body: usize,
-) -> Result<HttpRequest, Error> {
+pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpRequest, Error> {
     let mut bytes = Vec::with_capacity(4096);
     let mut buffer = [0_u8; 4096];
     let header_end = loop {
@@ -46,7 +43,7 @@ pub fn read_request(
     {
         return Err(invalid("invalid HTTP request line"));
     }
-    let mut headers = BTreeMap::new();
+    let mut headers = std::collections::BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
