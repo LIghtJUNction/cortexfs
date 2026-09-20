@@ -413,7 +413,10 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: HashMap::new(),
             enabled: true,
-            formats: vec!["google.generative".to_owned(), "openai.responses".to_owned()],
+            formats: vec![
+                "google.generative".to_owned(),
+                "openai.responses".to_owned(),
+            ],
             auth: Vec::new(),
             oauth: None,
         };
