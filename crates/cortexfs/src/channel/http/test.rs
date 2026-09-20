@@ -36,7 +36,7 @@ fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
 }
 
 #[test]
-fn content_length_framing_fails_closed() {
+fn content_length_framing_fails_closed() -> std::io::Result<()> {
     assert!(parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length:+0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length:0\r\nContent-Length:0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
@@ -49,10 +49,12 @@ fn content_length_framing_fails_closed() {
     assert!(parse_raw("GET /foo\tbar HTTP/1.1\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\n\r\n").is_err());
     assert!(parse_raw("GET / HTTP/1.1\r\nHost: one\r\nHost: two\r\n\r\n").is_err());
+    assert!(parse_raw("GET / HTTP/1.1\r\nHost:x\r\nX:a\r\nx:b\r\n\r\n").is_err());
+    let r = parse_raw("GET / HTTP/1.0\r\nX-Test: \t\u{a0}b\u{a0}\t \r\n\r\n")?;
     assert!(
-        parse_raw("GET / HTTP/1.1\r\nHost:x\r\nX-Line-Signature:a\r\nx-line-signature:b\r\n\r\n")
-            .is_err()
+        r.headers
+            .get("x-test")
+            .is_some_and(|v| v == "\u{a0}b\u{a0}")
     );
-    assert!(parse_raw("GET / HTTP/1.0\r\nX-Test:a\tb\r\n\r\n").is_ok());
-    assert!(parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").is_ok());
+    parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").map(|_| ())
 }
