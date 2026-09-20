@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+
 pub(in crate::channel) fn server<const N: usize>(
     prefix: &str,
     responses: [&'static str; N],
