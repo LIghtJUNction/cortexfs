@@ -50,9 +50,9 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .split_once(':')
             .filter(|&(name, value)| {
                 reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok()
-                    && !value
+                    && value
                         .bytes()
-                        .any(|byte| (byte < b' ' && byte != b'\t') || byte == 0x7f)
+                        .all(|byte| !byte.is_ascii_control() || byte == b'\t')
             })
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
