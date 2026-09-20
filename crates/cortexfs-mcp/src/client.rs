@@ -320,13 +320,7 @@ impl Client {
         };
         let response = self.exchange(method, &params)?;
         if let Some(error) = response.get("error") {
-            return Err(io::Error::other(format!(
-                "MCP request failed: {}",
-                error
-                    .get("code")
-                    .and_then(Value::as_i64)
-                    .unwrap_or_default()
-            )));
+            return Err(io::Error::other(format!("MCP request failed: {}", error["code"])));
         }
         response
             .get("result")
