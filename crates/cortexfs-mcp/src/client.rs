@@ -361,6 +361,10 @@ impl Client {
             }
             if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
                 || value.get("result").is_some() == value.get("error").is_some()
+                || value.get("error").is_some_and(|error| {
+                    error.get("code").and_then(Value::as_i64).is_none()
+                        || error.get("message").and_then(Value::as_str).is_none()
+                })
             {
                 return Err(invalid_data("invalid JSON-RPC response"));
             }
