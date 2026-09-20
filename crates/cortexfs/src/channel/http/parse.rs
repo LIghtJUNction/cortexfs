@@ -1,5 +1,4 @@
-use std::io::{Error, ErrorKind, Read};
-use std::net::TcpStream;
+use std::{io::{Error, ErrorKind, Read}, net::TcpStream};
 
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -48,12 +47,8 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
-            .filter(|&(name, value)| {
-                reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok()
-                    && value
-                        .bytes()
-                        .all(|byte| !byte.is_ascii_control() || byte == b'\t')
-            })
+            .filter(|&(name, _)| reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok())
+            .filter(|&(_, value)| !value.bytes().any(|b| b.is_ascii_control() && b != b'\t'))
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
         if name == "transfer-encoding" {
