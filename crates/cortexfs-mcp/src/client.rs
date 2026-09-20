@@ -351,6 +351,9 @@ impl Client {
                     self.reply_server_request(&value)?;
                 } else if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
                     || value.get("method").and_then(Value::as_str).is_none()
+                    || value
+                        .get("params")
+                        .is_some_and(|params| !params.is_object() && !params.is_array())
                 {
                     return Err(invalid_data("invalid JSON-RPC notification"));
                 }
