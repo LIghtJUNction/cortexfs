@@ -35,10 +35,11 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     let mut request = lines.next().unwrap_or_default().split(' ');
     let method = request.next().unwrap_or_default().to_owned();
     let path = request.next().unwrap_or_default().to_owned();
+    let version = request.next().unwrap_or_default();
     if path.is_empty()
         || path.bytes().any(|byte| byte.is_ascii_whitespace())
         || reqwest::header::HeaderName::from_bytes(method.as_bytes()).is_err()
-        || !matches!(request.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+        || !matches!(version, "HTTP/1.0" | "HTTP/1.1")
         || request.next().is_some()
     {
         return Err(invalid("invalid HTTP request line"));
@@ -50,10 +51,15 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .filter(|&(name, _)| reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok())
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
-        if name == "transfer-encoding" || name == "content-length" && headers.contains_key(&name) {
+        if name == "transfer-encoding"
+            || (matches!(name.as_str(), "content-length" | "host") && headers.contains_key(&name))
+        {
             return Err(invalid("invalid HTTP framing"));
         }
         headers.insert(name, value.trim().to_owned());
+    }
+    if version == "HTTP/1.1" && !headers.contains_key("host") {
+        return Err(invalid("invalid HTTP host"));
     }
     let length = match headers.get("content-length") {
         None => 0,
