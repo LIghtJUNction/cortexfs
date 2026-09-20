@@ -203,8 +203,8 @@ fn stderr_has_an_independent_hard_limit() -> io::Result<()> {
 }
 
 #[test]
-fn rpc_errors_and_duplicate_names_are_rejected() -> io::Result<()> {
-    assert!(Client::start(&server("error"))?.tools().is_err());
+fn ambiguous_rpc_outcomes_and_duplicate_names_are_rejected() -> io::Result<()> {
+    assert!(Client::start(&server("bothoutcomes"))?.tools().is_err());
     assert!(Client::start(&server("duplicate"))?.tools().is_err());
     Ok(())
 }
