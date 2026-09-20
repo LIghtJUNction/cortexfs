@@ -1,4 +1,5 @@
-use std::{io::{Error, ErrorKind, Read}, net::TcpStream};
+use std::io::{Error, ErrorKind, Read};
+use std::net::TcpStream;
 
 fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
@@ -51,11 +52,8 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .filter(|&(_, value)| !value.bytes().any(|b| b.is_ascii_control() && b != b'\t'))
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
-        if name == "transfer-encoding" {
-            return Err(invalid("invalid HTTP framing"));
-        }
-        if headers.insert(name, value.trim().to_owned()).is_some() {
-            return Err(invalid("duplicate HTTP header"));
+        if name == "transfer-encoding" || headers.insert(name, value.trim().to_owned()).is_some() {
+            return Err(invalid("invalid HTTP header"));
         }
     }
     if version == "HTTP/1.1" && !headers.contains_key("host") {
