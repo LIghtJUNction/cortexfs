@@ -344,6 +344,7 @@ impl Client {
         loop {
             let value = self.read()?;
             if value.get("method").is_some() {
+                let params = value.get("params");
                 if value.get("id").is_some() {
                     if self.protocol.is_some() || method == "server/discover" {
                         return Err(invalid_data("unsupported modern MCP server request"));
@@ -351,6 +352,7 @@ impl Client {
                     self.reply_server_request(&value)?;
                 } else if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
                     || value.get("method").and_then(Value::as_str).is_none()
+                    || params.is_some_and(|p| !p.is_object() && !p.is_array())
                 {
                     return Err(invalid_data("invalid JSON-RPC notification"));
                 }
@@ -377,12 +379,10 @@ impl Client {
     }
 
     fn reply_server_request(&mut self, value: &Value) -> io::Result<()> {
-        let id = value
-            .get("id")
-            .filter(|id| id.is_string() || id.is_number());
+        let id = &value["id"];
         let valid = value.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
             && value.get("method").and_then(Value::as_str) == Some("ping")
-            && id.is_some()
+            && (id.is_string() || id.is_number())
             && value.get("params").is_none_or(Value::is_object)
             && value.get("result").is_none()
             && value.get("error").is_none();
