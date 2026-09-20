@@ -52,7 +52,7 @@ fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
 
 #[test]
 fn content_length_framing_fails_closed() {
-    assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length:+0\r\n\r\n").is_err());
+    assert!(parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length:+0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length:0\r\nContent-Length:0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
     assert!(parse_raw("POST / HTTP/1.1\r\nContent-Length : 0\r\n\r\n").is_err());
