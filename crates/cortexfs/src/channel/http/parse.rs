@@ -52,8 +52,7 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
         if name == "transfer-encoding"
-            || (matches!(name.as_str(), "content-length" | "host")
-                && headers.contains_key(&name))
+            || (matches!(name.as_str(), "content-length" | "host") && headers.contains_key(&name))
         {
             return Err(invalid("invalid HTTP framing"));
         }
