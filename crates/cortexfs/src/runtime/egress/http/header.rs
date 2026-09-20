@@ -47,7 +47,7 @@ pub(super) fn parse_headers(
                 if length.is_some() {
                     return Err(invalid("duplicate provider HTTP content length"));
                 }
-                if value.is_empty() || !value.bytes().all(u8::is_ascii_digit) {
+                if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
                     return Err(invalid("invalid provider HTTP content length"));
                 }
                 let parsed = value
