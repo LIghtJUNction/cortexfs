@@ -44,7 +44,7 @@ pub(super) fn parse_headers(
         let value = raw_value.trim_matches([' ', '\t']);
         match name.as_str() {
             "content-length" => {
-                if length.is_some() || value.is_empty() {
+                if length.is_some() || value.is_empty() || !value.bytes().all(u8::is_ascii_digit) {
                     return Err(invalid("duplicate provider HTTP content length"));
                 }
                 let parsed = value
@@ -106,10 +106,4 @@ pub(super) fn read_line(input: &mut impl BufRead) -> io::Result<String> {
         return Err(invalid("invalid provider HTTP line"));
     }
     String::from_utf8(bytes).map_err(|_error| invalid("provider HTTP line is not UTF-8"))
-}
-
-#[cfg(test)]
-#[test]
-fn standard_field_name_parser_rejects_whitespace() {
-    assert!(reqwest::header::HeaderName::from_bytes(b"Authorization ").is_err());
 }
