@@ -52,11 +52,8 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
             .filter(|&(_, value)| !value.bytes().any(|b| b.is_ascii_control() && b != b'\t'))
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
-        if name == "transfer-encoding"
-            || headers
-                .insert(name, value.trim_matches([' ', '\t']).to_owned())
-                .is_some()
-        {
+        let value = value.trim_matches([' ', '\t']).to_owned();
+        if name == "transfer-encoding" || headers.insert(name, value).is_some() {
             return Err(invalid("invalid HTTP header"));
         }
     }
