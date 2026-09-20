@@ -60,7 +60,7 @@ for line in sys.stdin:
   for _ in range(4):
    print(json.dumps({"jsonrpc":"2.0","method":"progress"}),flush=True); time.sleep(.1)
  if mode=="invalidnotification" and m=="initialize":
-  print(json.dumps({"method":"progress"}),flush=True)
+  print(json.dumps({"jsonrpc":"2.0","method":"progress","params":7}),flush=True)
  if mode in ("pingstr","pingnum") and m=="initialize":
   ping_id="server-ping" if mode=="pingstr" else 7
   print(json.dumps({"jsonrpc":"2.0","id":ping_id,"method":"ping","params":{}}),flush=True)
