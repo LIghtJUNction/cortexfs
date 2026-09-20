@@ -206,15 +206,16 @@ fn capability_text(
     }
 
     let Some(metadata) = metadata else {
+        if !uses_streaming_adapter(formats) {
+            return "chat\n".to_owned();
+        }
         return if formats
             .iter()
             .any(|value| value.trim() == "openai.responses")
         {
             "chat\nstream\ntool_call_syntax\n".to_owned()
-        } else if uses_streaming_adapter(formats) {
-            "chat\nstream\n".to_owned()
         } else {
-            "chat\n".to_owned()
+            "chat\nstream\n".to_owned()
         };
     };
 
@@ -412,7 +413,7 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: HashMap::new(),
             enabled: true,
-            formats: vec!["google.generative".to_owned()],
+            formats: vec!["google.generative".to_owned(), "openai.responses".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
