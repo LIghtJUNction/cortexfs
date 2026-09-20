@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 
 pub(in crate::channel) fn server<const N: usize>(
@@ -12,7 +12,7 @@ pub(in crate::channel) fn server<const N: usize>(
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
             };
-            if read_request(&stream).is_err() {
+            if super::read_request(&mut stream, super::MAX_HTTP_BODY_BYTES).is_err() {
                 return;
             }
             let reply = format!(
@@ -26,21 +26,6 @@ pub(in crate::channel) fn server<const N: usize>(
         }
     });
     Ok((address, server))
-}
-
-fn read_request(stream: &TcpStream) -> std::io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut length = 0_usize;
-    loop {
-        let mut line = Vec::new();
-        if reader.read_until(b'\n', &mut line)? == 0 || line == b"\r\n" {
-            break;
-        }
-        if let Some(value) = line.strip_prefix(b"Content-Length: ") {
-            length = String::from_utf8_lossy(value).trim().parse().unwrap_or(0);
-        }
-    }
-    reader.read_exact(&mut vec![0_u8; length])
 }
 
 fn parse_raw(request: &str) -> std::io::Result<super::HttpRequest> {
