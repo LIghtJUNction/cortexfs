@@ -27,16 +27,13 @@ pub(super) fn parse_headers(
             break;
         }
         count += 1;
-        if count > HEADER_COUNT_MAX || line.starts_with([' ', '\t']) {
+        if count > HEADER_COUNT_MAX {
             return Err(invalid("invalid provider HTTP header"));
         }
         let (raw_name, raw_value) = line
             .split_once(':')
             .ok_or_else(|| invalid("invalid provider HTTP header"))?;
-        if raw_name.is_empty()
-            || !raw_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+        if reqwest::header::HeaderName::from_bytes(raw_name.as_bytes()).is_err()
             || raw_value
                 .bytes()
                 .any(|byte| (byte < b' ' && byte != b'\t') || byte == 0x7f)
@@ -109,4 +106,10 @@ pub(super) fn read_line(input: &mut impl BufRead) -> io::Result<String> {
         return Err(invalid("invalid provider HTTP line"));
     }
     String::from_utf8(bytes).map_err(|_error| invalid("provider HTTP line is not UTF-8"))
+}
+
+#[cfg(test)]
+#[test]
+fn standard_field_name_parser_rejects_whitespace() {
+    assert!(reqwest::header::HeaderName::from_bytes(b"Authorization ").is_err());
 }
