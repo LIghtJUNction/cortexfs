@@ -200,7 +200,9 @@ fn parser_rejects_request_target_and_protocol_injection() {
 fn parser_rejects_framing_smuggling_and_unapproved_headers() {
     for headers in [
         "Transfer-Encoding: chunked\r\n",
+        "Content-Length: +2\r\n",
         "Content-Length: 0\r\nContent-Length: 0\r\n",
+        "Authorization : Bearer secret\r\nContent-Length: 0\r\n",
         "Upgrade: websocket\r\nContent-Length: 0\r\n",
         "Forwarded: host=evil\r\nContent-Length: 0\r\n",
         "X-Evil: value\r\nContent-Length: 0\r\n",
