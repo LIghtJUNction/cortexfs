@@ -211,7 +211,7 @@ fn capability_text(
             .any(|value| value.trim() == "openai.responses")
         {
             "chat\nstream\ntool_call_syntax\n".to_owned()
-        } else if supports_streaming_format(formats) {
+        } else if uses_streaming_adapter(formats) {
             "chat\nstream\n".to_owned()
         } else {
             "chat\n".to_owned()
@@ -225,9 +225,7 @@ fn capability_text(
     if matches!(metadata.tools, Support::Supported) {
         let _ignored = writeln!(cap, "tool_call_syntax");
     }
-    if metadata.streaming == Support::Supported
-        || (metadata.streaming != Support::Unsupported && supports_streaming_format(formats))
-    {
+    if metadata.streaming != Support::Unsupported && uses_streaming_adapter(formats) {
         let _ignored = writeln!(cap, "stream");
     }
     if matches!(metadata.structured_output, Support::Supported) {
@@ -282,10 +280,13 @@ fn capability_text(
     cap
 }
 
-fn supports_streaming_format(formats: &[String]) -> bool {
-    formats
-        .iter()
-        .any(|value| matches!(value.trim(), "openai.chat" | "openai.responses"))
+fn uses_streaming_adapter(formats: &[String]) -> bool {
+    !formats.iter().any(|value| {
+        matches!(
+            value.trim(),
+            "anthropic.messages" | "google.generative"
+        )
+    })
 }
 
 fn has_modalities(modalities: &[Modality], needle: Modality) -> bool {
@@ -379,7 +380,7 @@ mod tests {
             cache_dir,
             &serde_json::json!({
                 "id": "known", "name": "Local Known", "attachment": false,
-                "reasoning": false, "tool_call": true, "open_weights": false,
+                "reasoning": false, "tool_call": true, "streaming": true, "open_weights": false,
                 "modalities": {"input": ["text"], "output": ["text"]},
                 "limit": {"context": context, "output": 0}
             }),
