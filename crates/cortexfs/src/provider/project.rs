@@ -41,17 +41,11 @@ pub(super) fn project_models(
         let custom_metadata = has_custom_limit || has_custom_cap;
         let resolved = resolve_model_metadata(&catalog, provider, &model, custom_metadata);
 
-        let mut cap = capability_text(
+        let cap = capability_text(
             &config.formats,
             config.model_capabilities.get(&model).map(Vec::as_slice),
             resolved.metadata,
         );
-        if cap.is_empty()
-            && resolved.metadata.is_none()
-            && !config.model_capabilities.contains_key(&model)
-        {
-            cap = String::from("chat\nstream\n");
-        }
 
         let limit = config
             .model_limits
@@ -212,6 +206,9 @@ fn capability_text(
     }
 
     let Some(metadata) = metadata else {
+        if !uses_streaming_adapter(formats) {
+            return "chat\n".to_owned();
+        }
         return if formats
             .iter()
             .any(|value| value.trim() == "openai.responses")
@@ -229,9 +226,7 @@ fn capability_text(
     if matches!(metadata.tools, Support::Supported) {
         let _ignored = writeln!(cap, "tool_call_syntax");
     }
-    if metadata.streaming == Support::Supported
-        || (metadata.streaming != Support::Unsupported && supports_streaming_format(formats))
-    {
+    if metadata.streaming != Support::Unsupported && uses_streaming_adapter(formats) {
         let _ignored = writeln!(cap, "stream");
     }
     if matches!(metadata.structured_output, Support::Supported) {
@@ -286,13 +281,10 @@ fn capability_text(
     cap
 }
 
-fn supports_streaming_format(formats: &[String]) -> bool {
-    formats.iter().any(|value| {
-        matches!(
-            value.trim(),
-            "openai.chat" | "openai.responses" | "anthropic.messages" | "gemini.generate_content"
-        )
-    })
+fn uses_streaming_adapter(formats: &[String]) -> bool {
+    !formats
+        .iter()
+        .any(|value| matches!(value.trim(), "anthropic.messages" | "google.generative"))
 }
 
 fn has_modalities(modalities: &[Modality], needle: Modality) -> bool {
@@ -386,7 +378,7 @@ mod tests {
             cache_dir,
             &serde_json::json!({
                 "id": "known", "name": "Local Known", "attachment": false,
-                "reasoning": false, "tool_call": true, "open_weights": false,
+                "reasoning": false, "tool_call": true, "streaming": true, "open_weights": false,
                 "modalities": {"input": ["text"], "output": ["text"]},
                 "limit": {"context": context, "output": 0}
             }),
@@ -421,7 +413,10 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: HashMap::new(),
             enabled: true,
-            formats: vec!["openai.chat".to_owned()],
+            formats: vec![
+                "google.generative".to_owned(),
+                "openai.responses".to_owned(),
+            ],
             auth: Vec::new(),
             oauth: None,
         };
@@ -434,7 +429,7 @@ mod tests {
         assert_eq!(model.limit.tokens(), None);
         assert_eq!(model.recommended.tokens(), None);
         assert_eq!(model.compact.tokens(), None);
-        assert!(model.cap.contains("chat"));
+        assert_eq!(model.cap, "chat\n");
         assert!(
             model
                 .log
@@ -499,14 +494,14 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: capabilities,
             enabled: true,
-            formats: vec!["openai.chat".to_owned()],
+            formats: vec!["anthropic.messages".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
 
         let mut projected = Vec::new();
         project_models("local", &config, dir.path(), &mut projected);
-        assert_eq!(projected[0].cap, "chat\ntool_call_syntax\nstream\n");
+        assert_eq!(projected[0].cap, "chat\ntool_call_syntax\n");
         assert_eq!(projected[1].cap, "");
         Ok(())
     }
