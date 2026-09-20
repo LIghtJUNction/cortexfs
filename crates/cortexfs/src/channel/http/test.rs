@@ -53,8 +53,8 @@ fn content_length_framing_fails_closed() -> std::io::Result<()> {
         parse_raw("GET / HTTP/1.1\r\nHost:x\r\nX-Line-Signature:a\r\nx-line-signature:b\r\n\r\n")
             .is_err()
     );
-    let request = parse_raw("GET / HTTP/1.0\r\nX-Test: \t\u{a0}b\u{a0}\t \r\n\r\n")?;
-    assert!(request.headers.get("x-test").is_some_and(|v| v == "\u{a0}b\u{a0}"));
+    let r = parse_raw("GET / HTTP/1.0\r\nX-Test: \t\u{a0}b\u{a0}\t \r\n\r\n")?;
+    assert!(r.headers.get("x-test").is_some_and(|v| v == "\u{a0}b\u{a0}"));
     assert!(parse_raw("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n").is_ok());
     Ok(())
 }
