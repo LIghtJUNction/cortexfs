@@ -48,7 +48,12 @@ pub fn read_request(stream: &mut TcpStream, max_body: usize) -> Result<HttpReque
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
-            .filter(|&(name, _)| reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok())
+            .filter(|&(name, value)| {
+                reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok()
+                    && !value
+                        .bytes()
+                        .any(|byte| (byte < b' ' && byte != b'\t') || byte == 0x7f)
+            })
             .map(|(name, value)| (name.to_ascii_lowercase(), value))
             .ok_or_else(|| invalid("invalid HTTP header"))?;
         if name == "transfer-encoding" {
