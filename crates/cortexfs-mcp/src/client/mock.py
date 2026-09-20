@@ -19,6 +19,9 @@ for line in sys.stdin:
   continue
  if m=="server/discover":
   meta=r.get("params",{}).get("_meta",{})
+  if mode in ("baderrorcode","baderrormessage"):
+   error={"code":"-32601" if mode=="baderrorcode" else -32601,"message":7 if mode=="baderrormessage" else "unknown"}
+   print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":error}),flush=True); continue
   if mode.startswith("modern"):
    expected={"io.modelcontextprotocol/protocolVersion":"2026-07-28",
              "io.modelcontextprotocol/clientInfo":{"name":"ctxmcp","version":os.environ["PKG_VERSION"]},

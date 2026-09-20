@@ -182,7 +182,7 @@ impl Client {
             result => result?,
         };
         if let Some(error) = response.get("error") {
-            match error.get("code").and_then(Value::as_i64) {
+            match error["code"].as_i64() {
                 Some(-32020 | -32021) => return Err(invalid_data("modern MCP discovery error")),
                 Some(-32022) => {}
                 _ => return Ok(false),
@@ -322,10 +322,7 @@ impl Client {
         if let Some(error) = response.get("error") {
             return Err(io::Error::other(format!(
                 "MCP request failed: {}",
-                error
-                    .get("code")
-                    .and_then(Value::as_i64)
-                    .unwrap_or_default()
+                error["code"]
             )));
         }
         response
@@ -361,6 +358,10 @@ impl Client {
             }
             if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
                 || value.get("result").is_some() == value.get("error").is_some()
+                || value.get("error").is_some_and(|error| {
+                    !(error["code"].is_i64() || error["code"].is_u64())
+                        || !error["message"].is_string()
+                })
             {
                 return Err(invalid_data("invalid JSON-RPC response"));
             }

@@ -59,10 +59,7 @@ fn wait_pid(path: &std::path::Path, timeout: Duration) -> io::Result<nix::unistd
 }
 
 fn assert_reaped(path: &std::path::Path) -> io::Result<()> {
-    let pid = fs::read_to_string(path)?
-        .parse::<i32>()
-        .map(nix::unistd::Pid::from_raw)
-        .map_err(io::Error::other)?;
+    let pid = wait_pid(path, Duration::ZERO)?;
     assert_eq!(signal::kill(pid, None), Err(Errno::ESRCH));
     assert_eq!(signal::killpg(pid, None), Err(Errno::ESRCH));
     Ok(())
@@ -96,6 +93,8 @@ fn invalid_negotiation_and_server_requests_are_rejected() {
         "modernping",
         "modernmissingcap",
         "modernbadresult",
+        "baderrorcode",
+        "baderrormessage",
         "unsupportedrequest",
         "malformedping",
         "unknownversion",
