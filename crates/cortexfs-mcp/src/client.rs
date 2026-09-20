@@ -351,10 +351,7 @@ impl Client {
                     self.reply_server_request(&value)?;
                 } else if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
                     || value.get("method").and_then(Value::as_str).is_none()
-                    || !matches!(
-                        value.get("params"),
-                        None | Some(Value::Object(_) | Value::Array(_))
-                    )
+                    || value.get("params").is_some_and(|p| !p.is_object() && !p.is_array())
                 {
                     return Err(invalid_data("invalid JSON-RPC notification"));
                 }
@@ -381,10 +378,10 @@ impl Client {
     }
 
     fn reply_server_request(&mut self, value: &Value) -> io::Result<()> {
-        let id = value.get("id").filter(|id| id.is_string() || id.is_number());
+        let id = &value["id"];
         let valid = value.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
             && value.get("method").and_then(Value::as_str) == Some("ping")
-            && id.is_some()
+            && (id.is_string() || id.is_number())
             && value.get("params").is_none_or(Value::is_object)
             && value.get("result").is_none()
             && value.get("error").is_none();
@@ -505,7 +502,9 @@ impl Drop for Client {
 }
 
 fn stop_process_group(child: &mut Child) -> io::Result<()> {
-    let process_group = i32::try_from(child.id()).ok().map(nix::unistd::Pid::from_raw);
+    let process_group = i32::try_from(child.id())
+        .ok()
+        .map(nix::unistd::Pid::from_raw);
     let _graceful = wait_child(child, DROP_GRACE)?;
     if let Some(process_group) = process_group {
         signal_process_group(process_group, nix::sys::signal::Signal::SIGTERM)?;
