@@ -76,7 +76,9 @@ fn oauth_config_rejects_insecure_endpoints_and_control_character_secret_accounts
         r#"{"request_url":"http://x","token_url":"https://x","verification_uri":"https://x"}"#
     ));
     assert!(!device.is_valid());
-    assert!(oauth_post("http://auth.example/token", "text/plain", "secret", 1).is_err());
+    assert!(
+        oauth_post("http://auth.example/token", "text/plain", "secret", 1).is_err()
+    );
 }
 
 #[test]
