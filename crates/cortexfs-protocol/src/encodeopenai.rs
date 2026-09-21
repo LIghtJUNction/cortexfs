@@ -1,4 +1,5 @@
-use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, ToolChoice, WireProtocol};
+use crate::{Content, ContentPart};
+use crate::{ConversionError, Message, ModelRequest, ToolChoice, WireProtocol};
 use serde_json::{Map, Value, json};
 
 pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
