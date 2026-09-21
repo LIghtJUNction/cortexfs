@@ -59,17 +59,21 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
         let mut value =
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
         let signature = match &source.content {
-            Content::Parts(parts) => parts.iter().find_map(|part| match part {
-                ContentPart::Data { name, value } => name
-                    .strip_prefix("gemini.thought_signature:")
-                    .filter(|id| *id == call.id.as_str())
-                    .and_then(|_| value.as_str()),
+            Content::Parts(parts) => parts.iter().find_map(|part| match *part {
+                ContentPart::Data {
+                    ref name,
+                    ref value,
+                } => {
+                    (name.strip_prefix("gemini.thought_signature:") == Some(call.id.as_str()))
+                        .then_some(value)
+                        .and_then(Value::as_str)
+                }
                 _ => None,
             }),
             Content::Text(_) => None,
         };
-        if let Some(signature) = signature {
-            value["thoughtSignature"] = Value::String(signature.to_owned());
+        if let (Some(signature), Some(object)) = (signature, value.as_object_mut()) {
+            drop(object.insert("thoughtSignature".to_owned(), Value::String(signature.to_owned())));
         }
         value
     }));
