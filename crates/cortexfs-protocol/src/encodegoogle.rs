@@ -1,94 +1,98 @@
-use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, Role, ToolDefinition};
-use serde_json::{Value, json};
+use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, WireProtocol};
+use serde_json::{Map, Value, json};
 
-pub(crate) fn request(source: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
-    let mut contents = Vec::new();
-    for message in &source.messages {
-        contents.push(content(message)?);
+pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
+    crate::encode::check_context(request, WireProtocol::Gemini)?;
+    let mut root = Map::new();
+    root.insert("model".to_owned(), Value::String(request.model.clone()));
+    if let Some(system) = request
+        .messages
+        .iter()
+        .find(|message| message.role.as_str() == "system")
+    {
+        root.insert(
+            "systemInstruction".to_owned(),
+            json!({"parts": parts(&system.content, "system")?}),
+        );
     }
-    let system_instruction = source
-        .system
-        .as_ref()
-        .map(|system| Message {
-            role: Role::new("user"),
-            content: Content::Text(system.clone()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-        })
-        .map(|message| content(&message))
-        .transpose()?;
-    let mut request = json!({"contents": contents});
-    if let Some(model) = source.model.as_ref() {
-        request["model"] = json!(model);
+    root.insert(
+        "contents".to_owned(),
+        Value::Array(
+            request
+                .messages
+                .iter()
+                .filter(|message| message.role.as_str() != "system")
+                .map(content)
+                .collect::<Result<_, _>>()?,
+        ),
+    );
+    if !request.tools.is_empty() {
+        root.insert("tools".to_owned(), json!([{"functionDeclarations": request.tools.iter().map(|tool| json!({"name": tool.name, "description": tool.description, "parameters": tool.parameters})).collect::<Vec<_>>() }]));
     }
-    if let Some(system) = system_instruction {
-        request["systemInstruction"] = system;
+    let config = generation(request);
+    if !config.is_empty() {
+        root.insert("generationConfig".to_owned(), Value::Object(config));
     }
-    if !source.tools.is_empty() {
-        request["tools"] = json!([{"functionDeclarations": source.tools.iter().map(tool).collect::<Vec<_>>() }]);
+    crate::encode::options(&mut root, request);
+    crate::encode::bytes(WireProtocol::Gemini, &Value::Object(root))
+}
+
+fn generation(request: &ModelRequest) -> Map<String, Value> {
+    let mut value = Map::new();
+    if let Some(tokens) = request.max_output_tokens {
+        value.insert("maxOutputTokens".to_owned(), json!(tokens));
     }
-    if source.max_tokens.is_some() || source.thinking.is_some() {
-        request["generationConfig"] = json!({
-            "maxOutputTokens": source.max_tokens,
-            "thinkingConfig": source.thinking,
-        });
+    if let Some(config) = request.options.get("gemini.thinking_config") {
+        value.insert("thinkingConfig".to_owned(), config.clone());
     }
-    serde_json::to_vec(&request).map_err(ConversionError::serialize)
+    value
 }
 
 fn content(source: &Message) -> Result<Value, ConversionError> {
-    let role = match source.role.as_str() {
-        "assistant" => "model",
-        role => role,
+    if source.role.as_str() == "tool" {
+        let name = source.name.as_ref().or(source.tool_call_id.as_ref());
+        return Ok(
+            json!({"role": "user", "parts": [{"functionResponse": {"id": source.tool_call_id, "name": name, "response": {"content": source.content.text_value()}}}]}),
+        );
+    }
+    let role = if source.role.as_str() == "assistant" {
+        "model"
+    } else {
+        source.role.as_str()
     };
-    let mut values = parts(&source.content)?;
+    let mut values = parts(&source.content, role)?;
     values.extend(source.tool_calls.iter().enumerate().map(|(index, call)| {
         let mut value =
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
         let marker = format!("gemini.thought_signature:{index}");
         let signature = match source.content {
-            Content::Parts(ref parts) => parts.iter().find_map(|part| match *part {
-                ContentPart::Data { ref name, ref value } if name == &marker => value.as_str(),
+            Content::Parts(ref parts) => parts.iter().find_map(|part| match part {
+                ContentPart::Data { name, value } if name == &marker => value.as_str(),
                 _ => None,
             }),
             Content::Text(_) => None,
         };
-        if let (Some(signature), Some(object)) = (signature, value.as_object_mut()) {
-            drop(object.insert("thoughtSignature".to_owned(), json!(signature)));
+        if let Some(signature) = signature {
+            value["thoughtSignature"] = json!(signature);
         }
         value
     }));
     Ok(json!({"role": role, "parts": values}))
 }
 
-fn parts(content: &Content) -> Result<Vec<Value>, ConversionError> {
-    match content {
-        Content::Text(text) => Ok(vec![json!({"text": text})]),
-        Content::Parts(parts) => parts
+fn parts(content: &Content, role: &str) -> Result<Vec<Value>, ConversionError> {
+    match *content {
+        Content::Text(ref text) => Ok(vec![json!({"text": text})]),
+        Content::Parts(ref parts) => parts
             .iter()
             .filter(|part| {
                 !matches!(part, ContentPart::Data { name, .. } if name.starts_with("gemini.thought_signature:"))
             })
-            .map(|part| match part {
-                ContentPart::Text { text } => Ok(json!({"text": text})),
-                ContentPart::Image { uri, mime } => Ok(json!({"fileData": {
-                    "fileUri": uri,
-                    "mimeType": mime.as_deref().unwrap_or("application/octet-stream")
-                }})),
-                ContentPart::Data { .. } => Err(ConversionError::unsupported(
-                    "contents[].parts[]",
-                    "Gemini request data part",
-                )),
+            .map(|part| match *part {
+                ContentPart::Text { ref text } => Ok(json!({"text": text})),
+                ContentPart::Image { ref uri, ref mime } | ContentPart::Audio { ref uri, ref mime } => Ok(json!({"fileData": {"mimeType": mime.as_deref().unwrap_or(if role == "model" { "application/octet-stream" } else { "image/*" }), "fileUri": uri}})),
+                ContentPart::Data { .. } => Err(ConversionError::UnsupportedField { protocol: WireProtocol::Gemini, field: "content part".to_owned() }),
             })
             .collect(),
     }
-}
-
-fn tool(source: &ToolDefinition) -> Value {
-    json!({
-        "name": source.name,
-        "description": source.description,
-        "parameters": source.parameters,
-    })
 }
