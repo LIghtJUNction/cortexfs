@@ -58,8 +58,8 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
     values.extend(source.tool_calls.iter().map(|call| {
         let mut value =
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
-        let signature = match &source.content {
-            Content::Parts(parts) => parts.iter().find_map(|part| match *part {
+        let signature = match source.content {
+            Content::Parts(ref parts) => parts.iter().find_map(|part| match *part {
                 ContentPart::Data {
                     ref name,
                     ref value,
