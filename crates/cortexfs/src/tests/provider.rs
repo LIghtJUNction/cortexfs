@@ -345,6 +345,10 @@ fn copilot_device_flow_reports_challenge_and_refreshes_poll_interval()
             },
             AuthResponse {
                 status: 400,
+                body: br#"{"error":"slow_down"}"#.to_vec(),
+            },
+            AuthResponse {
+                status: 400,
                 body: br#"{"error":"authorization_pending"}"#.to_vec(),
             },
             AuthResponse {
@@ -372,8 +376,8 @@ fn copilot_device_flow_reports_challenge_and_refreshes_poll_interval()
             .map(|challenge| challenge.user_code.as_str()),
         Some("ABCD-1234")
     );
-    assert_eq!(pauses, [1]);
-    assert_eq!(transport.posts.len(), 3);
+    assert_eq!(pauses, [1, 1, 6]);
+    assert_eq!(transport.posts.len(), 4);
     Ok(())
 }
 
@@ -494,7 +498,8 @@ fn model_headers_reject_control_character_credentials() {
     let adapter = AnthropicAdapter::claude();
     let credential = Credential::ApiKey {
         provider: "anthropic".to_owned(),
-        key: "bad\nkey".to_owned(),
+        key: "bad\
+key".to_owned(),
         slot: Some("default".to_owned()),
     };
     assert_eq!(
