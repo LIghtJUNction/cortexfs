@@ -172,21 +172,23 @@ fn model_names(config: &ProviderConfig, cache: &Path, provider: &str) -> Vec<Str
     names
 }
 
-fn driver_text(formats: &[String]) -> String {
+pub(crate) fn format_driver_routes(formats: &[String]) -> (&'static str, &'static str) {
     let has = |format| formats.iter().any(|value| value.trim() == format);
-    let (default, agent) = if has("anthropic.messages") {
+    if has("anthropic.messages") {
         ("anthropic-messages", "anthropic-messages")
     } else if has("google.generative") {
         ("google-generative", "google-generative")
+    } else if has("openai.responses") && has("openai.chat") {
+        ("openai-chat", "openai-responses,openai-chat")
     } else if has("openai.responses") {
-        if has("openai.chat") {
-            ("openai-chat", "openai-responses,openai-chat")
-        } else {
-            ("openai-responses", "openai-responses")
-        }
+        ("openai-responses", "openai-responses")
     } else {
         ("openai-chat", "openai-chat")
-    };
+    }
+}
+
+fn driver_text(formats: &[String]) -> String {
+    let (default, agent) = format_driver_routes(formats);
     format!("default={default}\nexec={default}\nagent={agent}\n")
 }
 
