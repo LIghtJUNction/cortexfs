@@ -60,13 +60,10 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
         let signature = match &source.content {
             Content::Parts(parts) => parts.iter().find_map(|part| match part {
-                ContentPart::Data { name, value } => {
-                    if name.strip_prefix("gemini.thought_signature:") == Some(call.id.as_str()) {
-                        value.as_str()
-                    } else {
-                        None
-                    }
-                }
+                ContentPart::Data { name, value } => name
+                    .strip_prefix("gemini.thought_signature:")
+                    .filter(|id| *id == call.id.as_str())
+                    .and_then(|_| value.as_str()),
                 _ => None,
             }),
             Content::Text(_) => None,
