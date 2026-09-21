@@ -88,11 +88,12 @@ modern request carries the standard request `_meta`. Only an unrecognized
 discovery error or a bounded timeout falls back on the same process to the
 legacy `initialize` lifecycle. That legacy path accepts only the stable
 versions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`; draft,
-unknown, and future versions are rejected. A missing modern `resultType` is
-treated as `complete` for backward compatibility; an explicitly present
-unsupported value, including `input_required`, fails closed until MRTR
-continuation is implemented. Modern server-initiated requests are rejected;
-legacy `ping` handling remains on the legacy path only.
+unknown, and future versions are rejected. Modern `2026-07-28` results must
+include `resultType="complete"`; the missing-field compatibility rule applies
+only to responses from earlier protocol versions. Unsupported values, including
+`input_required`, fail closed until MRTR continuation is implemented. Modern
+server-initiated requests are rejected; legacy `ping` handling remains on the
+legacy path only.
 
 ```text
 /ctx/tool/github.search_issues
@@ -237,7 +238,6 @@ Tool execution has two caller-facing modes:
 terminal CLI     tsh TOOL ARG...
 agent native     in-process/runtime tool call with structured input/output
 ```
-
 The terminal CLI mode should behave like a normal command line program: argv is
 preserved, stdin/stdout/stderr are inherited, and output is plain command
 output. A tool may decide that empty argv is invalid, but `tsh` must not reject
