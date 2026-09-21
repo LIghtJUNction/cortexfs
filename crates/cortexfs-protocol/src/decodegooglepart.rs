@@ -30,7 +30,7 @@ pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionE
             let id = call.id.as_ref().unwrap_or(&call.name).to_string();
             if let Some(signature) = part.thought_signature.as_ref() {
                 values.push(ContentPart::Data {
-                    name: format!("gemini.thought_signature:{id}"),
+                    name: format!("gemini.thought_signature:{}", calls.len()),
                     value: json!(signature),
                 });
             }
