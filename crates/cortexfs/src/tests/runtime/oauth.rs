@@ -59,7 +59,9 @@ fn oauth_token_exchange_is_hermetic_and_validates_bearer() {
     assert_eq!(token.access_token, "access");
     assert!(parse_oauth_token_response(br#"{"access_token":"x"}"#).is_err());
     assert!(parse_oauth_token_response(br#"{"access_token":"x","token_type":"mac"}"#).is_err());
-    assert!(parse_oauth_token_response(br#"{"access_token":"x\n","token_type":"Bearer"}"#).is_err());
+    assert!(
+        parse_oauth_token_response(br#"{"access_token":"x\n","token_type":"Bearer"}"#).is_err()
+    );
 }
 
 #[test]
