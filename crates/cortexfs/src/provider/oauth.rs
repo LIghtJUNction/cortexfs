@@ -230,7 +230,7 @@ pub fn oauth_authorization_url(
             ]);
         }
     }
-    Ok(String::from(url).replace('+', "%20"))
+    Ok(String::from(url))
 }
 
 pub fn oauth_authorization_code_form(
