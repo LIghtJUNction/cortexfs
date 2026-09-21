@@ -67,7 +67,10 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
         let marker = format!("gemini.thought_signature:{index}");
         let signature = match source.content {
             Content::Parts(ref parts) => parts.iter().find_map(|part| match *part {
-                ContentPart::Data { ref name, ref value } if name == &marker => value.as_str(),
+                ContentPart::Data {
+                    ref name,
+                    ref value,
+                } if name == &marker => value.as_str(),
                 _ => None,
             }),
             Content::Text(_) => None,
