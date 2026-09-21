@@ -50,10 +50,9 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
             json!({"role": "user", "parts": [{"functionResponse": {"id": source.tool_call_id, "name": name, "response": {"content": source.content.text_value()}}}]}),
         );
     }
-    let role = if source.role.as_str() == "assistant" {
-        "model"
-    } else {
-        source.role.as_str()
+    let role = match source.role.as_str() {
+        "assistant" => "model",
+        role => role,
     };
     let mut values = parts(&source.content, role)?;
     values.extend(source.tool_calls.iter().map(|call| {
