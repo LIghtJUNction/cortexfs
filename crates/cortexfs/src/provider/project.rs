@@ -173,19 +173,19 @@ fn model_names(config: &ProviderConfig, cache: &Path, provider: &str) -> Vec<Str
 }
 
 fn driver_text(formats: &[String]) -> String {
-    let responses = formats
-        .iter()
-        .any(|value| value.trim() == "openai.responses");
-    let chat = formats.iter().any(|value| value.trim() == "openai.chat") || !responses;
-    let default = if chat {
-        "openai-chat"
+    let has = |format| formats.iter().any(|value| value.trim() == format);
+    let (default, agent) = if has("anthropic.messages") {
+        ("anthropic-messages", "anthropic-messages")
+    } else if has("google.generative") {
+        ("google-generative", "google-generative")
+    } else if has("openai.responses") {
+        if has("openai.chat") {
+            ("openai-chat", "openai-responses,openai-chat")
+        } else {
+            ("openai-responses", "openai-responses")
+        }
     } else {
-        "openai-responses"
-    };
-    let agent = if responses && chat {
-        "openai-responses,openai-chat"
-    } else {
-        default
+        ("openai-chat", "openai-chat")
     };
     format!("default={default}\nexec={default}\nagent={agent}\n")
 }
@@ -206,7 +206,7 @@ fn capability_text(
     }
 
     let Some(metadata) = metadata else {
-        if !uses_streaming_adapter(formats) {
+        if !uses_openai_adapter(formats) {
             return "chat\n".to_owned();
         }
         return if formats
@@ -223,10 +223,10 @@ fn capability_text(
     if has_text(&metadata.input_modalities, &metadata.output_modalities) {
         let _ignored = writeln!(cap, "chat");
     }
-    if matches!(metadata.tools, Support::Supported) {
+    if matches!(metadata.tools, Support::Supported) && uses_openai_adapter(formats) {
         let _ignored = writeln!(cap, "tool_call_syntax");
     }
-    if metadata.streaming != Support::Unsupported && uses_streaming_adapter(formats) {
+    if metadata.streaming != Support::Unsupported && uses_openai_adapter(formats) {
         let _ignored = writeln!(cap, "stream");
     }
     if matches!(metadata.structured_output, Support::Supported) {
@@ -281,7 +281,7 @@ fn capability_text(
     cap
 }
 
-fn uses_streaming_adapter(formats: &[String]) -> bool {
+fn uses_openai_adapter(formats: &[String]) -> bool {
     !formats
         .iter()
         .any(|value| matches!(value.trim(), "anthropic.messages" | "google.generative"))
@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(model.model, "mystery-model");
         assert_eq!(model.limit.tokens(), None);
         assert_eq!(model.recommended.tokens(), None);
-        assert_eq!(model.compact.tokens(), None);
+        assert!(model.driver.lines().all(|line| line.ends_with("google-generative")));
         assert_eq!(model.cap, "chat\n");
         assert!(
             model
@@ -494,15 +494,15 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: capabilities,
             enabled: true,
-            formats: vec!["anthropic.messages".to_owned()],
+            formats: vec!["google.generative".to_owned(), "anthropic.messages".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
 
         let mut projected = Vec::new();
         project_models("local", &config, dir.path(), &mut projected);
-        assert_eq!(projected[0].cap, "chat\ntool_call_syntax\n");
-        assert_eq!(projected[1].cap, "");
+        assert!(projected[0].driver.lines().all(|line| line.ends_with("anthropic-messages")));
+        assert_eq!((projected[0].cap.as_str(), projected[1].cap.as_str()), ("chat\n", ""));
         Ok(())
     }
 
