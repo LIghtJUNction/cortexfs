@@ -3,37 +3,36 @@ use std::io;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
+#[cfg(test)]
 pub(crate) fn provider_runtime_driver(
     config: &RunnerProviderConfig,
     agent_call: bool,
 ) -> ProviderRuntimeDriver {
-    if config
-        .formats
-        .iter()
-        .any(|format| format.trim() == "anthropic.messages")
-    {
-        ProviderRuntimeDriver::Anthropic
-    } else if config
-        .formats
-        .iter()
-        .any(|format| format.trim() == "google.generative")
-    {
-        ProviderRuntimeDriver::Gemini
-    } else if config
-        .formats
-        .iter()
-        .any(|format| format.trim() == "openai.responses")
-        && (agent_call
-            || !config
-                .formats
-                .iter()
-                .any(|format| format.trim() == "openai.chat"))
-    {
-        ProviderRuntimeDriver::OpenAiResponses
-    } else {
-        ProviderRuntimeDriver::OpenAiChat
+    provider_runtime_drivers(config, agent_call)
+        .into_iter()
+        .next()
+        .unwrap_or(ProviderRuntimeDriver::OpenAiChat)
+}
+
+fn provider_runtime_drivers(
+    config: &RunnerProviderConfig,
+    agent_call: bool,
+) -> Vec<ProviderRuntimeDriver> {
+    let (default, agent) = crate::provider::format_driver_routes(&config.formats);
+    let route = if agent_call { agent } else { default };
+    route.split(',').filter_map(runtime_driver).collect()
+}
+
+fn runtime_driver(driver: &str) -> Option<ProviderRuntimeDriver> {
+    match driver {
+        "openai-chat" => Some(ProviderRuntimeDriver::OpenAiChat),
+        "openai-responses" => Some(ProviderRuntimeDriver::OpenAiResponses),
+        "anthropic-messages" => Some(ProviderRuntimeDriver::Anthropic),
+        "google-generative" => Some(ProviderRuntimeDriver::Gemini),
+        _ => None,
     }
 }
+
 pub(crate) fn provider_chat_completion(
     name: &str,
     input: &str,
@@ -68,7 +67,7 @@ pub(crate) fn provider_chat_completion(
     let agent_call = env::var_os("CTX_AGENT").is_some();
     let drivers = model_runtime_drivers(&ctx_root, provider, model, agent_call)
         .map_err(ProviderCompletionError::fallback)?
-        .unwrap_or_else(|| vec![provider_runtime_driver(&config, agent_call)]);
+        .unwrap_or_else(|| provider_runtime_drivers(&config, agent_call));
     let mut last_error = None;
     for driver in drivers {
         match call_provider_driver(
@@ -156,12 +155,9 @@ fn model_runtime_drivers(
     })?;
     drivers
         .iter()
-        .map(|driver| match driver.as_str() {
-            "openai-chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
-            "openai-responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
-            "anthropic-messages" => Ok(ProviderRuntimeDriver::Anthropic),
-            "google-generative" => Ok(ProviderRuntimeDriver::Gemini),
-            _ => Err(format!("unsupported model driver adapter: {driver}")),
+        .map(|driver| {
+            runtime_driver(driver)
+                .ok_or_else(|| format!("unsupported model driver adapter: {driver}"))
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
@@ -388,6 +384,28 @@ mod driver_route_tests {
             Ok(Some(vec![ProviderRuntimeDriver::Gemini]))
         );
         Ok(())
+    }
+
+    #[test]
+    fn projected_openai_agent_route_keeps_chat_fallback() {
+        let config = RunnerProviderConfig {
+            name: None,
+            base_url: "https://provider.invalid/v1".to_owned(),
+            auth: Vec::new(),
+            oauth: None,
+            formats: vec!["openai.chat".to_owned(), "openai.responses".to_owned()],
+        };
+        assert_eq!(
+            provider_runtime_drivers(&config, false),
+            vec![ProviderRuntimeDriver::OpenAiChat]
+        );
+        assert_eq!(
+            provider_runtime_drivers(&config, true),
+            vec![
+                ProviderRuntimeDriver::OpenAiResponses,
+                ProviderRuntimeDriver::OpenAiChat
+            ]
+        );
     }
 
     #[test]
