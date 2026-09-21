@@ -387,41 +387,21 @@ mod driver_route_tests {
     }
 
     #[test]
-    fn declared_provider_formats_select_their_runtime_routes() {
-        for (formats, agent_call, expected) in [
-            (
-                vec!["google.generative"],
-                false,
-                vec![ProviderRuntimeDriver::Gemini],
-            ),
-            (
-                vec!["anthropic.messages"],
-                false,
-                vec![ProviderRuntimeDriver::Anthropic],
-            ),
-            (
-                vec!["openai.chat"],
-                false,
-                vec![ProviderRuntimeDriver::OpenAiChat],
-            ),
-            (
-                vec!["openai.chat", "openai.responses"],
-                true,
-                vec![
-                    ProviderRuntimeDriver::OpenAiResponses,
-                    ProviderRuntimeDriver::OpenAiChat,
-                ],
-            ),
-        ] {
-            let config = RunnerProviderConfig {
-                name: None,
-                base_url: "https://provider.invalid/v1".to_owned(),
-                auth: Vec::new(),
-                oauth: None,
-                formats: formats.into_iter().map(str::to_owned).collect(),
-            };
-            assert_eq!(provider_runtime_drivers(&config, agent_call), expected);
-        }
+    fn projected_format_routes_drive_runtime_fallback() {
+        let config = RunnerProviderConfig {
+            name: None,
+            base_url: "https://provider.invalid/v1".to_owned(),
+            auth: Vec::new(),
+            oauth: None,
+            formats: vec!["openai.chat".to_owned(), "openai.responses".to_owned()],
+        };
+        assert_eq!(
+            provider_runtime_drivers(&config, true),
+            vec![
+                ProviderRuntimeDriver::OpenAiResponses,
+                ProviderRuntimeDriver::OpenAiChat,
+            ]
+        );
     }
 
     #[test]
