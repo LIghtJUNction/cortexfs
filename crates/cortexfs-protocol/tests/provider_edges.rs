@@ -37,7 +37,7 @@ mod tests {
         let request = p::decode_model_request(W::OpenAiChat, input)?;
         let encoded = p::encode_model_request(W::OpenAiChat, &request)?;
         assert_eq!(p::decode_model_request(W::OpenAiChat, &encoded)?, request);
-        let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"one","args":{}},"thoughtSignature":"sig"},{"functionCall":{"id":"call-2","name":"two","args":{}}}]}]}"#;
+        let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"name":"same","args":{"n":1}},"thoughtSignature":"sig"},{"functionCall":{"name":"same","args":{"n":2}}}]}]}"#;
         let request = p::decode_model_request(W::Gemini, input)?;
         let encoded = p::encode_model_request(W::Gemini, &request)?;
         assert_eq!(p::decode_model_request(W::Gemini, &encoded)?, request);
