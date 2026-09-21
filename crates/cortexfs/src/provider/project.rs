@@ -516,7 +516,7 @@ mod tests {
                 "id": "known", "name": "Local Known", "description": "official description",
                 "attachment": true, "reasoning": true, "tool_call": true,
                 "open_weights": false, "structured_output": true,
-                "modalities": {"input": ["text"], "output": ["text"]},
+                "modalities": {"input": ["text"], "output": ["text", "image"]},
                 "reasoning_options": [{"type": "effort", "values": ["low", "max"]}],
                 "limit": {"context": 1_000_000, "output": 0}, "future_field": "retained"
             }),
@@ -546,6 +546,8 @@ mod tests {
         assert_eq!(document["effective"]["limit_tokens"], 1_000_000);
         assert!(projected[0].cap.contains("attachment"));
         assert!(projected[0].cap.contains("stream"));
+        assert!(!projected[0].cap.contains("vision"));
+        assert!(projected[0].cap.contains("image_output"));
         Ok(())
     }
 
