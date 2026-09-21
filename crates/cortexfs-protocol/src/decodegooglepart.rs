@@ -8,27 +8,8 @@ fn raw(field: &str, value: &RawValue) -> Result<Value, ConversionError> {
 
 pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionError> {
     let role = source.role.as_ref().map_or("user", |value| value.as_ref());
-    let mut calls = Vec::new();
-    for part in &source.parts {
-        if let Some(call) = part.function_call.as_ref() {
-            calls.push(ToolCall {
-                id: call.id.as_ref().unwrap_or(&call.name).to_string(),
-                name: call.name.to_string(),
-                arguments: raw("contents[].functionCall.args", call.args)?,
-            });
-        }
-    }
-    Ok(Message {
-        role: Role::new(if role == "model" { "assistant" } else { role }),
-        content: content(source)?,
-        name: None,
-        tool_call_id: None,
-        tool_calls: calls,
-    })
-}
-
-pub(super) fn content(source: &NativeContent<'_>) -> Result<Content, ConversionError> {
     let mut values = Vec::new();
+    let mut calls = Vec::new();
     for part in &source.parts {
         if let Some(text) = part.text.as_ref() {
             values.push(ContentPart::text(text.as_ref()));
@@ -45,6 +26,20 @@ pub(super) fn content(source: &NativeContent<'_>) -> Result<Content, ConversionE
                 value: json!({"mime_type": blob.mime_type, "data": blob.data}),
             });
         }
+        if let Some(call) = part.function_call.as_ref() {
+            let id = call.id.as_ref().unwrap_or(&call.name).to_string();
+            if let Some(signature) = part.thought_signature.as_ref() {
+                values.push(ContentPart::Data {
+                    name: format!("gemini.thought_signature:{id}"),
+                    value: json!(signature),
+                });
+            }
+            calls.push(ToolCall {
+                id,
+                name: call.name.to_string(),
+                arguments: raw("contents[].functionCall.args", call.args)?,
+            });
+        }
         if let Some(response) = part.function_response.as_ref() {
             values.push(ContentPart::Data {
                 name: "gemini.function_response".to_owned(),
@@ -58,7 +53,13 @@ pub(super) fn content(source: &NativeContent<'_>) -> Result<Content, ConversionE
             });
         }
     }
-    Ok(Content::Parts(values))
+    Ok(Message {
+        role: Role::new(if role == "model" { "assistant" } else { role }),
+        content: Content::Parts(values),
+        name: None,
+        tool_call_id: None,
+        tool_calls: calls,
+    })
 }
 
 pub(super) fn tool(
