@@ -195,10 +195,17 @@ fn capability_text(
     configured: Option<&[String]>,
     metadata: Option<&ModelMetadata>,
 ) -> String {
+    let accepts_images = !formats
+        .iter()
+        .any(|value| value.trim() == "anthropic.messages");
     if let Some(configured) = configured {
         return STABLE_MODEL_CAPABILITIES
             .iter()
-            .filter(|capability| configured.iter().any(|value| value == **capability))
+            .filter(|capability| {
+                configured.iter().any(|value| value == **capability)
+                    && (accepts_images
+                        || !matches!(**capability, "attachment" | "vision" | "image_input"))
+            })
             .fold(String::new(), |mut output, capability| {
                 let _ignored = writeln!(output, "{capability}");
                 output
@@ -235,7 +242,7 @@ fn capability_text(
     if metadata.reasoning.support == Support::Supported {
         let _ignored = writeln!(cap, "reasoning");
     }
-    if metadata.attachment == Support::Supported {
+    if metadata.attachment == Support::Supported && accepts_images {
         let _ignored = writeln!(cap, "attachment");
     }
     if metadata.temperature == Support::Supported {
@@ -244,12 +251,13 @@ fn capability_text(
     if metadata.interleaved == Support::Supported {
         let _ignored = writeln!(cap, "interleaved");
     }
-    if has_modalities(&metadata.input_modalities, Modality::Image)
-        || has_modalities(&metadata.output_modalities, Modality::Image)
+    if accepts_images
+        && (has_modalities(&metadata.input_modalities, Modality::Image)
+            || has_modalities(&metadata.output_modalities, Modality::Image))
     {
         let _ignored = writeln!(cap, "vision");
     }
-    if has_modalities(&metadata.input_modalities, Modality::Image) {
+    if accepts_images && has_modalities(&metadata.input_modalities, Modality::Image) {
         let _ignored = writeln!(cap, "image_input");
     }
     if has_modalities(&metadata.output_modalities, Modality::Image) {
@@ -377,9 +385,9 @@ mod tests {
         write_local_raw_cache(
             cache_dir,
             &serde_json::json!({
-                "id": "known", "name": "Local Known", "attachment": false,
+                "id": "known", "name": "Local Known", "attachment": true,
                 "reasoning": false, "tool_call": true, "streaming": true, "open_weights": false,
-                "modalities": {"input": ["text"], "output": ["text"]},
+                "modalities": {"input": ["text", "image"], "output": ["text"]},
                 "limit": {"context": context, "output": 0}
             }),
         )
@@ -481,16 +489,29 @@ mod tests {
     }
 
     #[test]
-    fn project_models_preserves_known_and_explicit_empty_capabilities() -> io::Result<()> {
+    fn project_models_filters_anthropic_image_capabilities() -> io::Result<()> {
         let dir = tempdir()?;
         write_local_metadata_cache(dir.path(), 8192)?;
         let mut capabilities = HashMap::new();
         capabilities.insert("unknown".to_owned(), Vec::new());
+        capabilities.insert(
+            "override".to_owned(),
+            vec![
+                "chat".to_owned(),
+                "attachment".to_owned(),
+                "vision".to_owned(),
+                "image_input".to_owned(),
+            ],
+        );
         let config = ProviderConfig {
             name: None,
             base_url: "http://127.0.0.1/v1".to_owned(),
             default_model: None,
-            models: vec!["known".to_owned(), "unknown".to_owned()],
+            models: vec![
+                "known".to_owned(),
+                "unknown".to_owned(),
+                "override".to_owned(),
+            ],
             model_limits: HashMap::new(),
             model_capabilities: capabilities,
             enabled: true,
@@ -504,6 +525,7 @@ mod tests {
         assert!(projected[0].driver.contains("anthropic-messages"));
         assert_eq!(projected[0].cap, "chat\n");
         assert_eq!(projected[1].cap, "");
+        assert_eq!(projected[2].cap, "chat\n");
         Ok(())
     }
 
