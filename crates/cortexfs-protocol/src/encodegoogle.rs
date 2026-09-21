@@ -1,4 +1,4 @@
-use crate::{Content, ConversionError, Message, ModelRequest, WireProtocol};
+use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, WireProtocol};
 use serde_json::{Map, Value, json};
 
 pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
@@ -29,23 +29,18 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
     if !request.tools.is_empty() {
         root.insert("tools".to_owned(), json!([{"functionDeclarations": request.tools.iter().map(|tool| json!({"name": tool.name, "description": tool.description, "parameters": tool.parameters})).collect::<Vec<_>>() }]));
     }
-    let config = generation(request);
+    let mut config = Map::new();
+    if let Some(tokens) = request.max_output_tokens {
+        config.insert("maxOutputTokens".to_owned(), json!(tokens));
+    }
+    if let Some(thinking) = request.options.get("gemini.thinking_config") {
+        config.insert("thinkingConfig".to_owned(), thinking.clone());
+    }
     if !config.is_empty() {
         root.insert("generationConfig".to_owned(), Value::Object(config));
     }
     crate::encode::options(&mut root, request);
     crate::encode::bytes(WireProtocol::Gemini, &Value::Object(root))
-}
-
-fn generation(request: &ModelRequest) -> Map<String, Value> {
-    let mut value = Map::new();
-    if let Some(tokens) = request.max_output_tokens {
-        value.insert("maxOutputTokens".to_owned(), json!(tokens));
-    }
-    if let Some(config) = request.options.get("gemini.thinking_config") {
-        value.insert("thinkingConfig".to_owned(), config.clone());
-    }
-    value
 }
 
 fn content(source: &Message) -> Result<Value, ConversionError> {
@@ -61,19 +56,42 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
         source.role.as_str()
     };
     let mut values = parts(&source.content, role)?;
-    values.extend(source.tool_calls.iter().map(
-        |call| json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}}),
-    ));
+    values.extend(source.tool_calls.iter().map(|call| {
+        let mut value = json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
+        let signature = match &source.content {
+            Content::Parts(parts) => parts.iter().find_map(|part| match part {
+                ContentPart::Data { name, value }
+                    if name.strip_prefix("gemini.thought_signature:") == Some(call.id.as_str()) =>
+                {
+                    value.as_str()
+                }
+                _ => None,
+            }),
+            Content::Text(_) => None,
+        };
+        if let Some(signature) = signature {
+            value["thoughtSignature"] = Value::String(signature.to_owned());
+        }
+        value
+    }));
     Ok(json!({"role": role, "parts": values}))
 }
 
 fn parts(content: &Content, role: &str) -> Result<Vec<Value>, ConversionError> {
     match *content {
         Content::Text(ref text) => Ok(vec![json!({"text": text})]),
-        Content::Parts(ref parts) => parts.iter().map(|part| match *part {
-            crate::ContentPart::Text { ref text } => Ok(json!({"text": text})),
-            crate::ContentPart::Image { ref uri, ref mime } | crate::ContentPart::Audio { ref uri, ref mime } => Ok(json!({"fileData": {"mimeType": mime.as_deref().unwrap_or(if role == "model" { "application/octet-stream" } else { "image/*" }), "fileUri": uri}})),
-            crate::ContentPart::Data { .. } => Err(ConversionError::UnsupportedField { protocol: WireProtocol::Gemini, field: "content part".to_owned() }),
-        }).collect(),
+        Content::Parts(ref parts) => parts
+            .iter()
+            .filter_map(|part| match *part {
+                ContentPart::Text { ref text } => Some(Ok(json!({"text": text}))),
+                ContentPart::Image { ref uri, ref mime } | ContentPart::Audio { ref uri, ref mime } => Some(Ok(json!({"fileData": {"mimeType": mime.as_deref().unwrap_or(if role == "model" { "application/octet-stream" } else { "image/*" }), "fileUri": uri}}))),
+                ContentPart::Data { ref name, .. }
+                    if name.starts_with("gemini.thought_signature:") => None,
+                ContentPart::Data { .. } => Some(Err(ConversionError::UnsupportedField {
+                    protocol: WireProtocol::Gemini,
+                    field: "content part".to_owned(),
+                })),
+            })
+            .collect(),
     }
 }
