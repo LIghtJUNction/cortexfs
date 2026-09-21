@@ -6,9 +6,12 @@ mod tests {
         for input in [
             br#"{"choices":[]}"#.as_slice(),
             br#"{"choices":[{}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]}}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]}}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]}}]}"#.as_slice(),
+            br#"{"choices":[{"message":{"content":"partial"}}]}"#.as_slice(),
+            br#"{"choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#.as_slice(),
+            br#"{"choices":[{"message":{"content":"partial"},"finish_reason":""}]}"#.as_slice(),
+            br#"{"choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#.as_slice(),
+            br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#.as_slice(),
+            br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#.as_slice(),
         ] {
             assert!(decode_response_events(WireProtocol::OpenAiChat, input).is_err());
         }

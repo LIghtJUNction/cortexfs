@@ -410,7 +410,7 @@ fn openai_request_bodies_include_effort_and_agent_tools() {
 #[test]
 fn openai_chat_tool_call_response_parses_as_canonical_tool_call() {
     let content = parse_openai_chat_content(
-        br#"{"choices":[{"message":{"content":"explanation","tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]}}]}"#,
+        br#"{"choices":[{"message":{"content":"explanation","tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]},"finish_reason":"tool_calls"}]}"#,
     );
     assert_eq!(
         content,
