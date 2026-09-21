@@ -172,7 +172,7 @@ fn model_names(config: &ProviderConfig, cache: &Path, provider: &str) -> Vec<Str
     names
 }
 
-pub(crate) fn format_driver_routes(formats: &[String]) -> (&'static str, &'static str) {
+pub fn format_driver_routes(formats: &[String]) -> (&'static str, &'static str) {
     let has = |format| formats.iter().any(|value| value.trim() == format);
     if has("anthropic.messages") {
         ("anthropic-messages", "anthropic-messages")
