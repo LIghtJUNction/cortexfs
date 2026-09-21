@@ -10,20 +10,16 @@ mod tests {
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"args":{}}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","args":[]}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","id":7}}]}}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"}}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"},"finish_reason":""}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#[..]),
         ] {
             assert!(p::decode_response_events(protocol, input).is_err());
-        }
-        for input in [
-            br#"{"choices":[]}"#.as_slice(),
-            br#"{"choices":[{}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"content":"partial"}}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"content":"partial"},"finish_reason":""}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#.as_slice(),
-            br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#.as_slice(),
-        ] {
-            assert!(p::decode_response_events(W::OpenAiChat, input).is_err());
         }
         for (input, valid) in [
             (br#"{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}]}"#.as_slice(), true),
