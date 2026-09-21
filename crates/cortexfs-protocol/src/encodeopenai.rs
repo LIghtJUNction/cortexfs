@@ -30,8 +30,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         root.insert("max_tokens".to_owned(), json!(tokens));
     }
     crate::encode::options(&mut root, request);
-    let value = Value::Object(root);
-    crate::encode::bytes(WireProtocol::OpenAiChat, &value)
+    crate::encode::bytes(WireProtocol::OpenAiChat, &Value::Object(root))
 }
 
 fn message(source: &Message) -> Result<Value, ConversionError> {
@@ -48,12 +47,10 @@ fn message(source: &Message) -> Result<Value, ConversionError> {
                     ContentPart::Image { ref uri, .. } => {
                         Ok(json!({"type": "image_url", "image_url": {"url": uri}}))
                     }
-                    ContentPart::Audio { .. } | ContentPart::Data { .. } => {
-                        Err(ConversionError::UnsupportedField {
-                            protocol: WireProtocol::OpenAiChat,
-                            field: "content part".to_owned(),
-                        })
-                    }
+                    _ => Err(ConversionError::UnsupportedField {
+                        protocol: WireProtocol::OpenAiChat,
+                        field: "content part".to_owned(),
+                    }),
                 })
                 .collect::<Result<_, _>>()?,
         ),
