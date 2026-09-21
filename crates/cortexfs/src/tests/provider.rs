@@ -498,8 +498,7 @@ fn model_headers_reject_control_character_credentials() {
     let adapter = AnthropicAdapter::claude();
     let credential = Credential::ApiKey {
         provider: "anthropic".to_owned(),
-        key: "bad\
-key".to_owned(),
+        key: "bad\nkey".to_owned(),
         slot: Some("default".to_owned()),
     };
     assert_eq!(
