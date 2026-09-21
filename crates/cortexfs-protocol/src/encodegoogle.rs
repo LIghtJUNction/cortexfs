@@ -66,14 +66,17 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
         let marker = format!("gemini.thought_signature:{index}");
         let signature = match source.content {
-            Content::Parts(ref parts) => parts.iter().find_map(|part| match part {
-                ContentPart::Data { name, value } if name == &marker => value.as_str(),
+            Content::Parts(ref parts) => parts.iter().find_map(|part| match *part {
+                ContentPart::Data {
+                    ref name,
+                    ref value,
+                } if name == &marker => value.as_str(),
                 _ => None,
             }),
             Content::Text(_) => None,
         };
-        if let Some(signature) = signature {
-            value["thoughtSignature"] = json!(signature);
+        if let (Some(signature), Some(object)) = (signature, value.as_object_mut()) {
+            drop(object.insert("thoughtSignature".to_owned(), json!(signature)));
         }
         value
     }));
