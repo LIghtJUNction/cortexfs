@@ -28,10 +28,13 @@ fn oauth_pkce_authorization_and_forms_are_bounded() {
         pkce.challenge(),
         "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
     );
-    let url = ok!(oauth_authorization_url(&config(), "state value", &pkce));
+    let mut oauth = config();
+    oauth.auth_url = "https://auth.example/oauth+authorize?tenant=a%2Bb".to_owned();
+    let url = ok!(oauth_authorization_url(&oauth, "state value", &pkce));
     for part in [
+        "/oauth+authorize?tenant=a%2Bb&",
         "client_id=client-1",
-        "state=state%20value",
+        "state=state+value",
         "code_challenge_method=S256",
     ] {
         assert!(url.contains(part));
