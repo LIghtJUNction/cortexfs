@@ -267,7 +267,7 @@ fn device_code_handles_slow_down_pending_and_exchange() -> Result<(), cortexfs::
             );
             Ok((
                 200,
-                br#"{"access_token":"access","refresh_token":"refresh"}"#.to_vec(),
+                br#"{"access_token":"access","token_type":"Bearer","refresh_token":"refresh"}"#.to_vec(),
             ))
         },
         |seconds| waits.push(seconds),

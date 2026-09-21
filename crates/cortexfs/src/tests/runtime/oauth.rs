@@ -57,14 +57,10 @@ fn oauth_token_exchange_is_hermetic_and_validates_bearer() {
         ))
     }));
     assert_eq!(token.access_token, "access");
+    assert!(parse_oauth_token_response(br#"{"access_token":"x"}"#).is_err());
     assert!(parse_oauth_token_response(br#"{"access_token":"x","token_type":"mac"}"#).is_err());
-}
-
-#[test]
-fn oauth_token_parser_rejects_control_character_credentials() {
-    assert_eq!(
-        parse_oauth_token_response(br#"{"access_token":"access\n"}"#),
-        Err(OAuthError::InvalidToken)
+    assert!(
+        parse_oauth_token_response(br#"{"access_token":"x\n","token_type":"Bearer"}"#).is_err()
     );
 }
 
@@ -103,7 +99,7 @@ fn oauth_access_resolution_prefers_environment() {
 fn codex_jwt_expiry_and_root_storage_are_complete() {
     let jwt = "e30.eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJhY2N0LTEiLCJleHAiOjEzMDB9.x";
     let token = ok!(parse_oauth_token_response(
-        format!(r#"{{"access_token":"{jwt}","expires_in":300,"refresh_token":"refresh"}}"#)
+        format!(r#"{{"access_token":"{jwt}","token_type":"Bearer","expires_in":300,"refresh_token":"refresh"}}"#)
             .as_bytes()
     ));
     let state = ok!(oauth_token_state(&token, None, 1_000));
@@ -141,7 +137,9 @@ fn codex_refresh_retains_complete_state_and_fails_closed() {
         1_000,
         |form| {
             assert!(form.contains("refresh_token=refresh"));
-            parse_oauth_token_response(br#"{"access_token":"new","expires_in":600}"#)
+            parse_oauth_token_response(
+                br#"{"access_token":"new","token_type":"Bearer","expires_in":600}"#,
+            )
         }
     ));
     assert_eq!(credential.map(|value| value.0), Some("new".to_owned()));

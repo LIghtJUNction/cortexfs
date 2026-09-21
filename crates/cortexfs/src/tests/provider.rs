@@ -46,11 +46,11 @@ fn authorization_transport(models: &[u8]) -> ScriptedTransport {
             },
             AuthResponse {
                 status: 200,
-                body: br#"{"access_token":"new","expires_in":300}"#.to_vec(),
+                body: br#"{"access_token":"new","token_type":"Bearer","expires_in":300}"#.to_vec(),
             },
             AuthResponse {
                 status: 200,
-                body: br#"{"access_token":"access","refresh_token":"refresh","expires_in":600,"scope":"model.read"}"#.to_vec(),
+                body: br#"{"access_token":"access","token_type":"Bearer","refresh_token":"refresh","expires_in":600,"scope":"model.read"}"#.to_vec(),
             },
         ],
         ..ScriptedTransport::default()
@@ -541,7 +541,7 @@ fn refreshed_token_expiry_is_not_inherited_or_overflowed() {
         let mut transport = ScriptedTransport {
             responses: vec![AuthResponse {
                 status: 200,
-                body: serde_json::json!({"access_token": "new", "expires_in": expiry})
+                body: serde_json::json!({"access_token": "new", "token_type": "Bearer", "expires_in": expiry})
                     .to_string()
                     .into_bytes(),
             }],

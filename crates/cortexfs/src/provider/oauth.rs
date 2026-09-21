@@ -276,7 +276,7 @@ pub fn parse_oauth_token_response(body: &[u8]) -> Result<OAuthTokenResponse, OAu
         || token
             .token_type
             .as_deref()
-            .is_some_and(|kind| !kind.eq_ignore_ascii_case("bearer"))
+            .is_none_or(|kind| !kind.eq_ignore_ascii_case("bearer"))
     {
         return Err(OAuthError::InvalidToken);
     }
