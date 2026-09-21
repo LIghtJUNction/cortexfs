@@ -41,7 +41,7 @@ impl OAuthDeviceConfig {
     pub fn is_valid(&self) -> bool {
         [&self.request_url, &self.token_url, &self.verification_uri]
             .into_iter()
-            .all(|value| !value.trim().is_empty() && !has_ascii_control(value))
+            .all(|value| is_https_endpoint(value))
     }
 }
 
@@ -289,7 +289,7 @@ pub fn oauth_post(
     body: &str,
     timeout_secs: u64,
 ) -> Result<(u16, Vec<u8>), OAuthError> {
-    if url.is_empty() || has_ascii_control(url) || has_ascii_control(content_type) {
+    if !is_https_endpoint(url) || has_ascii_control(content_type) {
         return Err(OAuthError::InvalidConfig);
     }
     let response = reqwest::blocking::Client::new()
@@ -610,15 +610,6 @@ pub fn resolve_oauth_credential_with(
     })
 }
 
-fn resolve_generic_oauth(
-    provider: &str,
-    config: &OAuthProviderConfig,
-) -> Result<Option<OAuthCredential>, OAuthError> {
-    resolve_generic_oauth_with(provider, config, |request| {
-        standard_refresh(config, request)
-    })
-}
-
 fn resolve_generic_oauth_with(
     provider: &str,
     config: &OAuthProviderConfig,
@@ -773,7 +764,7 @@ pub fn resolve_oauth_access_token(
     config: &OAuthProviderConfig,
 ) -> Result<Option<String>, OAuthError> {
     if !config.is_codex() {
-        return resolve_generic_oauth(provider, config)
+        return resolve_oauth_credential(provider, config)
             .map(|value| value.map(|(token, _account)| token));
     }
     resolve_oauth_access_token_with(
@@ -856,15 +847,17 @@ fn oauth_keychain_set(service: &str, account: &str, secret: &str) -> Result<(), 
         .map_err(|_error| OAuthError::KeychainUnavailable)
 }
 
+fn is_https_endpoint(value: &str) -> bool {
+    !has_ascii_control(value) && reqwest::Url::parse(value).is_ok_and(|url| url.scheme() == "https")
+}
+
 fn valid_config(config: &OAuthProviderConfig) -> bool {
-    [
-        &config.client_id,
-        &config.auth_url,
-        &config.token_url,
-        &config.redirect_uri,
-    ]
-    .into_iter()
-    .all(|value| !value.trim().is_empty() && !has_ascii_control(value))
+    [&config.client_id, &config.redirect_uri]
+        .into_iter()
+        .all(|value| !value.trim().is_empty() && !has_ascii_control(value))
+        && [&config.auth_url, &config.token_url]
+            .into_iter()
+            .all(|value| is_https_endpoint(value))
         && !config
             .scopes
             .iter()

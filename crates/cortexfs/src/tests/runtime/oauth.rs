@@ -65,10 +65,18 @@ fn oauth_token_exchange_is_hermetic_and_validates_bearer() {
 }
 
 #[test]
-fn oauth_config_rejects_control_character_secret_accounts() {
+fn oauth_config_rejects_insecure_endpoints_and_control_character_secret_accounts() {
     let mut oauth = config();
     oauth.access_token_account = Some("oauth\naccess".to_owned());
     assert!(!oauth.is_valid());
+    oauth.access_token_account = None;
+    oauth.token_url = "http://auth.example/token".to_owned();
+    assert!(!oauth.is_valid());
+    let device: crate::OAuthDeviceConfig = ok!(serde_json::from_str(
+        r#"{"request_url":"http://x","token_url":"https://x","verification_uri":"https://x"}"#
+    ));
+    assert!(!device.is_valid());
+    assert!(crate::oauth_post("http://x", "", "", 0).is_err());
 }
 
 #[test]
