@@ -37,31 +37,3 @@ pub(super) fn options(root: &mut Map<String, Value>, request: &ModelRequest) {
         root.entry(name.clone()).or_insert_with(|| value.clone());
     }
 }
-
-pub(super) fn text_or_parts(
-    content: &crate::Content,
-    text_type: &str,
-    image_type: &str,
-) -> Result<Value, ConversionError> {
-    match *content {
-        crate::Content::Text(ref text) => Ok(Value::String(text.clone())),
-        crate::Content::Parts(ref parts) => parts
-            .iter()
-            .map(|part| match *part {
-                crate::ContentPart::Text { ref text } => {
-                    Ok(serde_json::json!({ "type": text_type, "text": text }))
-                }
-                crate::ContentPart::Image { ref uri, .. } => {
-                    Ok(serde_json::json!({ "type": image_type, "image_url": uri }))
-                }
-                crate::ContentPart::Audio { .. } | crate::ContentPart::Data { .. } => {
-                    Err(ConversionError::UnsupportedField {
-                        protocol: WireProtocol::OpenAiChat,
-                        field: "content part".to_owned(),
-                    })
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-    }
-}
