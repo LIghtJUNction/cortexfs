@@ -387,42 +387,40 @@ mod driver_route_tests {
     }
 
     #[test]
-    fn projected_openai_agent_route_keeps_chat_fallback() {
-        let config = RunnerProviderConfig {
-            name: None,
-            base_url: "https://provider.invalid/v1".to_owned(),
-            auth: Vec::new(),
-            oauth: None,
-            formats: vec!["openai.chat".to_owned(), "openai.responses".to_owned()],
-        };
-        assert_eq!(
-            provider_runtime_drivers(&config, false),
-            vec![ProviderRuntimeDriver::OpenAiChat]
-        );
-        assert_eq!(
-            provider_runtime_drivers(&config, true),
-            vec![
-                ProviderRuntimeDriver::OpenAiResponses,
-                ProviderRuntimeDriver::OpenAiChat
-            ]
-        );
-    }
-
-    #[test]
-    fn declared_provider_formats_select_their_native_driver() {
-        for (format, expected) in [
-            ("google.generative", ProviderRuntimeDriver::Gemini),
-            ("anthropic.messages", ProviderRuntimeDriver::Anthropic),
-            ("openai.chat", ProviderRuntimeDriver::OpenAiChat),
+    fn declared_provider_formats_select_their_runtime_routes() {
+        for (formats, agent_call, expected) in [
+            (
+                vec!["google.generative"],
+                false,
+                vec![ProviderRuntimeDriver::Gemini],
+            ),
+            (
+                vec!["anthropic.messages"],
+                false,
+                vec![ProviderRuntimeDriver::Anthropic],
+            ),
+            (
+                vec!["openai.chat"],
+                false,
+                vec![ProviderRuntimeDriver::OpenAiChat],
+            ),
+            (
+                vec!["openai.chat", "openai.responses"],
+                true,
+                vec![
+                    ProviderRuntimeDriver::OpenAiResponses,
+                    ProviderRuntimeDriver::OpenAiChat,
+                ],
+            ),
         ] {
             let config = RunnerProviderConfig {
                 name: None,
                 base_url: "https://provider.invalid/v1".to_owned(),
                 auth: Vec::new(),
                 oauth: None,
-                formats: vec![format.to_owned()],
+                formats: formats.into_iter().map(str::to_owned).collect(),
             };
-            assert_eq!(provider_runtime_driver(&config, false), expected);
+            assert_eq!(provider_runtime_drivers(&config, agent_call), expected);
         }
     }
 
