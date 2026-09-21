@@ -481,7 +481,10 @@ mod tests {
         let dir = tempdir()?;
         write_local_metadata_cache(dir.path(), 8192)?;
         let mut capabilities = HashMap::new();
-        capabilities.insert("unknown".to_owned(), vec!["chat".to_owned(), "vision".to_owned()]);
+        capabilities.insert(
+            "unknown".to_owned(),
+            vec!["chat".to_owned(), "vision".to_owned()],
+        );
         let config = ProviderConfig {
             name: None,
             base_url: "http://127.0.0.1/v1".to_owned(),
