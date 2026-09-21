@@ -226,8 +226,12 @@ fn capability_text(
         };
     };
 
+    let input_image = metadata.input_modalities.contains(&Modality::Image);
+    let output_image = metadata.output_modalities.contains(&Modality::Image);
     let mut cap = String::new();
-    if has_text(&metadata.input_modalities, &metadata.output_modalities) {
+    if metadata.input_modalities.contains(&Modality::Text)
+        || metadata.output_modalities.contains(&Modality::Text)
+    {
         let _ignored = writeln!(cap, "chat");
     }
     if matches!(metadata.tools, Support::Supported) && uses_openai_adapter(formats) {
@@ -251,38 +255,35 @@ fn capability_text(
     if metadata.interleaved == Support::Supported {
         let _ignored = writeln!(cap, "interleaved");
     }
-    if accepts_images
-        && (has_modalities(&metadata.input_modalities, Modality::Image)
-            || has_modalities(&metadata.output_modalities, Modality::Image))
-    {
+    if accepts_images && (input_image || output_image) {
         let _ignored = writeln!(cap, "vision");
     }
-    if accepts_images && has_modalities(&metadata.input_modalities, Modality::Image) {
+    if accepts_images && input_image {
         let _ignored = writeln!(cap, "image_input");
     }
-    if has_modalities(&metadata.output_modalities, Modality::Image) {
+    if output_image {
         let _ignored = writeln!(cap, "image_output");
     }
-    if has_modalities(&metadata.input_modalities, Modality::Audio) {
+    if metadata.input_modalities.contains(&Modality::Audio) {
         let _ignored = writeln!(cap, "audio_input");
     }
-    if has_modalities(&metadata.output_modalities, Modality::Audio) {
+    if metadata.output_modalities.contains(&Modality::Audio) {
         let _ignored = writeln!(cap, "audio_output");
     }
-    if has_modalities(&metadata.input_modalities, Modality::Video) {
+    if metadata.input_modalities.contains(&Modality::Video) {
         let _ignored = writeln!(cap, "video_input");
     }
-    if has_modalities(&metadata.output_modalities, Modality::Video) {
+    if metadata.output_modalities.contains(&Modality::Video) {
         let _ignored = writeln!(cap, "video_output");
     }
-    if has_modalities(&metadata.input_modalities, Modality::Pdf) {
+    if metadata.input_modalities.contains(&Modality::Pdf) {
         let _ignored = writeln!(cap, "pdf_input");
     }
-    if has_modalities(&metadata.output_modalities, Modality::Pdf) {
+    if metadata.output_modalities.contains(&Modality::Pdf) {
         let _ignored = writeln!(cap, "pdf_output");
     }
-    if has_modalities(&metadata.input_modalities, Modality::Embedding)
-        || has_modalities(&metadata.output_modalities, Modality::Embedding)
+    if metadata.input_modalities.contains(&Modality::Embedding)
+        || metadata.output_modalities.contains(&Modality::Embedding)
     {
         let _ignored = writeln!(cap, "embedding");
     }
@@ -293,14 +294,6 @@ fn uses_openai_adapter(formats: &[String]) -> bool {
     !formats
         .iter()
         .any(|value| matches!(value.trim(), "anthropic.messages" | "google.generative"))
-}
-
-fn has_modalities(modalities: &[Modality], needle: Modality) -> bool {
-    modalities.contains(&needle)
-}
-
-fn has_text(input: &[Modality], output: &[Modality]) -> bool {
-    has_modalities(input, Modality::Text) || has_modalities(output, Modality::Text)
 }
 
 fn model_metadata_document(
@@ -493,25 +486,17 @@ mod tests {
         let dir = tempdir()?;
         write_local_metadata_cache(dir.path(), 8192)?;
         let mut capabilities = HashMap::new();
-        capabilities.insert("unknown".to_owned(), Vec::new());
         capabilities.insert(
-            "override".to_owned(),
-            vec![
-                "chat".to_owned(),
-                "attachment".to_owned(),
-                "vision".to_owned(),
-                "image_input".to_owned(),
-            ],
+            "unknown".to_owned(),
+            ["chat", "attachment", "vision", "image_input"]
+                .map(str::to_owned)
+                .to_vec(),
         );
         let config = ProviderConfig {
             name: None,
             base_url: "http://127.0.0.1/v1".to_owned(),
             default_model: None,
-            models: vec![
-                "known".to_owned(),
-                "unknown".to_owned(),
-                "override".to_owned(),
-            ],
+            models: vec!["known".to_owned(), "unknown".to_owned()],
             model_limits: HashMap::new(),
             model_capabilities: capabilities,
             enabled: true,
@@ -524,8 +509,8 @@ mod tests {
         project_models("local", &config, dir.path(), &mut projected);
         assert!(projected[0].driver.contains("anthropic-messages"));
         assert_eq!(projected[0].cap, "chat\n");
-        assert_eq!(projected[1].cap, "");
-        assert_eq!(projected[2].cap, "chat\n");
+        assert_eq!(projected[1].cap, "chat\n");
+        assert_eq!(capability_text(&config.formats, Some(&[]), None), "");
         Ok(())
     }
 
