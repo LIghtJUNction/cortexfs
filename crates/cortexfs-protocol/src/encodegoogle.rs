@@ -60,10 +60,7 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
         let signature = match &source.content {
             Content::Parts(parts) => parts.iter().find_map(|part| match *part {
-                ContentPart::Data {
-                    ref name,
-                    ref value,
-                } => {
+                ContentPart::Data { ref name, ref value } => {
                     (name.strip_prefix("gemini.thought_signature:") == Some(call.id.as_str()))
                         .then_some(value)
                         .and_then(Value::as_str)
