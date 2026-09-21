@@ -195,9 +195,7 @@ fn capability_text(
     configured: Option<&[String]>,
     metadata: Option<&ModelMetadata>,
 ) -> String {
-    let accepts_images = !formats
-        .iter()
-        .any(|value| value.trim() == "anthropic.messages");
+    let accepts_images = !formats.iter().any(|value| value.trim() == "anthropic.messages");
     if let Some(configured) = configured {
         return STABLE_MODEL_CAPABILITIES
             .iter()
@@ -225,9 +223,6 @@ fn capability_text(
             "chat\nstream\n".to_owned()
         };
     };
-
-    let input_image = metadata.input_modalities.contains(&Modality::Image);
-    let output_image = metadata.output_modalities.contains(&Modality::Image);
     let mut cap = String::new();
     if metadata.input_modalities.contains(&Modality::Text)
         || metadata.output_modalities.contains(&Modality::Text)
@@ -255,13 +250,11 @@ fn capability_text(
     if metadata.interleaved == Support::Supported {
         let _ignored = writeln!(cap, "interleaved");
     }
-    if accepts_images && (input_image || output_image) {
+    if accepts_images && metadata.input_modalities.contains(&Modality::Image) {
         let _ignored = writeln!(cap, "vision");
-    }
-    if accepts_images && input_image {
         let _ignored = writeln!(cap, "image_input");
     }
-    if output_image {
+    if metadata.output_modalities.contains(&Modality::Image) {
         let _ignored = writeln!(cap, "image_output");
     }
     if metadata.input_modalities.contains(&Modality::Audio) {
@@ -488,9 +481,7 @@ mod tests {
         let mut capabilities = HashMap::new();
         capabilities.insert(
             "unknown".to_owned(),
-            ["chat", "attachment", "vision", "image_input"]
-                .map(str::to_owned)
-                .to_vec(),
+            ["chat", "attachment", "vision", "image_input"].map(str::to_owned).to_vec(),
         );
         let config = ProviderConfig {
             name: None,
