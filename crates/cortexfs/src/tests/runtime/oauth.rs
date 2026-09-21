@@ -72,11 +72,11 @@ fn oauth_config_rejects_insecure_endpoints_and_control_character_secret_accounts
     oauth.access_token_account = None;
     oauth.token_url = "http://auth.example/token".to_owned();
     assert!(!oauth.is_valid());
-    let device: OAuthDeviceConfig = ok!(serde_json::from_str(
+    let device: crate::OAuthDeviceConfig = ok!(serde_json::from_str(
         r#"{"request_url":"http://x","token_url":"https://x","verification_uri":"https://x"}"#
     ));
     assert!(!device.is_valid());
-    assert!(oauth_post("http://x", "", "", 0).is_err());
+    assert!(crate::oauth_post("http://x", "", "", 0).is_err());
 }
 
 #[test]
