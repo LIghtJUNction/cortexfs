@@ -1,9 +1,10 @@
-use cortexfs_protocol::{decode_model_request, encode_model_request, WireProtocol};
+use cortexfs_protocol::{WireProtocol, decode_model_request, encode_model_request};
 
 #[test]
 fn openai_image_request_roundtrips() {
     let input = br#"{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/i.png"}}]}]}"#;
-    let request = decode_model_request(WireProtocol::OpenAiChat, input).unwrap();
-    let encoded = encode_model_request(WireProtocol::OpenAiChat, &request).unwrap();
-    assert_eq!(decode_model_request(WireProtocol::OpenAiChat, &encoded).unwrap(), request);
+    let protocol = WireProtocol::OpenAiChat;
+    let request = decode_model_request(protocol, input).unwrap();
+    let encoded = encode_model_request(protocol, &request).unwrap();
+    assert_eq!(decode_model_request(protocol, &encoded).unwrap(), request);
 }
