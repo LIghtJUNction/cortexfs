@@ -1,4 +1,4 @@
-use crate::{ConversionError, Message, ModelRequest, ToolChoice, WireProtocol};
+use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, ToolChoice, WireProtocol};
 use serde_json::{Map, Value, json};
 
 pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
@@ -37,10 +37,27 @@ fn message(source: &Message) -> Result<Value, ConversionError> {
     let mut value = Map::new();
     let role = source.role.as_str();
     value.insert("role".to_owned(), Value::String(role.to_owned()));
-    value.insert(
-        "content".to_owned(),
-        crate::encode::text_or_parts(&source.content, "text", "image_url")?,
-    );
+    let content = match source.content {
+        Content::Text(ref text) => Value::String(text.clone()),
+        Content::Parts(ref parts) => Value::Array(
+            parts
+                .iter()
+                .map(|part| match *part {
+                    ContentPart::Text { ref text } => Ok(json!({"type": "text", "text": text})),
+                    ContentPart::Image { ref uri, .. } => {
+                        Ok(json!({"type": "image_url", "image_url": {"url": uri}}))
+                    }
+                    ContentPart::Audio { .. } | ContentPart::Data { .. } => {
+                        Err(ConversionError::UnsupportedField {
+                            protocol: WireProtocol::OpenAiChat,
+                            field: "content part".to_owned(),
+                        })
+                    }
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+    };
+    value.insert("content".to_owned(), content);
     if let Some(name) = source.name.as_ref().filter(|_| role != "tool") {
         value.insert("name".to_owned(), Value::String(name.clone()));
     }
