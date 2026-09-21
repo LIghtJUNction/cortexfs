@@ -12,7 +12,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
     {
         root.insert(
             "systemInstruction".to_owned(),
-            json!({"parts": parts(&system.content, "system", 0)?}),
+            json!({"parts": parts(&system.content, "system")?}),
         );
     }
     root.insert(
@@ -60,7 +60,7 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
     } else {
         source.role.as_str()
     };
-    let mut values = parts(&source.content, role, source.tool_calls.len())?;
+    let mut values = parts(&source.content, role)?;
     values.extend(source.tool_calls.iter().enumerate().map(|(index, call)| {
         let mut value =
             json!({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}});
@@ -83,20 +83,13 @@ fn content(source: &Message) -> Result<Value, ConversionError> {
     Ok(json!({"role": role, "parts": values}))
 }
 
-fn parts(
-    content: &Content,
-    role: &str,
-    tool_calls: usize,
-) -> Result<Vec<Value>, ConversionError> {
+fn parts(content: &Content, role: &str) -> Result<Vec<Value>, ConversionError> {
     match *content {
         Content::Text(ref text) => Ok(vec![json!({"text": text})]),
         Content::Parts(ref parts) => parts
             .iter()
             .filter(|part| {
-                !matches!(part, ContentPart::Data { name, value }
-                    if value.is_string()
-                        && name.strip_prefix("gemini.thought_signature:")
-                            .is_some_and(|index| index.parse::<usize>().is_ok_and(|index| index < tool_calls)))
+                !matches!(part, ContentPart::Data { name, .. } if name.starts_with("gemini.thought_signature:"))
             })
             .map(|part| match *part {
                 ContentPart::Text { ref text } => Ok(json!({"text": text})),
