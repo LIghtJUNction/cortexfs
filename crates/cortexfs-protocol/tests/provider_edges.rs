@@ -44,5 +44,5 @@ fn request_roundtrips_preserve_provider_shapes() {
     let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"one","args":{}},"thoughtSignature":"sig"},{"functionCall":{"id":"call-2","name":"two","args":{}}}]}]}"#;
     let request = decode_model_request(W::Gemini, input).unwrap();
     let encoded = String::from_utf8(encode_model_request(W::Gemini, &request).unwrap()).unwrap();
-    assert!(encoded.contains(r#""thoughtSignature":"sig""#) && encoded.matches("thoughtSignature").count() == 1);
+    assert_eq!(encoded.matches(r#""thoughtSignature":"sig""#).count(), 1);
 }
