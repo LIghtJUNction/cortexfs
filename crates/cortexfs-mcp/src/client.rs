@@ -219,9 +219,7 @@ impl Client {
             .and_then(Value::as_object)
             .and_then(|capabilities| capabilities.get("tools"))
             .is_some_and(Value::is_object);
-        if result
-            .get("resultType")
-            .is_some_and(|value| value.as_str() != Some("complete"))
+        if result.get("resultType").and_then(Value::as_str) != Some("complete")
             || !tools
             || !supported
                 .iter()
@@ -330,9 +328,7 @@ impl Client {
             .cloned()
             .filter(|result| {
                 self.protocol.is_none()
-                    || result
-                        .get("resultType")
-                        .is_none_or(|value| value.as_str() == Some("complete"))
+                    || result.get("resultType").and_then(Value::as_str) == Some("complete")
             })
             .ok_or_else(|| invalid_data("missing or unsupported JSON-RPC result"))
     }
