@@ -764,8 +764,10 @@ pub fn resolve_oauth_access_token(
     config: &OAuthProviderConfig,
 ) -> Result<Option<String>, OAuthError> {
     if !config.is_codex() {
-        return resolve_oauth_credential(provider, config)
-            .map(|value| value.map(|(token, _account)| token));
+        return resolve_generic_oauth_with(provider, config, |request| {
+            standard_refresh(config, request)
+        })
+        .map(|value| value.map(|(token, _account)| token));
     }
     resolve_oauth_access_token_with(
         provider,
