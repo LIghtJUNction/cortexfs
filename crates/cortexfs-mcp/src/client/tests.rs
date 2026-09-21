@@ -241,7 +241,7 @@ fn cursor_notifications_call_errors_and_result_types_follow_protocol() -> io::Re
     assert!(cursor.tools().is_err());
     let mut call = Client::start(&server("callerror"))?;
     assert!(call.call("echo", &json!({})).is_err());
-    drop(Client::start(&server("modernmissingresulttype"))?.tools()?);
+    assert!(Client::start(&server("modernmissingresulttype"))?.tools().is_err());
     let mut input = Client::start(&server("moderninputrequired"))?;
     assert!(input.call("echo", &json!({})).is_err());
     Ok(())
