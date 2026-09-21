@@ -14,7 +14,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     if let Some(system) = source.system_instruction.as_ref() {
         messages.push(Message {
             role: Role::new("system"),
-            content: crate::decodegooglepart::content(system)?,
+            content: crate::decodegooglepart::message(system)?.content,
             name: None,
             tool_call_id: None,
             tool_calls: Vec::new(),
