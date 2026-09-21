@@ -5,6 +5,7 @@ use cortexfs_protocol::{
 fn malformed_provider_payloads_are_rejected() {
     for (protocol, input) in [
         (W::Anthropic, &br#"{"content":[{"type":"tool_use","id":0}]}"#[..]),
+        (W::OpenAiResponses, &br#"{"output":[{"type":"function_call","call_id":"c","name":"f"}]}"#[..]),
         (W::Gemini, &br#"{"modelVersion":"m","candidates":[]}"#[..]),
         (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"args":{}}}]}}]}"#[..]),
         (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","args":[]}}]}}]}"#[..]),
@@ -24,8 +25,6 @@ fn malformed_provider_payloads_are_rejected() {
     ] {
         assert!(decode_response_events(W::OpenAiChat, input).is_err());
     }
-    let call = br#"{"output":[{"type":"function_call","call_id":"c","name":"f"}]}"#;
-    assert!(decode_response_events(W::OpenAiResponses, call).is_err());
     for (input, valid) in [
         (br#"{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}]}"#.as_slice(), true),
         (br#"{"model":"m","input":[{"type":"function_call","call_id":"","name":"f","arguments":"{}"}]}"#.as_slice(), false),
@@ -40,10 +39,10 @@ fn request_roundtrips_preserve_provider_shapes() {
     let input = br#"{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/i.png"}}]}]}"#;
     let request = decode_model_request(W::OpenAiChat, input).unwrap();
     let encoded = encode_model_request(W::OpenAiChat, &request).unwrap();
-    assert_eq!(decode_model_request(W::OpenAiChat, &encoded).unwrap(), request);
+    let decoded = decode_model_request(W::OpenAiChat, &encoded).unwrap();
+    assert_eq!(decoded, request);
     let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"one","args":{}},"thoughtSignature":"sig"},{"functionCall":{"id":"call-2","name":"two","args":{}}}]}]}"#;
     let request = decode_model_request(W::Gemini, input).unwrap();
     let encoded = String::from_utf8(encode_model_request(W::Gemini, &request).unwrap()).unwrap();
-    assert!(encoded.contains(r#""thoughtSignature":"sig""#));
-    assert_eq!(encoded.matches("thoughtSignature").count(), 1);
+    assert!(encoded.contains(r#""thoughtSignature":"sig""#) && encoded.matches("thoughtSignature").count() == 1);
 }
