@@ -39,8 +39,7 @@ fn request_roundtrips_preserve_provider_shapes() {
     let input = br#"{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/i.png"}}]}]}"#;
     let request = decode_model_request(W::OpenAiChat, input).unwrap();
     let encoded = encode_model_request(W::OpenAiChat, &request).unwrap();
-    let decoded = decode_model_request(W::OpenAiChat, &encoded).unwrap();
-    assert_eq!(decoded, request);
+    assert_eq!(decode_model_request(W::OpenAiChat, &encoded).unwrap(), request);
     let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"one","args":{}},"thoughtSignature":"sig"},{"functionCall":{"id":"call-2","name":"two","args":{}}}]}]}"#;
     let request = decode_model_request(W::Gemini, input).unwrap();
     let encoded = String::from_utf8(encode_model_request(W::Gemini, &request).unwrap()).unwrap();
