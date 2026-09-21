@@ -73,6 +73,11 @@ pub fn login(
     let mut interval = challenge.interval.clamp(1, 60);
     let mut remaining = timeout_secs.min(challenge.expires_in);
     loop {
+        if interval > remaining {
+            return Err(AuthProviderError::Unavailable);
+        }
+        pause(interval);
+        remaining -= interval;
         let body = form(&[
             ("client_id", &oauth.client_id),
             ("device_code", &device_code),
@@ -98,10 +103,5 @@ pub fn login(
             }
             _ => return Err(AuthProviderError::Unavailable),
         }
-        if interval > remaining {
-            return Err(AuthProviderError::Unavailable);
-        }
-        pause(interval);
-        remaining -= interval;
     }
 }
