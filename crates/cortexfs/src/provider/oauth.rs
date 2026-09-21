@@ -764,10 +764,8 @@ pub fn resolve_oauth_access_token(
     config: &OAuthProviderConfig,
 ) -> Result<Option<String>, OAuthError> {
     if !config.is_codex() {
-        return resolve_generic_oauth_with(provider, config, |request| {
-            standard_refresh(config, request)
-        })
-        .map(|value| value.map(|(token, _account)| token));
+        return resolve_oauth_credential(provider, config)
+            .map(|value| value.map(|(token, _account)| token));
     }
     resolve_oauth_access_token_with(
         provider,
@@ -850,8 +848,7 @@ fn oauth_keychain_set(service: &str, account: &str, secret: &str) -> Result<(), 
 }
 
 fn is_https_endpoint(value: &str) -> bool {
-    !has_ascii_control(value)
-        && reqwest::Url::parse(value).is_ok_and(|url| url.scheme() == "https")
+    !has_ascii_control(value) && reqwest::Url::parse(value).is_ok_and(|url| url.scheme() == "https")
 }
 
 fn valid_config(config: &OAuthProviderConfig) -> bool {
