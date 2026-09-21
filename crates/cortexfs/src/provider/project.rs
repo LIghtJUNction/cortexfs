@@ -195,7 +195,9 @@ fn capability_text(
     configured: Option<&[String]>,
     metadata: Option<&ModelMetadata>,
 ) -> String {
-    let accepts_images = !formats.iter().any(|value| value.trim() == "anthropic.messages");
+    let accepts_images = !formats
+        .iter()
+        .any(|value| value.trim() == "anthropic.messages");
     if let Some(configured) = configured {
         return STABLE_MODEL_CAPABILITIES
             .iter()
@@ -479,10 +481,7 @@ mod tests {
         let dir = tempdir()?;
         write_local_metadata_cache(dir.path(), 8192)?;
         let mut capabilities = HashMap::new();
-        capabilities.insert(
-            "unknown".to_owned(),
-            ["chat", "attachment", "vision", "image_input"].map(str::to_owned).to_vec(),
-        );
+        capabilities.insert("unknown".to_owned(), vec!["chat".to_owned(), "vision".to_owned()]);
         let config = ProviderConfig {
             name: None,
             base_url: "http://127.0.0.1/v1".to_owned(),
