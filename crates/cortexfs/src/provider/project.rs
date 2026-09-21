@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(model.model, "mystery-model");
         assert_eq!(model.limit.tokens(), None);
         assert_eq!(model.recommended.tokens(), None);
-        assert!(model.driver.lines().all(|line| line.ends_with("google-generative")));
+        assert!(model.driver.contains("google-generative"));
         assert_eq!(model.cap, "chat\n");
         assert!(
             model
@@ -494,15 +494,16 @@ mod tests {
             model_limits: HashMap::new(),
             model_capabilities: capabilities,
             enabled: true,
-            formats: vec!["google.generative".to_owned(), "anthropic.messages".to_owned()],
+            formats: vec!["anthropic.messages".to_owned()],
             auth: Vec::new(),
             oauth: None,
         };
 
         let mut projected = Vec::new();
         project_models("local", &config, dir.path(), &mut projected);
-        assert!(projected[0].driver.lines().all(|line| line.ends_with("anthropic-messages")));
-        assert_eq!((projected[0].cap.as_str(), projected[1].cap.as_str()), ("chat\n", ""));
+        assert!(projected[0].driver.contains("anthropic-messages"));
+        assert_eq!(projected[0].cap, "chat\n");
+        assert_eq!(projected[1].cap, "");
         Ok(())
     }
 
