@@ -1,5 +1,5 @@
 use crate::responseopenaipart::{invalid, text_events, tool_call};
-use crate::{ConversionError, EventStatus, ModelEvent, Usage, WireProtocol};
+use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
 use serde_json::{Map, Value, json};
 
 pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
@@ -25,20 +25,13 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             events.push(tool_call(&run, call)?);
         }
     }
-    let finish_reason = choice
-        .get("finish_reason")
-        .and_then(Value::as_str)
-        .filter(|reason| !reason.is_empty())
-        .ok_or_else(|| invalid("choices[].finish_reason"))?;
-    let status = match finish_reason {
-        "stop" | "tool_calls" | "function_call" => EventStatus::Ok,
-        "cancelled" => EventStatus::Cancelled,
-        _ => EventStatus::Error,
+    let status = match choice.get("finish_reason").and_then(Value::as_str) {
+        Some("stop" | "tool_calls" | "function_call") => EventStatus::Ok,
+        Some("cancelled") => EventStatus::Cancelled,
+        Some("") | None => return Err(invalid("choices[].finish_reason")),
+        Some(_) => EventStatus::Error,
     };
-    events.push(ModelEvent::Done {
-        run: run.clone(),
-        status,
-    });
+    events.push(ModelEvent::Done { run: run.clone(), status });
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
     Ok(events)
 }
@@ -52,11 +45,7 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
     let message = json!({ "role": "assistant", "content": summary.text, "tool_calls": summary.calls.iter().map(|call| json!({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments.to_string()}})).collect::<Vec<_>>() });
     root.insert("choices".to_owned(), json!([{"index": 0, "message": message, "finish_reason": crate::responseutil::finish(summary.status)}]));
     if let Some(usage) = summary.usage {
-        root.insert("usage".to_owned(), usage_value(&usage));
+        root.insert("usage".to_owned(), json!({"prompt_tokens": usage.input_tokens, "completion_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens}));
     }
     crate::encode::bytes(WireProtocol::OpenAiChat, &Value::Object(root))
-}
-
-fn usage_value(usage: &Usage) -> Value {
-    json!({"prompt_tokens": usage.input_tokens, "completion_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens})
 }
