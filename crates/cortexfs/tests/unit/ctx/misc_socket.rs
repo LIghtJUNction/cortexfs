@@ -41,8 +41,8 @@ fn ctx_latest_run_id_reads_projected_columnar_events() {
             &session,
             columnar::Stream::Events,
             &[
-                r#"{"type":"start","run":"older"}"#,
-                r#"{"type":"done","run":"latest","status":"ok"}"#,
+                r#"{\"type\":\"start\",\"run\":\"older\"}"#,
+                r#"{\"type\":\"done\",\"run\":\"latest\",\"status\":\"ok\"}"#,
             ],
         )
         .is_ok()
@@ -238,7 +238,7 @@ fn device_code_handles_slow_down_pending_and_exchange() -> Result<(), cortexfs::
         assert!(body.contains(cortexfs::CODEX_CLIENT_ID));
         Ok((
             200,
-            br#"{"device_auth_id":"id","user_code":"ABCD","interval":"1"}"#.to_vec(),
+            br#"{\"device_auth_id\":\"id\",\"user_code\":\"ABCD\",\"interval\":\"1\"}"#.to_vec(),
         ))
     });
     let device = device?;
@@ -255,9 +255,9 @@ fn device_code_handles_slow_down_pending_and_exchange() -> Result<(), cortexfs::
             let call = calls.get();
             calls.set(call + 1);
             Ok(match call {
-            0 => (429, br#"{"error":"slow_down"}"#.to_vec()),
-            1 => (403, br#"{"error":"authorization_pending"}"#.to_vec()),
-            _ => (200, br#"{"authorization_code":"auth","code_verifier":"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk","code_challenge":"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}"#.to_vec()),
+            0 => (429, br#"{\"error\":\"slow_down\"}"#.to_vec()),
+            1 => (403, br#"{\"error\":\"authorization_pending\"}"#.to_vec()),
+            _ => (200, br#"{\"authorization_code\":\"auth\",\"code_verifier\":\"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\",\"code_challenge\":\"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM\"}"#.to_vec()),
         })
         },
         |url, form| {
@@ -267,7 +267,7 @@ fn device_code_handles_slow_down_pending_and_exchange() -> Result<(), cortexfs::
             );
             Ok((
                 200,
-                br#"{"access_token":"access","refresh_token":"refresh"}"#.to_vec(),
+                br#"{\"access_token\":\"access\",\"token_type\":\"Bearer\",\"refresh_token\":\"refresh\"}"#.to_vec(),
             ))
         },
         |seconds| waits.push(seconds),
