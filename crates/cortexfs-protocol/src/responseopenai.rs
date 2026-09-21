@@ -1,6 +1,6 @@
 use crate::responseopenaipart::{invalid, text_events, tool_call};
 use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let root = crate::responseutil::parse(WireProtocol::OpenAiChat, input)?;
@@ -41,17 +41,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
 
 pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> {
     let summary = crate::responseutil::summary(WireProtocol::OpenAiChat, events)?;
-    let mut root = Map::from_iter([
-        (String::from("id"), json!(summary.run)),
-        (String::from("model"), json!(summary.model)),
-    ]);
+    let mut root = json!({"id": summary.run, "model": summary.model});
     let message = json!({ "role": "assistant", "content": summary.text, "tool_calls": summary.calls.iter().map(|call| json!({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments.to_string()}})).collect::<Vec<_>>() });
-    root.insert("choices".to_owned(), json!([{"index": 0, "message": message, "finish_reason": crate::responseutil::finish(summary.status)}]));
+    root["choices"] = json!([{"index": 0, "message": message, "finish_reason": crate::responseutil::finish(summary.status)}]);
     if let Some(usage) = summary.usage {
-        root.insert(
-            "usage".to_owned(),
-            json!({"prompt_tokens": usage.input_tokens, "completion_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens}),
-        );
+        root["usage"] = json!({"prompt_tokens": usage.input_tokens, "completion_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens});
     }
-    crate::encode::bytes(WireProtocol::OpenAiChat, &Value::Object(root))
+    crate::encode::bytes(WireProtocol::OpenAiChat, &root)
 }
