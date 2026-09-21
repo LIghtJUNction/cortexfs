@@ -25,10 +25,15 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             events.push(tool_call(&run, call)?);
         }
     }
-    let status = match choice.get("finish_reason").and_then(Value::as_str) {
-        Some("stop" | "tool_calls" | "function_call") | None => EventStatus::Ok,
-        Some("cancelled") => EventStatus::Cancelled,
-        Some(_) => EventStatus::Error,
+    let finish_reason = choice
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.is_empty())
+        .ok_or_else(|| invalid("choices[].finish_reason"))?;
+    let status = match finish_reason {
+        "stop" | "tool_calls" | "function_call" => EventStatus::Ok,
+        "cancelled" => EventStatus::Cancelled,
+        _ => EventStatus::Error,
     };
     events.push(ModelEvent::Done {
         run: run.clone(),
