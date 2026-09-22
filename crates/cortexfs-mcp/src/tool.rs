@@ -164,7 +164,7 @@ mod tests {
         Ok((result, frames))
     }
 
-    fn frame(content: Value) -> Value {
+    fn frame(content: &Value) -> Value {
         json!({"type":"message","run":"r-test","role":"tool","content":content})
     }
 
@@ -173,17 +173,17 @@ mod tests {
         let text = json!({"type":"text","text":"ok"});
         let structured = json!({"type":"text","text":"{\"value\":42}"});
         for (input, expected) in [
-            (json!({"content":[text.clone()]}), json!([text])),
+            (json!({"content":[text]}), json!([text])),
             (
                 json!({"content":[],"structuredContent":{"value":42}}),
-                json!([structured.clone()]),
+                json!([structured]),
             ),
             (
-                json!({"content":[structured.clone()],"structuredContent":{"value":42}}),
+                json!({"content":[structured],"structuredContent":{"value":42}}),
                 json!([structured]),
             ),
         ] {
-            assert_eq!(emit(input)?, (Ok(()), vec![frame(expected)]));
+            assert_eq!(emit(input)?, (Ok(()), vec![frame(&expected)]));
         }
         Ok(())
     }
@@ -191,14 +191,14 @@ mod tests {
     #[test]
     fn call_result_emits_content_before_remote_error() -> io::Result<()> {
         let content = json!([{"type":"text","text":"failed detail"}]);
-        let (result, frames) = emit(json!({"content":content.clone(),"isError":true}))?;
+        let (result, frames) = emit(json!({"content":content,"isError":true}))?;
         assert!(matches!(
             result,
             Err(ref error)
                 if error.code() == "EIO"
                     && error.message() == "remote MCP tool returned an error"
         ));
-        assert_eq!(frames, vec![frame(content)]);
+        assert_eq!(frames, vec![frame(&content)]);
         Ok(())
     }
 
