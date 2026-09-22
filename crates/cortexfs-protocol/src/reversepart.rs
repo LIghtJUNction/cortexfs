@@ -3,15 +3,13 @@ use crate::openaichat::{Content as OpenAiContent, Function, ImageUrl, Message, P
 use std::borrow::Cow;
 
 pub(super) fn gemini_messages<'a>(content: &GeminiContent<'a>) -> Vec<Message<'a>> {
-    let mut role = content.role.clone().unwrap_or(Cow::Borrowed("user"));
-    if role == "model" {
-        role = Cow::Borrowed("assistant");
-    }
+    let role = content.role.clone().unwrap_or(Cow::Borrowed("user"));
     let mut text = Vec::new();
     let mut parts = Vec::new();
     let mut calls = Vec::new();
     let mut results = Vec::new();
     for (index, part) in content.parts.iter().enumerate() {
+        let id = |id: Option<&str>| Cow::Owned(crate::gemini::correlation_id(id, index));
         if let Some(value) = part.text.as_ref() {
             text.push(Cow::clone(value));
         }
@@ -27,7 +25,7 @@ pub(super) fn gemini_messages<'a>(content: &GeminiContent<'a>) -> Vec<Message<'a
         }
         if let Some(call) = part.function_call.as_ref() {
             calls.push(ToolCall {
-                id: Cow::Owned(crate::gemini::correlation_id(call.id.as_deref(), index)),
+                id: id(call.id.as_deref()),
                 kind: Cow::Borrowed("function"),
                 function: Function {
                     name: Cow::clone(&call.name),
@@ -41,11 +39,8 @@ pub(super) fn gemini_messages<'a>(content: &GeminiContent<'a>) -> Vec<Message<'a
             results.push(Message {
                 role: Cow::Borrowed("tool"),
                 content: Some(OpenAiContent::Text(Cow::Borrowed(response.response.get()))),
-                name: Some(Cow::clone(&response.name)),
-                tool_call_id: Some(Cow::Owned(crate::gemini::correlation_id(
-                    response.id.as_deref(),
-                    index,
-                ))),
+                name: None,
+                tool_call_id: Some(id(response.id.as_deref())),
                 tool_calls: Vec::new(),
             });
         }
@@ -66,7 +61,11 @@ pub(super) fn gemini_messages<'a>(content: &GeminiContent<'a>) -> Vec<Message<'a
         results.insert(
             0,
             Message {
-                role,
+                role: if role == "model" {
+                    Cow::Borrowed("assistant")
+                } else {
+                    role
+                },
                 content,
                 name: None,
                 tool_call_id: None,
