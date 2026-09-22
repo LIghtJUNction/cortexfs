@@ -164,78 +164,53 @@ mod tests {
         Ok((result, frames))
     }
 
-    #[test]
-    fn call_result_emits_text_content_directly() -> io::Result<()> {
-        let (result, frames) = emit(json!({
-            "content": [{"type":"text","text":"ok"}],
-            "isError": false
-        }))?;
-
-        assert_eq!(
-            (result, frames),
-            (
-                Ok(()),
-                vec![json!({
-                    "type": "message",
-                    "run": "r-test",
-                    "role": "tool",
-                    "content": [{"type":"text","text":"ok"}]
-                })]
-            )
-        );
-        Ok(())
+    fn frame(content: Value) -> Value {
+        json!({"type":"message","run":"r-test","role":"tool","content":content})
     }
 
     #[test]
-    fn call_result_projects_structured_content_once() -> io::Result<()> {
-        let expected = json!([{"type":"text","text":"{\"value\":42}"}]);
-        for content in [json!([]), expected.clone()] {
-            let (_, frames) = emit(json!({
-                "content": content,
-                "structuredContent": {"value": 42},
-                "isError": false
-            }))?;
-            assert_eq!(frames[0]["content"], expected);
+    fn call_result_projects_content_without_loss_or_duplicates() -> io::Result<()> {
+        let text = json!({"type":"text","text":"ok"});
+        let structured = json!({"type":"text","text":"{\"value\":42}"});
+        for (input, expected) in [
+            (json!({"content":[text.clone()]}), json!([text])),
+            (
+                json!({"content":[],"structuredContent":{"value":42}}),
+                json!([structured.clone()]),
+            ),
+            (
+                json!({"content":[structured.clone()],"structuredContent":{"value":42}}),
+                json!([structured]),
+            ),
+        ] {
+            assert_eq!(emit(input)?, (Ok(()), vec![frame(expected)]));
         }
         Ok(())
     }
 
     #[test]
     fn call_result_emits_content_before_remote_error() -> io::Result<()> {
-        let (result, frames) = emit(json!({
-            "content": [{"type":"text","text":"failed detail"}],
-            "isError": true
-        }))?;
-
-        assert!(
-            matches!(
-                result,
-                Err(ref error)
-                    if error.code() == "EIO"
-                        && error.message() == "remote MCP tool returned an error"
-            ) && frames
-                == vec![json!({
-                    "type": "message",
-                    "run": "r-test",
-                    "role": "tool",
-                    "content": [{"type":"text","text":"failed detail"}]
-                })]
-        );
+        let content = json!([{"type":"text","text":"failed detail"}]);
+        let (result, frames) = emit(json!({"content":content.clone(),"isError":true}))?;
+        assert!(matches!(
+            result,
+            Err(ref error)
+                if error.code() == "EIO"
+                    && error.message() == "remote MCP tool returned an error"
+        ));
+        assert_eq!(frames, vec![frame(content)]);
         Ok(())
     }
 
     #[test]
     fn call_result_requires_content_array() -> io::Result<()> {
         let (result, frames) = emit(json!({"isError": false}))?;
-
-        assert!(
-            matches!(
-                result,
-                Err(ref error)
-                    if error.code() == "EIO"
-                        && error.message().contains("missing field `content`")
-            ) && frames.is_empty()
-        );
+        assert!(matches!(
+            result,
+            Err(ref error)
+                if error.code() == "EIO" && error.message().contains("missing field `content`")
+        ));
+        assert!(frames.is_empty());
         Ok(())
     }
 }
