@@ -10,12 +10,14 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model: crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?,
     }];
-    let choice = map
+    let choices = map
         .get("choices")
         .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(Value::as_object)
         .ok_or_else(|| invalid("choices"))?;
+    let [choice] = choices.as_slice() else {
+        return Err(invalid("choices"));
+    };
+    let choice = choice.as_object().ok_or_else(|| invalid("choices"))?;
     let message = crate::responseutil::object(choice.get("message"))
         .ok_or_else(|| invalid("choices[].message"))?;
     text_events(&mut events, &run, message.get("content"));
@@ -24,7 +26,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             events.push(tool_call(&run, call)?);
         }
     }
-    let status = match choice.get("finish_reason").and_then(Value::as_str) {
+    let status = match choice.get("finish_reason\").and_then(Value::as_str) {
         Some("stop" | "tool_calls" | "function_call") => EventStatus::Ok,
         Some("cancelled") => EventStatus::Cancelled,
         Some("") | None => return Err(invalid("choices[].finish_reason")),
