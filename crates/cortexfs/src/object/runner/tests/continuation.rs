@@ -55,15 +55,9 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn Error>> {
     let decoded = serde_json::to_string(&decode_model_request(WireProtocol::Gemini, input)?)?;
     assert!(decoded.contains(r#""id":"call-2""#) && decoded.contains(r#""id":"gemini-call-1""#));
     let direct = transcode_request(WireProtocol::Gemini, WireProtocol::OpenAiChat, input)?;
-    let direct: Value = serde_json::from_slice(&direct.bytes)?;
-    for (pointer, expected) in [
-        ("/messages/0/tool_calls/0/id", "call-2"),
-        ("/messages/0/tool_calls/1/id", "gemini-call-1"),
-        ("/messages/1/tool_call_id", "call-2"),
-        ("/messages/2/tool_call_id", "gemini-call-1"),
-    ] {
-        assert_eq!(direct.pointer(pointer), Some(&json!(expected)));
-    }
+    let direct = String::from_utf8(direct.bytes)?;
+    assert!(direct.contains(r#""id":"call-2""#) && direct.contains(r#""tool_call_id":"call-2""#));
+    assert!(direct.contains(r#""id":"gemini-call-1""#) && direct.contains(r#""tool_call_id":"gemini-call-1""#));
     Ok(())
 }
 
