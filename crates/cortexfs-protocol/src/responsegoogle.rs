@@ -34,8 +34,8 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         .filter(|_| root.pointer("/candidates/1").is_none())
         .and_then(Value::as_object)
         .ok_or_else(|| invalid("candidates"))?;
-    if let Some(parts) = candidate
-        .pointer("/content/parts")
+    if let Some(parts) = root
+        .pointer("/candidates/0/content/parts")
         .and_then(Value::as_array)
     {
         for (index, part) in parts.iter().enumerate() {
