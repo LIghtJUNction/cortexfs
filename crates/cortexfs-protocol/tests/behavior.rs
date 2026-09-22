@@ -204,6 +204,12 @@ mod tests {
                 serde_json::from_slice::<Value>(&converted.bytes)?;
             }
         }
+        for input in [
+            br#"{"id":"run","model":"model","content":[]}"#.as_slice(),
+            br#"{"id":"run","model":"model","content":[],"stop_reason":null}"#.as_slice(),
+        ] {
+            assert!(decode_response_events(WireProtocol::Anthropic, input).is_err());
+        }
         Ok(())
     }
 
@@ -211,7 +217,7 @@ mod tests {
     fn response_usage_overflow_returns_a_conversion_error() -> TestResult {
         for output in [0_u64, 1] {
             let input = serde_json::to_vec(&json!({
-                "id": "run", "model": "model", "content": [],
+                "id": "run", "model": "model", "content": [], "stop_reason": "end_turn",
                 "usage": {"input_tokens": u64::MAX, "output_tokens": output},
             }))?;
             for (target, _) in cases() {
