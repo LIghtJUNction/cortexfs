@@ -485,7 +485,7 @@ fn provider_route_selects_key_slot_by_model() {
 fn anthropic_message_content_parses_text_parts() {
     assert_eq!(
         parse_anthropic_message_content(
-            br#"{"content":[{"type":"text","text":"hello "},{"type":"text","text":"claude"}]}"#
+            br#"{"content":[{"type":"text","text":"hello "},{"type":"text","text":"claude"}],"stop_reason":"end_turn"}"#
         ),
         Ok("hello claude".to_owned())
     );
