@@ -52,7 +52,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| invalid("functionCall.name"))?;
                 let id = match call.get("id") {
-                    None => crate::gemini::correlation_id(None, index).into_owned(),
+                    None => crate::gemini::correlation_id(None, index),
                     Some(value) => text(Some(value)).ok_or_else(|| invalid("functionCall.id"))?,
                 };
                 events.push(ModelEvent::ToolCall {
