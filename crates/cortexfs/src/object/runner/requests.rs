@@ -59,24 +59,8 @@ pub(crate) fn provider_request_body(
         request.option("parallel_tool_calls", json!(false));
     }
     let bytes = encode_model_request(protocol, &request).map_err(|error| error.to_string())?;
-    let body = String::from_utf8(bytes)
-        .map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())?;
-    if protocol == WireProtocol::Gemini {
-        return gemini_body_without_model(&body);
-    }
-    Ok(body)
-}
-
-/// Drops the path-bound `model` field from an encoded Gemini request body: the neutral
-/// request keeps it so bodies round trip, but Gemini binds it to the request URL.
-fn gemini_body_without_model(body: &str) -> Result<String, String> {
-    let mut value = serde_json::from_str::<Value>(body)
-        .map_err(|_error| "protocol encoder returned invalid JSON".to_owned())?;
-    let Some(root) = value.as_object_mut() else {
-        return Err("protocol encoder returned a non-object body".to_owned());
-    };
-    root.remove("model");
-    serde_json::to_string(&value).map_err(|_error| "cannot encode Gemini request".to_owned())
+    String::from_utf8(bytes)
+        .map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())
 }
 
 fn model_request(
