@@ -5,18 +5,12 @@ mod tests {
     fn provider_edges_conform() -> Result<(), p::ConversionError> {
         for (protocol, input) in [
             (W::Anthropic, &br#"{"id":"r","model":"m","content":[{"type":"tool_use","id":0}],"stop_reason":"end_turn"}"#[..]),
-            (W::Anthropic, &br#"{"model":"m","content":[],"stop_reason":"end_turn"}"#[..]),
-            (W::Anthropic, &br#"{"id":"r","content":[],"stop_reason":"end_turn"}"#[..]),
             (W::OpenAiResponses, &br#"{"id":"r","model":"m","output":[{"type":"function_call","call_id":"c","name":"f"}],"status":"completed"}"#[..]),
-            (W::OpenAiResponses, &br#"{"model":"m","output":[],"status":"completed"}"#[..]),
-            (W::OpenAiResponses, &br#"{"id":"r","output":[],"status":"completed"}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"args":{}}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","args":[]}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","id":7}}]}}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[]}"#[..]),
-            (W::OpenAiChat, &br#"{"model":"m","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#[..]),
-            (W::OpenAiChat, &br#"{"id":"r","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"}}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#[..]),
@@ -26,6 +20,10 @@ mod tests {
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#[..]),
         ] {
             assert!(p::decode_response_events(protocol, input).is_err());
+        }
+        let bad_identity = [br#"{"model":"m"}"#.as_slice(), br#"{"id":"r"}"#.as_slice()];
+        for wire in [W::Anthropic, W::OpenAiResponses, W::OpenAiChat] {
+            assert!(bad_identity.iter().all(|input| p::decode_response_events(wire, input).is_err()));
         }
         for (input, valid) in [
             (br#"{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}]}"#.as_slice(), true),
