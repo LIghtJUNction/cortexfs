@@ -21,10 +21,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         None => return Err(invalid("stop_reason")),
     };
     if let Some(usage) = crate::responseutil::usage(crate::responseutil::object(map.get("usage"))) {
-        events.push(ModelEvent::Usage {
-            run: run.clone(),
-            usage,
-        });
+        events.push(ModelEvent::Usage { run: run.clone(), usage });
     }
     events.push(ModelEvent::Done { run, status });
     Ok(events)
