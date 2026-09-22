@@ -37,6 +37,7 @@ mod tests {
         let request = p::decode_model_request(W::Gemini, input)?;
         let encoded = p::encode_model_request(W::Gemini, &request)?;
         let encoded = String::from_utf8_lossy(&encoded);
+        assert!(encoded.contains("gemini-call-0") && encoded.contains("gemini-call-1"));
         assert!(encoded.contains("\"thoughtSignature\":\"sig\""));
         assert_eq!(encoded.matches("thoughtSignature").count(), 1);
         Ok(())

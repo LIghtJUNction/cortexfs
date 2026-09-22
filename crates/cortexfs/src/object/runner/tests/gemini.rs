@@ -99,7 +99,7 @@ fn responses_decode_text_tool_calls_and_usage() -> Result<(), Box<dyn std::error
     assert_eq!(parse_provider_content(protocol, text.as_bytes())?, "hello");
     let explicit = json!({"functionCall":{"id":"call-1","name":"tsh","args":{"args":[]}}});
     let legacy = json!({"functionCall":{"name":"tsh","args":{"args":[]}}});
-    for (part, id) in [(explicit, "call-1"), (legacy, "tsh")] {
+    for (part, id) in [(explicit, "call-1"), (legacy, "gemini-call-0")] {
         let body = candidate(&json!([part]), "STOP");
         let call = parse_provider_content(protocol, body.as_bytes())?;
         let value = serde_json::from_str::<Value>(&call)?;
