@@ -67,9 +67,10 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         }
     }
     let status = match candidate.get("finishReason").and_then(Value::as_str) {
-        Some("STOP") | None => EventStatus::Ok,
+        Some("STOP") => EventStatus::Ok,
         Some("CANCELLED") => EventStatus::Cancelled,
         Some(_) => EventStatus::Error,
+        None => return Err(invalid("finishReason")),
     };
     events.push(ModelEvent::Done {
         run: run.clone(),

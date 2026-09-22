@@ -140,8 +140,13 @@ fn responses_surface_provider_errors_and_refused_candidates() {
         let actual = parse_provider_content(protocol, response.as_bytes()).err();
         assert_eq!(actual, Some(expected.to_owned()));
     }
-    let missing_model = json!({"candidates": [{"finishReason": "STOP"}]}).to_string();
-    assert!(decode_response_events(protocol, missing_model.as_bytes()).is_err());
+    for response in [
+        json!({"candidates": [{"finishReason": "STOP"}]}),
+        json!({"modelVersion": "gemini-2.5-flash", "candidates": [{}]}),
+        json!({"modelVersion": "gemini-2.5-flash", "candidates": [{"finishReason": null}]}),
+    ] {
+        assert!(decode_response_events(protocol, response.to_string().as_bytes()).is_err());
+    }
 }
 
 fn candidate(parts: &Value, finish_reason: &str) -> String {
