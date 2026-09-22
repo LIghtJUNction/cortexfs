@@ -33,7 +33,10 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some(items) if items.len() == 1 => &items[0],
         _ => return Err(invalid("candidates")),
     };
-    if let Some(parts) = candidate.pointer("/content/parts").and_then(Value::as_array) {
+    if let Some(parts) = candidate
+        .pointer("/content/parts")
+        .and_then(Value::as_array)
+    {
         for (index, part) in parts.iter().enumerate() {
             if let Some(text) = text(part.get("text")) {
                 events.push(ModelEvent::TextDelta {
