@@ -1,7 +1,7 @@
 use crate::{client::Client, config};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::env;
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -60,11 +60,21 @@ impl Tool for McpTool {
 }
 
 fn emit_call_result(result: Value, output: &mut ToolEmitter<&mut dyn Write>) -> ToolResult<()> {
+    let structured = result.get("structuredContent").map(Value::to_string);
     let result: CallToolResult = serde_json::from_value(result).map_err(|error| {
         ToolError::new("EIO", format!("invalid MCP tools/call result: {error}"))
     })?;
+    let mut content = result.content;
+    if let Some(text) = structured
+        && !content.iter().any(|block| {
+            block.get("type").and_then(Value::as_str) == Some("text")
+                && block.get("text").and_then(Value::as_str) == Some(text.as_str())
+        })
+    {
+        content.push(json!({"type":"text","text":text}));
+    }
     output
-        .content(&result.content)
+        .content(&content)
         .map_err(|error| ToolError::new("EIO", error.to_string()))?;
     if result.is_error {
         return Err(ToolError::new("EIO", "remote MCP tool returned an error"));
@@ -154,64 +164,53 @@ mod tests {
         Ok((result, frames))
     }
 
-    #[test]
-    fn call_result_emits_text_content_directly() -> io::Result<()> {
-        let (result, frames) = emit(json!({
-            "content": [{"type":"text","text":"ok"}],
-            "isError": false
-        }))?;
+    fn frame(content: &Value) -> Value {
+        json!({"type":"message","run":"r-test","role":"tool","content":content})
+    }
 
-        assert_eq!(
-            (result, frames),
+    #[test]
+    fn call_result_projects_content_without_loss_or_duplicates() -> io::Result<()> {
+        let text = json!({"type":"text","text":"ok"});
+        let structured = json!({"type":"text","text":"{\"value\":42}"});
+        for (input, expected) in [
+            (json!({"content":[text]}), json!([text])),
             (
-                Ok(()),
-                vec![json!({
-                    "type": "message",
-                    "run": "r-test",
-                    "role": "tool",
-                    "content": [{"type":"text","text":"ok"}]
-                })]
-            )
-        );
+                json!({"content":[],"structuredContent":{"value":42}}),
+                json!([structured]),
+            ),
+            (
+                json!({"content":[structured],"structuredContent":{"value":42}}),
+                json!([structured]),
+            ),
+        ] {
+            assert_eq!(emit(input)?, (Ok(()), vec![frame(&expected)]));
+        }
         Ok(())
     }
 
     #[test]
     fn call_result_emits_content_before_remote_error() -> io::Result<()> {
-        let (result, frames) = emit(json!({
-            "content": [{"type":"text","text":"failed detail"}],
-            "isError": true
-        }))?;
-
-        assert!(
-            matches!(
-                result,
-                Err(ref error)
-                    if error.code() == "EIO"
-                        && error.message() == "remote MCP tool returned an error"
-            ) && frames
-                == vec![json!({
-                    "type": "message",
-                    "run": "r-test",
-                    "role": "tool",
-                    "content": [{"type":"text","text":"failed detail"}]
-                })]
-        );
+        let content = json!([{"type":"text","text":"failed detail"}]);
+        let (result, frames) = emit(json!({"content":content,"isError":true}))?;
+        assert!(matches!(
+            result,
+            Err(ref error)
+                if error.code() == "EIO"
+                    && error.message() == "remote MCP tool returned an error"
+        ));
+        assert_eq!(frames, vec![frame(&content)]);
         Ok(())
     }
 
     #[test]
     fn call_result_requires_content_array() -> io::Result<()> {
         let (result, frames) = emit(json!({"isError": false}))?;
-
-        assert!(
-            matches!(
-                result,
-                Err(ref error)
-                    if error.code() == "EIO"
-                        && error.message().contains("missing field `content`")
-            ) && frames.is_empty()
-        );
+        assert!(matches!(
+            result,
+            Err(ref error)
+                if error.code() == "EIO" && error.message().contains("missing field `content`")
+        ));
+        assert!(frames.is_empty());
         Ok(())
     }
 }
