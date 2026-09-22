@@ -17,11 +17,11 @@ use super::{
     is_regular_file_no_follow, missing_model_message, model_candidates,
     normalize_agent_model_frame, open_executable_no_follow, openai_api_key, openai_chat_body,
     openai_chat_body_with_agent_tools, openai_responses_body, openai_stream_event,
-    parse_agent_context_budget, parse_agent_window_environment, parse_anthropic_message_content,
-    parse_openai_chat_content, parse_openai_response_content, passthrough_tool_program,
-    proc_fd_path, provider_config_from_dir, provider_curl_command, provider_egress_transport,
-    provider_messages_for_agent, provider_request_attempts, provider_request_failure_message,
-    provider_route, provider_runtime_driver, provider_secret_from_inherited_fd_with_env,
+    parse_agent_context_budget, parse_agent_window_environment, parse_openai_chat_content,
+    parse_openai_response_content, passthrough_tool_program, proc_fd_path, provider_config_from_dir,
+    provider_curl_command, provider_egress_transport, provider_messages_for_agent,
+    provider_request_attempts, provider_request_failure_message, provider_route,
+    provider_runtime_driver, provider_secret_from_inherited_fd_with_env,
     provider_secret_from_runtime_file_with_env, provider_secret_from_runtime_value_with_env,
     provider_target, provider_transport, read_limited_input_text, read_provider_stream_line,
     read_runtime_provider_secret_file, read_small_plain_text_file, reset_provider_request_attempts,
@@ -64,7 +64,7 @@ pub(crate) fn unique_temp_dir(name: &str) -> std::io::Result<PathBuf> {
             .as_nanos()
     ));
     fs::create_dir_all(&path)?;
-    Ok(path)
+    Ok(())
 }
 
 #[cfg(unix)]
