@@ -31,10 +31,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some("") | None => return Err(invalid("choices[].finish_reason")),
         Some(_) => EventStatus::Error,
     };
-    events.push(ModelEvent::Done {
-        run: run.clone(),
-        status,
-    });
+    events.push(ModelEvent::Done { run: run.clone(), status });
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
     Ok(events)
 }
