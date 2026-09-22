@@ -63,7 +63,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn unusable_provider_turns_fail_closed() {
-    let response = br#"{"content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"max_tokens"}"#;
+    let response = br#"{"id":"r","model":"m","content":[{"type":"tool_use","id":"c","name":"tsh","input":{"args":["tools"]}}],"stop_reason":"max_tokens"}"#;
     let error = parse_anthropic_message_content(response).err();
     assert_eq!(error.as_deref(), Some("provider response failed"));
     for reason in ["cancelled", "error", "future_reason"] {

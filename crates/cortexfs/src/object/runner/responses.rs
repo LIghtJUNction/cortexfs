@@ -1,12 +1,9 @@
-use serde_json::json;
-
 use super::*;
-use cortexfs_protocol::{EventStatus, ModelEvent, ToolCall, WireProtocol, decode_response_events};
-use serde_json::Value;
-
 use crate::provider::openai_response_item_requires_continuation;
 use cortexfs::is_object_name;
-
+use cortexfs_protocol::{EventStatus, ModelEvent, ToolCall, WireProtocol, decode_response_events};
+use serde_json::Value;
+use serde_json::json;
 pub(crate) fn parse_provider_content(
     protocol: WireProtocol,
     output: &[u8],
@@ -17,10 +14,18 @@ pub(crate) fn parse_provider_content(
     let events = decode_response_events(protocol, output).map_err(|error| error.to_string())?;
     normalized_content(&events)
 }
-
+#[cfg(test)]
+fn parse_openai_fixture(protocol: WireProtocol, output: &[u8]) -> Result<String, String> {
+    let mut map = serde_json::from_slice::<serde_json::Map<String, Value>>(output)
+        .map_err(|error| format!("invalid provider json: {error}"))?;
+    map.entry("id").or_insert(json!("test-response"));
+    map.entry("model").or_insert(json!("test-model"));
+    let bytes = serde_json::to_vec(&map).map_err(|error| error.to_string())?;
+    parse_provider_content(protocol, &bytes)
+}
 #[cfg(test)]
 pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
-    parse_provider_content(WireProtocol::OpenAiChat, output)
+    parse_openai_fixture(WireProtocol::OpenAiChat, output)
 }
 pub(crate) fn openai_chat_finish_reason(value: &Value) -> Result<Option<&str>, String> {
     let reason = value
@@ -59,14 +64,12 @@ pub(crate) fn openai_chat_tool_call_args(arguments: &Value) -> Option<Vec<String
 }
 #[cfg(test)]
 pub(crate) fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
-    parse_provider_content(WireProtocol::OpenAiResponses, output)
+    parse_openai_fixture(WireProtocol::OpenAiResponses, output)
 }
-
 #[cfg(test)]
 pub(crate) fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
     parse_provider_content(WireProtocol::Anthropic, output)
 }
-
 fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(), String> {
     if protocol == WireProtocol::OpenAiChat {
         openai_chat_finish_reason(value)?;
@@ -96,7 +99,6 @@ fn validate_provider_response(protocol: WireProtocol, value: &Value) -> Result<(
     }
     Ok(())
 }
-
 /// Rejects unusable Gemini candidates while preserving the native finish reason.
 fn gemini_response_status(value: &Value) -> Result<(), String> {
     if let Some(message) = value
@@ -120,7 +122,6 @@ fn gemini_response_status(value: &Value) -> Result<(), String> {
         Some(reason) => Err(format!("provider response finished with {reason}")),
     }
 }
-
 fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
     if events.iter().any(|event| {
         matches!(
@@ -148,14 +149,12 @@ fn normalized_content(events: &[ModelEvent]) -> Result<String, String> {
     }
     Ok(text)
 }
-
 fn tool_call_content(event: &ModelEvent) -> Option<String> {
     let ModelEvent::ToolCall { ref call, .. } = *event else {
         return None;
     };
     canonical_event_tool_call(call)
 }
-
 fn canonical_event_tool_call(call: &ToolCall) -> Option<String> {
     if !provider_function_name_is_compatible(&call.name) || !is_object_name(&call.id) {
         return None;
@@ -288,7 +287,6 @@ pub(crate) fn provider_request_target(
         }
     }
 }
-
 /// Builds the Gemini `models/<model>:generateContent` target.
 ///
 /// Gemini binds the API version into the provider base URL and the model into
@@ -315,7 +313,6 @@ fn gemini_target(transport: &ResolvedTransport, model: &str) -> Result<CurlJsonT
         unix_socket,
     })
 }
-
 /// Selects the Gemini authentication header for one resolved credential.
 ///
 /// Google splits authentication by credential kind: API keys travel in
@@ -331,7 +328,6 @@ fn gemini_headers(credential: &ProviderCredential) -> Result<Vec<String>, String
         }
     }
 }
-
 #[cfg(test)]
 pub(crate) fn openai_request_target(
     transport: &ResolvedTransport,
@@ -341,7 +337,6 @@ pub(crate) fn openai_request_target(
 ) -> Result<(CurlJsonTarget, Vec<String>), String> {
     openai_target(transport, credential, responses, run)
 }
-
 fn openai_target(
     transport: &ResolvedTransport,
     credential: Option<&ProviderCredential>,
