@@ -53,7 +53,7 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn Error>> {
     assert!(gemini.pointer("/contents/1/parts/1").is_none());
     let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}},{"functionCall":{"name":"legacy","args":{"args":[]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}}]},{"role":"user","parts":[{"functionResponse":{"name":"legacy","response":{"output":"ok"}}}]}]}"#;
     let decoded = serde_json::to_string(&decode_model_request(WireProtocol::Gemini, input)?)?;
-    assert!(decoded.contains(r#""id":"call-2""#) && decoded.contains(r#""id":"legacy""#));
+    assert!(decoded.contains(r#""id":"call-2""#) && decoded.contains(r#""id":"gemini-call-1""#));
     let direct = transcode_request(WireProtocol::Gemini, WireProtocol::OpenAiChat, input)?;
     let direct = String::from_utf8(direct.bytes)?;
     assert!(direct.contains(r#""id":"call-2""#) && direct.contains(r#""tool_call_id":"call-2""#));
