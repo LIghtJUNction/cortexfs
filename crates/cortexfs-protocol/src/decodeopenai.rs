@@ -37,16 +37,15 @@ fn message(source: &crate::openaichat::Message<'_>) -> Result<Message, Conversio
         .tool_calls
         .iter()
         .map(|call| {
-            let arguments = call.function.arguments.as_deref().map_or_else(
-                || Ok(Value::Object(serde_json::Map::new())),
-                |value| {
-                    crate::semantic::json_value(
-                        crate::WireProtocol::OpenAiChat,
-                        "messages[].tool_calls[].function.arguments",
-                        value,
-                    )
-                },
-            )?;
+            let field = "messages[].tool_calls[].function.arguments";
+            let raw = call.function.arguments.as_deref().ok_or_else(|| {
+                ConversionError::InvalidField {
+                    protocol: crate::WireProtocol::OpenAiChat,
+                    field: field.to_owned(),
+                }
+            })?;
+            let arguments =
+                crate::semantic::json_value(crate::WireProtocol::OpenAiChat, field, raw)?;
             Ok(ToolCall {
                 id: call.id.to_string(),
                 name: call.function.name.to_string(),
