@@ -5,12 +5,18 @@ mod tests {
     fn provider_edges_conform() -> Result<(), p::ConversionError> {
         for (protocol, input) in [
             (W::Anthropic, &br#"{"content":[{"type":"tool_use","id":0}]}"#[..]),
+            (W::Anthropic, &br#"{"model":"m","content":[],"stop_reason":"end_turn"}"#[..]),
+            (W::Anthropic, &br#"{"id":"r","content":[],"stop_reason":"end_turn"}"#[..]),
             (W::OpenAiResponses, &br#"{"output":[{"type":"function_call","call_id":"c","name":"f"}]}"#[..]),
+            (W::OpenAiResponses, &br#"{"model":"m","output":[],"status":"completed"}"#[..]),
+            (W::OpenAiResponses, &br#"{"id":"r","output":[],"status":"completed"}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"args":{}}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","args":[]}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","id":7}}]}}]}"#[..]),
             (W::OpenAiChat, &br#"{"choices":[]}"#[..]),
+            (W::OpenAiChat, &br#"{"model":"m","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#[..]),
             (W::OpenAiChat, &br#"{"choices":[{}]}"#[..]),
             (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"}}]}"#[..]),
             (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#[..]),
