@@ -56,15 +56,17 @@ pub fn gemini_to_openai(input: &[u8]) -> Result<Vec<u8>, ConversionError> {
     }
     let mut messages = Vec::new();
     if let Some(system) = source.system_instruction.as_ref() {
-        let mut message = crate::reversepart::gemini_message(system);
-        message.role = Cow::Borrowed("system");
-        messages.push(message);
+        let mut converted = crate::reversepart::gemini_messages(system);
+        if let Some(message) = converted.first_mut() {
+            message.role = Cow::Borrowed("system");
+        }
+        messages.extend(converted);
     }
     messages.extend(
         source
             .contents
             .iter()
-            .map(crate::reversepart::gemini_message),
+            .flat_map(crate::reversepart::gemini_messages),
     );
     let max_tokens = source
         .generation_config
