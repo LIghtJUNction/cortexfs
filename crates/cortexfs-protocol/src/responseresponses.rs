@@ -28,11 +28,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
 
 fn output_item(out: &mut Vec<ModelEvent>, run: &str, item: &Value) -> Result<(), ConversionError> {
     let map = item.as_object().ok_or_else(|| invalid("output[]"))?;
-    match map
+    let kind = map
         .get("type")
         .and_then(Value::as_str)
-        .ok_or_else(|| invalid("output[].type"))?
-    {
+        .ok_or_else(|| invalid("output[].type"))?;
+    match kind {
         "message" => {
             if let Some(parts) = map.get("content").and_then(Value::as_array) {
                 for part in parts {
@@ -49,21 +49,21 @@ fn output_item(out: &mut Vec<ModelEvent>, run: &str, item: &Value) -> Result<(),
             }
         }
         "function_call" => {
-            let required = |key| map.get(key).and_then(Value::as_str).ok_or_else(|| invalid(key));
-            let call_id = required("call_id")?;
-            let name = required("name")?;
-            let arguments = required("arguments")?;
-            let arguments = crate::semantic::json_value(
-                WireProtocol::OpenAiResponses,
-                "output[].arguments",
-                arguments,
-            )?;
+            let required = |key| {
+                map.get(key)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| invalid(key))
+            };
             out.push(ModelEvent::ToolCall {
                 run: run.to_owned(),
                 call: crate::ToolCall {
-                    id: call_id.to_owned(),
-                    name: name.to_owned(),
-                    arguments,
+                    id: required("call_id")?.to_owned(),
+                    name: required("name")?.to_owned(),
+                    arguments: crate::semantic::json_value(
+                        WireProtocol::OpenAiResponses,
+                        "output[].arguments",
+                        required("arguments")?,
+                    )?,
                 },
             });
         }
