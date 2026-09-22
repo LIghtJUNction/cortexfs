@@ -11,9 +11,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         model: crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?,
     }];
     let choice = match map.get("choices").and_then(Value::as_array) {
-        Some(items) if items.len() == 1 => items[0]
-            .as_object()
-            .ok_or_else(|| invalid("choices"))?,
+        Some(items) if items.len() == 1 => items[0].as_object().ok_or_else(|| invalid("choices"))?,
         _ => return Err(invalid("choices")),
     };
     let message = crate::responseutil::object(choice.get("message"))
