@@ -44,7 +44,8 @@ fn message(source: &crate::openaichat::Message<'_>) -> Result<Message, Conversio
                     field: field.to_owned(),
                 }
             })?;
-            let arguments = crate::semantic::json_value(crate::WireProtocol::OpenAiChat, field, raw)?;
+            let arguments =
+                crate::semantic::json_value(crate::WireProtocol::OpenAiChat, field, raw)?;
             Ok(ToolCall {
                 id: call.id.to_string(),
                 name: call.function.name.to_string(),
