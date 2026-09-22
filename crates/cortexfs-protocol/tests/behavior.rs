@@ -45,7 +45,8 @@ mod tests {
             assert!(encoded.contains("\"parameters\":{\"type\":\"object\"}"));
             assert!(!encoded.contains("\"strict\""), "{protocol:?}");
         }
-        let gemini: Value = serde_json::from_slice(&encode_model_request(WireProtocol::Gemini, &request)?)?;
+        let gemini: Value =
+            serde_json::from_slice(&encode_model_request(WireProtocol::Gemini, &request)?)?;
         assert!(gemini.get("model").is_none());
         Ok(())
     }
