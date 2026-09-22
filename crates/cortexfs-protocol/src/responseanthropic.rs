@@ -5,10 +5,9 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let root = crate::responseutil::parse(WireProtocol::Anthropic, input)?;
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
     let run = crate::responseutil::text(map.get("id")).ok_or_else(|| invalid("id"))?;
-    let model = crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?;
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
-        model,
+        model: crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?,
     }];
     let content = map.get("content").and_then(Value::as_array);
     for block in content.into_iter().flatten() {
