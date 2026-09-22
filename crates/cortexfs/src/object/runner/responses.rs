@@ -18,8 +18,8 @@ pub(crate) fn parse_provider_content(
 fn parse_openai_fixture(protocol: WireProtocol, output: &[u8]) -> Result<String, String> {
     let mut map = serde_json::from_slice::<serde_json::Map<String, Value>>(output)
         .map_err(|error| format!("invalid provider json: {error}"))?;
-    map.entry("id".into()).or_insert(json!("test-response"));
-    map.entry("model".into()).or_insert(json!("test-model"));
+    map.entry("id").or_insert(json!("test-response"));
+    map.entry("model").or_insert(json!("test-model"));
     let bytes = serde_json::to_vec(&map).map_err(|error| error.to_string())?;
     parse_provider_content(protocol, &bytes)
 }
