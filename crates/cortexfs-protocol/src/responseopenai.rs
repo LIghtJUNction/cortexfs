@@ -10,13 +10,12 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model: crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?,
     }];
-    let choice = map
-        .get("choices")
-        .and_then(Value::as_array)
-        .filter(|items| items.len() == 1)
-        .and_then(|items| items.first())
-        .and_then(Value::as_object)
-        .ok_or_else(|| invalid("choices"))?;
+    let choice = match map.get("choices").and_then(Value::as_array) {
+        Some(items) if items.len() == 1 => items[0]
+            .as_object()
+            .ok_or_else(|| invalid("choices"))?,
+        _ => return Err(invalid("choices")),
+    };
     let message = crate::responseutil::object(choice.get("message"))
         .ok_or_else(|| invalid("choices[].message"))?;
     text_events(&mut events, &run, message.get("content"));
@@ -31,7 +30,10 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some("") | None => return Err(invalid("choices[].finish_reason")),
         Some(_) => EventStatus::Error,
     };
-    events.push(ModelEvent::Done { run: run.clone(), status });
+    events.push(ModelEvent::Done {
+        run: run.clone(),
+        status,
+    });
     crate::responseutil::append_output_text_and_usage(&mut events, &run, map);
     Ok(events)
 }
