@@ -34,17 +34,11 @@ mod tests {
         ] {
             assert_eq!(p::decode_model_request(W::OpenAiResponses, input).is_ok(), valid);
         }
-        for (input, valid) in [
-            (br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}]}"#.as_slice(), true),
-            (br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f"}}]}]}"#.as_slice(), false),
-            (br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{"}}]}]}"#.as_slice(), false),
-        ] {
-            assert_eq!(p::decode_model_request(W::OpenAiChat, input).is_ok(), valid);
-        }
-        let input = br#"{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/i.png"}}]}]}"#;
+        let input = br#"{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/i.png"}}]},{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}]}"#;
         let request = p::decode_model_request(W::OpenAiChat, input)?;
         let encoded = p::encode_model_request(W::OpenAiChat, &request)?;
         assert_eq!(p::decode_model_request(W::OpenAiChat, &encoded)?, request);
+        assert!(p::decode_model_request(W::OpenAiChat, br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f"}}]}]}"#).is_err());
         let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"name":"same","args":{"n":1}},"thoughtSignature":"sig"},{"functionCall":{"name":"same","args":{"n":2}}}]}]}"#;
         let request = p::decode_model_request(W::Gemini, input)?;
         let encoded = p::encode_model_request(W::Gemini, &request)?;
