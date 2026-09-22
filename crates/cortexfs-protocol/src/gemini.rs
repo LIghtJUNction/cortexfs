@@ -5,7 +5,7 @@ use std::{borrow::Cow, collections::BTreeMap};
 /// Borrowed Gemini `generateContent` request IR.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Request<'a> {
-    #[serde(default, borrow)]
+    #[serde(default, skip_serializing_if = "Option::is_none", borrow)]
     pub model: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
     pub system_instruction: Option<Content<'a>>,

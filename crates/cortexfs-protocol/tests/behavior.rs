@@ -45,6 +45,9 @@ mod tests {
             assert!(encoded.contains("\"parameters\":{\"type\":\"object\"}"));
             assert!(!encoded.contains("\"strict\""), "{protocol:?}");
         }
+        let gemini: Value =
+            serde_json::from_slice(&encode_model_request(WireProtocol::Gemini, &request)?)?;
+        assert!(gemini.get("model").is_none());
         Ok(())
     }
     #[test]
@@ -110,7 +113,11 @@ mod tests {
             for (target, _) in cases() {
                 let converted = transcode_request(source, target, input)?;
                 serde_json::from_slice::<Value>(&converted.bytes)?;
-                decode_model_request(target, &converted.bytes)?;
+                if target == WireProtocol::Gemini {
+                    decode_native_request(target, &converted.bytes)?;
+                } else {
+                    decode_model_request(target, &converted.bytes)?;
+                }
                 let expected = if source == target {
                     BridgePath::Identity
                 } else if matches!(
@@ -300,6 +307,7 @@ mod tests {
         let converted = transcode_request(WireProtocol::OpenAiChat, WireProtocol::Gemini, input)?;
         assert_eq!(converted.path, BridgePath::Direct);
         let value: Value = serde_json::from_slice(&converted.bytes)?;
+        assert!(value.get("model").is_none());
         assert!(value.get("tools").is_some());
         assert!(value.get("contents").is_some());
         Ok(())
