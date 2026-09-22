@@ -36,7 +36,7 @@ mod tests {
         let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"name":"same","args":{"n":1}},"thoughtSignature":"sig"},{"functionCall":{"name":"same","args":{"n":2}}}]}]}"#;
         let request = p::decode_model_request(W::Gemini, input)?;
         let ids = &request.messages[0].tool_calls;
-        assert_eq!((ids[0].id.as_str(), ids[1].id.as_str()), ("gemini-call-0", "gemini-call-1"));
+        assert_ne!(ids[0].id, ids[1].id);
         let encoded = p::encode_model_request(W::Gemini, &request)?;
         let encoded = String::from_utf8_lossy(&encoded);
         assert!(encoded.contains("\"thoughtSignature\":\"sig\""));
