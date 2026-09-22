@@ -1,7 +1,7 @@
 use crate::{client::Client, config};
 use cortexfs_tool_sdk::{Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::env;
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -60,11 +60,23 @@ impl Tool for McpTool {
 }
 
 fn emit_call_result(result: Value, output: &mut ToolEmitter<&mut dyn Write>) -> ToolResult<()> {
+    let structured = result.get("structuredContent").cloned();
     let result: CallToolResult = serde_json::from_value(result).map_err(|error| {
         ToolError::new("EIO", format!("invalid MCP tools/call result: {error}"))
     })?;
+    let mut content = result.content;
+    if let Some(value) = structured {
+        let text = value.to_string();
+        let present = content.iter().any(|block| {
+            block.get("type").and_then(Value::as_str) == Some("text")
+                && block.get("text").and_then(Value::as_str) == Some(text.as_str())
+        });
+        if !present {
+            content.push(json!({"type":"text","text":text}));
+        }
+    }
     output
-        .content(&result.content)
+        .content(&content)
         .map_err(|error| ToolError::new("EIO", error.to_string()))?;
     if result.is_error {
         return Err(ToolError::new("EIO", "remote MCP tool returned an error"));
@@ -173,6 +185,26 @@ mod tests {
                 })]
             )
         );
+        Ok(())
+    }
+
+    #[test]
+    fn call_result_projects_structured_content_once() -> io::Result<()> {
+        for content in [
+            json!([]),
+            json!([{"type":"text","text":"{\"value\":42}"}]),
+        ] {
+            let (result, frames) = emit(json!({
+                "content": content,
+                "structuredContent": {"value": 42},
+                "isError": false
+            }))?;
+            assert_eq!(result, Ok(()));
+            assert_eq!(
+                frames[0]["content"],
+                json!([{"type":"text","text":"{\"value\":42}"}])
+            );
+        }
         Ok(())
     }
 
