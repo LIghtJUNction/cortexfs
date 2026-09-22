@@ -56,11 +56,10 @@ pub fn gemini_to_openai(input: &[u8]) -> Result<Vec<u8>, ConversionError> {
     }
     let mut messages = Vec::new();
     if let Some(system) = source.system_instruction.as_ref() {
-        let mut converted = crate::reversepart::gemini_messages(system);
-        if let Some(message) = converted.first_mut() {
+        if let Some(mut message) = crate::reversepart::gemini_messages(system).into_iter().next() {
             message.role = Cow::Borrowed("system");
+            messages.push(message);
         }
-        messages.extend(converted);
     }
     messages.extend(
         source
