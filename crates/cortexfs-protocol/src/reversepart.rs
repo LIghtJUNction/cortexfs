@@ -11,7 +11,7 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
     let mut parts = Vec::new();
     let mut calls = Vec::new();
     let mut result = None;
-    for (index, part) in content.parts.iter().enumerate() {
+    for part in &content.parts {
         if let Some(value) = part.text.as_ref() {
             text.push(Cow::clone(value));
         }
@@ -27,10 +27,7 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
         }
         if let Some(call) = part.function_call.as_ref() {
             calls.push(ToolCall {
-                id: call
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| crate::gemini::correlation_id(None, index)),
+                id: call.id.as_ref().unwrap_or(&call.name).clone(),
                 kind: Cow::Borrowed("function"),
                 function: Function {
                     name: Cow::clone(&call.name),
