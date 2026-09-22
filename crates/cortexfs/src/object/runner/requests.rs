@@ -59,8 +59,7 @@ pub(crate) fn provider_request_body(
         request.option("parallel_tool_calls", json!(false));
     }
     let bytes = encode_model_request(protocol, &request).map_err(|error| error.to_string())?;
-    String::from_utf8(bytes)
-        .map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())
+    String::from_utf8(bytes).map_err(|_error| "protocol encoder returned invalid UTF-8".to_owned())
 }
 
 fn model_request(
