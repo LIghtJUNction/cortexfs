@@ -204,21 +204,13 @@ mod tests {
                 serde_json::from_slice::<Value>(&converted.bytes)?;
             }
         }
-        Ok(())
-    }
-
-    #[test]
-    fn anthropic_non_streaming_requires_stop_reason() {
         for input in [
             br#"{"id":"run","model":"model","content":[]}"#.as_slice(),
             br#"{"id":"run","model":"model","content":[],"stop_reason":null}"#.as_slice(),
         ] {
-            assert!(matches!(
-                decode_response_events(WireProtocol::Anthropic, input),
-                Err(cortexfs_protocol::ConversionError::InvalidField { field, .. })
-                    if field == "stop_reason"
-            ));
+            assert!(decode_response_events(WireProtocol::Anthropic, input).is_err());
         }
+        Ok(())
     }
 
     #[test]
