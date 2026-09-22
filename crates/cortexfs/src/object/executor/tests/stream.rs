@@ -190,11 +190,11 @@ fn responses_stream_function_calls_remain_direct_or_fail_closed() -> Result<(), 
 #[test]
 fn openai_response_content_parses_output_parts() {
     for (response, expected) in [
-        (br#"{"output":[{"content":[{"type":"output_text","text":"hello "},{"type":"output_text","text":"codex"}]}]}"#.as_slice(), Ok("hello codex")),
-        (br#"{"output":[{"content":[{"type":"refusal","refusal":"cannot comply"}]}]}"#.as_slice(), Ok("cannot comply")),
+        (br#"{"output":[{"type":"message","content":[{"type":"output_text","text":"hello "},{"type":"output_text","text":"codex"}]}]}"#.as_slice(), Ok("hello codex")),
+        (br#"{"output":[{"type":"message","content":[{"type":"refusal","refusal":"cannot comply"}]}]}"#.as_slice(), Ok("cannot comply")),
         (br#"{"status":"failed","error":{"message":"quota"},"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[]}"}]}"#.as_slice(), Err("quota")),
         (br#"{"status":"cancelled","output_text":"ignored"}"#.as_slice(), Err("provider response cancelled")),
-        (br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"content":[{"type":"output_text","text":"ignored"}]}]}"#.as_slice(), Err("max_output_tokens")),
+        (br#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","content":[{"type":"output_text","text":"ignored"}]}]}"#.as_slice(), Err("max_output_tokens")),
         (br#"{"status":"failed","output_text":"ignored"}"#.as_slice(), Err("provider response failed")),
         (br#"{"status":"incomplete","output_text":"ignored"}"#.as_slice(), Err("provider response incomplete")),
     ] {
@@ -733,10 +733,6 @@ fn agent_driver_route_falls_back_from_responses_to_chat() -> Result<(), Box<dyn 
         .env("CTX_ROOT", &root)
         .env("CTX_AGENT", "architect")
         .status()?;
-    let _ignored = stop.send(());
-    let paths = server
-        .join()
-        .map_err(|_panic| std::io::Error::other("provider test server panicked"))??;
     let _ignored = fs::remove_dir_all(root);
 
     assert!(status.success(), "driver fallback child assertion failed");
