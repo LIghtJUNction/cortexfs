@@ -49,11 +49,7 @@ fn output_item(out: &mut Vec<ModelEvent>, run: &str, item: &Value) -> Result<(),
             }
         }
         "function_call" => {
-            let required = |key| {
-                map.get(key)
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| invalid(key))
-            };
+            let required = |key| map.get(key).and_then(Value::as_str).ok_or_else(|| invalid(key));
             let call_id = required("call_id")?;
             let name = required("name")?;
             let arguments = required("arguments")?;
@@ -96,7 +92,10 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
         (String::from("output"), Value::Array(output)),
     ]);
     if let Some(usage) = summary.usage {
-        root.insert("usage".to_owned(), json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens}));
+        root.insert(
+            "usage".to_owned(),
+            json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens}),
+        );
     }
     crate::encode::bytes(WireProtocol::OpenAiResponses, &Value::Object(root))
 }
