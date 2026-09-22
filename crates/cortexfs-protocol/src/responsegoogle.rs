@@ -29,17 +29,15 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         });
         return Ok(events);
     }
-    let candidates = map
+    let candidate = map
         .get("candidates")
         .and_then(Value::as_array)
+        .filter(|items| items.len() == 1)
+        .and_then(|items| items.first())
+        .and_then(Value::as_object)
         .ok_or_else(|| invalid("candidates"))?;
-    let [candidate] = candidates.as_slice() else {
-        return Err(invalid("candidates"));
-    };
-    let candidate = candidate.as_object().ok_or_else(|| invalid("candidates"))?;
-    if let Some(parts) = candidate
-        .get("content")
-        .and_then(|content| content.get("parts"))
+    if let Some(parts) = root
+        .pointer("/candidates/0/content/parts")
         .and_then(Value::as_array)
     {
         for (index, part) in parts.iter().enumerate() {
