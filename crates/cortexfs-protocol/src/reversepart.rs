@@ -27,7 +27,10 @@ pub(super) fn gemini_message<'a>(content: &GeminiContent<'a>) -> Message<'a> {
         }
         if let Some(call) = part.function_call.as_ref() {
             calls.push(ToolCall {
-                id: crate::gemini::correlation_id(call.id.as_deref(), index),
+                id: call
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| crate::gemini::correlation_id(None, index)),
                 kind: Cow::Borrowed("function"),
                 function: Function {
                     name: Cow::clone(&call.name),
