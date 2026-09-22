@@ -10,14 +10,13 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         run: run.clone(),
         model: crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?,
     }];
-    let choices = map
+    let choice = map
         .get("choices")
         .and_then(Value::as_array)
+        .filter(|items| items.len() == 1)
+        .and_then(|items| items.first())
+        .and_then(Value::as_object)
         .ok_or_else(|| invalid("choices"))?;
-    let [choice] = choices.as_slice() else {
-        return Err(invalid("choices"));
-    };
-    let choice = choice.as_object().ok_or_else(|| invalid("choices"))?;
     let message = crate::responseutil::object(choice.get("message"))
         .ok_or_else(|| invalid("choices[].message"))?;
     text_events(&mut events, &run, message.get("content"));
