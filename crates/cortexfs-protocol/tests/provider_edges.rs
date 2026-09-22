@@ -4,26 +4,26 @@ mod tests {
     #[test]
     fn provider_edges_conform() -> Result<(), p::ConversionError> {
         for (protocol, input) in [
-            (W::Anthropic, &br#"{"content":[{"type":"tool_use","id":0}]}"#[..]),
+            (W::Anthropic, &br#"{"id":"r","model":"m","content":[{"type":"tool_use","id":0}],"stop_reason":"end_turn"}"#[..]),
             (W::Anthropic, &br#"{"model":"m","content":[],"stop_reason":"end_turn"}"#[..]),
             (W::Anthropic, &br#"{"id":"r","content":[],"stop_reason":"end_turn"}"#[..]),
-            (W::OpenAiResponses, &br#"{"output":[{"type":"function_call","call_id":"c","name":"f"}]}"#[..]),
+            (W::OpenAiResponses, &br#"{"id":"r","model":"m","output":[{"type":"function_call","call_id":"c","name":"f"}],"status":"completed"}"#[..]),
             (W::OpenAiResponses, &br#"{"model":"m","output":[],"status":"completed"}"#[..]),
             (W::OpenAiResponses, &br#"{"id":"r","output":[],"status":"completed"}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"args":{}}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","args":[]}}]}}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"name":"x","id":7}}]}}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[]}"#[..]),
             (W::OpenAiChat, &br#"{"model":"m","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"}}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{"message":{"content":"partial"},"finish_reason":""}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
-            (W::OpenAiChat, &br#"{"choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"}}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"},"finish_reason":""}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#[..]),
         ] {
             assert!(p::decode_response_events(protocol, input).is_err());
         }
