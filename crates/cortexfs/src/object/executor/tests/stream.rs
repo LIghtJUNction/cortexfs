@@ -733,6 +733,10 @@ fn agent_driver_route_falls_back_from_responses_to_chat() -> Result<(), Box<dyn 
         .env("CTX_ROOT", &root)
         .env("CTX_AGENT", "architect")
         .status()?;
+    let _ignored = stop.send(());
+    let paths = server
+        .join()
+        .map_err(|_panic| std::io::Error::other("provider test server panicked"))??;
     let _ignored = fs::remove_dir_all(root);
 
     assert!(status.success(), "driver fallback child assertion failed");
