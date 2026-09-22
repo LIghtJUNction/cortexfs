@@ -2,6 +2,7 @@ use crate::directpart::{openai_content, openai_message};
 use crate::directtool;
 use crate::gemini::{Content as GeminiContent, GenerationConfig, Request as GeminiRequest};
 use crate::openaichat::{Message as OpenAiMessage, Request as OpenAiRequest};
+use crate::reversepart::gemini_messages;
 use crate::{ConversionError, WireProtocol};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -56,16 +57,13 @@ pub fn gemini_to_openai(input: &[u8]) -> Result<Vec<u8>, ConversionError> {
     }
     let mut messages = Vec::new();
     if let Some(system) = source.system_instruction.as_ref() {
-        let mut message = crate::reversepart::gemini_message(system);
-        message.role = Cow::Borrowed("system");
-        messages.push(message);
+        let system = gemini_messages(system).into_iter().next();
+        if let Some(mut message) = system {
+            message.role = Cow::Borrowed("system");
+            messages.push(message);
+        }
     }
-    messages.extend(
-        source
-            .contents
-            .iter()
-            .map(crate::reversepart::gemini_message),
-    );
+    messages.extend(source.contents.iter().flat_map(gemini_messages));
     let max_tokens = source
         .generation_config
         .as_ref()
