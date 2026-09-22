@@ -64,7 +64,7 @@ pub(crate) fn unique_temp_dir(name: &str) -> std::io::Result<PathBuf> {
             .as_nanos()
     ));
     fs::create_dir_all(&path)?;
-    Ok(())
+    Ok(path)
 }
 
 #[cfg(unix)]
