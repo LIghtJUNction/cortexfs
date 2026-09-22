@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::{borrow::Cow, collections::BTreeMap};
 
-pub(super) fn correlation_id<'a>(id: Option<&'a str>, index: usize) -> Cow<'a, str> {
+pub(super) fn correlation_id(id: Option<&str>, index: usize) -> Cow<'_, str> {
     id.map_or_else(|| Cow::Owned(format!("gemini-call-{index}")), Cow::Borrowed)
 }
 
