@@ -26,12 +26,8 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     Ok(events)
 }
 
-fn output_item(
-    events: &mut Vec<ModelEvent>,
-    run: &str,
-    value: &Value,
-) -> Result<(), ConversionError> {
-    let map = value.as_object().ok_or_else(|| invalid("output[]"))?;
+fn output_item(out: &mut Vec<ModelEvent>, run: &str, item: &Value) -> Result<(), ConversionError> {
+    let map = item.as_object().ok_or_else(|| invalid("output[]"))?;
     match map
         .get("type")
         .and_then(Value::as_str)
@@ -44,7 +40,7 @@ fn output_item(
                     let text = crate::responseutil::text(part.and_then(|x| x.get("text")))
                         .or_else(|| crate::responseutil::text(part.and_then(|x| x.get("refusal"))));
                     if let Some(text) = text {
-                        events.push(ModelEvent::TextDelta {
+                        out.push(ModelEvent::TextDelta {
                             run: run.to_owned(),
                             text,
                         });
@@ -66,7 +62,7 @@ fn output_item(
                 "output[].arguments",
                 arguments,
             )?;
-            events.push(ModelEvent::ToolCall {
+            out.push(ModelEvent::ToolCall {
                 run: run.to_owned(),
                 call: crate::ToolCall {
                     id: call_id.to_owned(),
