@@ -51,34 +51,28 @@ pub(super) fn gemini_messages<'a>(content: &GeminiContent<'a>) -> Vec<Message<'a
         }
     }
     if results.is_empty() || !text.is_empty() || !parts.is_empty() || !calls.is_empty() {
-        results.insert(0, message(role, text, parts, calls));
+        let content = if !parts.is_empty() || text.len() > 1 {
+            parts.extend(text.into_iter().map(|value| Part {
+                kind: Cow::Borrowed("text"),
+                text: Some(value),
+                image_url: None,
+            }));
+            Some(OpenAiContent::Parts(parts))
+        } else {
+            Some(OpenAiContent::Text(
+                text.into_iter().next().unwrap_or(Cow::Borrowed("")),
+            ))
+        };
+        results.insert(
+            0,
+            Message {
+                role,
+                content,
+                name: None,
+                tool_call_id: None,
+                tool_calls: calls,
+            },
+        );
     }
     results
-}
-
-fn message<'a>(
-    role: Cow<'a, str>,
-    text: Vec<Cow<'a, str>>,
-    mut parts: Vec<Part<'a>>,
-    calls: Vec<ToolCall<'a>>,
-) -> Message<'a> {
-    let content = if !parts.is_empty() || text.len() > 1 {
-        parts.extend(text.into_iter().map(|value| Part {
-            kind: Cow::Borrowed("text"),
-            text: Some(value),
-            image_url: None,
-        }));
-        Some(OpenAiContent::Parts(parts))
-    } else {
-        Some(OpenAiContent::Text(
-            text.into_iter().next().unwrap_or(Cow::Borrowed("")),
-        ))
-    };
-    Message {
-        role,
-        content,
-        name: None,
-        tool_call_id: None,
-        tool_calls: calls,
-    }
 }
