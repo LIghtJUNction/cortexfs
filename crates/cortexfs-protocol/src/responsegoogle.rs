@@ -30,7 +30,9 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         return Ok(events);
     }
     let candidate = match map.get("candidates").and_then(Value::as_array) {
-        Some(items) if items.len() == 1 => &items[0],
+        Some(items) if items.len() == 1 => {
+            items.first().ok_or_else(|| invalid("candidates"))?
+        }
         _ => return Err(invalid("candidates")),
     };
     if let Some(parts) = candidate
