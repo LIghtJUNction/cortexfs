@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let root = crate::responseutil::parse(WireProtocol::Anthropic, input)?;
     let map = root.as_object().ok_or_else(|| invalid("response object"))?;
-    let run = crate::responseutil::text(map.get("id")).unwrap_or_else(|| "response".to_owned());
-    let model = crate::responseutil::text(map.get("model")).unwrap_or_else(|| "unknown".to_owned());
+    let run = crate::responseutil::text(map.get("id")).ok_or_else(|| invalid("id"))?;
+    let model = crate::responseutil::text(map.get("model")).ok_or_else(|| invalid("model"))?;
     let mut events = vec![ModelEvent::Start {
         run: run.clone(),
         model,
