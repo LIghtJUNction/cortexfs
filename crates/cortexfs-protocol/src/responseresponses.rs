@@ -1,4 +1,4 @@
-use crate::{ConversionError, EventStatus, ModelEvent, Usage, WireProtocol};
+use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
 use serde_json::{Map, Value, json};
 
 pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
@@ -32,11 +32,11 @@ fn output_item(
     value: &Value,
 ) -> Result<(), ConversionError> {
     let map = value.as_object().ok_or_else(|| invalid("output[]"))?;
-    let kind = map
+    match map
         .get("type")
         .and_then(Value::as_str)
-        .ok_or_else(|| invalid("output[].type"))?;
-    match kind {
+        .ok_or_else(|| invalid("output[].type"))?
+    {
         "message" => {
             if let Some(parts) = map.get("content").and_then(Value::as_array) {
                 for part in parts {
@@ -100,14 +100,11 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
         (String::from("output"), Value::Array(output)),
     ]);
     if let Some(usage) = summary.usage {
-        root.insert("usage".to_owned(), usage_value(&usage));
+        root.insert("usage".to_owned(), json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens}));
     }
     crate::encode::bytes(WireProtocol::OpenAiResponses, &Value::Object(root))
 }
 
-fn usage_value(usage: &Usage) -> Value {
-    json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens})
-}
 fn invalid(field: &str) -> ConversionError {
     ConversionError::InvalidField {
         protocol: WireProtocol::OpenAiResponses,
