@@ -75,7 +75,8 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
     content.extend(summary.calls.iter().map(|call| json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments})));
     let mut root = json!({"id": summary.run, "model": summary.model, "role": "assistant", "content": content, "stop_reason": crate::responseutil::finish(summary.status)});
     if let Some(usage) = summary.usage {
-        root["usage"] = json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens});
+        root["usage"] =
+            json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens});
     }
     crate::encode::bytes(WireProtocol::Anthropic, &root)
 }
