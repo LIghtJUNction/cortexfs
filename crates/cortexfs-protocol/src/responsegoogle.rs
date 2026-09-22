@@ -75,10 +75,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some(_) => EventStatus::Error,
         None => return Err(invalid("finishReason")),
     };
-    events.push(ModelEvent::Done {
-        run: run.clone(),
-        status,
-    });
+    events.push(ModelEvent::Done { run: run.clone(), status });
     if let Some(usage) = usage(object(map.get("usageMetadata"))) {
         events.push(ModelEvent::Usage { run, usage });
     }
