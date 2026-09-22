@@ -32,8 +32,12 @@ fn output_item(
     value: &Value,
 ) -> Result<(), ConversionError> {
     let map = value.as_object().ok_or_else(|| invalid("output[]"))?;
-    match crate::responseutil::text(map.get("type")).as_deref() {
-        Some("message") | None => {
+    let kind = map
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("output[].type"))?;
+    match kind {
+        "message" => {
             if let Some(parts) = map.get("content").and_then(Value::as_array) {
                 for part in parts {
                     let part = part.as_object();
@@ -48,7 +52,7 @@ fn output_item(
                 }
             }
         }
-        Some("function_call") => {
+        "function_call" => {
             let required = |key| {
                 map.get(key)
                     .and_then(Value::as_str)
