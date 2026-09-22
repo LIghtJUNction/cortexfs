@@ -4,7 +4,6 @@ use serde_json::{Map, Value, json};
 pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError> {
     crate::encode::check_context(request, WireProtocol::Gemini)?;
     let mut root = Map::new();
-    root.insert("model".to_owned(), Value::String(request.model.clone()));
     if let Some(system) = request
         .messages
         .iter()
