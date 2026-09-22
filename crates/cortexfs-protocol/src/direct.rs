@@ -25,7 +25,7 @@ pub fn openai_to_gemini(input: &[u8]) -> Result<Vec<u8>, ConversionError> {
         }
     }
     let target = GeminiRequest {
-        model: Some(Cow::Borrowed(source.model.as_ref())),
+        model: None,
         system_instruction: system,
         contents,
         tools: directtool::openai_to_gemini(&source.tools),
