@@ -35,14 +35,9 @@ mod tests {
         assert_eq!(p::decode_model_request(W::OpenAiChat, &encoded)?, request);
         let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"name":"same","args":{"n":1}},"thoughtSignature":"sig"},{"functionCall":{"name":"same","args":{"n":2}}}]}]}"#;
         let request = p::decode_model_request(W::Gemini, input)?;
-        let calls = request
-            .messages
-            .first()
-            .map(|m| m.tool_calls.as_slice())
-            .unwrap_or_default();
-        assert!(matches!(calls, [first, second] if first.id != second.id));
         let encoded = p::encode_model_request(W::Gemini, &request)?;
         let encoded = String::from_utf8_lossy(&encoded);
+        assert!(encoded.contains("gemini-call-0") && encoded.contains("gemini-call-1"));
         assert!(encoded.contains("\"thoughtSignature\":\"sig\""));
         assert_eq!(encoded.matches("thoughtSignature").count(), 1);
         Ok(())
