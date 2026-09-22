@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::{borrow::Cow, collections::BTreeMap};
 
-pub(super) fn correlation_id(id: Option<&str>, index: usize) -> Cow<'_, str> {
-    id.map_or_else(|| Cow::Owned(format!("gemini-call-{index}")), Cow::Borrowed)
+pub(super) fn correlation_id(id: Option<&str>, index: usize) -> String {
+    id.map_or_else(|| format!("gemini-call-{index}"), str::to_owned)
 }
 
 /// Borrowed Gemini `generateContent` request IR.
