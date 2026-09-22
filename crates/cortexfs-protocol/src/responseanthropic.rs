@@ -1,4 +1,4 @@
-use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
+use crate::{ConversionError, EventStatus, ModelEvent, Usage, WireProtocol};
 use serde_json::{Value, json};
 
 pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
@@ -74,11 +74,10 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
     let mut content = vec![json!({"type": "text", "text": summary.text})];
     content.extend(summary.calls.iter().map(|call| json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments})));
     let mut root = json!({"id": summary.run, "model": summary.model, "role": "assistant", "content": content, "stop_reason": crate::responseutil::finish(summary.status)});
-    if let (Some(usage), Some(root)) = (summary.usage, root.as_object_mut()) {
-        root.insert(
-            "usage".into(),
-            json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens}),
-        );
+    let usage =
+        |u: Usage| json!({"input_tokens": u.input_tokens, "output_tokens": u.output_tokens});
+    if let (Some(u), Some(root)) = (summary.usage, root.as_object_mut()) {
+        root.insert("usage".into(), usage(u));
     }
     crate::encode::bytes(WireProtocol::Anthropic, &root)
 }
