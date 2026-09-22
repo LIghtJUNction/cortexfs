@@ -51,13 +51,19 @@ fn continuation_encodes_native_tool_results() -> Result<(), Box<dyn Error>> {
     assert!(chat.pointer("/messages/1/name").is_none());
     assert!(anthropic.pointer("/messages/1/content/1").is_none());
     assert!(gemini.pointer("/contents/1/parts/1").is_none());
-    let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}},{"functionCall":{"name":"legacy","args":{"args":[]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}}]},{"role":"user","parts":[{"functionResponse":{"name":"legacy","response":{"output":"ok"}}}]}]}"#;
+    let input = br#"{"model":"model","contents":[{"role":"model","parts":[{"functionCall":{"id":"call-2","name":"tsh","args":{"args":["tools"]}}},{"functionCall":{"name":"legacy","args":{"args":[]}}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-2","name":"tsh","response":{"output":"ok"}}},{"functionResponse":{"name":"legacy","response":{"output":"ok"}}}]}]}"#;
     let decoded = serde_json::to_string(&decode_model_request(WireProtocol::Gemini, input)?)?;
     assert!(decoded.contains(r#""id":"call-2""#) && decoded.contains(r#""id":"gemini-call-1""#));
     let direct = transcode_request(WireProtocol::Gemini, WireProtocol::OpenAiChat, input)?;
-    let direct = String::from_utf8(direct.bytes)?;
-    assert!(direct.contains(r#""id":"call-2""#) && direct.contains(r#""tool_call_id":"call-2""#));
-    assert!(direct.contains(r#""id":"legacy""#) && direct.contains(r#""tool_call_id":"legacy""#));
+    let direct: Value = serde_json::from_slice(&direct.bytes)?;
+    for (pointer, expected) in [
+        ("/messages/0/tool_calls/0/id", "call-2"),
+        ("/messages/0/tool_calls/1/id", "gemini-call-1"),
+        ("/messages/1/tool_call_id", "call-2"),
+        ("/messages/2/tool_call_id", "gemini-call-1"),
+    ] {
+        assert_eq!(direct.pointer(pointer), Some(&json!(expected)));
+    }
     Ok(())
 }
 
