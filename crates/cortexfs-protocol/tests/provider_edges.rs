@@ -6,6 +6,8 @@ mod tests {
         for (protocol, input) in [
             (W::Anthropic, &br#"{"id":"r","model":"m","content":[{"type":"tool_use","id":0}],"stop_reason":"end_turn"}"#[..]),
             (W::OpenAiResponses, &br#"{"id":"r","model":"m","output":[{"type":"function_call","call_id":"c","name":"f"}],"status":"completed"}"#[..]),
+            (W::OpenAiResponses, &br#"{"id":"r","model":"m","output":[{"content":[{"type":"output_text","text":"x"}]}],"status":"completed"}"#[..]),
+            (W::OpenAiResponses, &br#"{"id":"r","model":"m","output":[{"type":7,"content":[]}],"status":"completed"}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[]},"finishReason":"STOP"},{"content":{"parts":[]},"finishReason":"STOP"}]}"#[..]),
             (W::Gemini, &br#"{"modelVersion":"m","candidates":[{"content":{"parts":[{"functionCall":{"args":{}}}]}}]}"#[..]),
