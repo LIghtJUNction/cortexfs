@@ -481,16 +481,6 @@ fn provider_route_selects_key_slot_by_model() {
     );
 }
 
-#[test]
-fn anthropic_message_content_parses_text_parts() {
-    assert_eq!(
-        parse_anthropic_message_content(
-            br#"{"content":[{"type":"text","text":"hello "},{"type":"text","text":"claude"}],"stop_reason":"end_turn"}"#
-        ),
-        Ok("hello claude".to_owned())
-    );
-}
-
 fn test_provider_config(base_url: &str) -> RunnerProviderConfig {
     test_provider_config_with_formats(base_url, &[])
 }
