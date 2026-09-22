@@ -34,6 +34,13 @@ mod tests {
         ] {
             assert_eq!(p::decode_model_request(W::OpenAiResponses, input).is_ok(), valid);
         }
+        for (input, valid) in [
+            (br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}]}"#.as_slice(), true),
+            (br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f"}}]}]}"#.as_slice(), false),
+            (br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{"}}]}]}"#.as_slice(), false),
+        ] {
+            assert_eq!(p::decode_model_request(W::OpenAiChat, input).is_ok(), valid);
+        }
         let input = br#"{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/i.png"}}]}]}"#;
         let request = p::decode_model_request(W::OpenAiChat, input)?;
         let encoded = p::encode_model_request(W::OpenAiChat, &request)?;
