@@ -10,7 +10,7 @@ pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionE
     let role = source.role.as_ref().map_or("user", |value| value.as_ref());
     let mut values = Vec::new();
     let mut calls = Vec::new();
-    for part in &source.parts {
+    for (index, part) in source.parts.iter().enumerate() {
         if let Some(text) = part.text.as_ref() {
             values.push(ContentPart::text(text.as_ref()));
         }
@@ -27,7 +27,7 @@ pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionE
             });
         }
         if let Some(call) = part.function_call.as_ref() {
-            let id = call.id.as_ref().unwrap_or(&call.name).to_string();
+            let id = crate::gemini::correlation_id(call.id.as_deref(), index).into_owned();
             if let Some(signature) = part.thought_signature.as_ref() {
                 values.push(ContentPart::Data {
                     name: format!("gemini.thought_signature:{}", calls.len()),
