@@ -1,4 +1,4 @@
-use crate::{ConversionError, EventStatus, ModelEvent, Usage, WireProtocol};
+use crate::{ConversionError, EventStatus, ModelEvent, WireProtocol};
 use serde_json::{Map, Value, json};
 
 pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
@@ -26,21 +26,21 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     Ok(events)
 }
 
-fn output_item(
-    events: &mut Vec<ModelEvent>,
-    run: &str,
-    value: &Value,
-) -> Result<(), ConversionError> {
-    let map = value.as_object().ok_or_else(|| invalid("output[]"))?;
-    match crate::responseutil::text(map.get("type")).as_deref() {
-        Some("message") | None => {
+fn output_item(out: &mut Vec<ModelEvent>, run: &str, item: &Value) -> Result<(), ConversionError> {
+    let map = item.as_object().ok_or_else(|| invalid("output[]"))?;
+    let kind = map
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("output[].type"))?;
+    match kind {
+        "message" => {
             if let Some(parts) = map.get("content").and_then(Value::as_array) {
                 for part in parts {
                     let part = part.as_object();
                     let text = crate::responseutil::text(part.and_then(|x| x.get("text")))
                         .or_else(|| crate::responseutil::text(part.and_then(|x| x.get("refusal"))));
                     if let Some(text) = text {
-                        events.push(ModelEvent::TextDelta {
+                        out.push(ModelEvent::TextDelta {
                             run: run.to_owned(),
                             text,
                         });
@@ -48,26 +48,22 @@ fn output_item(
                 }
             }
         }
-        Some("function_call") => {
+        "function_call" => {
             let required = |key| {
                 map.get(key)
                     .and_then(Value::as_str)
                     .ok_or_else(|| invalid(key))
             };
-            let call_id = required("call_id")?;
-            let name = required("name")?;
-            let arguments = required("arguments")?;
-            let arguments = crate::semantic::json_value(
-                WireProtocol::OpenAiResponses,
-                "output[].arguments",
-                arguments,
-            )?;
-            events.push(ModelEvent::ToolCall {
+            out.push(ModelEvent::ToolCall {
                 run: run.to_owned(),
                 call: crate::ToolCall {
-                    id: call_id.to_owned(),
-                    name: name.to_owned(),
-                    arguments,
+                    id: required("call_id")?.to_owned(),
+                    name: required("name")?.to_owned(),
+                    arguments: crate::semantic::json_value(
+                        WireProtocol::OpenAiResponses,
+                        "output[].arguments",
+                        required("arguments")?,
+                    )?,
                 },
             });
         }
@@ -96,14 +92,14 @@ pub(super) fn encode(events: &[ModelEvent]) -> Result<Vec<u8>, ConversionError> 
         (String::from("output"), Value::Array(output)),
     ]);
     if let Some(usage) = summary.usage {
-        root.insert("usage".to_owned(), usage_value(&usage));
+        root.insert(
+            "usage".to_owned(),
+            json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens}),
+        );
     }
     crate::encode::bytes(WireProtocol::OpenAiResponses, &Value::Object(root))
 }
 
-fn usage_value(usage: &Usage) -> Value {
-    json!({"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "total_tokens": usage.input_tokens + usage.output_tokens})
-}
 fn invalid(field: &str) -> ConversionError {
     ConversionError::InvalidField {
         protocol: WireProtocol::OpenAiResponses,
