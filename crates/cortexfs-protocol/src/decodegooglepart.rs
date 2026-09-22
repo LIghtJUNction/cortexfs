@@ -27,7 +27,7 @@ pub(super) fn message(source: &NativeContent<'_>) -> Result<Message, ConversionE
             });
         }
         if let Some(call) = part.function_call.as_ref() {
-            let id = crate::gemini::correlation_id(call.id.as_deref(), index).into_owned();
+            let id = crate::gemini::correlation_id(call.id.as_deref(), index);
             if let Some(signature) = part.thought_signature.as_ref() {
                 values.push(ContentPart::Data {
                     name: format!("gemini.thought_signature:{}", calls.len()),
