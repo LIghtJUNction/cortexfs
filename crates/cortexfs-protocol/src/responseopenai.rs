@@ -26,7 +26,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
             events.push(tool_call(&run, call)?);
         }
     }
-    let status = match choice.get("finish_reason\").and_then(Value::as_str) {
+    let status = match choice.get("finish_reason").and_then(Value::as_str) {
         Some("stop" | "tool_calls" | "function_call") => EventStatus::Ok,
         Some("cancelled") => EventStatus::Cancelled,
         Some("") | None => return Err(invalid("choices[].finish_reason")),
