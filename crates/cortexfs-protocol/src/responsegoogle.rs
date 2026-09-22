@@ -31,6 +31,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     }
     let candidate = root
         .pointer("/candidates/0")
+        .filter(|_| root.pointer("/candidates/1").is_none())
         .and_then(Value::as_object)
         .ok_or_else(|| invalid("candidates"))?;
     if let Some(parts) = root

@@ -13,7 +13,7 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
     let choice = map
         .get("choices")
         .and_then(Value::as_array)
-        .and_then(|items| items.first())
+        .and_then(|items| items.first().filter(|_| items.len() == 1))
         .and_then(Value::as_object)
         .ok_or_else(|| invalid("choices"))?;
     let message = crate::responseutil::object(choice.get("message"))
