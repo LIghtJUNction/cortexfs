@@ -1,9 +1,9 @@
-use serde_json::json;
 use super::*;
-use cortexfs_protocol::{EventStatus, ModelEvent, ToolCall, WireProtocol, decode_response_events};
-use serde_json::Value;
 use crate::provider::openai_response_item_requires_continuation;
 use cortexfs::is_object_name;
+use cortexfs_protocol::{EventStatus, ModelEvent, ToolCall, WireProtocol, decode_response_events};
+use serde_json::Value;
+use serde_json::json;
 pub(crate) fn parse_provider_content(
     protocol: WireProtocol,
     output: &[u8],
