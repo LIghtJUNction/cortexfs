@@ -22,8 +22,9 @@ mod tests {
             assert!(p::decode_response_events(protocol, input).is_err());
         }
         let bad = [br#"{"model":"m"}"#.as_slice(), br#"{"id":"r"}"#.as_slice()];
+        let rejects = |w| bad.iter().all(|x| p::decode_response_events(w, x).is_err());
         for w in [W::Anthropic, W::OpenAiResponses, W::OpenAiChat] {
-            assert!(bad.iter().all(|input| p::decode_response_events(w, input).is_err()));
+            assert!(rejects(w));
         }
         for (input, valid) in [
             (br#"{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}]}"#.as_slice(), true),
