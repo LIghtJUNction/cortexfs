@@ -29,17 +29,11 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         });
         return Ok(events);
     }
-    let candidate = map
-        .get("candidates")
-        .and_then(Value::as_array)
-        .filter(|items| items.len() == 1)
-        .and_then(|items| items.first())
-        .and_then(Value::as_object)
-        .ok_or_else(|| invalid("candidates"))?;
-    if let Some(parts) = root
-        .pointer("/candidates/0/content/parts")
-        .and_then(Value::as_array)
-    {
+    let candidate = match map.get("candidates").and_then(Value::as_array) {
+        Some(items) if items.len() == 1 => &items[0],
+        _ => return Err(invalid("candidates")),
+    };
+    if let Some(parts) = candidate.pointer("/content/parts").and_then(Value::as_array) {
         for (index, part) in parts.iter().enumerate() {
             if let Some(text) = text(part.get("text")) {
                 events.push(ModelEvent::TextDelta {
@@ -75,7 +69,10 @@ pub(super) fn decode(input: &[u8]) -> Result<Vec<ModelEvent>, ConversionError> {
         Some(_) => EventStatus::Error,
         None => return Err(invalid("finishReason")),
     };
-    events.push(ModelEvent::Done { run: run.clone(), status });
+    events.push(ModelEvent::Done {
+        run: run.clone(),
+        status,
+    });
     if let Some(usage) = usage(object(map.get("usageMetadata"))) {
         events.push(ModelEvent::Usage { run, usage });
     }
