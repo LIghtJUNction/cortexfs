@@ -34,7 +34,7 @@ provider/API 格式细节不进入 root ABI
 后端无关执行契约：
 
 ```text
-executable/argv + cwd + env + stdio/PT Y
+executable/argv + cwd + env + stdio/PTY
 uid + gid + supplementary groups + umask/mode policy
 授权 mounts/sockets
 policy 推导的 network namespace / egress
@@ -83,7 +83,7 @@ session-abi.md          持久 session 兼容事实
 agent-tool-security.md  Agent identity/view/mount/creation
 agent-runtime.md        旧 hosted-runtime 兼容与迁移边界
 module-abi.md           静态 module API 与外部 wire contract
-terminal-abi.md         terminal/PT Y/attach
+terminal-abi.md         terminal/PTY/attach
 terminal-broker.md      root broker auth 与 descriptor grant
 tool-policy-abi.md      tool/MCP/shared/policy/logs
 ctx-coreutils.md        ctx 命令契约
