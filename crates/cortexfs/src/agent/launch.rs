@@ -1622,8 +1622,7 @@ fn terminal_bwrap_args(
             mount.target().into()
         });
     }
-    let git_mask = agent_git_mask(request, view);
-    let mut masked = false;
+    let mut git_policy_applied = false;
     for mount in &request.mounts {
         args.extend(crate::support::bwrap::dir_args_for_parent(&mount.target));
         args.extend([
@@ -1636,13 +1635,13 @@ fn terminal_bwrap_args(
             mount.source.clone(),
             mount.target.clone(),
         ]);
-        if !masked && request.default_workspace && mount.target == "/workspace" {
-            if policy_git {
-                append_policy_git_mounts(&mut args, request, view);
-            } else if let Some(mask) = git_mask {
-                args.extend(agent_git_mask_args(mask));
-            }
-            masked = true;
+        if !git_policy_applied
+            && request.default_workspace
+            && mount.target == "/workspace"
+            && policy_git
+        {
+            append_policy_git_mounts(&mut args, request, view);
+            git_policy_applied = true;
         }
     }
     args.extend([
@@ -1676,52 +1675,11 @@ fn terminal_bwrap_args(
     args
 }
 
-#[derive(Clone, Copy)]
-enum AgentGitMask {
-    Directory,
-    File,
-}
-
 fn has_policy_git_mount(view: &crate::AgentRuntimeView) -> bool {
     view.mount_table()
         .entries()
         .iter()
         .any(|mount| mount.target() == "/workspace/.git")
-}
-
-fn agent_git_mask(
-    request: &AgentLaunchRequest,
-    view: &crate::AgentRuntimeView,
-) -> Option<AgentGitMask> {
-    if !request.default_workspace
-        || request
-            .mounts
-            .iter()
-            .any(|mount| mount.target == "/workspace/.git")
-        || has_policy_git_mount(view)
-    {
-        return None;
-    }
-    let workspace = request
-        .mounts
-        .iter()
-        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")?;
-    let metadata = fs::symlink_metadata(Path::new(&workspace.source).join(".git")).ok()?;
-    metadata
-        .is_dir()
-        .then_some(AgentGitMask::Directory)
-        .or_else(|| metadata.is_file().then_some(AgentGitMask::File))
-}
-
-fn agent_git_mask_args(mask: AgentGitMask) -> Vec<String> {
-    match mask {
-        AgentGitMask::Directory => vec!["--tmpfs".into(), "/workspace/.git".into()],
-        AgentGitMask::File => vec![
-            "--ro-bind".into(),
-            "/dev/null".into(),
-            "/workspace/.git".into(),
-        ],
-    }
 }
 
 fn append_policy_git_mounts(
