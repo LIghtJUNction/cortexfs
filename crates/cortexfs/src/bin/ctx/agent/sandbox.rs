@@ -56,11 +56,7 @@ fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: boo
 #[test]
 fn fuse_ctx_projection_uses_writable_bind() {
     let root = Path::new("/cortexfs-fuse");
-    let mut args = vec![
-        "--ro-bind".to_owned(),
-        root.display().to_string(),
-        "/ctx".to_owned(),
-    ];
+    let mut args = vec!["--ro-bind".to_owned(), root.display().to_string(), "/ctx".to_owned()];
     make_ctx_projection_writable(&mut args, root, true);
     assert_eq!(args[0], "--bind");
 }
