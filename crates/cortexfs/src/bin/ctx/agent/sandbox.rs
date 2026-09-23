@@ -40,13 +40,12 @@ pub(crate) fn agent_start_systemd_command(
 
 fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: bool) {
     if fuse_root {
-        let source = root.display().to_string();
-        let target = cortexfs_paths::ctx_root().display().to_string();
-        let index = args.windows(3).position(|window| {
-            window.first().is_some_and(|flag| flag == "--ro-bind")
-                && window.get(1).is_some_and(|bind_source| bind_source == &source)
-                && window.get(2).is_some_and(|bind_target| bind_target == &target)
-        });
+        let expected = [
+            "--ro-bind".to_owned(),
+            root.display().to_string(),
+            cortexfs_paths::ctx_root().display().to_string(),
+        ];
+        let index = args.windows(3).position(|window| window == expected);
         if let Some(flag) = index.and_then(|index| args.get_mut(index)) {
             flag.replace_range(.., "--bind");
         }
