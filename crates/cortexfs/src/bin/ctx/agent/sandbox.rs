@@ -8,7 +8,7 @@ pub(crate) fn agent_start_systemd_command(
     socket: &Path,
     unit: &str,
 ) -> AgentLaunchCommand {
-    terminal_command(
+    let mut command = terminal_command(
         &AgentLaunchRequest {
             agent: args.name.clone(),
             session: args.session.clone(),
@@ -27,7 +27,14 @@ pub(crate) fn agent_start_systemd_command(
         view,
         socket,
         unit,
-    )
+    );
+    if !args.command.is_empty()
+        && let Some(separator) = command.args.iter().rposition(|arg| arg == "--")
+    {
+        command.args.truncate(separator + 1);
+        command.args.extend(args.command.iter().cloned());
+    }
+    command
 }
 
 #[cfg(test)]
