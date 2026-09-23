@@ -81,6 +81,7 @@ spawn/factory/agent-template root
 cluster scheduler DSL
 MCP registry root; MCP servers are external config and may project ordinary tools
 skill registry root; skill files are ordinary visible files and grant no authority
+parallel channel alias root such as chan/
 audit root
 control root
 ```
