@@ -1,614 +1,356 @@
 # CortexFS Internal Architecture
 
-This document is the **engineering structure** companion to
-[architecture.md](architecture.md). Product/ABI rules stay there. This file
-governs **how Rust code is layered**, which boundaries may depend on which,
-how errors and binaries should look, and how to migrate the current monolith
-without breaking the stable root ABI. The explicit `channel` root is the
-communication subsystem exception; no other orchestration roots are allowed.
+This document is the engineering-structure companion to
+[architecture.md](architecture.md). Normative ABI lives under [spec/](spec/).
+It defines Rust/process layering, allowed dependencies, error policy, and the
+migration from the former self-hosted Agent runtime to a thin Unix/FUSE
+execution boundary.
 
-The elegance target is the same bar as Pi’s monorepo: each package has one
-job, lower layers never learn upper concerns, the agent loop stays small, and
-frontends/adapters compose around events and sockets. CortexFS adds FUSE
-projection and Linux authority; it does not add a second framework.
+The design target is small: hosted Agent CLIs keep Agent intelligence;
+CortexFS keeps Linux authority and inspectable filesystem/process primitives.
+Pi remains a simplicity reference, not a feature checklist.
 
-Normative ABI: [spec/](spec/). Naming: [naming-guide.md](naming-guide.md).
-Contributor rules live in the repository-root `AGENTS.md`.
+## 1. Internal objective
 
----
-
-## 1. Problem we are solving
-
-Today almost all production logic lives in one crate (`cortexfs`) with:
-
-| Symptom | Cost |
-| --- | --- |
-| ~75k LOC lib + ~20k LOC bins in one package | Slow compile; any change rebuilds everything |
-| Heavy deps always linked (`fuser`, `arrow`/`parquet`, `reqwest`, …) | SDKs and narrow tools pull a FUSE filesystem stack |
-| Flat `pub use` / `use crate::*` surface | Hidden coupling; hard to see allowed edges |
-| Many domain `*Error` types + residual `Result<_, String>` | Inconsistent recovery, weak `source()` chains |
-| God modules (`object/`, `agent/`, `runtime/`, `bin/ctx`) | Cognitive load; hard reviews |
-
-Product architecture (files, policy, sessions) is already clear. **Internal**
-architecture is the missing layer: process roles, crate roles, module layers,
-and error policy—expressed with Pi-level clarity so a reader can say where
-protocol, loop, and UX each stop.
-
----
-
-## 1.1 Elegance bar (Pi-aligned)
-
-Accept a design only when all of the following hold:
-
-| Principle | CortexFS meaning |
-| --- | --- |
-| Layered abstraction | Protocol ≠ loop ≠ session UX ≠ FUSE projection |
-| Minimal core | One tool/model feedback loop; no baked plan/workflow engine |
-| Event facts | Interaction/channel/session events are correlatable facts |
-| Composability | `protocol`, SDKs, and `runtime-client` usable without FUSE |
-| Extension at edges | Modules, tools, channels, skills—never new root classes; see architecture.md *Extension points* |
-| Omission | Prefer leaving a product surface out until a versioned ABI needs it |
-
-Anti-patterns (reject in review):
+CortexFS should make it obvious where a change belongs:
 
 ```text
-provider wire types leaking into agent/ or fuse/
-UI or channel crate importing object::executor
-new root directories for hook/job/workflow/memory
-in-process loading of every platform SDK
-Result<_, String> growing in library code
-thin rename-only wrappers or #[path] escapes
+hosted CLI behavior      -> outside CortexFS core
+launch/process policy    -> execution boundary
+filesystem projection    -> FUSE layer
+stable path/object ABI   -> ABI/foundation
+external protocol bridge -> narrow adapter at the edge
+legacy self-hosted loop  -> compatibility code being reduced
 ```
 
-## 1.2 Linux design principles as reviewable contracts
+A new backend should normally require executable/argv selection and perhaps a
+small launch profile. It must not require a new provider registry, Agent state
+machine, session database, or core branch on the backend name.
 
-Use Linux design practice to judge observable behavior. A small module name or
-filesystem-shaped API alone does not establish kernel-quality engineering.
-The [Linux API design guide](https://docs.kernel.org/process/adding-syscalls.html)
-emphasizes stable interfaces, existing object handles, extensibility, permission
-checks, and selftests. The [kref rules](https://docs.kernel.org/core-api/kref.html)
-make ownership and release order explicit. In CortexFS these translate to:
+## 2. Process architecture
 
-| Contract | Enforcement boundary | Acceptance evidence |
-| --- | --- | --- |
-| Authorize before effects | Channel routing validates the adapter's sender identity before creating session work; runtime still checks local peer and policy | Unknown and missing senders cannot submit requests; allowed senders keep separate sessions |
-| Bound each object | Session transport caps both each JSONL frame and aggregate response, and rejects truncated typed input runs | Oversized frames, malformed events, and missing completion fail; valid legacy events remain compatible |
-| Give resources one owner | Session slave owns durable append; supervisor receipts identify child lifetime | Competing writers fail; owned child cancellation and rollback leave auditable outcomes |
-| Keep defaults usable and explicit | Omitted delegated agent selects managed `executor`; explicit names retain their meaning | Default handoff works with matching create permission and still rejects insufficient policy |
-| Separate mechanism from presentation | Protocol/SDK crates expose facts; docs, terminal and IM clients adapt them | The same contract suite runs without FUSE or a model provider where the boundary permits |
-
-Run the reproducible [harness evaluation](evaluation.md) for the current
-implementation. Its reports record the exercised tests and their outcomes;
-passing deterministic contracts does not measure model task success or prove
-latency/RSS improvements. ABI changes still require compatibility cases and a
-migration description. Physical crate extraction remains the staged roadmap
-below, with measured dependency benefits required before a wider split.
-
-## 2. Process architecture (runtime shape)
-
-CortexFS is a **small set of long-lived and short-lived Unix processes**, not a
-single in-process AI framework.
+The target runtime shape is ordinary Unix processes:
 
 ```text
-┌─────────────┐     FUSE      ┌──────────────────┐
-│  user tools │──────────────▶│ cortexfs-mount   │  (projection of generation)
-│  ctx / tsh  │               └────────┬─────────┘
-└─────────────┘                        │ reads
-                                      ▼
-                           /var/lib/cortexfs/storage/current
-
-platform adapter ◀─ cortexfs.channel.socket/v1 ─▶ Channel Master
-terminal / web / IM Channel Masters
-        │ one multiplexed local Unix stream; SO_PEERCRED
-        │ cortexfs.interaction/v2 (v1 remains one-request mode)
-        ⇅
-┌────────────────────────────────────────────────────────────┐
-│ cortexfs-agent-runtime (current placement: per Agent)      │
-│  Agent Session Slave A   Agent Session Slave B   …         │
-│  isolated lock/mailbox/state; each session is single-writer│
-└─────────────────────────────┬──────────────────────────────┘
-                              │ spawn / unit: model/agent/tool
-                              ▼
-                   ┌─────────────────────────┐
-                   │ cortexfs-object-runner  │
-                   │ one-shot execution      │
-                   └─────────────────────────┘
+frontend / user
+      |
+      v
+ctx / supervisor
+      |
+      +-- derive uid/gid/groups + policy
+      +-- build authorized mounts/sockets
+      +-- derive network namespace / egress authority
+      +-- apply resource ceilings
+      +-- choose stdio or PTY
+      |
+      v
+hosted Agent CLI
+      |
+      +-- authorized workspace
+      +-- /ctx through FUSE
+      +-- explicit MCP/tool/socket projections
 ```
 
-| Process role | Job | Must not |
+Current process roles:
+
+| Process | Owns | Must not own |
 | --- | --- | --- |
-| `cortexfs-mount` | Project generation tree as `/ctx` | Own sessions, call providers |
-| Channel Master (`ctx`/terminal/web/IM host) | Frontend auth, attach/replay cursor, render, user requests, targeted command results, platform effects | Write session history, own the Agent loop, create/destroy a slave, reverse dependencies into runtime implementation |
-| platform adapter | Translate one platform behind `cortexfs.channel.socket/v1` | Cross the neutral interaction boundary with platform types or claim session authority |
-| Agent Session Slave (`cortexfs-agent-runtime`) | Authenticate peer, own one session mailbox/lock/order, durable record, replay, idempotency, launch policy | Import frontend/platform implementation or reverse-dial a master |
-| `cortexfs-object-runner` | One-shot model/agent/tool execution | Long-lived daemon or session-writer state |
-| `tsh` / `ctxterm` | Tool shell or PTY mechanics | Invent parallel control planes |
-| `ctxmcp` | Explicit MCP adapter | Create `/ctx/mcp` root class |
+| `cortexfs-mount` | FUSE projection and filesystem enforcement | provider calls or Agent loops |
+| `ctx` | CLI control surface and launch requests | backend intelligence |
+| `ctxterm` | PTY lifecycle, child process, attach/watch mechanics | tool/model/session semantics |
+| root terminal broker | authenticated descriptor grants | PTY byte relay or Agent logic |
+| `ctxmcp` | explicit MCP adaptation | a new `/ctx/mcp` root |
+| channel adapter | one external platform transport | core Agent authority |
+| hosted Agent CLI | its own loop/session/auth/approvals/tools | authority beyond projected Linux capabilities |
 
-The Master/Slave independence rule is a protocol, state, and lifecycle boundary,
-not a process-count requirement. The per-Agent runtime may host many isolated
-slaves today. Moving a slave to its own process later changes placement only,
-not `cortexfs.interaction/v2`, session paths, ownership, or replay semantics.
-A runtime that cannot acquire or retain the exclusive session lock fails closed
-rather than serving split-brain writers.
+The existing `cortexfs-agent-runtime`, object-runner loop, and related session
+machinery remain compatibility processes until issue #318 removes or narrows
+them. New hosted-CLI work must not deepen those dependencies.
 
-**Invariant:** development refresh is **Git commit or process restart**. No
-background watchers, polling loops, hot-reload subcommands, reverse dial, or
-workflow/job/hook entry is introduced.
+## 3. Backend-neutral launch contract
 
----
+The internal process contract is:
 
-## 3. Target crate architecture
+```text
+program + argv
+cwd
+environment
+stdin/stdout/stderr or PTY
+uid
+gid
+supplementary groups
+umask / effective mode policy
+authorized mounts and sockets
+network namespace / egress authorization
+resource limits
+exit status
+signals / cancellation
+```
 
-Move from “one lib does everything” to **thin crates with one job**, matching
-Pi’s enforced layered monorepo. Prefer **feature flags first**, physical split
-second (same module tree, lower risk).
+Identity, mount/socket authority, and network authority are not optional
+metadata. The launcher derives them from the agent object and effective
+CortexFS policy before spawning the child. A launch helper that merely inherits
+the operator's identity or unrestricted host network does not satisfy this
+contract. Default-deny policy therefore remains meaningful for provider-backed
+CLIs instead of being bypassed at process launch.
 
-### 3.1 Target graph
+Backend-specific flags stay in launch profiles/adapters. Core code should be
+written against the process contract above, not `match "codex"` or equivalent.
+
+## 4. Layer rules
+
+Dependencies point downward only:
+
+```text
+application / bins / channels
+        |
+        v
+execution / compatibility runtime
+        |
+        v
+FUSE + protocol adapters
+        |
+        v
+foundation ABI / paths / plain data / support
+```
+
+The foundation layer contains stable path/object ABI data types and other plain
+contracts that may be shared by both FUSE and execution code. Runtime object
+execution, policy orchestration, executors, launchers, and compatibility loops
+belong above FUSE. This separation is what keeps `fuse -> executor` illegal
+while still allowing FUSE to understand stable object/path schemas.
+
+Concrete rules:
+
+- foundation code may not import runtime, FUSE, or binaries;
+- protocol conversion may not import Agent/session orchestration;
+- FUSE may import only foundation object/path/support contracts; it may not
+  import executors, launch/runtime orchestration, or command-line UI;
+- execution/runtime code may depend on foundation contracts and compose FUSE
+  through its public boundary, but FUSE never depends back on execution;
+- binaries compose library layers; library code never imports `bin/*`;
+- channel/platform crates stop at neutral socket/runtime-client boundaries;
+- launch profiles may depend on generic process/ABI types but not on another
+  backend profile;
+- no `mod.rs`, no `unsafe`, and no new library `Result<_, String>`.
+
+If a dependency edge exists only because the old self-hosted loop needs it,
+that edge is a migration candidate rather than a precedent.
+
+## 5. Crate direction
+
+The intended gravity is:
 
 ```text
 Foundation
-  cortexfs-paths / abi types     pure path grammar and stable enums
-  cortexfs-support               plain fs, jsonl, layout (no FUSE, no HTTP)
-  cortexfs-module                static module API + socket module contract
+  paths / stable object ABI types / plain data
+  support: fs, jsonl, layout, process helpers
+  module contract
 
-Protocol / AI
-  cortexfs-protocol              provider-neutral IR (pi-ai analogue)
-  cortexfs-metadatas             catalog facts only
-  provider registry (in tree)    host config → neutral model projections
+FUSE + protocol boundary
+  FUSE projection over foundation ABI
+  protocol adapters over foundation/open contracts
 
-Agent core
-  cortexfs-runtime               Session Slaves: sockets, locks, mailbox, record
-  cortexfs-object                install / replace / one-shot executor
-  cortexfs-runtime-client        neutral v2/v1 interaction frames for Masters
-  cortexfs-tools                  default filesystem/shell/tsh tools
-  cortexfs-tool-sdk / agent-sdk   capability process contracts
+Execution boundary
+  object policy evaluation and compatibility runtime
+  process launch / receipts / resources / network authority
+  PTY + terminal broker
 
-Projection / application
-  cortexfs-fuse                  fuser projection only
-  cortexfs (facade)              re-exports + features; bins depend here
-  bins + channel-* + eval-*      UX, platform, and explicit evaluation adapters
+Edge adapters
+  MCP
+  channels
+  thin hosted-CLI launch profiles
+  telemetry / external protocol projections
+
+Compatibility-only while migrating
+  cortexfs-protocol provider/model IR
+  provider registry / model projections
+  Agent SDK loop
+  object-runner model/tool loop
+  CortexFS-owned compaction/session orchestration
+  legacy interaction runtime where still consumed
 ```
 
-Dependency direction is strictly upward in this diagram: application may
-depend on agent core and protocol; protocol must not depend on agent core or
-FUSE. Channel crates depend on channel-sdk / runtime-client, not on fuse or
-object executor.
-Equivalent compact form:
+Compatibility-only does not mean delete blindly. Before removal, search for
+independent consumers, stable public API use, and ABI promises. If the only
+consumer is the obsolete self-hosted runtime and a hosted CLI already owns the
+behavior, prefer deletion over another abstraction layer.
+
+## 6. FUSE and storage boundary
+
+`/ctx` is read-write overall. Per-path Unix mode, uid/gid, mount semantics, and
+CortexFS policy attenuate that access.
+
+Never grant write access by binding the backing generation/storage tree around
+FUSE. That would make permission checks observational instead of authoritative.
+Writable Agent paths must remain writable through the FUSE boundary or another
+explicitly authorized Unix object.
+
+The migration is not complete yet: the current Agent sandbox still projects
+`/ctx` read-only even though the host FUSE mount is read-write. Agent-visible
+writable `/ctx` is therefore a target until the sandbox projection is changed
+to route authorized writes through FUSE without exposing writable backing
+storage.
+
+Atomic state updates use the repository's existing same-directory temporary
+file plus rename convention. Do not add a second commit/control protocol.
+
+## 7. Workspace semantics
+
+A read-write workspace is a normal Unix subtree. Generic launch code does not
+special-case `.git`, `.jj`, editor metadata, or backend-specific project files.
+Explicit policy may narrow any subpath.
+
+Linked worktrees are the important exception: if `.git` points to metadata
+outside the authorized workspace, that external path is not automatically
+included. It needs its own authorization and mount.
+
+## 8. Environment and home
+
+Environment construction is an authority boundary.
+
+- pass only variables required by the launched CLI and policy;
+- do not inherit provider secrets merely because they exist in the operator's
+  shell;
+- preserve XDG semantics when config/data/cache paths are intentionally
+  projected;
+- do not expose the full user home to make one CLI work;
+- Omarchy/mise wrappers should be resolved through explicit executable/config
+  projections, not by trusting all of `~/.local/bin`.
+
+Provider/API credentials normally remain owned by the hosted CLI's existing
+auth flow. CortexFS should not copy them into a second secret/session system.
+
+## 9. PTY, stdio, signals, and lifetime
+
+Interactive and headless execution share the same child-process authority.
+Only I/O transport differs.
+
+`ctxterm` already provides the reusable PTY child boundary. Hosted CLI support
+should extend explicit program/argv selection around that machinery rather than
+inventing a second runner.
+
+Cancellation must reach the owned child/process group and produce an auditable
+CortexFS boundary result. Exit status remains the child's ordinary process
+status. Do not reinterpret backend failures into provider-specific core enums
+unless a stable external contract requires it.
+
+No background watcher, reverse-dial control plane, or hot-reload manager is
+introduced. Git commit is the sole development/config activation boundary.
+Process restart is ordinary lifecycle only and must not make uncommitted
+development/config changes authoritative or activate them as an alternative to
+a commit.
+
+## 10. Sessions and durable facts
+
+Hosted CLIs own their conversation/session formats unless CortexFS has a
+separate ABI reason to persist something.
+
+CortexFS may persist facts it owns:
+
+- agent/object definition;
+- effective policy and launch receipt;
+- process state and exit status;
+- terminal metadata and replay;
+- explicit audit facts;
+- compatibility session state required by existing stable APIs.
+
+Do not create a universal conversation schema merely to normalize Codex,
+Claude Code, Pi, and Antigravity. Preserve backend-native resume/session
+behavior through the process boundary where possible.
+
+## 11. Open protocols and adapters
+
+Use standards at the edge:
+
+- MCP remains MCP;
+- OAuth/OIDC remain provider/CLI auth protocols;
+- OpenTelemetry records boundary facts where useful;
+- JSON-RPC/SSE/WebSocket stay transport/protocol choices of the external
+  surface that already uses them.
+
+An adapter is justified when it maps an existing external contract to an
+existing CortexFS primitive. An adapter that invents a new private world model
+is not.
+
+## 12. Error policy
+
+Errors should identify the boundary that failed:
 
 ```text
-cortexfs-abi / paths      pure types, path grammar, request frames, policy enums
-        ▲
-cortexfs-support          plain fs, jsonl, layout, path checks (no FUSE, no HTTP)
-        ▲
-cortexfs-protocol         provider IR only (optional peer of support)
-        ▲
-cortexfs-runtime          socket, session record, egress, control handshakes
-        ▲
-cortexfs-object           install / replace / executor / runner helpers
-        ▲
-cortexfs-tools            default fs / shell / tsh tool implementations
-        ▲
-cortexfs-fuse             fuser projection only
-        ▲
-cortexfs (facade)         re-exports + optional features; bins depend on facade
-        ▲
-bins: ctx, tsh, mount, runner, agent-runtime, ctxmcp, channel/evaluation adapters
-      cortexfs-agent-{architect,executor,product-manager}, cortexfs-futureagi
-sdks: cortexfs-module, tool-sdk, agent-sdk, runtime-client, channel-sdk
-app:  cortexfs-agents (official role binaries on agent-sdk), cortexfs-tools
+path/layout violation
+identity/policy denial
+mount projection failure
+network-policy / namespace failure
+process spawn failure
+PTY/broker failure
+resource-limit failure
+signal/cancellation failure
+external adapter/protocol failure
 ```
 
-### 3.2 Crate rules
-
-| Crate | Allowed deps | Forbidden |
-| --- | --- | --- |
-| `cortexfs-abi` / paths | `serde`, small pure crates | `fuser`, `nix` process, HTTP, parquet |
-| `cortexfs-support` | `abi`, `nix` fs bits, serde_json | FUSE, provider HTTP, agent launch |
-| `cortexfs-protocol` | pure parse/IR crates | agent loop, FUSE, secrets, filesystem ABI |
-| `cortexfs-runtime` | `abi`, `support`, runtime-client protocol types | FUSE mount loop, object install stages, Channel Master/platform implementation |
-| `cortexfs-object` | `abi`, `support`, runtime-client, tool-sdk | FUSE server |
-| `cortexfs-tools` | paths, tool-sdk, `nix` fs/process, serde_json | FUSE, provider HTTP, agent lifecycle |
-| `cortexfs-fuse` | `abi`, `support`, `fuser` | object executor, provider HTTP |
-| `runtime-client` / SDKs | minimal abi and serialization types | runtime implementation, FUSE, object executor, platform SDKs |
-| `channel-*` | channel-sdk, runtime-client | runtime implementation, fuse, object executor, provider registry |
-| evaluation adapters | facade/trajectory types, HTTP client | FUSE internals, runtime lifecycle, background upload |
-
-`cortexfs-futureagi` follows the evaluation-adapter row: it consumes an
-explicit ATIF projection, performs a one-shot export or request, and never
-creates a filesystem root, watcher, provider special case, or durable secret.
-
-`cortexfs-agents` is an application-layer crate on `cortexfs-agent-sdk`. It
-ships `cortexfs-agent-architect`, `cortexfs-agent-executor`, and
-`cortexfs-agent-product-manager`. Each binary reads one hosted envelope and
-emits a role/mission/handoff message; it does not replace the hosted
-object-runner loop that bootstrap installs under `/ctx/agent/<name>`.
-`cortexfs-tools` is the default filesystem/shell/tsh tool implementation crate
-and must not grow FUSE, provider HTTP, or agent-lifecycle dependencies.
-
-**MCP stays an adapter binary** (`cortexfs-mcp` / `ctxmcp`). It may call
-support helpers; it must not force a root ABI class.
-
-**Independent usefulness (Pi composability):** a consumer must be able to
-depend on `cortexfs-protocol` or `cortexfs-runtime-client` alone without
-linking `fuser`, parquet, or channel platform SDKs.
-
-### 3.3 Near-term (no directory move): Cargo features
-
-Until physical crates land, gate heavy stacks behind features on `cortexfs`:
-
-```toml
-[features]
-default = ["fuse", "columnar", "runtime", "object"]
-fuse = ["dep:fuser"]
-columnar = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet"]
-runtime = []
-object = []
-cli-support = []
-```
-
-| Feature | Modules (indicative) |
-| --- | --- |
-| `fuse` | `fuse/**`, mount driver projection |
-| `columnar` | `support/columnar.rs` and callers |
-| `runtime` | `runtime/**` socket + record |
-| `object` | `object/**` install + executor |
-| `cli-support` | `cli/**` shared by bins |
-
-Acceptance: `cortexfs-runtime-client` and SDKs can depend on
-`default-features = false` plus only what they need, without linking `fuser`
-or parquet when unused.
-
-### 3.4 Loop ownership
-
-Inside agent core, keep Pi’s split between **mechanics** and **environment**:
-
-| Concern | Owner | Notes |
-| --- | --- | --- |
-| Turn + tool scheduling | `object/executor` (+ runtime socket) | smallest correct loop |
-| Session mailbox, lock, ordering | `runtime/socket` + `runtime/record` | one isolated Slave per logical session; fail closed on competing owner |
-| Durable session append | `runtime/record` | single-writer JSONL facts and monotonic v2 sequence; not prompt text |
-| Context projection | context/prompt modules | disposable; rebuildable |
-| Authority gate | `authority` + `policy` | pure decision mechanism; no durable writes |
-| Child lifecycle effects | `agent` + `runtime` | cancellation state and lifecycle facts |
-| Frontend modes | bins / channel adapters | subscribe to events only |
-
-Do not grow the loop with product modes (plan boards, memory roots, hook
-DAGs). Add a tool, module, skill, or versioned ABI surface instead.
-
-The `authority` decision surface/functions validate requests and return
-allow/deny decisions; those functions do not persist child cancellation or
-other lifecycle effects. The `agent` and `runtime` layers own those durable
-effects and append their auditable lifecycle facts.
-
-Generic atomic publication lives in `support::atomic`; callers use that
-canonical facade for symlink-safe create, replace, metadata-preserving swap,
-and generated sibling names. `authority::helpers` is decision support only and
-must not regain durable publication effects.
-
----
-
-## 4. Module layers inside `crates/cortexfs/src`
-
-Layers are **directional**. A module may depend on the same layer or a lower
-layer only. Violations need an explicit design note, not a silent `use`.
-
-```text
-L0  abi, policy, mount::table
-                         pure grammar and allowlist types
-L1  support              plain files, jsonl, layout, path, process helpers
-L2  authority, context   identity, packs, control inspection
-L3  provider, tool       model registry, tool schema/state (no FUSE)
-L4  reference, mount::driver
-                         storage generations and mount driver
-L5  agent, runtime       launch, child, socket, durable session
-L6  object               install/swap/residue + executor/runner
-L7  fuse                 projection only
-L8  bin/*                process entrypoints; may use L0–L7, not the reverse
-```
-
-During migration, `mount::table` is an L0 pure grammar sublayer; it only
-parses the fixed mount-table ABI. `mount::driver` remains an L4 module and
-owns mount execution.
-
-### 4.1 Allowed / forbidden edges (hard rules)
-
-| From → To | Rule |
-| --- | --- |
-| `fuse` → `object::executor` | **Forbidden** (projection must not run tools) |
-| `support` → `agent` / `runtime` / `fuse` | **Forbidden** |
-| `abi` → anything above L0 | **Forbidden** |
-| `object::executor` → `fuse` | **Forbidden** |
-| `bin/*` → library modules | Allowed |
-| library → `bin/*` | **Forbidden** |
-| `runtime` → `object::install` | Avoid; prefer callbacks/traits at boundary |
-| SDK / mcp → `support::plain` | Prefer a narrow `pub` façade later; today `#[doc(hidden)]` is a temporary escape hatch only |
-
-### 4.2 One job per module (enforcement targets)
-
-| Module | One job | Split when |
-| --- | --- | --- |
-| `object/executor` | Run model/agent/tool once | Already multi-file; finish `ExecError` then stop growing |
-| `object/install` + `swap` | Atomic object lifecycle | Keep residue/replace as siblings |
-| `runtime/socket` | Accept + frame + peer policy | `exec` / `stream` / `spawn` by stage |
-| `agent/launch` | systemd/user unit lifecycle | unit / receipt / alias files |
-| `support/columnar` | Durable JSONL backing store | wal / manifest / shard / claim |
-| `bin/ctx` | Host CLI parsing + UX | Keep domain logic in library modules |
-
-**Size policy (clippy-aligned):**
-
-- New functions: ≤ 120 lines unless an `#[expect]` cites an issue.
-- New non-test files are hard-capped at 120 lines; any debt over 120 lines in production
-  files must be reduced in follow-up commits.
-- `scripts/source-budget.sh` is the single executable authority for all-Rust and production
-  Rust baselines, targets, and ratchets; do not copy snapshot numbers into docs.
-- Ratchet forbids moving production code into `tests`, one-lining, source-path/include
-  tricks, or adding thin wrapper files to evade the budget.
-- Do not add `too_many_lines` expects on greenfield code.
-
-### 4.3 Import policy
-
-| Pattern | Policy |
-| --- | --- |
-| `use crate::*` | **No new uses.** Shrink existing when touching a file. |
-| `pub use imports::*` in `lib.rs` | Freeze; do not expand the prelude. Prefer explicit paths in new modules. |
-| `exports.rs` | Public ABI-facing re-exports only; not an internal kitchen sink. |
-| Glob imports in production | Forbidden (workspace lint); tests keep documented exceptions only. |
-
-### 4.4 Mechanism and policy
-
-Authority enforcement is split across two boundaries:
-
-| Boundary | Owns | Must not |
-| --- | --- | --- |
-| Mechanism (`authority`) | principal class, path lookup, Linux identity and mode bits, mount visibility/options, stable denial mapping | parse policy formats or assume one policy implementation |
-| Policy (`policy`) | subject/object/permission decisions through `PolicyEvaluator`; v0 text parsing through `PolicyV0` | bypass mechanism checks or grant from prompts, schemas, skills, or model output |
-
-`PolicyV0` is the built-in evaluator, not part of the enforcement mechanism.
-Alternative evaluators must be injected as already-loaded, host-owned policy
-state. A positive policy decision never bypasses principal, path, Linux, or
-mount checks, and any refusal still refuses.
-
-The boundary applies beyond tool execution. Schedule `requires` validation,
-post-routing model authorization, and named network egress gates consume
-`PolicyEvaluator`; only control-file adapters parse `PolicyV0`. Provider egress
-routing produces a validated immutable plan before the runtime allocates
-directories, sockets, relay threads, or upstream HTTP processes.
-
-Large modules follow the same ownership split. For example,
-`runtime/egress/{plan,secret,target}.rs` owns egress decisions while
-`runtime/egress.rs` owns relay lifetime, and
-`runtime/record/schedule/{record,complete,advance}.rs` owns schedule state
-transitions outside the child-channel receipt mechanism.
-
----
-
-## 5. Error architecture
-
-### 5.1 Three tiers
-
-```text
-Tier A — Domain stable enums
-  SocketRuntimeError, AgentLaunchError, InstallError, …
-  Eq/PartialEq for tests; Display + std::error::Error required.
-  Prefer source() / nested variants over map_err(|_e| UnitVariant).
-
-Tier B — Process-local typed shells
-  ExecError (object runner), StopError, CLI simple errors
-  Stable user-visible message strings; Display + Error.
-  Used where failures are mostly stringly today but still process-local.
-
-Tier C — Binary boundary
-  Exit codes + one-line stderr. May convert Tier A/B with .to_string()
-  or message() exactly once at main.
-```
-
-### 5.2 Rules
-
-1. **Library / runner internals:** no new `Result<T, String>` for errors.
-   (`Result<String, E>` where `String` is a success payload is fine.)
-2. **User-visible text is ABI** when tests or docs pin it. Changing wording
-   needs an explicit product decision.
-3. **IO mapping:** prefer `with_io("prefix", &error)` style helpers so text
-   stays `prefix: {error}` and pedantic stays happy.
-4. **No parallel Empty/Missing/Invalid enums** — reuse
-   `ControlLineIssue` / `PathLayoutIssue` families (see AGENTS.md).
-5. **Migration order for `object/executor`:**
-   `path/policy/wire` → `model/inference` → `agent` shell → `tool` + `run`
-   (partially underway; finish before starting unrelated refactors in executor).
-
-### 5.3 Target end state for executor
-
-```text
-object/executor/**  Err type = ExecError only
-executor::run       Result<ExitCode, ExecError>
-bin/runner main     map_err once to stderr + exit code
-From<String> for ExecError  removed after migration
-From<ExecError> for String  optional, binary-only convenience
-```
-
----
-
-## 6. Object / tool / MCP placement
-
-Product rule (unchanged): **MCP is not a root class.** Capabilities appear as
-ordinary tools under `/ctx/tool/...` with optional `.d/mcp` locator control.
-
-```text
-install path:  object manifest + controls (description, schema, cap, policy, mcp?)
-runtime path:  ctxmcp reads locator → stdio MCP server → Tool SDK frames
-agent path:    same tool execution + policy as any other tool
-```
-
-Internal rule: MCP client code lives in **`cortexfs-mcp`**, not inside
-`fuse` or root projection. Shared validation of locator JSON may live in
-`object/mcp` as install/bootstrap validation only.
-
----
-
-## 7. Data and durability architecture
-
-Already fixed by product design; internal code must respect it:
-
-| Concern | Mechanism | Code gravity |
-| --- | --- | --- |
-| Control-plane publish | write temp → `rename` to `*.req.json` / control files | `support::plain`, authority helpers |
-| Session history | append-only JSONL (+ optional columnar store) | `runtime/record`, `support/columnar` |
-| Generation switch | clone → validate → atomic `current` symlink | `reference/storage` |
-| Tool/agent install | stage + receipt + swap | `object/install`, `swap`, `residue` |
-| Cancellation / stop | receipt-bound plans | `agent/stop`, runtime stop traits |
-
-Do not introduce in-memory “workflow engines” that bypass these files.
-
-### 7.1 Performance engineering boundary
-
-Performance work is measure-first architecture work, not a license to weaken
-the ABI or safety model. This section defines acceptance boundaries; it does
-not claim that any candidate optimization has landed. The detailed workflow is
-the project skill at `.agents/skills/cortexfs-performance/SKILL.md`.
-
-| Boundary | Required rule |
-| --- | --- |
-| Evidence | Compare equivalent release workloads, measure baseline noise, and accept a gain only above `max(3%, 2 × noise)` while meeting the task's p95 and RSS gates. |
-| Safety / portability | Keep `unsafe` forbidden; do not use `target-cpu=native`, global `target-feature`, or default CUDA. Optional acceleration requires a tested, equivalent CPU fallback. |
-| Cache truth | Bound caches and invalidate them with the generation, commit/restart, policy, provider, model, or config identity that supplies their data. A cache never grants authority. |
-| Semantics | Preserve paths, framing, limits, errors, ordering, durability, permissions, cancellation, and fallback behavior. |
-| Review | Separate writer and reviewer; review the raw runs and diff, not only a summarized speedup. |
-
-Socket/JSONL framing, agent output, context rendering, FUSE metadata, provider
-catalog/config caches, thread pools, and optional accelerators are investigation
-surfaces only. Profile the exercised path before choosing one; do not document
-an unmeasured rewrite as an implemented optimization.
-
----
-
-## 8. Public API surface policy
-
-`lib.rs` currently re-exports broadly for historical reasons. Target:
-
-| Visibility | Audience |
-| --- | --- |
-| `pub` in `exports` / documented modules | External crates, integration tests |
-| `pub(crate)` | Cross-module inside cortexfs |
-| `pub(super)` / private | Module internals |
-| `#[doc(hidden)] pub` | Temporary for sibling bins (mcp); track and shrink |
-
-**Shrink list (ongoing):**
-
-1. Stop new `pub use` of implementation modules from `lib.rs`.
-2. Give `cortexfs-mcp` a narrow module (`cortexfs::fsutil` or support façade)
-   instead of growing `#[doc(hidden)]` on random plain helpers.
-3. SDKs depend on `runtime-client` + abi types, not full projection stack.
-
----
-
-## 9. Testing architecture
-
-| Layer | Location | Role |
-| --- | --- | --- |
-| Unit | `src/**/tests*.rs`, `tests/unit/**` | Pure logic, parse, policy |
-| Executor | `object/executor/tests/**` | Tool loop, process limits |
-| Integration | `tests/*.rs`, FUSE under `tests/mounts/cortexfs` | Mount + ABI |
-| Live | skills / scripts with `smollm2:135m` | Real model path only when asked |
-| MCP e2e | `cortexfs-mcp/tests` | Adapter only |
-
-Rules:
-
-- FUSE mount point remains `tests/mounts/cortexfs` (no fixtures stored there).
-- Prefer moving giant `#[cfg(test)]` blocks out of hot production files when
-  touching them.
-- Do not expand frozen test-parent glob exceptions (AGENTS.md).
-
----
-
-## 10. Migration roadmap
-
-Execute in order. Each phase must keep `cargo clippy -D warnings` and relevant
-tests green. Prefer **vertical slices** over horizontal rewrites.
-
-### Phase A — Error consistency (in progress)
-
-- [x] Introduce `object/executor::ExecError`
-- [x] Migrate `args`, `call`, `exec`, `path`, `policy`, `wire`, (partial) `output`/`agent` loop
-- [x] Finish `model::run_model`, `inference::run_agent_model_once`, `agent::run_agent` shell, `tool::run_tool`, and `executor::run`
-- [x] Migrate the object-runner bin `main` entrypoint to `ExecError`
-- [ ] Add `Display` + `Error` to remaining stable domain enums without changing variants
-- [x] Remove `From<String> for ExecError` when no callers remain
-
-**Exit criteria:** no production `Result<_, String>` error side under
-`object/executor` (except success payloads named `String`).
-
-### Phase B — Layer hygiene
-
-- [ ] Ban new `use crate::*`; convert files when touched
-- [ ] Document layer of each top-level module in `lib.rs` rustdoc
-- [ ] Split next god file only when a feature change already requires editing it
-  (order: `runtime/socket/exec` → `agent/launch` → `support/columnar`)
-- [ ] Replace temporary `#[doc(hidden)]` support exports with one façade module
-
-**Exit criteria:** dependency graph from `fuse`/`support` shows no upward edges
-in new code; CodeGraph or manual review on PRs.
-
-### Phase C — Feature flags
-
-- [ ] Add `fuse` / `columnar` features; `cfg` the modules
-- [ ] CI matrix: full features + `no-default-features` + minimal SDK build
-- [ ] Measure `cargo build -p cortexfs-runtime-client` / tool-sdk link set
-
-**Exit criteria:** SDK build without `fuser` and without parquet.
-
-### Phase D — Physical crate split
-
-- [ ] Extract `cortexfs-abi` (types only)
-- [ ] Extract `cortexfs-support`
-- [ ] Move runtime / object / fuse behind separate crates or keep features if
-      split cost > benefit
-- [ ] Facade crate preserves versioned path deps for bins
-
-**Exit criteria:** workspace compile graph matches §3.1; no behavior change.
-
-### Phase E — Bin packaging
-
-- [ ] Each bin depends only on features/crates it needs
-- [ ] `ctx` stays UX; domain logic remains in library modules
-- [ ] Align packaging/systemd units with process table in §2
-
----
-
-## 11. PR / review checklist (architecture)
-
-Reviewers ask:
-
-1. **ABI:** Any new root path or orchestration entry? Only the explicitly
-   versioned `channel` root and its generic state/tool children are allowed.
-2. **Layer:** Does this module only call same/lower layers? Does it match the
-   Pi-aligned package map (protocol / core / UX / projection)?
-3. **Loop:** Does this enlarge the agent loop with a product mode that should
-   be a tool, module, skill, or adapter instead?
-4. **Events:** Are new facts correlatable on existing interaction/session
-   streams rather than a parallel control plane?
-5. **Error:** New `Result<_, String>`? Missing `Display`/`Error` on public errors?
-6. **Size:** New expects for `too_many_lines` / `too_many_arguments` without split?
-7. **Deps:** New heavy dependency justified, and feature-gated if optional?
-   Can protocol/SDK consumers still avoid `fuser` and platform SDKs?
-8. **Process:** Any new background watcher/poller/hot reload? (Must be no.)
-9. **Reuse:** Existing `support::plain` / `path` / `process` / layout helpers checked first?
-
----
-
-## 12. What “done” looks like
-
-```text
-Product ABI        unchanged, still boring files + sockets
-Elegance           Pi-level layers: protocol ⊥ loop ⊥ UX ⊥ FUSE
-Internal graph     layered crates/features; SDKs stay thin and composable
-Errors             typed; strings only as success payloads or final stderr
-Modules            one job; god files split on natural edit boundaries
-Bins               process roles match §2; no logic-only-in-bin duplication
-MCP                adapter only; tools remain ordinary objects
-Omissions          no workflow/hook/job/memory roots; no mega in-process harness
-```
-
-This document is the north star for refactors such as `ExecError`, crate
-features, and module splits. Prefer small PRs that move one checkbox in §10
-over multi-thousand-line “architecture rewrites.”
+Library errors use narrow enums with `Display` and `Error`, preserving sources
+when available. Process-local binaries may wrap those in an `ExecError`-style
+shell. Do not add one error type per backend for the same Unix failure.
+
+## 13. Testing contracts
+
+Prefer behavior at the real boundary:
+
+- fake executable receives exact argv/cwd/env;
+- uid/gid/groups and umask/mode policy are derived correctly;
+- stdio and PTY modes preserve exit status;
+- signals/cancel terminate the owned child without orphans;
+- unauthorized mounts fail closed;
+- network authority is policy-derived: denied launches remain isolated and
+  explicitly authorized egress does not inherit broader host network access;
+- `/ctx` allows writes where policy allows and rejects only the intended
+  read-only paths once Agent-visible writable FUSE projection is migrated;
+- read-write workspaces preserve normal `.git` semantics;
+- out-of-tree linked-worktree metadata remains inaccessible without separate
+  authorization;
+- MCP/open-protocol adapters conform without backend-specific core branches.
+
+Live tests against Codex/Claude/Pi/Antigravity are optional smoke tests when the
+CLI is installed and no private credentials are required. Deterministic fake
+executables remain the contract test.
+
+## 14. Migration discipline
+
+Issue #318 is incremental. Keep at most one active implementation slice when
+possible.
+
+Before each change:
+
+1. search for an equivalent issue/PR/helper;
+2. identify whether the target code has independent consumers;
+3. ask whether deletion or direct Unix composition is simpler;
+4. preserve stable root/path ABI;
+5. add a boundary-level regression test;
+6. record additions/deletions and conceptual surface.
+
+A good migration PR removes more Agent-runtime concepts than it adds. A change
+that introduces a manager, registry, provider branch, or private protocol needs
+strong evidence that Unix primitives and public protocols cannot express the
+requirement.
+
+## 15. Current migration boundary
+
+Completed:
+
+- repository rules now define hosted CLIs as the target architecture;
+- #320 removed the implicit `.git` mask from authorized read-write workspaces.
+
+Next:
+
+- reuse existing `ctxterm` child execution;
+- add the smallest explicit child program/argv selection seam;
+- keep default `tsh` compatibility while migration proceeds;
+- then make authorized `/ctx` writes reach FUSE without exposing writable
+  backing storage;
+- carry policy-derived network authority through the generic launch boundary;
+- retire legacy provider/model/tool/session runtime pieces as their consumers
+  disappear.
+
+Until migration completes, old self-hosted loop code is compatibility surface,
+not the engineering target and not a pattern for new features.
