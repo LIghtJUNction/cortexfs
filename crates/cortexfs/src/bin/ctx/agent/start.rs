@@ -376,18 +376,23 @@ fn write_agent_terminal_record(
 ) -> Result<(), CliError> {
     let session_dir = cortexfs_paths::agent_sessions_from_home_path(&ctx_home(root)?, &args.name)
         .join(&args.session);
+    let command = if args.command.is_empty() {
+        vec![
+            cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
+                .join("tsh")
+                .display()
+                .to_string(),
+        ]
+    } else {
+        args.command.clone()
+    };
     let record = cortexfs::runtime::terminal::TerminalRecord {
         id: cortexfs::runtime::terminal::terminal_id(&args.name, &args.session),
         agent: args.name.clone(),
         session: args.session.clone(),
         owner: view.owner().to_string(),
         cwd: cwd.to_owned(),
-        command: vec![
-            cortexfs_paths::bin_root_path(&cortexfs_paths::ctx_root())
-                .join("tsh")
-                .display()
-                .to_string(),
-        ],
+        command,
         state: state.to_owned(),
         socket: socket.map(|path| path.display().to_string()),
         created_at: current_time_unix(),
