@@ -10,7 +10,7 @@ CortexFS follows the same anti-framework extension rule as Pi: add behavior at
 stable edges (packages, executables, skills, modules, channel adapters) without
 a second root ABI or a resident plugin daemon. Product placement of those edges
 is in [architecture.md](./architecture.md) (*Extension points*). This page is the
-shortest authoring path.
+shortest authoring path for existing compatibility surfaces.
 
 The shortest way to add behavior is one package directory. Keep the program
 logic in normal executables; keep the wiring in one `cortexfs.toml`:
@@ -43,6 +43,11 @@ tools = ["git.summary"]
 instructions = "Review changes, use the tool when useful, and cite evidence."
 parent = "agent:architect"
 ```
+
+The executable Agent SDK example above is a compatibility surface from the
+former self-hosted runtime. New hosted CLI integrations should prefer a thin
+process launch profile instead of adding new loop/provider/session behavior to
+`sdk-envelope-v1`.
 
 Validate the complete package without writing a backing tree, then install it:
 
@@ -89,21 +94,23 @@ Agent Unix identity is host authority, not package metadata. The installer
 derives it from its effective user and supplementary groups; package authors
 cannot select a uid, gid, or privileged group.
 
-The `run` file is the extension point. A tool implements the Tool SDK and an
-agent implements the Agent SDK; both are ordinary executable files, so a Rust,
-shell, or another host-language build can produce them. An SDK agent receives
-one hosted envelope on stdin and returns JSONL events. It may yield a tool call;
-the host performs the capability check and sends the observation back for the
-next step. This is the custom execution loop, without a resident plugin daemon.
+The `run` file is the extension point. A tool implements the Tool SDK and a
+legacy executable agent implements the Agent SDK; both are ordinary executable
+files, so a Rust, shell, or another host-language build can produce them. An SDK
+agent receives one hosted envelope on stdin and returns JSONL events. It may
+yield a tool call; the host performs the capability check and sends the
+observation back for the next step. This is compatibility behavior, not the
+target architecture for new Agent CLI integrations.
 
-For a build-free first agent, copy `examples/extensions/shell-agent/`. It uses
-POSIX shell plus `jq`, requires the seven core keys, permits the SDK-optional
-`event`/`origin` keys, rejects every unknown envelope key, preserves the
-runtime's forward-compatible origin extension behavior, enforces byte bounds,
-validates known present event/origin values, caps each response at the runtime's 256 KiB
-newline-inclusive limit, and rejects a wrong launch marker, sticky frames,
-mismatched run/step values, and continuations it does not implement. It then
-emits one canonical assistant `message` frame:
+For a build-free compatibility agent, copy
+`examples/extensions/shell-agent/`. It uses POSIX shell plus `jq`, requires the
+seven core keys, permits the SDK-optional `event`/`origin` keys, rejects every
+unknown envelope key, preserves the runtime's forward-compatible origin
+extension behavior, enforces byte bounds, validates known present event/origin
+values, caps each response at the runtime's 256 KiB newline-inclusive limit,
+and rejects a wrong launch marker, sticky frames, mismatched run/step values,
+and continuations it does not implement. It then emits one canonical assistant
+`message` frame:
 
 ```bash
 CTX_BIN=ctx ./examples/extensions/shell-agent/install.sh
@@ -116,10 +123,11 @@ ctx agent send field-notes --session demo "record this decision"
 
 The first command only validates. Installation remains an explicit second
 step. Run `scripts/shell-agent-smoke.sh` for the provider-free envelope test.
-Use `cortexfs-agent-sdk` instead of copying JSON parsing once the agent needs
-tool continuation, child handoff, richer events, or typed errors.
+Use `cortexfs-agent-sdk` only for existing compatibility consumers; do not grow
+new provider/model/session orchestration there when a hosted CLI already owns
+that behavior.
 
-Official defaults stay convenient while remaining overrideable:
+Official compatibility defaults remain overrideable:
 
 ```text
 loop=chat|react|coding|planner|research   built-in behavior hint (default chat)
@@ -134,6 +142,9 @@ Agent SDK BuiltinLoop helpers             interpret CTX_AGENT_LOOP inside your b
 Tool SDK InvokeMode helpers               read CTX_TOOL_MODE / CTX_AUTHORIZED_OBJECT
 Channel SDK DriverLaunchConfig            read CORTEXFS_CHANNEL_* / CTX_CHANNEL_* env
 ```
+
+Do not add new Agent-loop features to these compatibility controls during the
+hosted-CLI migration.
 
 Topology is just the `parent` edge. Every agent names its parent as
 `agent:NAME` (optional `session:` and `run:` qualifiers remain available), so a
@@ -157,6 +168,8 @@ installation the durable result is still only `agent/<name>.d/*`,
 `ctx object install` command remains available for package builders that need
 full manifest control; most users do not need to see it.
 
-Refresh is explicit: commit the package or restart the process that consumes
-the source generation. `ctx install` never starts a watcher, polling loop, or
-background plugin service.
+Development/config activation is commit-bound. Commit the package or
+configuration first; a later process restart is ordinary lifecycle that may
+consume the already committed generation. Restart must never make uncommitted
+package/config changes authoritative. `ctx install` never starts a watcher,
+polling loop, or background plugin service.
