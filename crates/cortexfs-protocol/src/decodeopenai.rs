@@ -103,13 +103,11 @@ fn tool(source: &crate::openaichat::Tool<'_>) -> Result<crate::ToolDefinition, C
             .map(ToString::to_string),
         parameters: source.function.parameters.map_or_else(
             || Ok(serde_json::json!({})),
-            |raw| {
-                crate::semantic::raw_value(
-                    crate::WireProtocol::OpenAiChat,
-                    "tools[].function.parameters",
-                    raw,
-                )
-            },
+            |raw| crate::semantic::raw_value(
+                crate::WireProtocol::OpenAiChat,
+                "tools[].function.parameters",
+                raw,
+            ),
         )?,
     })
 }
