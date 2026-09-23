@@ -90,7 +90,10 @@ pub(crate) fn agent_start_mounts_with_default_source(
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
     for mount in mounts {
         if let Ok(relative) = Path::new(&args.cwd).strip_prefix(&mount.source) {
-            return Path::new(&mount.target).join(relative).display().to_string();
+            return Path::new(&mount.target)
+                .join(relative)
+                .display()
+                .to_string();
         }
     }
     args.cwd.clone()
