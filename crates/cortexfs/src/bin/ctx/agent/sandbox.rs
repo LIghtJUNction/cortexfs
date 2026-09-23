@@ -44,11 +44,15 @@ fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: boo
     }
     let source = root.display().to_string();
     let target = cortexfs_paths::ctx_root().display().to_string();
-    if let Some(index) = args
-        .windows(3)
-        .position(|args| args[0] == "--ro-bind" && args[1] == source && args[2] == target)
-    {
-        args[index] = "--bind".to_owned();
+    let index = args.windows(3).position(|window| {
+        let [flag, bind_source, bind_target] = window else {
+            return false;
+        };
+        flag == "--ro-bind" && bind_source == &source && bind_target == &target
+    });
+    if let Some(flag) = index.and_then(|index| args.get_mut(index)) {
+        flag.clear();
+        flag.push_str("--bind");
     }
 }
 
@@ -58,7 +62,7 @@ fn fuse_ctx_projection_uses_writable_bind() {
     let root = Path::new("/cortexfs-fuse");
     let mut args = ["--ro-bind", "/cortexfs-fuse", "/ctx"].map(str::to_owned);
     make_ctx_projection_writable(&mut args, root, true);
-    assert_eq!(args[0], "--bind");
+    assert_eq!(args.first().map(String::as_str), Some("--bind"));
 }
 
 #[cfg(test)]
