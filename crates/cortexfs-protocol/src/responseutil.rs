@@ -81,8 +81,7 @@ pub(super) fn usage(map: Option<&Map<String, Value>>) -> Option<Usage> {
     Some(Usage {
         input_tokens: input,
         output_tokens: output,
-        cached_tokens: None,
-        reasoning_tokens: None,
+        ..Usage::default()
     })
 }
 
