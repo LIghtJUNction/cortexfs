@@ -23,6 +23,7 @@ fn writable_workspace_bwrap_does_not_invent_git_mask() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     let mounts = agent_start_mounts_with_default_source(&args, &source);
     let Some(bwrap) = agent_bwrap_test_args(&args, &mounts) else {
