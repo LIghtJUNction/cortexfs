@@ -37,6 +37,9 @@ fn message(source: &crate::openaichat::Message<'_>) -> Result<Message, Conversio
         .tool_calls
         .iter()
         .map(|call| {
+            if call.kind.as_ref() != "function" {
+                return Err(openai_unsupported("messages[].tool_calls[].type"));
+            }
             let field = "messages[].tool_calls[].function.arguments";
             let raw = call.function.arguments.as_deref().ok_or_else(|| {
                 ConversionError::InvalidField {
