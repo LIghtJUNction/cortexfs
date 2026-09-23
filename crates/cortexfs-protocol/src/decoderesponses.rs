@@ -26,8 +26,10 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
         result.tools.push(crate::decoderesponsepart::tool(tool)?);
     }
     if let Some(id) = source.previous_response_id.as_ref() {
-        let kind = "openai.responses.previous_response_id";
-        result.context = ContextState::provider_owned(kind, id.as_ref());
+        result.context = ContextState::provider_owned(
+            "openai.responses.previous_response_id",
+            id.as_ref(),
+        );
     } else if let Some(id) = source.conversation.as_ref() {
         result.context = ContextState::provider_owned("openai.responses.conversation", id.as_ref());
     }
