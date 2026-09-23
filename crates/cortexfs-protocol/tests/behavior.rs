@@ -158,10 +158,8 @@ mod tests {
             );
             let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
             let value: Value = serde_json::from_slice(&encoded)?;
-            assert_eq!(
-                value.get("conversation").and_then(Value::as_str),
-                Some("conv_42")
-            );
+            let conversation = value.get("conversation").and_then(Value::as_str);
+            assert_eq!(conversation, Some("conv_42"));
         }
         Ok(())
     }
