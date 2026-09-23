@@ -45,14 +45,11 @@ fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: boo
     let source = root.display().to_string();
     let target = cortexfs_paths::ctx_root().display().to_string();
     let index = args.windows(3).position(|window| {
-        let [flag, bind_source, bind_target] = window else {
-            return false;
-        };
+        let [flag, bind_source, bind_target] = window else { return false };
         flag == "--ro-bind" && bind_source == &source && bind_target == &target
     });
     if let Some(flag) = index.and_then(|index| args.get_mut(index)) {
-        flag.clear();
-        flag.push_str("--bind");
+        flag.replace_range(.., "--bind");
     }
 }
 
