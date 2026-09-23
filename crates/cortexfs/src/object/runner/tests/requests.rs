@@ -21,11 +21,8 @@ fn responses_agent_body_declares_tsh_function_tool() -> Result<(), Box<dyn std::
             let pointer = format!("{function}/{field}");
             assert_eq!(value.pointer(&pointer), Some(&expected));
         }
-        let strict = value.pointer(&format!("{function}/strict"));
-        assert_eq!(
-            strict,
-            (protocol == WireProtocol::OpenAiResponses).then_some(&Value::Null)
-        );
+        let expected = (protocol == WireProtocol::OpenAiResponses).then_some(&Value::Null);
+        assert_eq!(value.pointer(&format!("{function}/strict")), expected);
         assert_eq!(value.get("tool_choice"), Some(&json!("auto")));
         assert_eq!(value.get("parallel_tool_calls"), Some(&json!(false)));
     }
