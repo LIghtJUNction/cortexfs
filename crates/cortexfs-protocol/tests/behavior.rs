@@ -145,7 +145,8 @@ mod tests {
     fn responses_context_reference_is_semantic_metadata() -> TestResult {
         for input in [
             br#"{"model":"responses-model","conversation":"conv_42","input":"next"}"#.as_slice(),
-            br#"{"model":"responses-model","conversation":{"id":"conv_42"},"input":"next"}"#.as_slice(),
+            br#"{"model":"responses-model","conversation":{"id":"conv_42"},"input":"next"}"#
+                .as_slice(),
         ] {
             let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
             assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
@@ -157,7 +158,10 @@ mod tests {
             );
             let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
             let value: Value = serde_json::from_slice(&encoded)?;
-            assert_eq!(value.get("conversation").and_then(Value::as_str), Some("conv_42"));
+            assert_eq!(
+                value.get("conversation").and_then(Value::as_str),
+                Some("conv_42")
+            );
         }
         Ok(())
     }
