@@ -13,10 +13,10 @@ frontends / channel adapters
 CLI launch / execution boundary
         |
         v
-foundation object ABI + path/policy contracts
+FUSE projection
         |
         v
-FUSE + support primitives
+foundation object ABI + path/policy/support contracts
 ```
 
 Foundation 只包含稳定对象 ABI、路径、普通数据和通用 support contract。FUSE 可以依赖 foundation object/path contract，但不得依赖 executor、launch profile 或 runtime orchestration；`fuse -> executor` 仍然禁止。
