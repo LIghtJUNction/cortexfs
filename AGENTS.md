@@ -8,6 +8,17 @@ Git 分支约定：`main` 是默认集成分支；代码修改通常在描述任
 文件系统 ABI 只使用当前规范里的短单数顶层目录；不要新增 chan/job/hook/workflow 这类第二套提交或编排入口。
 统一提交语义是：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读取结果，向 audit 追加事实。
 
+Agent CLI 方向：
+
+- CortexFS 不再以自研完整 Agent Runtime / Agent Loop 为目标；核心职责收缩为 Unix/FUSE execution boundary。优先复用现成 Agent CLI 自带的 model/tool loop、context compaction、session、provider/auth、streaming 与 approvals，不在 CortexFS 内再造第二套。
+- 一等 CLI 后端至少包括 OpenAI Codex CLI、Anthropic Claude Code 与 `earendil-works/pi`；Google 路线以 Antigravity CLI 为当前扩展目标。Pi 同时是“小核心、可组合、清晰边界”的设计参考，但不是功能清单。
+- 后端差异只能停留在薄 launch profile / adapter；核心优先依赖 Unix/POSIX 进程、cwd、stdio/PTTY、signal、exit status、uid/gid/mode、mount/socket 语义，以及 MCP、OAuth/OIDC、OpenTelemetry 等公开协议。能直接映射就不要新增 CortexFS 私有 wire protocol、manager、registry 或 provider-specific core branch。
+- `cortexfs-protocol`、provider/model adapter、Agent SDK loop、runner/tool loop、compaction/session orchestration 等旧自研 runtime 代码，修改前必须先判断是否仍有独立消费者；只服务旧 runtime 且现成 CLI 已覆盖的部分优先迁移、弃用和删除，不继续补功能。
+- `/ctx` 的 FUSE 挂载整体必须保持正常可读可写，并由 Unix/POSIX 权限与 CortexFS policy 对具体路径收窄；只有语义上不可变或内核独占维护的具体文件/路径才只读。禁止把 backing store 直接以可写 bind 暴露给 Agent 来绕过 FUSE enforcement。
+- Agent 的授权 `rw` workspace 应遵循普通 Unix 子路径语义；不要在通用 execution boundary 中私自隐藏 `.git` 等 CLI 工作所需的项目元数据。需要只读时使用明确的路径级 policy/mount；外部路径（例如 linked worktree 的 out-of-tree gitdir）仍需单独授权。
+- Omarchy 以当前官方 `omacom/omarchy` 为首要桌面/开发环境验证目标，同时保持通用 Arch/Linux 兼容；不要为 Omarchy 品牌本身写特殊核心分支。
+- `agent.sh` 只在新的 CLI harness / integration 边界确实需要时维护，不得演变为第二套 Agent runtime。
+
 文档单一真相：`docs/` 是 canonical 源；`docs-site/i18n/en/` 只保留与 canonical 内容不同的真实翻译。禁止复制逐字相同的英文占位文件，缺失条目由 Docusaurus locale fallback 提供。
 Rust 规模统一由 `scripts/source-budget.sh` 门控：新增/变更需遵守 120 行上限、测试底线与 all/prod 预算。
 性能改动必须使用 `.agents/skills/cortexfs-performance`：先建立可复现 release 基线与噪声，收益须超过 `max(3%, 2×noise)` 且满足任务的 p95/RSS 门槛；禁止 `unsafe`、`target-cpu=native`、全局 `target-feature` 和默认 CUDA，任何可选加速都必须保留等价 CPU fallback 与缓存一致性，并由独立 reviewer 审核原始数据和 diff。
