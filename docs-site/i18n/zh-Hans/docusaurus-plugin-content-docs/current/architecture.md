@@ -97,7 +97,7 @@ Git commit 是唯一开发/配置激活边界。进程 restart 只是生命周�
 ## 迁移顺序
 
 1. #320 已移除 RW workspace 上的隐式 `.git` 遮罩。
-2. 复用现有 `ctxterm` 子进程/PT Y机制，不新增 runner。
+2. 复用现有 `ctxterm` 子进程/PTY 机制，不新增 runner。
 3. 增加最小显式 executable/argv 选择入口。
 4. 让被授权的 Agent 写入通过 FUSE 抵达 `/ctx`，禁止 writable backing bind。
 5. 仅在 CLI 命令行差异确有必要时增加薄 launch profile。
