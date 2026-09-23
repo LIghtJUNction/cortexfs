@@ -305,8 +305,8 @@ fn agent_start_rejects_mount_outside_runtime_view() {
 }
 
 #[test]
-fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() {
-    let source = clean_test_dir("ctx-agent-start-git-ro");
+fn agent_start_default_workspace_inherits_git_access_until_explicitly_overlaid() {
+    let source = clean_test_dir("ctx-agent-start-git-rw");
     let home = clean_test_dir("ctx-agent-start-git-home");
     assert!(fs::create_dir_all(&home).is_ok());
     assert!(
@@ -341,20 +341,21 @@ fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() 
         &args,
         &mounts,
         None,
-        "test ! -e /workspace/.git/host-marker && touch /workspace/.git/sandbox-only",
+        "test -e /workspace/.git/host-marker && touch /workspace/.git/sandbox-write",
     );
-    assert!(result.is_some(), "run masked git directory sandbox");
+    assert!(result.is_some(), "run inherited git directory sandbox");
     let Some((bwrap, output)) = result else {
         return;
     };
-    assert!(contains_arg_pair(&bwrap, "--tmpfs", "/workspace/.git"));
-    assert!(
-        !bwrap
-            .iter()
-            .any(|arg| arg == &source.join(".git").display().to_string())
-    );
-    assert!(output.status.success(), "masked sandbox failed: {output:?}");
-    assert!(!source.join(".git").join("sandbox-only").exists());
+    assert!(!contains_arg_pair(&bwrap, "--tmpfs", "/workspace/.git"));
+    assert!(!contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        "/dev/null",
+        "/workspace/.git"
+    ));
+    assert!(output.status.success(), "inherited sandbox failed: {output:?}");
+    assert!(source.join(".git").join("sandbox-write").exists());
 
     let explicit_args = AgentStartArgs {
         name: "executor".to_owned(),
@@ -423,11 +424,11 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
         }]
     );
     let bwrap = agent_bwrap_test_args(&args, &mounts);
-    assert!(bwrap.is_some(), "build git file mask args");
+    assert!(bwrap.is_some(), "build git file args");
     let Some(bwrap) = bwrap else {
         return;
     };
-    assert!(contains_arg_triplet(
+    assert!(!contains_arg_triplet(
         &bwrap,
         "--ro-bind",
         "/dev/null",
@@ -441,16 +442,21 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
 
     assert!(fs::remove_file(source.join(".git")).is_ok());
     assert!(std::os::unix::fs::symlink(&external, source.join(".git")).is_ok());
-    assert!(contains_arg_triplet(
-        &bwrap,
+    let symlink_bwrap = agent_bwrap_test_args(&args, &mounts);
+    assert!(symlink_bwrap.is_some(), "build git symlink args");
+    let Some(symlink_bwrap) = symlink_bwrap else {
+        return;
+    };
+    assert!(!contains_arg_triplet(
+        &symlink_bwrap,
         "--ro-bind",
         "/dev/null",
         "/workspace/.git"
     ));
     assert!(
-        !bwrap
+        !symlink_bwrap
             .iter()
-            .any(|arg| arg == &source.join(".git").display().to_string())
+            .any(|arg| arg == &external.display().to_string())
     );
 }
 
@@ -560,9 +566,9 @@ fn agent_start_real_worktree_requires_explicit_metadata_mounts() {
         &args,
         &mounts,
         None,
-        "! /usr/bin/git -C /workspace rev-parse --git-dir >/dev/null 2>&1",
+        "test -f /workspace/.git && ! /usr/bin/git -C /workspace rev-parse --git-dir >/dev/null 2>&1",
     );
-    assert!(result.is_some(), "run masked worktree sandbox");
+    assert!(result.is_some(), "run unmounted worktree sandbox");
     let Some((bwrap, output)) = result else {
         return;
     };
@@ -584,13 +590,16 @@ fn agent_start_real_worktree_requires_explicit_metadata_mounts() {
         common_dir.to_str().unwrap_or_default(),
         common_dir.to_str().unwrap_or_default()
     ));
-    assert!(contains_arg_triplet(
+    assert!(!contains_arg_triplet(
         &bwrap,
         "--ro-bind",
         "/dev/null",
         "/workspace/.git"
     ));
-    assert!(output.status.success(), "masked worktree failed: {output:?}");
+    assert!(
+        output.status.success(),
+        "unmounted worktree failed: {output:?}"
+    );
 
     let explicit_args = AgentStartArgs {
         name: "executor".to_owned(),
@@ -834,6 +843,16 @@ fn agent_start_default_workspace_does_not_remount_symlinked_git() {
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         }]
+    );
+    let bwrap = agent_bwrap_test_args(&args, &mounts);
+    assert!(bwrap.is_some(), "build git symlink args");
+    let Some(bwrap) = bwrap else {
+        return;
+    };
+    assert!(
+        !bwrap
+            .iter()
+            .any(|arg| arg == &target.display().to_string())
     );
 }
 
