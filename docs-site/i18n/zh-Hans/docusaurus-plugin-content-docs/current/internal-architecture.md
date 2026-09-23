@@ -54,7 +54,7 @@ CLI 自己拥有：model/provider 选择与认证、session/context、compaction
 
 `ctxterm` 负责 PTY、attach/watch、子进程生命周期与 exit status，不负责 Agent intelligence。新的 hosted-CLI seam 应优先复用 `ctxterm` 的已有 child-process 机制。
 
-测试应覆盖 exact argv、cwd/env、identity/groups、umask、mount/socket 可见性、network default-deny 与显式 egress、stdio/PT Y、exit status、signal/cancel/timeout 和无孤儿子进程。
+测试应覆盖 exact argv、cwd/env、identity/groups、umask、mount/socket 可见性、network default-deny 与显式 egress、stdio/PTY、exit status、signal/cancel/timeout 和无孤儿子进程。
 
 ## Git 与激活语义
 
@@ -64,7 +64,7 @@ RW workspace 使用正常 Unix 子树语义；`.git` 不再被 CortexFS 隐式�
 
 ## Backend adapter 约束
 
-Backend 差异只能位于薄 launch profile：可执行程序、argv 拼写、明确需要的 config/executable path、interactive/headless stdio/PT Y 选择。不得在 core 新增 backend enum、provider registry、model router、session manager、workflow engine 或私有 wire protocol。
+Backend 差异只能位于薄 launch profile：可执行程序、argv 拼写、明确需要的 config/executable path、interactive/headless stdio/PTY 选择。不得在 core 新增 backend enum、provider registry、model router、session manager、workflow engine 或私有 wire protocol。
 
 Omarchy 是首要验证环境，但实现必须保持普通 Arch/Linux 语义。对 mise wrapper、XDG、systemd --user、Wayland terminal 与 FUSE 的支持应通过显式最小路径/环境投影实现，而不是信任整个用户环境。
 
