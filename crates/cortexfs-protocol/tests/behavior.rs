@@ -42,7 +42,9 @@ mod tests {
         for protocol in [WireProtocol::OpenAiChat, WireProtocol::OpenAiResponses] {
             let encoded = String::from_utf8(encode_model_request(protocol, &request)?)?;
             assert!(encoded.contains("\"parameters\":{\"type\":\"object\"}"));
-            assert!(!encoded.contains("\"strict\""), "{protocol:?}");
+            let strict = protocol == WireProtocol::OpenAiResponses;
+            assert_eq!(encoded.contains("\"strict\""), strict, "{protocol:?}");
+            assert_eq!(encoded.contains("\"strict\":null"), strict, "{protocol:?}");
         }
         let gemini: Value =
             serde_json::from_slice(&encode_model_request(WireProtocol::Gemini, &request)?)?;
