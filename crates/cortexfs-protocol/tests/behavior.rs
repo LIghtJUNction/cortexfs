@@ -143,25 +143,22 @@ mod tests {
     }
     #[test]
     fn responses_context_reference_is_semantic_metadata() -> TestResult {
-        let input =
-            br#"{"model":"responses-model","previous_response_id":"resp_42","input":"next"}"#;
-        let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
-        assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
-        assert_eq!(
-            request
-                .context
-                .reference
-                .as_ref()
-                .map(|item| item.value.as_str()),
-            Some("resp_42")
-        );
-        let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
-        let value: Value = serde_json::from_slice(&encoded)?;
-        assert_eq!(
-            value.get("previous_response_id").and_then(Value::as_str),
-            Some("resp_42")
-        );
-        assert!(encode_model_request(WireProtocol::OpenAiChat, &request).is_err());
+        for input in [
+            br#"{"model":"responses-model","conversation":"conv_42","input":"next"}"#.as_slice(),
+            br#"{"model":"responses-model","conversation":{"id":"conv_42"},"input":"next"}"#.as_slice(),
+        ] {
+            let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
+            assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
+            let reference = request.context.reference.as_ref();
+            assert_eq!(reference.map(|item| item.value.as_str()), Some("conv_42"));
+            assert_eq!(
+                reference.map(|item| item.namespace.as_str()),
+                Some("openai.responses.conversation")
+            );
+            let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
+            let value: Value = serde_json::from_slice(&encoded)?;
+            assert_eq!(value.get("conversation").and_then(Value::as_str), Some("conv_42"));
+        }
         Ok(())
     }
     #[test]
