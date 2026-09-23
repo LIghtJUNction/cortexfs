@@ -67,21 +67,17 @@ pub(super) fn text(value: Option<&Value>) -> Option<String> {
     value.and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
-pub(super) fn number(value: Option<&Value>) -> Option<u64> {
-    value.and_then(Value::as_u64)
-}
-
 pub(super) fn usage(map: Option<&Map<String, Value>>) -> Option<Usage> {
-    let input = number(
-        map.and_then(|value| value.get("input_tokens"))
-            .or_else(|| map.and_then(|value| value.get("prompt_tokens")))
-            .or_else(|| map.and_then(|value| value.get("promptTokenCount"))),
-    )?;
-    let output = number(
-        map.and_then(|value| value.get("output_tokens"))
-            .or_else(|| map.and_then(|value| value.get("completion_tokens")))
-            .or_else(|| map.and_then(|value| value.get("candidatesTokenCount"))),
-    )?;
+    let input = map
+        .and_then(|value| value.get("input_tokens"))
+        .or_else(|| map.and_then(|value| value.get("prompt_tokens")))
+        .or_else(|| map.and_then(|value| value.get("promptTokenCount")))
+        .and_then(Value::as_u64)?;
+    let output = map
+        .and_then(|value| value.get("output_tokens"))
+        .or_else(|| map.and_then(|value| value.get("completion_tokens")))
+        .or_else(|| map.and_then(|value| value.get("candidatesTokenCount")))
+        .and_then(Value::as_u64)?;
     Some(Usage {
         input_tokens: input,
         output_tokens: output,
