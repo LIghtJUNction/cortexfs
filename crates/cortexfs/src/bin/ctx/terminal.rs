@@ -19,6 +19,7 @@ pub(crate) fn terminal_action(root: &Path, args: &TerminalArgs) -> Result<ExitCo
                 cwd: cwd.clone(),
                 default_workspace: true,
                 mounts: Vec::new(),
+                command: Vec::new(),
             };
             let _receipt = agent_start_host(root, &start)?;
             print_line(&terminal_id(agent, session))?;

@@ -534,6 +534,7 @@ pub(crate) fn parse_agent_start(
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     while let Some(value) = values.next() {
         match value.as_str() {
@@ -558,6 +559,13 @@ pub(crate) fn parse_agent_start(
             }
             "--no-default-workspace" => {
                 args.default_workspace = false;
+            }
+            "--" => {
+                args.command.extend(values);
+                if args.command.is_empty() {
+                    return Err(CliError::usage("agent start -- requires a command"));
+                }
+                break;
             }
             _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }

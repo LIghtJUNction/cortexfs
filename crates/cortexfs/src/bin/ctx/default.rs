@@ -18,6 +18,7 @@ pub(crate) fn start_default_session(root: &Path) -> Result<ExitCode, CliError> {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     agent_start_host(root, &args)?;
     agent_chat(root, &agent, Some(&session), false, &[])

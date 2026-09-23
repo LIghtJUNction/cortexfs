@@ -196,6 +196,7 @@ fn agent_start_builds_sandboxed_terminal_command() {
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         }],
+        command: Vec::new(),
     };
     let cli_mounts = vec![AgentMount {
         source: "/repo".to_owned(),
@@ -282,6 +283,37 @@ fn agent_start_builds_sandboxed_terminal_command() {
 }
 
 #[test]
+fn agent_start_preserves_explicit_child_argv() {
+    let root = clean_test_dir("ctx-agent-start-child-argv");
+    assert!(ensure_reference_tree(&root).is_ok());
+    ensure_runtime_model_fixture(&root);
+    let Ok(view) = derive_agent_runtime_view(&root, "executor") else {
+        return;
+    };
+    let args = AgentStartArgs {
+        name: "executor".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: Vec::new(),
+        command: vec![
+            "/workspace/fake-agent".to_owned(),
+            "--json".to_owned(),
+            "turn one".to_owned(),
+        ],
+    };
+    let Some(bwrap) = command_bwrap_args(&root, &args, &[], &view) else {
+        return;
+    };
+    let child = bwrap
+        .iter()
+        .rposition(|arg| arg == "--")
+        .and_then(|separator| separator.checked_add(1))
+        .and_then(|start| bwrap.get(start..));
+    assert_eq!(child, Some(args.command.as_slice()));
+}
+
+#[test]
 fn agent_start_rejects_mount_outside_runtime_view() {
     let root = clean_test_dir("ctx-agent-start-mount-authority");
     assert!(ensure_reference_tree(&root).is_ok());
@@ -296,6 +328,7 @@ fn agent_start_rejects_mount_outside_runtime_view() {
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         }],
+        command: Vec::new(),
     };
     let result = agent_start_host(&root, &args);
     assert!(
@@ -326,6 +359,7 @@ fn agent_start_default_workspace_preserves_git_and_explicit_ro_overlay() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     let mounts = agent_start_mounts_with_default_source(&args, &source);
     assert_eq!(
@@ -367,6 +401,7 @@ fn agent_start_default_workspace_preserves_git_and_explicit_ro_overlay() {
             target: "/workspace/.git".to_owned(),
             mode: "ro".to_owned(),
         }],
+        command: Vec::new(),
     };
     let explicit_mounts = agent_start_mounts_with_default_source(&explicit_args, &source);
     let result = run_agent_bwrap(
@@ -408,6 +443,7 @@ fn agent_start_git_file_does_not_authorize_external_mount() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     let mounts = agent_start_mounts_with_default_source(&args, &source);
     assert_eq!(
@@ -466,6 +502,7 @@ fn agent_start_policy_git_overlays_keep_declared_order() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     let mounts = agent_start_mounts_with_default_source(&args, &source);
     let git = source.join(".git").display().to_string();
@@ -531,6 +568,7 @@ fn agent_start_real_worktree_requires_explicit_metadata_mounts() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
 
     let mounts = agent_start_mounts_with_default_source(&args, &source);
@@ -602,6 +640,7 @@ fn agent_start_real_worktree_requires_explicit_metadata_mounts() {
                 mode: "ro".to_owned(),
             },
         ],
+        command: Vec::new(),
     };
     let explicit_mounts = agent_start_mounts_with_default_source(&explicit_args, &source);
     let result = run_agent_bwrap(
@@ -676,6 +715,7 @@ fn agent_start_maps_host_cwd_to_sandbox_mount_target() {
         cwd: subdir.display().to_string(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     let mounts = agent_start_mounts_with_default_source(&args, &source);
 
@@ -694,6 +734,7 @@ fn agent_start_records_ready_status_and_start_event() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
 
     let facts = [
@@ -758,6 +799,7 @@ fn agent_start_prepares_session_workspace_hint() {
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         }],
+        command: Vec::new(),
     };
     let mounts = agent_start_mounts_with_default_source(&args, &root);
     let cwd = agent_start_sandbox_cwd(&args, &mounts);
@@ -812,6 +854,7 @@ fn agent_start_default_workspace_does_not_remount_symlinked_git() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
 
     let mounts = agent_start_mounts_with_default_source(&args, &source);
@@ -877,6 +920,7 @@ fn agent_start_no_default_workspace_does_not_guess_git_mount() {
         cwd: "/workspace".to_owned(),
         default_workspace: false,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
 
     let mounts = agent_start_mounts_with_default_source(&args, &source);
@@ -899,6 +943,7 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
         cwd: "/workspace".to_owned(),
         default_workspace: true,
         mounts: Vec::new(),
+        command: Vec::new(),
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/executor/session/test/terminal/main.sock");
     let cli_mounts = agent_start_mounts_with_default_source(&args, Path::new("/repo"));
