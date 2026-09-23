@@ -40,11 +40,11 @@ mod tests {
         });
         request.validate()?;
         for protocol in [WireProtocol::OpenAiChat, WireProtocol::OpenAiResponses] {
-            let value: Value = serde_json::from_slice(&encode_model_request(protocol, &request)?)?;
-            assert_eq!(value["tools"][0]["parameters"], json!({"type":"object"}));
-            let strict = value["tools"][0].get("strict");
-            let expected = (protocol == WireProtocol::OpenAiResponses).then_some(&Value::Null);
-            assert_eq!(strict, expected);
+            let encoded = String::from_utf8(encode_model_request(protocol, &request)?)?;
+            assert!(encoded.contains("\"parameters\":{\"type\":\"object\"}"));
+            let strict = protocol == WireProtocol::OpenAiResponses;
+            assert_eq!(encoded.contains("\"strict\""), strict, "{protocol:?}");
+            assert_eq!(encoded.contains("\"strict\":null"), strict, "{protocol:?}");
         }
         let gemini: Value =
             serde_json::from_slice(&encode_model_request(WireProtocol::Gemini, &request)?)?;
@@ -58,7 +58,10 @@ mod tests {
             text: "hi".to_owned(),
         };
         let value = serde_json::to_value(event).unwrap_or_default();
-        assert_eq!(value.get("type").and_then(Value::as_str), Some("text_delta"));
+        assert_eq!(
+            value.get("type").and_then(Value::as_str),
+            Some("text_delta")
+        );
         assert_eq!(value.get("run").and_then(Value::as_str), Some("run-1"));
     }
     #[test]
