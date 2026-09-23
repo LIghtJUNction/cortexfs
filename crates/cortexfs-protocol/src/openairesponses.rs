@@ -36,7 +36,9 @@ fn deserialize_conversation<'de, D: serde::Deserializer<'de>>(
             .and_then(Value::as_str)
             .map(|id| Some(Cow::Owned(id.to_owned())))
             .ok_or_else(|| serde::de::Error::missing_field("id")),
-        Some(_) => Err(serde::de::Error::custom("conversation must be string or object")),
+        Some(_) => Err(serde::de::Error::custom(
+            "conversation must be string or object",
+        )),
     }
 }
 
