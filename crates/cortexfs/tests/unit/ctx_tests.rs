@@ -77,7 +77,11 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 include!("ctx/helpers.rs");
 include!("ctx/output_mount.rs");
-include!("ctx/parse_paths.rs");
+#[allow(clippy::panic, clippy::indexing_slicing)]
+mod parse_paths {
+    use super::*;
+    include!("ctx/parse_paths.rs");
+}
 include!("ctx/format_check.rs");
 include!("ctx/file_doctor.rs");
 include!("ctx/misc_terminal.rs");
