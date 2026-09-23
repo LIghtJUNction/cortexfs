@@ -26,7 +26,8 @@ Core principles:
 root is frozen
 root contains stable object classes only
 /ctx is read-write; individual paths may be read-only by Unix/FUSE policy
-Agent CLIs own model/provider auth, session/context, approvals, and tool loops
+Agent CLIs own model/provider auth, session/context, approval UX, and tool loops
+CortexFS policy remains the hard authority ceiling for projected capabilities
 CortexFS owns process, path, mount, identity, policy, and FUSE boundaries
 agent objects describe principals and executable boundaries, not a second AI runtime
 tools are executable capability endpoints
