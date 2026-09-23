@@ -27,7 +27,7 @@ pub(crate) fn agent_start_systemd_command(
     };
     let mut command = terminal_command(&request, view, socket, unit);
     if !args.command.is_empty() {
-        command.args.pop();
+        let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
     command
@@ -91,13 +91,10 @@ pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMoun
     mounts
         .iter()
         .find_map(|mount| {
-            let relative = Path::new(&args.cwd).strip_prefix(&mount.source).ok()?;
-            Some(
-                Path::new(&mount.target)
-                    .join(relative)
-                    .display()
-                    .to_string(),
-            )
+            Path::new(&args.cwd)
+                .strip_prefix(&mount.source)
+                .ok()
+                .map(|relative| Path::new(&mount.target).join(relative).display().to_string())
         })
         .unwrap_or_else(|| args.cwd.clone())
 }
@@ -155,22 +152,20 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
     let mut normalized = PathBuf::from("/");
     for component in Path::new(target).components() {
-        match component {
-            ParentDir => {
-                normalized.pop();
-            }
-            Normal(part) => normalized.push(part),
-            _ => {}
+        if component == ParentDir {
+            normalized.pop();
+        } else if let Normal(part) = component {
+            normalized.push(part);
         }
     }
-    match normalized
+    let top = normalized
         .components()
         .nth(1)
-        .and_then(|component| component.as_os_str().to_str())
-    {
+        .and_then(|component| component.as_os_str().to_str());
+    match top {
         None => true,
-        Some("bin" | "ctx" | "dev" | "etc" | "home" | "lib" | "lib64" | "proc" | "run" | "usr") => true,
-        Some(_) => false,
+        Some(top) => ["bin", "ctx", "dev", "etc", "home", "lib", "lib64", "proc", "run", "usr"]
+            .contains(&top),
     }
 }
 
