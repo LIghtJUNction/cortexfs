@@ -1,7 +1,6 @@
-use crate::decodechoice::openai_unsupported;
+use crate::decodechoice::{openai, openai_unsupported};
 use crate::openaichat::{Content as NativeContent, Request};
 use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, Role, ToolCall};
-use serde_json::Value;
 
 pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     let source: Request<'_> = crate::semantic::parse(crate::WireProtocol::OpenAiChat, input)?;
@@ -14,11 +13,7 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     result.stream = source.stream;
     result.max_output_tokens = source.max_tokens;
     result.tools = source.tools.iter().map(tool).collect::<Result<_, _>>()?;
-    result.tool_choice = source
-        .tool_choice
-        .as_ref()
-        .map(crate::decodechoice::openai)
-        .transpose()?;
+    result.tool_choice = source.tool_choice.as_ref().map(openai).transpose()?;
     for (name, raw) in &source.extra {
         result.options.insert(
             name.to_string(),
@@ -107,7 +102,7 @@ fn tool(source: &crate::openaichat::Tool<'_>) -> Result<crate::ToolDefinition, C
             .as_ref()
             .map(ToString::to_string),
         parameters: source.function.parameters.map_or_else(
-            || Ok(Value::Object(serde_json::Map::new())),
+            || Ok(serde_json::json!({})),
             |raw| {
                 crate::semantic::raw_value(
                     crate::WireProtocol::OpenAiChat,
