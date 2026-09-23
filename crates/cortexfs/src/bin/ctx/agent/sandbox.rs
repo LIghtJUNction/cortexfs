@@ -55,7 +55,8 @@ pub(crate) fn agent_chat_socket_systemd_command(
 
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
     if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() == Some("")
-        && let Some(backing) = read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
+        && let Some(backing) =
+            read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
         && backing.is_absolute()
         && open_plain_directory(&backing).is_ok()
     {
@@ -77,11 +78,14 @@ pub(crate) fn agent_start_mounts_with_default_source(
 ) -> Vec<AgentMount> {
     let mut mounts = args.mounts.clone();
     if args.default_workspace {
-        mounts.insert(0, AgentMount {
-            source: default_source.display().to_string(),
-            target: "/workspace".to_owned(),
-            mode: "rw".to_owned(),
-        });
+        mounts.insert(
+            0,
+            AgentMount {
+                source: default_source.display().to_string(),
+                target: "/workspace".to_owned(),
+                mode: "rw".to_owned(),
+            },
+        );
     }
     mounts
 }
@@ -125,16 +129,17 @@ pub(crate) fn validate_agent_start_mounts(
 
 pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
     path.is_absolute().then(|| {
-        path.components().fold(PathBuf::from("/"), |mut out, part| {
-            match part {
-                std::path::Component::ParentDir => {
-                    out.pop();
+        path.components()
+            .fold(PathBuf::from("/"), |mut normalized, component| {
+                match component {
+                    std::path::Component::ParentDir => {
+                        normalized.pop();
+                    }
+                    std::path::Component::Normal(part) => normalized.push(part),
+                    _ => {}
                 }
-                std::path::Component::Normal(part) => out.push(part),
-                _ => {}
-            }
-            out
-        })
+                normalized
+            })
     })
 }
 
@@ -156,21 +161,29 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
     if is_protected_agent_mount_target(&target.display().to_string()) {
-        return Err(CliError::usage("agent mount target cannot replace sandbox system paths"));
+        return Err(CliError::usage(
+            "agent mount target cannot replace sandbox system paths",
+        ));
     }
     Ok(())
 }
 
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
-    ["/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run", "/usr"]
+    const PROTECTED_TARGETS: &[&str] = &[
+        "/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
+        "/usr",
+    ];
+
+    PROTECTED_TARGETS
         .iter()
         .any(|protected| target == *protected || target.starts_with(&format!("{protected}/")))
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
-    Path::new(cwd).is_absolute().then_some(()).ok_or_else(|| {
-        CliError::usage("agent cwd must be absolute inside the sandbox")
-    })
+    Path::new(cwd)
+        .is_absolute()
+        .then_some(())
+        .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
 }
 
 #[cfg(test)]
@@ -180,11 +193,12 @@ pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
 
 pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", name)?;
-    let runtime_root = env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| {
-        cortexfs_paths::system_run_root()
+    let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => cortexfs_paths::system_run_root()
             .join("user")
-            .join(current_uid_for_ctx(root).unwrap_or_default())
-    });
+            .join(current_uid_for_ctx(root)?),
+    };
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
         &stable_path_hash(root),
