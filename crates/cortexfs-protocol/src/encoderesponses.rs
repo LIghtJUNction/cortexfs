@@ -7,22 +7,15 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
     crate::encode::check_context(request, WireProtocol::OpenAiResponses)?;
     let mut root = Map::new();
     root.insert("model".to_owned(), Value::String(request.model.clone()));
-    let systems = request
+    let system = request
         .messages
         .iter()
         .filter(|message| message.role.as_str() == "system")
-        .collect::<Vec<_>>();
-    if !systems.is_empty() {
-        root.insert(
-            "instructions".to_owned(),
-            Value::String(
-                systems
-                    .iter()
-                    .map(|message| message.content.text_value())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
-        );
+        .map(|message| message.content.text_value())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !system.is_empty() {
+        root.insert("instructions".to_owned(), Value::String(system));
     }
     let input = request
         .messages
@@ -35,24 +28,12 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         .collect();
     root.insert("input".to_owned(), Value::Array(input));
     if !request.tools.is_empty() {
-        root.insert(
-            "tools".to_owned(),
-            Value::Array(
-                request
-                    .tools
-                    .iter()
-                    .map(|tool| {
-                        json!({
-                            "type": "function",
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.parameters,
-                            "strict": null,
-                        })
-                    })
-                    .collect(),
-            ),
-        );
+        let tools = request
+            .tools
+            .iter()
+            .map(|tool| json!({"type": "function", "name": tool.name, "description": tool.description, "parameters": tool.parameters, "strict": null}))
+            .collect();
+        root.insert("tools".to_owned(), Value::Array(tools));
     }
     if let Some(choice) = request.tool_choice.as_ref() {
         root.insert("tool_choice".to_owned(), choice_value(choice));
