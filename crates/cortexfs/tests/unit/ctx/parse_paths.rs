@@ -7,6 +7,7 @@ include!("parse_paths/agent_parent_validation.rs");
 include!("parse_paths/agent_process.rs");
 include!("parse_paths/agent_profile.rs");
 include!("parse_paths/agent_status_validation.rs");
+#[allow(clippy::panic, clippy::indexing_slicing)]
 include!("parse_paths/agent_start.rs");
 include!("parse_paths/chat.rs");
 include!("parse_paths/agent_rendering.rs");
