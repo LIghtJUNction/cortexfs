@@ -40,18 +40,19 @@ pub(crate) fn agent_chat_socket_systemd_command(
     socket: &Path,
     unit: &str,
 ) -> AgentLaunchCommand {
+    let source = agent_source_root(root);
     cortexfs::chat_socket_command(
         &AgentLaunchRequest {
             agent: name.to_owned(),
             session: String::new(),
-            source: agent_source_root(root),
+            source,
             cwd: String::new(),
             mounts: Vec::new(),
             default_workspace: false,
         },
         socket,
         unit,
-        Path::new(cortexfs::support::command::CORTEXFS_AGENT_RUNTIME),
+        Path::new(&agent_runtime_program()),
     )
 }
 
@@ -62,6 +63,19 @@ pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
         .map(PathBuf::from)
         .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
         .unwrap_or_else(|| root.to_path_buf())
+}
+
+#[cfg(test)]
+pub(crate) fn agent_runtime_program() -> String {
+    if let Ok(current) = env::current_exe()
+        && let Some(parent) = current.parent()
+    {
+        let sibling = parent.join("cortexfs-agent-runtime");
+        if sibling.is_file() {
+            return sibling.display().to_string();
+        }
+    }
+    cortexfs::support::command::CORTEXFS_AGENT_RUNTIME.to_owned()
 }
 
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
@@ -164,8 +178,10 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
         .and_then(|component| component.as_os_str().to_str());
     match top {
         None => true,
-        Some(top) => ["bin", "ctx", "dev", "etc", "home", "lib", "lib64", "proc", "run", "usr"]
-            .contains(&top),
+        Some(top) => [
+            "bin", "ctx", "dev", "etc", "home", "lib", "lib64", "proc", "run", "usr",
+        ]
+        .contains(&top),
     }
 }
 
