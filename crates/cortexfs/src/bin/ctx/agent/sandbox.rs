@@ -57,7 +57,7 @@ pub(crate) fn agent_chat_socket_systemd_command(
 
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
     read_xattr_string(root, "user.cortexfs.abi_path")
-        .filter(|abi| abi.is_empty())
+        .filter(String::is_empty)
         .and_then(|_| read_xattr_string(root, "user.cortexfs.backing_path"))
         .map(PathBuf::from)
         .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
@@ -162,13 +162,12 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
         .components()
         .nth(1)
         .and_then(|component| component.as_os_str().to_str());
-    match top {
-        None => true,
-        Some(top) => [
+    top.is_none_or(|top| {
+        [
             "bin", "ctx", "dev", "etc", "home", "lib", "lib64", "proc", "run", "usr",
         ]
-        .contains(&top),
-    }
+        .contains(&top)
+    })
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
