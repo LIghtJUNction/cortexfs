@@ -45,7 +45,9 @@ fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: boo
     let source = root.display().to_string();
     let target = cortexfs_paths::ctx_root().display().to_string();
     let index = args.windows(3).position(|window| {
-        let [flag, bind_source, bind_target] = window else { return false };
+        let [flag, bind_source, bind_target] = window else {
+            return false;
+        };
         flag == "--ro-bind" && bind_source == &source && bind_target == &target
     });
     if let Some(flag) = index.and_then(|index| args.get_mut(index)) {
@@ -215,9 +217,7 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
         Some(path) => PathBuf::from(path),
-        None => cortexfs_paths::system_run_root()
-            .join("user")
-            .join(current_uid_for_ctx(root)?),
+        None => cortexfs_paths::system_run_root().join("user").join(current_uid_for_ctx(root)?),
     };
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
