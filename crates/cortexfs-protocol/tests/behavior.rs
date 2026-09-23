@@ -40,15 +40,11 @@ mod tests {
         });
         request.validate()?;
         for protocol in [WireProtocol::OpenAiChat, WireProtocol::OpenAiResponses] {
-            let encoded = String::from_utf8(encode_model_request(protocol, &request)?)?;
-            assert!(encoded.contains("\"parameters\":{\"type\":\"object\"}"));
-            let strict = serde_json::from_str::<Value>(&encoded)?
-                .pointer("/tools/0/strict")
-                .cloned();
-            assert_eq!(
-                strict,
-                (protocol == WireProtocol::OpenAiResponses).then_some(Value::Null)
-            );
+            let value: Value = serde_json::from_slice(&encode_model_request(protocol, &request)?)?;
+            assert_eq!(value["tools"][0]["parameters"], json!({"type":"object"}));
+            let strict = value["tools"][0].get("strict");
+            let expected = (protocol == WireProtocol::OpenAiResponses).then_some(&Value::Null);
+            assert_eq!(strict, expected);
         }
         let gemini: Value =
             serde_json::from_slice(&encode_model_request(WireProtocol::Gemini, &request)?)?;
@@ -177,7 +173,10 @@ mod tests {
     fn invalid_provider_context_is_rejected_before_encoding() {
         let mut request = ModelRequest::new("model", vec![Message::user("hi")]);
         request.context.ownership = ContextOwnership::ProviderOwned;
-        assert!(matches!(request.validate(), Err(ProtocolError::InvalidContext(_))));
+        assert!(matches!(
+            request.validate(),
+            Err(ProtocolError::InvalidContext(_))
+        ));
     }
     #[test]
     fn response_events_roundtrip_through_all_native_dialects() -> TestResult {
