@@ -48,8 +48,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         context(&mut root, reference)?;
     }
     crate::encode::options(&mut root, request);
-    let value = Value::Object(root);
-    crate::encode::bytes(WireProtocol::OpenAiResponses, &value)
+    crate::encode::bytes(WireProtocol::OpenAiResponses, &Value::Object(root))
 }
 
 fn context(
