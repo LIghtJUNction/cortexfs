@@ -56,7 +56,7 @@ fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: boo
 #[test]
 fn fuse_ctx_projection_uses_writable_bind() {
     let root = Path::new("/cortexfs-fuse");
-    let mut args = vec!["--ro-bind".to_owned(), root.display().to_string(), "/ctx".to_owned()];
+    let mut args = ["--ro-bind", "/cortexfs-fuse", "/ctx"].map(str::to_owned);
     make_ctx_projection_writable(&mut args, root, true);
     assert_eq!(args[0], "--bind");
 }
@@ -216,7 +216,8 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
         Some(path) => PathBuf::from(path),
         None => cortexfs_paths::system_run_root()
             .join("user")
-            .join(current_uid_for_ctx(root)?),
+            .join(current_uid_for_ctx(root)?,
+            ),
     };
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
