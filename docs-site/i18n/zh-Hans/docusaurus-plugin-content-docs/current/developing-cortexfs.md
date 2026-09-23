@@ -78,7 +78,7 @@ Backend adapter 通常只应该描述：
 program + argv 拼写
 明确需要的环境变量
 明确需要投影的 config/executable path
-interactive/headless 的 stdio/PT Y 选择
+interactive/headless 的 stdio/PTY 选择
 ```
 
 它不能长成 model router、provider registry、session manager、Agent loop、auth broker 或 workflow engine。
@@ -152,7 +152,7 @@ scripts/test.sh cargo test --workspace
 npm --prefix docs-site run build
 ```
 
-进程边界改动优先使用 fake executable，验证 exact argv、cwd/env、identity/groups、umask、mount/socket、network default-deny/authorized egress、stdio/PT Y、exit status、signal/cancel/timeout 与无孤儿 child。
+进程边界改动优先使用 fake executable，验证 exact argv、cwd/env、identity/groups、umask、mount/socket、network default-deny/authorized egress、stdio/PTY、exit status、signal/cancel/timeout 与无孤儿 child。
 
 只有官方 CLI 在环境里真实可用且不需要暴露敏感凭据时，才做 live smoke test，并明确区分 fixture 与 live evidence。
 
