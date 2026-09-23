@@ -60,7 +60,8 @@ pub(crate) fn agent_chat_socket_systemd_command(
 
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
     if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() == Some("")
-        && let Some(backing) = read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
+        && let Some(backing) =
+            read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
         && backing.is_absolute()
         && open_plain_directory(&backing).is_ok()
     {
@@ -71,9 +72,18 @@ pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
 
 #[cfg(test)]
 pub(crate) fn agent_runtime_program() -> String {
-    env::current_exe().ok().and_then(|current| current.parent().map(|parent| parent.join("cortexfs-agent-runtime")))
+    env::current_exe()
+        .ok()
+        .and_then(|current| {
+            current
+                .parent()
+                .map(|parent| parent.join("cortexfs-agent-runtime"))
+        })
         .filter(|sibling| sibling.is_file())
-        .map_or_else(|| cortexfs::support::command::CORTEXFS_AGENT_RUNTIME.to_owned(), |path| path.display().to_string())
+        .map_or_else(
+            || cortexfs::support::command::CORTEXFS_AGENT_RUNTIME.to_owned(),
+            |path| path.display().to_string(),
+        )
 }
 
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
@@ -83,20 +93,31 @@ pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'sta
     }
 }
 
-pub(crate) fn agent_start_mounts_with_default_source(args: &AgentStartArgs, default_source: &Path) -> Vec<AgentMount> {
+pub(crate) fn agent_start_mounts_with_default_source(
+    args: &AgentStartArgs,
+    default_source: &Path,
+) -> Vec<AgentMount> {
     let default = args.default_workspace.then(|| AgentMount {
         source: default_source.display().to_string(),
         target: "/workspace".to_owned(),
         mode: "rw".to_owned(),
     });
-    default.into_iter().chain(args.mounts.iter().cloned()).collect()
+    default
+        .into_iter()
+        .chain(args.mounts.iter().cloned())
+        .collect()
 }
 
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    mounts.iter().find_map(|mount| {
-        Path::new(&args.cwd).strip_prefix(&mount.source).ok()
-            .map(|relative| Path::new(&mount.target).join(relative).display().to_string())
-    }).unwrap_or_else(|| args.cwd.clone())
+    mounts
+        .iter()
+        .find_map(|mount| {
+            Path::new(&args.cwd)
+                .strip_prefix(&mount.source)
+                .ok()
+                .map(|relative| Path::new(&mount.target).join(relative).display().to_string())
+        })
+        .unwrap_or_else(|| args.cwd.clone())
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
@@ -107,37 +128,53 @@ pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<Stri
         .map(|mount| mount.source.clone())
 }
 
-pub(crate) fn validate_agent_start_mounts(view: &AgentRuntimeView, mounts: &[AgentMount]) -> Result<(), CliError> {
-    let authorized = |mount: &AgentMount| view.mount_table().entries().iter().any(|entry| {
-        entry.source() == mount.source && entry.target() == mount.target
-            && (entry.mode() == cortexfs::MountMode::ReadWrite || mount.mode == "ro")
-    });
-    mounts.iter().all(authorized).then_some(())
+pub(crate) fn validate_agent_start_mounts(
+    view: &AgentRuntimeView,
+    mounts: &[AgentMount],
+) -> Result<(), CliError> {
+    let authorized = |mount: &AgentMount| {
+        view.mount_table().entries().iter().any(|entry| {
+            entry.source() == mount.source
+                && entry.target() == mount.target
+                && (entry.mode() == cortexfs::MountMode::ReadWrite || mount.mode == "ro")
+        })
+    };
+    mounts
+        .iter()
+        .all(authorized)
+        .then_some(())
         .ok_or_else(|| CliError::usage("mount exceeds agent mount policy"))
 }
 
 pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
     path.is_absolute().then(|| {
-        path.components().fold(PathBuf::from("/"), |mut normalized, component| {
-            match component {
-                std::path::Component::ParentDir => { normalized.pop(); }
-                std::path::Component::Normal(part) => normalized.push(part),
-                _ => {}
-            }
-            normalized
-        })
+        path.components()
+            .fold(PathBuf::from("/"), |mut normalized, component| {
+                match component {
+                    std::path::Component::ParentDir => {
+                        normalized.pop();
+                    }
+                    std::path::Component::Normal(part) => normalized.push(part),
+                    _ => {}
+                }
+                normalized
+            })
     })
 }
 
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if mount.source.bytes().any(|byte| byte.is_ascii_control()) {
-        return Err(CliError::usage("agent mount source must not contain control characters"));
+        return Err(CliError::usage(
+            "agent mount source must not contain control characters",
+        ));
     }
     if !Path::new(&mount.source).is_absolute() {
         return Err(CliError::usage("agent mount source must be absolute"));
     }
     if mount.target.bytes().any(|byte| byte.is_ascii_control()) {
-        return Err(CliError::usage("agent mount target must not contain control characters"));
+        return Err(CliError::usage(
+            "agent mount target must not contain control characters",
+        ));
     }
     let Some(target) =
         normalized_absolute_path(Path::new(&mount.target)).map(|path| path.display().to_string())
@@ -148,14 +185,17 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
     if is_protected_agent_mount_target(&target) {
-        return Err(CliError::usage("agent mount target cannot replace sandbox system paths"));
+        return Err(CliError::usage(
+            "agent mount target cannot replace sandbox system paths",
+        ));
     }
     Ok(())
 }
 
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
     const PROTECTED_TARGETS: &[&str] = &[
-        "/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run", "/usr",
+        "/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
+        "/usr",
     ];
 
     PROTECTED_TARGETS
@@ -164,7 +204,9 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
-    Path::new(cwd).is_absolute().then_some(())
+    Path::new(cwd)
+        .is_absolute()
+        .then_some(())
         .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
 }
 
