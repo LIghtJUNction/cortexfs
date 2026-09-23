@@ -56,10 +56,9 @@ pub(crate) fn agent_chat_socket_systemd_command(
 }
 
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
-    if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() != Some("") {
-        return root.to_path_buf();
-    }
-    read_xattr_string(root, "user.cortexfs.backing_path")
+    read_xattr_string(root, "user.cortexfs.abi_path")
+        .filter(|abi| abi.is_empty())
+        .and_then(|_| read_xattr_string(root, "user.cortexfs.backing_path"))
         .map(PathBuf::from)
         .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
         .unwrap_or_else(|| root.to_path_buf())
@@ -89,15 +88,18 @@ pub(crate) fn agent_start_mounts_with_default_source(
 }
 
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    for mount in mounts {
-        if let Ok(relative) = Path::new(&args.cwd).strip_prefix(&mount.source) {
-            return Path::new(&mount.target)
-                .join(relative)
-                .display()
-                .to_string();
-        }
-    }
-    args.cwd.clone()
+    mounts
+        .iter()
+        .find_map(|mount| {
+            let relative = Path::new(&args.cwd).strip_prefix(&mount.source).ok()?;
+            Some(
+                Path::new(&mount.target)
+                    .join(relative)
+                    .display()
+                    .to_string(),
+            )
+        })
+        .unwrap_or_else(|| args.cwd.clone())
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
@@ -113,16 +115,15 @@ pub(crate) fn validate_agent_start_mounts(
     mounts: &[AgentMount],
 ) -> Result<(), CliError> {
     let policy = view.mount_table().entries();
-    let allowed = |mount: &AgentMount| {
-        policy.iter().any(|entry| {
-            entry.source() == mount.source
-                && entry.target() == mount.target
-                && (entry.mode() == cortexfs::MountMode::ReadWrite || mount.mode == "ro")
-        })
-    };
     mounts
         .iter()
-        .all(allowed)
+        .all(|mount| {
+            policy.iter().any(|entry| {
+                entry.source() == mount.source
+                    && entry.target() == mount.target
+                    && (entry.mode() == cortexfs::MountMode::ReadWrite || mount.mode == "ro")
+            })
+        })
         .then_some(())
         .ok_or_else(|| CliError::usage("mount exceeds agent mount policy"))
 }
@@ -134,12 +135,11 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
                 "agent mount {label} must not contain control characters"
             )));
         }
-    }
-    if !Path::new(&mount.source).is_absolute() {
-        return Err(CliError::usage("agent mount source must be absolute"));
-    }
-    if !Path::new(&mount.target).is_absolute() {
-        return Err(CliError::usage("agent mount target must be absolute"));
+        if !Path::new(value).is_absolute() {
+            return Err(CliError::usage(format!(
+                "agent mount {label} must be absolute"
+            )));
+        }
     }
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
@@ -153,27 +153,25 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
 }
 
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
-    const PROTECTED_TARGETS: &[&str] = &[
-        "/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
-        "/usr",
-    ];
-    let target = Path::new(target)
-        .components()
-        .fold(PathBuf::from("/"), |mut normalized, component| {
-            match component {
-                ParentDir => {
-                    normalized.pop();
-                }
-                Normal(part) => normalized.push(part),
-                _ => {}
+    let mut normalized = PathBuf::from("/");
+    for component in Path::new(target).components() {
+        match component {
+            ParentDir => {
+                normalized.pop();
             }
-            normalized
-        })
-        .display()
-        .to_string();
-    PROTECTED_TARGETS
-        .iter()
-        .any(|protected| target == *protected || target.starts_with(&format!("{protected}/")))
+            Normal(part) => normalized.push(part),
+            _ => {}
+        }
+    }
+    match normalized
+        .components()
+        .nth(1)
+        .and_then(|component| component.as_os_str().to_str())
+    {
+        None => true,
+        Some("bin" | "ctx" | "dev" | "etc" | "home" | "lib" | "lib64" | "proc" | "run" | "usr") => true,
+        Some(_) => false,
+    }
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
