@@ -40,11 +40,21 @@ Execution boundary:
 
 ```text
 one backend-neutral process contract: executable/argv, cwd, env, stdio or PTY,
-exit status, cancellation/signals, bounded resources, and authorized mounts
+uid, gid, supplementary groups, umask/mode policy, exit status,
+cancellation/signals, bounded resources, and authorized mounts
+identity and mount authority derive from the agent object plus CortexFS policy
 backend-specific spelling stays in thin launch profiles/adapters
-Codex CLI, Claude Code, and Pi are first-class hosted CLIs
-Antigravity CLI is the current Google-side extension target
+Codex CLI, Claude Code, and Pi are first-class target hosted CLIs
+Antigravity CLI is the current Google-side target extension
 MCP and other open protocols are reused directly instead of wrapped in a new wire protocol
+```
+
+Implementation status:
+
+```text
+target does not mean implemented: generic hosted-CLI launch profiles are still migrating under #318
+current executable agents may still use the legacy sdk-envelope-v1 runtime path
+new work must close that migration gap instead of presenting missing adapters as available
 ```
 
 Compatibility boundary:
@@ -93,10 +103,26 @@ interaction-abi.md      frontend/runtime bidirectional interaction frames
 paths.md                public path constants and filesystem/socket path ABI
 ```
 
-`agent-runtime.md` still documents compatibility behavior that exists in the
-current implementation. It is not the target architecture for new Agent
-features. Migration toward hosted Agent CLIs is tracked in issue #318; changes
-to the legacy runtime should reduce or preserve its surface, not extend it.
+`agent-runtime.md` documents compatibility behavior in the current
+implementation. It is not the target architecture for new Agent features.
+Migration toward hosted Agent CLIs is tracked in issue #318; changes to the
+legacy runtime should reduce or preserve its surface, not extend it.
+
+The legacy document still contains historical statements that have already
+been superseded by implementation migrations. In particular, the default
+workspace `.git` read-only over-mount described there was removed by #320: an
+explicitly authorized read-write workspace now keeps ordinary Git metadata
+writable, while path-level policy can still narrow `/workspace/.git` to
+read-only and out-of-tree linked-worktree metadata still requires separate
+authority. Such superseded statements are migration inventory, not preserved
+compatibility requirements.
+
+During #318, [architecture.md](../architecture.md) and
+[internal-architecture.md](../internal-architecture.md) are also being narrowed
+from the former self-hosted Agent-loop design. Any remaining text in those
+documents that assigns provider/model/tool-loop/session authority to CortexFS
+is legacy migration inventory. This specification, `AGENTS.md`, and the current
+implementation take precedence until those sections are removed.
 
 ## External references
 
