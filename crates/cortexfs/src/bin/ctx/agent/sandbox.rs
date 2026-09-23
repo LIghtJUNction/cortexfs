@@ -26,38 +26,11 @@ pub(crate) fn agent_start_systemd_command(
         default_workspace: args.default_workspace,
     };
     let mut command = terminal_command(&request, view, socket, unit);
-    let fuse_root = read_xattr_string(root, "user.cortexfs.abi_path").as_deref() == Some("")
-        && open_plain_directory(root)
-            .and_then(|directory| cortexfs::support::plain::is_fuse(&directory))
-            .unwrap_or(false);
-    make_ctx_projection_writable(&mut command.args, root, fuse_root);
     if !args.command.is_empty() {
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
     command
-}
-
-fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: bool) {
-    if fuse_root {
-        let expected = [
-            "--ro-bind".to_owned(),
-            root.display().to_string(),
-            cortexfs_paths::ctx_root().display().to_string(),
-        ];
-        let index = args.windows(3).position(|window| window == expected);
-        if let Some(flag) = index.and_then(|index| args.get_mut(index)) {
-            flag.replace_range(.., "--bind");
-        }
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn fuse_ctx_projection_uses_writable_bind() {
-    let mut args = ["--ro-bind", "/cortexfs-fuse", "/ctx"].map(str::to_owned);
-    make_ctx_projection_writable(&mut args, Path::new("/cortexfs-fuse"), true);
-    assert_eq!(args.first().map(String::as_str), Some("--bind"));
 }
 
 #[cfg(test)]
