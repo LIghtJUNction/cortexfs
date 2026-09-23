@@ -39,6 +39,7 @@ ctx / supervisor
       |
       +-- derive uid/gid/groups + policy
       +-- build authorized mounts/sockets
+      +-- derive network namespace / egress authority
       +-- apply resource ceilings
       +-- choose stdio or PTY
       |
@@ -80,14 +81,18 @@ gid
 supplementary groups
 umask / effective mode policy
 authorized mounts and sockets
+network namespace / egress authorization
 resource limits
 exit status
 signals / cancellation
 ```
 
-Identity is not optional metadata. The launcher derives it from the agent
-object and effective CortexFS policy before spawning the child. A launch helper
-that merely inherits the operator's identity does not satisfy this contract.
+Identity, mount/socket authority, and network authority are not optional
+metadata. The launcher derives them from the agent object and effective
+CortexFS policy before spawning the child. A launch helper that merely inherits
+the operator's identity or unrestricted host network does not satisfy this
+contract. Default-deny policy therefore remains meaningful for provider-backed
+CLIs instead of being bypassed at process launch.
 
 Backend-specific flags stay in launch profiles/adapters. Core code should be
 written against the process contract above, not `match "codex"` or equivalent.
@@ -100,20 +105,29 @@ Dependencies point downward only:
 application / bins / channels
         |
         v
-execution + object/runtime compatibility
+execution / compatibility runtime
         |
         v
-FUSE / protocol adapters as independent peers where appropriate
+FUSE + protocol adapters
         |
         v
-support / ABI / paths / plain data
+foundation ABI / paths / plain data / support
 ```
+
+The foundation layer contains stable path/object ABI data types and other plain
+contracts that may be shared by both FUSE and execution code. Runtime object
+execution, policy orchestration, executors, launchers, and compatibility loops
+belong above FUSE. This separation is what keeps `fuse -> executor` illegal
+while still allowing FUSE to understand stable object/path schemas.
 
 Concrete rules:
 
 - foundation code may not import runtime, FUSE, or binaries;
 - protocol conversion may not import Agent/session orchestration;
-- FUSE may use object/path/support contracts but not command-line UI;
+- FUSE may import only foundation object/path/support contracts; it may not
+  import executors, launch/runtime orchestration, or command-line UI;
+- execution/runtime code may depend on foundation contracts and compose FUSE
+  through its public boundary, but FUSE never depends back on execution;
 - binaries compose library layers; library code never imports `bin/*`;
 - channel/platform crates stop at neutral socket/runtime-client boundaries;
 - launch profiles may depend on generic process/ABI types but not on another
@@ -129,15 +143,18 @@ The intended gravity is:
 
 ```text
 Foundation
-  paths / ABI types
+  paths / stable object ABI types / plain data
   support: fs, jsonl, layout, process helpers
   module contract
 
+FUSE + protocol boundary
+  FUSE projection over foundation ABI
+  protocol adapters over foundation/open contracts
+
 Execution boundary
-  object definitions and policy
-  process launch / receipts / resources
+  object policy evaluation and compatibility runtime
+  process launch / receipts / resources / network authority
   PTY + terminal broker
-  FUSE projection
 
 Edge adapters
   MCP
@@ -168,6 +185,12 @@ Never grant write access by binding the backing generation/storage tree around
 FUSE. That would make permission checks observational instead of authoritative.
 Writable Agent paths must remain writable through the FUSE boundary or another
 explicitly authorized Unix object.
+
+The migration is not complete yet: the current Agent sandbox still projects
+`/ctx` read-only even though the host FUSE mount is read-write. Agent-visible
+writable `/ctx` is therefore a target until the sandbox projection is changed
+to route authorized writes through FUSE without exposing writable backing
+storage.
 
 Atomic state updates use the repository's existing same-directory temporary
 file plus rename convention. Do not add a second commit/control protocol.
@@ -213,8 +236,10 @@ status. Do not reinterpret backend failures into provider-specific core enums
 unless a stable external contract requires it.
 
 No background watcher, reverse-dial control plane, or hot-reload manager is
-introduced. Git commit or process restart remains the development/config
-boundary.
+introduced. Git commit is the sole development/config activation boundary.
+Process restart is ordinary lifecycle only and must not make uncommitted
+development/config changes authoritative or activate them as an alternative to
+a commit.
 
 ## 10. Sessions and durable facts
 
@@ -256,6 +281,7 @@ Errors should identify the boundary that failed:
 path/layout violation
 identity/policy denial
 mount projection failure
+network-policy / namespace failure
 process spawn failure
 PTY/broker failure
 resource-limit failure
@@ -276,8 +302,10 @@ Prefer behavior at the real boundary:
 - stdio and PTY modes preserve exit status;
 - signals/cancel terminate the owned child without orphans;
 - unauthorized mounts fail closed;
+- network authority is policy-derived: denied launches remain isolated and
+  explicitly authorized egress does not inherit broader host network access;
 - `/ctx` allows writes where policy allows and rejects only the intended
-  read-only paths;
+  read-only paths once Agent-visible writable FUSE projection is migrated;
 - read-write workspaces preserve normal `.git` semantics;
 - out-of-tree linked-worktree metadata remains inaccessible without separate
   authorization;
@@ -320,6 +348,7 @@ Next:
 - keep default `tsh` compatibility while migration proceeds;
 - then make authorized `/ctx` writes reach FUSE without exposing writable
   backing storage;
+- carry policy-derived network authority through the generic launch boundary;
 - retire legacy provider/model/tool/session runtime pieces as their consumers
   disappear.
 
