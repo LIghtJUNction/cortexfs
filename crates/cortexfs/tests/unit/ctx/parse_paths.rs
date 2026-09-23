@@ -13,4 +13,5 @@ include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
 include!("parse_paths/abi_detection.rs");
 
+#[allow(clippy::type_complexity)]
 const _: fn(&AgentStartArgs, &[AgentMount]) -> Option<Vec<String>> = agent_bwrap_test_args;
