@@ -1,6 +1,7 @@
-use std::path::Component::{Normal, ParentDir, Prefix};
+use std::path::Component::{Normal, ParentDir};
 
 use crate::*;
+
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -31,6 +32,7 @@ pub(crate) fn agent_start_systemd_command(
     }
     command
 }
+
 #[cfg(test)]
 pub(crate) fn agent_chat_socket_systemd_command(
     root: &Path,
@@ -52,6 +54,7 @@ pub(crate) fn agent_chat_socket_systemd_command(
         Path::new(cortexfs::support::command::CORTEXFS_AGENT_RUNTIME),
     )
 }
+
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
     if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() != Some("") {
         return root.to_path_buf();
@@ -61,12 +64,14 @@ pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
         .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
         .unwrap_or_else(|| root.to_path_buf())
 }
+
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
     match lifecycle {
         cortexfs::ChildLifecycle::Owned => "owned",
         cortexfs::ChildLifecycle::Temp => "temp",
     }
 }
+
 pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
@@ -82,17 +87,19 @@ pub(crate) fn agent_start_mounts_with_default_source(
     mounts.extend(args.mounts.iter().cloned());
     mounts
 }
+
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    mounts
-        .iter()
-        .find_map(|mount| {
-            Path::new(&args.cwd)
-                .strip_prefix(&mount.source)
-                .ok()
-                .map(|relative| Path::new(&mount.target).join(relative).display().to_string())
-        })
-        .unwrap_or_else(|| args.cwd.clone())
+    for mount in mounts {
+        if let Ok(relative) = Path::new(&args.cwd).strip_prefix(&mount.source) {
+            return Path::new(&mount.target)
+                .join(relative)
+                .display()
+                .to_string();
+        }
+    }
+    args.cwd.clone()
 }
+
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
     mounts
         .iter()
@@ -100,6 +107,7 @@ pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<Stri
         .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
         .map(|mount| mount.source.clone())
 }
+
 pub(crate) fn validate_agent_start_mounts(
     view: &AgentRuntimeView,
     mounts: &[AgentMount],
@@ -118,20 +126,7 @@ pub(crate) fn validate_agent_start_mounts(
         .then_some(())
         .ok_or_else(|| CliError::usage("mount exceeds agent mount policy"))
 }
-pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
-    let mut normalized = path.is_absolute().then(|| PathBuf::from("/"))?;
-    for component in path.components() {
-        match component {
-            ParentDir => {
-                normalized.pop();
-            }
-            Normal(part) => normalized.push(part),
-            Prefix(_) => return None,
-            _ => {}
-        }
-    }
-    Some(normalized)
-}
+
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     for (value, label) in [(&mount.source, "source"), (&mount.target, "target")] {
         if value.bytes().any(|byte| byte.is_ascii_control()) {
@@ -143,38 +138,56 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !Path::new(&mount.source).is_absolute() {
         return Err(CliError::usage("agent mount source must be absolute"));
     }
-    let Some(target) = normalized_absolute_path(Path::new(&mount.target)) else {
+    if !Path::new(&mount.target).is_absolute() {
         return Err(CliError::usage("agent mount target must be absolute"));
-    };
+    }
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
-    if is_protected_agent_mount_target(&target.display().to_string()) {
+    if is_protected_agent_mount_target(&mount.target) {
         return Err(CliError::usage(
             "agent mount target cannot replace sandbox system paths",
         ));
     }
     Ok(())
 }
+
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
     const PROTECTED_TARGETS: &[&str] = &[
         "/", "/bin", CTX_ROOT, "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
         "/usr",
     ];
+    let target = Path::new(target)
+        .components()
+        .fold(PathBuf::from("/"), |mut normalized, component| {
+            match component {
+                ParentDir => {
+                    normalized.pop();
+                }
+                Normal(part) => normalized.push(part),
+                _ => {}
+            }
+            normalized
+        })
+        .display()
+        .to_string();
     PROTECTED_TARGETS
         .iter()
         .any(|protected| target == *protected || target.starts_with(&format!("{protected}/")))
 }
+
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
     Path::new(cwd)
         .is_absolute()
         .then_some(())
         .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
 }
+
 #[cfg(test)]
 pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
     format!("cortexfs-agent-{name}-{}-chat", stable_path_hash(root))
 }
+
 pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
@@ -189,6 +202,7 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
         name,
     ))
 }
+
 pub(crate) fn reset_agent_chat_unit(unit: &str) {
     for target in [format!("{unit}.service"), format!("{unit}.socket")] {
         for verb in ["stop", "reset-failed"] {
@@ -199,6 +213,7 @@ pub(crate) fn reset_agent_chat_unit(unit: &str) {
         }
     }
 }
+
 pub(crate) fn stable_path_hash(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     let path = absolute_existing_path(path).unwrap_or_else(|_error| path.to_path_buf());
