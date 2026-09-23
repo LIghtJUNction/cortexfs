@@ -48,32 +48,24 @@ pub(super) fn request(request: &ModelRequest) -> Result<Vec<u8>, ConversionError
         context(&mut root, reference)?;
     }
     crate::encode::options(&mut root, request);
-    let value = Value::Object(root);
-    crate::encode::bytes(WireProtocol::OpenAiResponses, &value)
+    crate::encode::bytes(WireProtocol::OpenAiResponses, &Value::Object(root))
 }
 
 fn context(
     root: &mut Map<String, Value>,
     reference: &ContextReference,
 ) -> Result<(), ConversionError> {
-    if reference.namespace == "openai.responses.previous_response_id" {
-        root.insert(
-            "previous_response_id".to_owned(),
-            Value::String(reference.value.clone()),
-        );
-        return Ok(());
+    let field = match reference.namespace.as_str() {
+        "openai.responses.previous_response_id" => Some("previous_response_id"),
+        "openai.responses.conversation" => Some("conversation"),
+        _ => None,
     }
-    if reference.namespace == "openai.responses.conversation" {
-        root.insert(
-            "conversation".to_owned(),
-            Value::String(reference.value.clone()),
-        );
-        return Ok(());
-    }
-    Err(ConversionError::UnsupportedField {
+    .ok_or_else(|| ConversionError::UnsupportedField {
         protocol: WireProtocol::OpenAiResponses,
         field: "foreign context reference".to_owned(),
-    })
+    })?;
+    root.insert(field.to_owned(), Value::String(reference.value.clone()));
+    Ok(())
 }
 
 fn items(source: &Message) -> Result<Vec<Value>, ConversionError> {

@@ -22,7 +22,6 @@ mod tests {
     const GEMINI_RESPONSE: &[u8] = br#"{"responseId":"gemini-run","modelVersion":"gemini-model","candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"TOO_MANY_TOOL_CALLS"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}"#;
     const ANTHROPIC_RESPONSE: &[u8] = br#"{"id":"anthropic-run","model":"claude-model","role":"assistant","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#;
     const CHAT_TOOL_RESPONSE: &[u8] = br#"{"id":"chat-tool-run","model":"chat-model","choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"rust\"}"}}]},"finish_reason":"tool_calls"}]}"#;
-
     fn cases() -> [(WireProtocol, &'static [u8]); 4] {
         [
             (WireProtocol::OpenAiChat, CHAT),
@@ -143,24 +142,31 @@ mod tests {
     }
     #[test]
     fn responses_context_reference_is_semantic_metadata() -> TestResult {
+        for input in [
+            br#"{"model":"responses-model","conversation":"conv_42","input":"next"}"#.as_slice(),
+            br#"{"model":"responses-model","conversation":{"id":"conv_42"},"input":"next"}"#
+                .as_slice(),
+        ] {
+            let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
+            assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
+            let reference = request.context.reference.as_ref();
+            assert_eq!(reference.map(|item| item.value.as_str()), Some("conv_42"));
+            assert_eq!(
+                reference.map(|item| item.namespace.as_str()),
+                Some("openai.responses.conversation")
+            );
+            let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
+            let encoded = String::from_utf8(encoded)?;
+            assert!(encoded.contains("\"conversation\":\"conv_42\""));
+        }
         let input =
             br#"{"model":"responses-model","previous_response_id":"resp_42","input":"next"}"#;
         let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
-        assert_eq!(request.context.ownership, ContextOwnership::ProviderOwned);
-        assert_eq!(
-            request
-                .context
-                .reference
-                .as_ref()
-                .map(|item| item.value.as_str()),
-            Some("resp_42")
-        );
+        let reference = request.context.reference.as_ref();
+        assert_eq!(reference.map(|item| item.value.as_str()), Some("resp_42"));
         let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
-        let value: Value = serde_json::from_slice(&encoded)?;
-        assert_eq!(
-            value.get("previous_response_id").and_then(Value::as_str),
-            Some("resp_42")
-        );
+        let encoded = String::from_utf8(encoded)?;
+        assert!(encoded.contains("\"previous_response_id\":\"resp_42\""));
         assert!(encode_model_request(WireProtocol::OpenAiChat, &request).is_err());
         Ok(())
     }
@@ -212,7 +218,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn response_usage_overflow_returns_a_conversion_error() -> TestResult {
         for output in [0_u64, 1] {
@@ -246,7 +251,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn response_conversion_preserves_terminal_status() -> TestResult {
         for status in [EventStatus::Ok, EventStatus::Error, EventStatus::Cancelled] {
@@ -275,7 +279,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn responses_native_failure_status_is_not_success() -> TestResult {
         for (native, status) in [
@@ -306,7 +309,6 @@ mod tests {
         }
         Ok(())
     }
-
     #[test]
     fn direct_route_keeps_image_and_tool_schema() -> TestResult {
         let input = br#"{"model":"gemini-model","messages":[{"role":"user","content":[{"type":"text","text":"find"},{"type":"image_url","image_url":{"url":"https://example.invalid/a.png"}}]}],"tools":[{"type":"function","function":{"name":"lookup","description":"lookup data","parameters":{"type":"object"}}}]}"#;
@@ -318,7 +320,6 @@ mod tests {
         assert!(value.get("contents").is_some());
         Ok(())
     }
-
     #[test]
     fn response_tool_call_becomes_a_normalized_event() -> TestResult {
         let events = decode_response_events(WireProtocol::OpenAiChat, CHAT_TOOL_RESPONSE)?;
@@ -330,7 +331,6 @@ mod tests {
         encode_response_events(WireProtocol::Anthropic, &events)?;
         Ok(())
     }
-
     #[test]
     fn output_text_fallback_preserves_provider_event_order() -> TestResult {
         let chat = decode_response_events(
@@ -353,7 +353,6 @@ mod tests {
         ));
         Ok(())
     }
-
     #[test]
     fn malformed_native_json_returns_protocol_error() {
         let result = decode_model_request(WireProtocol::OpenAiChat, b"not-json");
