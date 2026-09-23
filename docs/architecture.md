@@ -13,7 +13,7 @@ CortexFS is a Unix/FUSE execution substrate, not a second Agent framework.
 agent objects define identity, authority, visible paths, and launch boundaries.
 hosted Agent CLIs own their model/provider auth, session/context, approvals,
 tool loop, compaction, and provider-specific behavior.
-CortexFS owns process, identity, mount, path, resource, socket, and FUSE limits.
+CortexFS owns process, identity, mount, path, network, resource, socket, and FUSE limits.
 MCP and other open protocols are reused directly when they already fit.
 ```
 
@@ -32,9 +32,9 @@ skills, project rules, prompts, and CLI config remain ordinary visible files
 ```
 
 Forbidden root namespaces include `skill/`, `memory/`, `mcp/`, `workflow/`,
-`job/`, `hook/`, `audit/`, and `control/`. Those concepts may exist as ordinary
-files, object-local state, or external protocol endpoints; they are not new
-root classes.
+`chan/`, `job/`, `hook/`, `audit/`, and `control/`. Those concepts may exist as
+ordinary files, object-local state, or external protocol endpoints; they are not
+new root classes.
 
 ## Authority model
 
@@ -45,6 +45,7 @@ agent definition
   -> uid/gid/supplementary groups
   -> mode/umask and path policy
   -> authorized mounts and sockets
+  -> policy-derived network namespace / egress authority
   -> cgroup/resource ceilings
   -> child process
 ```
@@ -71,6 +72,7 @@ stdin/stdout/stderr or PTY
 uid + gid + supplementary groups
 umask/mode policy
 authorized mounts and sockets
+policy-derived network namespace / egress authorization
 resource ceilings
 exit status
 signals + cancellation
@@ -89,8 +91,8 @@ protocol.
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
-| Hosted Agent CLI | model/provider selection, auth, Agent loop, context/session semantics, approval UX, CLI-native tools | host filesystem authority outside projected capabilities |
-| CortexFS execution boundary | identity, cwd/env, stdio/PTTY, signals, mounts, sockets, resource limits, FUSE projection, hard policy ceiling | provider-specific Agent intelligence or a duplicate loop |
+| Hosted Agent CLI | model/provider selection, auth, Agent loop, context/session semantics, approval UX, CLI-native tools | host filesystem or network authority outside projected capabilities |
+| CortexFS execution boundary | identity, cwd/env, stdio/PTTY, signals, mounts, sockets, network authority, resource limits, FUSE projection, hard policy ceiling | provider-specific Agent intelligence or a duplicate loop |
 | FUSE `/ctx` | inspectable object classes and authorized read/write projection | provider or framework configuration mirrors |
 | Frontends / channels | presentation, transport adaptation, user input/output | a second process or Agent authority model |
 
@@ -107,7 +109,7 @@ user / frontend
       v
 ctx launch / supervisor
       |
-      +-- apply identity, policy, mounts, resources
+      +-- apply identity, policy, mounts, network authority, resources
       |
       +-- stdio or PTY via ctxterm when needed
       |
@@ -115,6 +117,7 @@ ctx launch / supervisor
 Codex | Claude Code | Pi | Antigravity | other compatible CLI
       |
       +-- reads/writes authorized workspace and /ctx paths
+      +-- connects only through policy-authorized network/socket paths
       +-- connects to explicitly projected MCP/tools/sockets
       +-- exits with ordinary process status
 ```
