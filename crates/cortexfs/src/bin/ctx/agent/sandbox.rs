@@ -1,3 +1,5 @@
+use std::path::Component::{Normal, ParentDir, Prefix};
+
 use crate::*;
 
 pub(crate) fn agent_start_systemd_command(
@@ -54,15 +56,13 @@ pub(crate) fn agent_chat_socket_systemd_command(
 }
 
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
-    if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() == Some("")
-        && let Some(backing) =
-            read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
-        && backing.is_absolute()
-        && open_plain_directory(&backing).is_ok()
-    {
-        return backing;
+    if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() != Some("") {
+        return root.to_path_buf();
     }
-    root.to_path_buf()
+    read_xattr_string(root, "user.cortexfs.backing_path")
+        .map(PathBuf::from)
+        .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
+        .unwrap_or_else(|| root.to_path_buf())
 }
 
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
@@ -76,17 +76,15 @@ pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
 ) -> Vec<AgentMount> {
-    let mut mounts = args.mounts.clone();
+    let mut mounts = Vec::with_capacity(args.mounts.len() + 1);
     if args.default_workspace {
-        mounts.insert(
-            0,
-            AgentMount {
-                source: default_source.display().to_string(),
-                target: "/workspace".to_owned(),
-                mode: "rw".to_owned(),
-            },
-        );
+        mounts.push(AgentMount {
+            source: default_source.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        });
     }
+    mounts.extend(args.mounts.iter().cloned());
     mounts
 }
 
@@ -115,32 +113,33 @@ pub(crate) fn validate_agent_start_mounts(
     mounts: &[AgentMount],
 ) -> Result<(), CliError> {
     let policy = view.mount_table().entries();
-    if mounts.iter().any(|mount| {
-        !policy.iter().any(|entry| {
+    let allowed = |mount: &AgentMount| {
+        policy.iter().any(|entry| {
             entry.source() == mount.source
                 && entry.target() == mount.target
                 && (entry.mode() == cortexfs::MountMode::ReadWrite || mount.mode == "ro")
         })
-    }) {
-        return Err(CliError::usage("mount exceeds agent mount policy"));
-    }
-    Ok(())
+    };
+    mounts
+        .iter()
+        .all(allowed)
+        .then_some(())
+        .ok_or_else(|| CliError::usage("mount exceeds agent mount policy"))
 }
 
 pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
-    path.is_absolute().then(|| {
-        path.components()
-            .fold(PathBuf::from("/"), |mut normalized, component| {
-                match component {
-                    std::path::Component::ParentDir => {
-                        normalized.pop();
-                    }
-                    std::path::Component::Normal(part) => normalized.push(part),
-                    _ => {}
-                }
-                normalized
-            })
-    })
+    let mut normalized = path.is_absolute().then(|| PathBuf::from("/"))?;
+    for component in path.components() {
+        match component {
+            ParentDir => {
+                normalized.pop();
+            }
+            Normal(part) => normalized.push(part),
+            Prefix(_) => return None,
+            _ => {}
+        }
+    }
+    Some(normalized)
 }
 
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
