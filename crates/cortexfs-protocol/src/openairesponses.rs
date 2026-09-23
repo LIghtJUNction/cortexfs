@@ -10,7 +10,7 @@ pub struct Request<'a> {
     pub model: Cow<'a, str>,
     #[serde(default, borrow)]
     pub previous_response_id: Option<Cow<'a, str>>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "deserialize_conversation")]
     pub conversation: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
     pub input: Option<Input<'a>>,
@@ -24,6 +24,30 @@ pub struct Request<'a> {
     pub max_output_tokens: Option<u32>,
     #[serde(default, borrow)]
     pub extra: BTreeMap<Cow<'a, str>, &'a RawValue>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged, bound(deserialize = "'de: 'a"))]
+enum Conversation<'a> {
+    #[serde(borrow)]
+    Id(Cow<'a, str>),
+    Object {
+        #[serde(borrow)]
+        id: Cow<'a, str>,
+    },
+}
+
+fn deserialize_conversation<'de, D>(
+    deserializer: D,
+) -> Result<Option<Cow<'de, str>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<Conversation<'de>>::deserialize(deserializer).map(|value| {
+        value.map(|value| match value {
+            Conversation::Id(id) | Conversation::Object { id } => id,
+        })
+    })
 }
 
 /// String shorthand or structured Responses input items.
