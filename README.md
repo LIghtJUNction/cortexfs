@@ -11,14 +11,21 @@
   <a href="https://github.com/LIghtJUNction/cortexfs/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-2A8F73"></a>
 </p>
 
-**A durable, inspectable agent runtime for Linux.** CortexFS uses FUSE to make
-models, agents, tools, channels, and session facts available through a small
-`/ctx` filesystem ABI. Rust processes enforce authority and execute work;
-ordinary files expose the durable facts needed to inspect, resume, and audit it.
+**A Unix/FUSE execution substrate for existing Agent CLIs.** CortexFS exposes a
+small `/ctx` filesystem ABI and a policy-bound Linux process boundary so tools
+such as OpenAI Codex CLI, Anthropic Claude Code, Pi, and Antigravity can run
+without CortexFS reimplementing their model loop, provider auth, session logic,
+context compaction, approval UX, or tool orchestration.
+
+The hosted-CLI migration is tracked in
+[#318](https://github.com/LIghtJUNction/cortexfs/issues/318). The target
+architecture is normative, but generic launch profiles are still being migrated;
+current releases may still contain compatibility paths from the former
+self-hosted runtime.
 
 ```text
-/ctx/model     provider-neutral inference objects
-/ctx/agent     policy-bound agent definitions
+/ctx/model     compatibility model objects and inspectable facts
+/ctx/agent     policy-bound execution principals
 /ctx/tool      governed capability endpoints
 /ctx/channel   channel state and channel-local tools
 /ctx/home      per-UID durable state
@@ -27,60 +34,77 @@ ordinary files expose the durable facts needed to inspect, resume, and audit it.
 
 ## Core properties
 
-- Session history is append-only `messages.jsonl` and `events.jsonl`; prompt
-  context is disposable and rebuildable.
-- Authority comes from Linux identity, mount visibility, path checks, policy,
-  and host-owned secrets—never prompts or skills.
-- Agents use one portable tool path, `tsh`, and see only permitted tools.
-- Providers, channels, and extensions use narrow Rust crates and versioned
-  Unix-socket ABIs instead of a monolithic agent framework.
+- `/ctx` is a read-write FUSE filesystem overall. Individual paths may be
+  read-only by Unix/FUSE policy; backing storage must never be exposed as a
+  writable bypass around FUSE.
+- Authority comes from Linux identity, mount/path visibility, network policy,
+  sockets, resource limits, and CortexFS policy—never prompts, skills, or model
+  output.
+- Hosted Agent CLIs own provider/model authentication, Agent loops,
+  session/context semantics, compaction, approvals, and CLI-native tools.
+- CortexFS owns the execution ceiling: executable/argv, cwd/env, stdio or PTY,
+  uid/gid/groups, umask/mode, authorized mounts/sockets, policy-derived network
+  authority, resource limits, exit status, signals, and cancellation.
+- Backend differences stay in thin launch profiles/adapters. Core code must not
+  grow provider-specific Agent branches, registries, or a second wire protocol.
+- Stable root/path ABI remains small and Unix-shaped. There is no parallel
+  `workflow`, `mcp`, `skill`, `memory`, `chan`, or provider root.
 
 Read the normative [specification](docs/spec/README.md),
 [architecture](docs/architecture.md), and
 [internal architecture](docs/internal-architecture.md) before production use.
 
-## Models, authentication, and metadata
+## Hosted CLI direction
 
-Provider configuration is host state under `/etc/cortexfs/providers.d/*.json`.
-Credentials belong only in the root-owned CortexFS secret store; they never
-appear in `/ctx`, model controls, agent environments, audit errors, or logs.
+The first target hosted CLIs are:
 
-```bash
-sudo ctx provider preset install codex
-ctx auth methods codex
-sudo ctx auth login codex --profile subscription
-sudo ctx auth status codex --profile subscription
+- [OpenAI Codex CLI](https://github.com/openai/codex)
+- Anthropic Claude Code
+- [Pi](https://github.com/earendil-works/pi)
+- Google Antigravity CLI as the current Google-side extension target
 
-# API keys are read from stdin and stored as a named profile.
-printf '%s' "$MY_PROVIDER_KEY" | sudo ctx auth login openai \
-  --method api-key --stdin --profile work
-```
+Pi is also a design reference for small cores and clear boundaries; it is not a
+feature checklist. Omarchy is the primary desktop/development validation
+environment, while implementations should remain ordinary Arch/Linux rather
+than add Omarchy-specific branches in core.
 
-The provider-auth boundary supports API keys, Authorization Code + PKCE, and
-device-code flows. Provider adapters own vendor request shapes; model objects
-remain provider-neutral. See the [Model ABI](docs/spec/model-abi.md).
+CortexFS should reuse each CLI's existing non-interactive or interactive modes,
+JSON/JSONL or RPC surfaces, resume/session behavior, MCP support, authentication,
+and approval model. If a capability can be expressed as a Unix process contract
+or an open protocol, CortexFS should not wrap it in a new private protocol.
 
-`cortexfs-metadatas` dynamically fetches and atomically caches
-[models.dev/catalog.json](https://models.dev/catalog.json). It normalizes limits,
-modalities, tool calling, reasoning, and lifecycle facts while retaining exact
-provider-serving and model-only records (including benchmarks and weights).
-No provider model table is hardcoded in Rust; missing or invalid cache facts
-stay **unknown**.
-
-## Channels and extensions
+## Tools, channels, and open protocols
 
 `cortexfs-channels` defines the generic message, receipt, effect, command, and
 `cortexfs.channel.socket/v1` boundary. Platform adapters own their credentials,
-rate limits, retries, uploads, and WebSocket lifetimes.
+rate limits, retries, uploads, and transport lifetimes.
 
-`cortexfs-channel-sdk` is the Rust SDK for a process-isolated adapter:
-implement `ChannelService`, run `ChannelRuntime`, and use `ChannelSender` from
-the platform receive loop. Discord is the first reference implementation with
-gateway input, per-UID session routing, Unix-socket tool control, idempotent
-embed/file/thread/component operations, and redacted errors.
-
-See [channels.md](docs/channels.md) and the
+`cortexfs-channel-sdk` is the Rust SDK for a process-isolated adapter. See
+[channels.md](docs/channels.md) and the
 [Channel ABI](docs/spec/channel-abi.md).
+
+For external tool servers, prefer MCP directly when MCP already fits. For local
+execution, prefer Unix files, sockets, stdio/PTTY, process status, signals, and
+mode/identity semantics. OAuth 2.0/OIDC belongs to hosted CLI/provider
+authentication flows rather than a new CortexFS root or Agent framework.
+
+## Compatibility runtime
+
+The repository still contains compatibility code from the former self-hosted
+Agent runtime, including `cortexfs-protocol`, model/provider adapters, Agent SDK
+loop behavior, object-runner loops, compaction/session orchestration, and
+interaction-runtime paths. These components remain only while real consumers
+need them.
+
+New work must not extend those components to match features already owned by
+Codex, Claude Code, Pi, Antigravity, or another hosted CLI. Migration work should
+prefer deletion, responsibility narrowing, and thin process adapters.
+
+Legacy provider authentication commands and model objects may remain available
+for compatibility, but they are not the target ownership model for new hosted
+CLI integrations. Hosted CLIs should keep their own supported authentication
+and provider behavior unless a concrete compatibility requirement proves a
+CortexFS boundary is necessary.
 
 ## Evaluation
 
@@ -88,30 +112,6 @@ The optional `cortexfs-futureagi` adapter turns a validated CortexFS ATIF
 trajectory into Future AGI evaluation inputs or submits it to a compatible
 Future AGI endpoint. It is explicit and one-shot: no background uploader and
 no additional filesystem ABI. See [Future AGI evaluation](docs/futureagi.md).
-
-## Eve-compatible direction and Pi-level elegance
-
-CortexFS targets functional compatibility with platforms such as
-[Vercel Eve](https://vercel.com/eve), while retaining Rust and the filesystem
-ABI: durable sessions, tools, skills, sandboxed execution, channels, dynamic
-capabilities, subagents, approval pauses, and observable events map onto
-existing agent/session/tool/channel boundaries. It does not introduce parallel
-`workflow`, `hook`, `plugin`, or `memory` roots.
-
-Internally, elegance tracks the Pi toolkit
-([earendil-works/pi](https://github.com/earendil-works/pi)): `cortexfs-protocol`
-stays the provider-neutral IR (no HTTP, secrets, or agent loop);
-agent runtime + object runner own the minimal tool loop and event facts;
-`ctx`, terminals, and channel adapters are replaceable surfaces around the
-same core. See [architecture.md](docs/architecture.md) and
-[internal-architecture.md](docs/internal-architecture.md).
-
-`cortexfs-protocol` stays deliberately narrow: a pure request/event IR and
-converter for OpenAI Chat/Responses, Anthropic Messages, and Gemini. It has no
-HTTP client, credentials, retry logic, filesystem access, or agent loop. This
-adopts useful provider-protocol ideas from libraries such as
-[genai](https://crates.io/crates/genai) without turning CortexFS into a
-multi-purpose client facade.
 
 ## Install and develop
 
@@ -131,5 +131,6 @@ scripts/test.sh cargo test --workspace
 ```
 
 Continue with [getting started](docs/getting-started.md),
-[using CortexFS](docs/using-cortexfs.md), and the
+[using CortexFS](docs/using-cortexfs.md),
+[extending CortexFS](docs/developing-cortexfs.md), and the
 [specification index](docs/spec/README.md).
