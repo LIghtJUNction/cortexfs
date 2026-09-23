@@ -57,10 +57,7 @@ mod tests {
             text: "hi".to_owned(),
         };
         let value = serde_json::to_value(event).unwrap_or_default();
-        assert_eq!(
-            value.get("type").and_then(Value::as_str),
-            Some("text_delta")
-        );
+        assert_eq!(value.get("type").and_then(Value::as_str), Some("text_delta"));
         assert_eq!(value.get("run").and_then(Value::as_str), Some("run-1"));
     }
     #[test]
@@ -161,16 +158,21 @@ mod tests {
             let conversation = value.get("conversation").and_then(Value::as_str);
             assert_eq!(conversation, Some("conv_42"));
         }
+        let input = br#"{"model":"responses-model","previous_response_id":"resp_42","input":"next"}"#;
+        let request = decode_model_request(WireProtocol::OpenAiResponses, input)?;
+        let reference = request.context.reference.as_ref();
+        assert_eq!(reference.map(|item| item.value.as_str()), Some("resp_42"));
+        let encoded = encode_model_request(WireProtocol::OpenAiResponses, &request)?;
+        let encoded = String::from_utf8(encoded)?;
+        assert!(encoded.contains("\"previous_response_id\":\"resp_42\""));
+        assert!(encode_model_request(WireProtocol::OpenAiChat, &request).is_err());
         Ok(())
     }
     #[test]
     fn invalid_provider_context_is_rejected_before_encoding() {
         let mut request = ModelRequest::new("model", vec![Message::user("hi")]);
         request.context.ownership = ContextOwnership::ProviderOwned;
-        assert!(matches!(
-            request.validate(),
-            Err(ProtocolError::InvalidContext(_))
-        ));
+        assert!(matches!(request.validate(), Err(ProtocolError::InvalidContext(_))));
     }
     #[test]
     fn response_events_roundtrip_through_all_native_dialects() -> TestResult {
@@ -321,11 +323,7 @@ mod tests {
     #[test]
     fn response_tool_call_becomes_a_normalized_event() -> TestResult {
         let events = decode_response_events(WireProtocol::OpenAiChat, CHAT_TOOL_RESPONSE)?;
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, ModelEvent::ToolCall { .. }))
-        );
+        assert!(events.iter().any(|event| matches!(event, ModelEvent::ToolCall { .. })));
         encode_response_events(WireProtocol::Anthropic, &events)?;
         Ok(())
     }
