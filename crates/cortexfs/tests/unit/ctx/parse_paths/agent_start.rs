@@ -305,10 +305,12 @@ fn agent_start_preserves_explicit_child_argv() {
     let Some(bwrap) = command_bwrap_args(&root, &args, &[], &view) else {
         return;
     };
-    let Some(separator) = bwrap.iter().rposition(|arg| arg == "--") else {
-        panic!("ctxterm child separator missing: {bwrap:?}");
-    };
-    assert_eq!(&bwrap[separator + 1..], args.command.as_slice());
+    let child = bwrap
+        .iter()
+        .rposition(|arg| arg == "--")
+        .and_then(|separator| separator.checked_add(1))
+        .and_then(|start| bwrap.get(start..));
+    assert_eq!(child, Some(args.command.as_slice()));
 }
 
 #[test]
