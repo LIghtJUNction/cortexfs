@@ -1,10 +1,10 @@
-use crate::decodechoice::openai_unsupported;
+use crate::WireProtocol::OpenAiChat;
+use crate::decodechoice::{openai, openai_unsupported};
 use crate::openaichat::{Content as NativeContent, Request};
 use crate::{Content, ContentPart, ConversionError, Message, ModelRequest, Role, ToolCall};
-use serde_json::Value;
 
 pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
-    let source: Request<'_> = crate::semantic::parse(crate::WireProtocol::OpenAiChat, input)?;
+    let source: Request<'_> = crate::semantic::parse(OpenAiChat, input)?;
     let messages = source
         .messages
         .iter()
@@ -14,15 +14,11 @@ pub(super) fn request(input: &[u8]) -> Result<ModelRequest, ConversionError> {
     result.stream = source.stream;
     result.max_output_tokens = source.max_tokens;
     result.tools = source.tools.iter().map(tool).collect::<Result<_, _>>()?;
-    result.tool_choice = source
-        .tool_choice
-        .as_ref()
-        .map(crate::decodechoice::openai)
-        .transpose()?;
+    result.tool_choice = source.tool_choice.as_ref().map(openai).transpose()?;
     for (name, raw) in &source.extra {
         result.options.insert(
             name.to_string(),
-            crate::semantic::raw_value(crate::WireProtocol::OpenAiChat, name, raw)?,
+            crate::semantic::raw_value(OpenAiChat, name, raw)?,
         );
     }
     Ok(result)
@@ -37,15 +33,17 @@ fn message(source: &crate::openaichat::Message<'_>) -> Result<Message, Conversio
         .tool_calls
         .iter()
         .map(|call| {
+            if call.kind.as_ref() != "function" {
+                return Err(openai_unsupported("messages[].tool_calls[].type"));
+            }
             let field = "messages[].tool_calls[].function.arguments";
             let raw = call.function.arguments.as_deref().ok_or_else(|| {
                 ConversionError::InvalidField {
-                    protocol: crate::WireProtocol::OpenAiChat,
+                    protocol: OpenAiChat,
                     field: field.to_owned(),
                 }
             })?;
-            let arguments =
-                crate::semantic::json_value(crate::WireProtocol::OpenAiChat, field, raw)?;
+            let arguments = crate::semantic::json_value(OpenAiChat, field, raw)?;
             Ok(ToolCall {
                 id: call.id.to_string(),
                 name: call.function.name.to_string(),
@@ -104,14 +102,8 @@ fn tool(source: &crate::openaichat::Tool<'_>) -> Result<crate::ToolDefinition, C
             .as_ref()
             .map(ToString::to_string),
         parameters: source.function.parameters.map_or_else(
-            || Ok(Value::Object(serde_json::Map::new())),
-            |raw| {
-                crate::semantic::raw_value(
-                    crate::WireProtocol::OpenAiChat,
-                    "tools[].function.parameters",
-                    raw,
-                )
-            },
+            || Ok(serde_json::json!({})),
+            |raw| crate::semantic::raw_value(OpenAiChat, "tools[].function.parameters", raw),
         )?,
     })
 }

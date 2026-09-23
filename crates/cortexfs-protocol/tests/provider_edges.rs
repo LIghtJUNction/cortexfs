@@ -19,9 +19,12 @@ mod tests {
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"}}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"},"finish_reason":null}]}"#[..]),
             (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"content":"partial"},"finish_reason":""}]}"#[..]),
-            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
-            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
-            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"type":"function","function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","type":"function","function":{"name":"","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":{}}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","type":7,"function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
+            (W::OpenAiChat, &br#"{"id":"r","model":"m","choices":[{"message":{"tool_calls":[{"id":"c","type":"custom","function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#[..]),
         ] {
             assert!(p::decode_response_events(protocol, input).is_err());
         }
@@ -43,6 +46,7 @@ mod tests {
         let encoded = p::encode_model_request(W::OpenAiChat, &request)?;
         assert_eq!(p::decode_model_request(W::OpenAiChat, &encoded)?, request);
         assert!(p::decode_model_request(W::OpenAiChat, br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f"}}]}]}"#).is_err());
+        assert!(p::decode_model_request(W::OpenAiChat, br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"custom","function":{"name":"f","arguments":"{}"}}]}]}"#).is_err());
         let input = br#"{"model":"m","contents":[{"role":"model","parts":[{"functionCall":{"name":"same","args":{"n":1}},"thoughtSignature":"sig"},{"functionCall":{"name":"same","args":{"n":2}}}]}]}"#;
         let request = p::decode_model_request(W::Gemini, input)?;
         let encoded = p::encode_model_request(W::Gemini, &request)?;
