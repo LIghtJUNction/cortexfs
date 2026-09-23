@@ -1,495 +1,248 @@
 # CortexFS Architecture
 
 Normative ABI detail lives under [spec/](spec/). Visual identity lives in
-[DESIGN.md](DESIGN.md) (Google Labs DESIGN.md format). This file is the
-engineering design entry: what CortexFS is, where state lives, and what must
-not become an additional root ABI.
+[DESIGN.md](DESIGN.md). This document is the engineering architecture entry
+point: what CortexFS owns, what hosted Agent CLIs own, and where compatibility
+code is being removed.
 
 ## One-page model
 
 ```text
-/ctx is a FUSE filesystem interface for agent runtimes.
-model is a pure inference file.
-agent is the policy-bound orchestrator.
-tool is a capability endpoint.
-channel is a filesystem-backed communication capability namespace.
-session is ordinary file history.
-policy is a minimal SELinux-like allowlist.
-CortexFS protocol adapters remove provider and API-format differences.
-CortexFS does not express provider/API formats as root ABI.
-MCP servers are tool sources; MCP capabilities are ordinary tools.
-CortexFS controls agent visibility, execution, and sharing, not framework config formats.
+CortexFS is a Unix/FUSE execution substrate, not a second Agent framework.
+/ctx is a read-write FUSE filesystem with path-level Unix/policy attenuation.
+agent objects define identity, authority, visible paths, and launch boundaries.
+hosted Agent CLIs own their model/provider auth, session/context, approvals,
+tool loop, compaction, and provider-specific behavior.
+CortexFS owns process, identity, mount, path, resource, socket, and FUSE limits.
+MCP and other open protocols are reused directly when they already fit.
 ```
+
+The first target hosted CLIs are OpenAI Codex CLI, Anthropic Claude Code, and
+`earendil-works/pi`. Antigravity CLI is the current Google-side extension
+target. These are **target integrations** during issue #318, not a claim that
+all launch profiles already exist in the current release.
 
 ## Frozen root rule
 
 ```text
-root only contains stable object classes; channel is the explicit communication root
+root only contains stable object classes
 root never mirrors provider, database, workflow, memory, or orchestration internals
 MCP must not become a root namespace
-MCP configs, skills, project rules, and prompt packages are ordinary visible files
+skills, project rules, prompts, and CLI config remain ordinary visible files
 ```
 
-Forbidden root namespaces (examples):
+Forbidden root namespaces include `skill/`, `memory/`, `mcp/`, `workflow/`,
+`job/`, `hook/`, `audit/`, and `control/`. Those concepts may exist as ordinary
+files, object-local state, or external protocol endpoints; they are not new
+root classes.
+
+## Authority model
+
+Authority comes from Linux and CortexFS policy, never from prompt text.
 
 ```text
-skill/  memory/  mcp/  workflow/  chan/  job/  hook/  audit/  control/
+agent definition
+  -> uid/gid/supplementary groups
+  -> mode/umask and path policy
+  -> authorized mounts and sockets
+  -> cgroup/resource ceilings
+  -> child process
 ```
 
-Those concepts may exist as object-local files, session data, or tools. They
-must not become new root classes.
+`/ctx` is mounted read-write. Individual files or directories may be read-only
+when their semantics require it. Backing storage must never be exposed as a
+writable bind that bypasses FUSE enforcement.
 
-## Core invariants
+A read-write `/workspace` follows ordinary Unix subtree semantics. CortexFS does
+not secretly hide `.git` or other project metadata from a hosted CLI. A policy
+may explicitly make `/workspace/.git` read-only. Paths outside the authorized
+workspace, including an out-of-tree linked-worktree gitdir, still need separate
+authority.
+
+## Execution boundary
+
+The backend-neutral launch contract is intentionally small:
 
 ```text
-Context is a working set, not the full history.
-Raw history is durable.
-Prompt context is disposable and rebuildable.
-Compaction must not destroy raw messages.
-Independent tasks should run in child agents.
-Child agents are owned by their parent unless explicitly detached by policy.
-Owned children die when the parent dies.
-Prompt text and skill metadata never grant authority.
-Policy, path, mount, uid/gid, and mode bits grant authority.
-Mechanism enforces principal, path, mount, and Linux constraints; an injected
-policy evaluator may only further restrict that authority.
+executable + argv
+cwd
+environment
+stdin/stdout/stderr or PTY
+uid + gid + supplementary groups
+umask/mode policy
+authorized mounts and sockets
+resource ceilings
+exit status
+signals + cancellation
 ```
 
-## Architectural elegance
+A launch profile may translate a backend's command-line spelling, but it must
+not become a provider registry, model router, session manager, or second
+workflow engine. Backend-specific logic stays at the edge.
 
-CortexFS keeps a Unix filesystem ABI and Linux authority model that coding
-agent toolkits do not. Its **internal elegance bar** still matches the Pi
-toolkit ([earendil-works/pi](https://github.com/earendil-works/pi)): strict
-layers, a minimal tool loop, event facts instead of UI decisions, packages
-usable alone, and extension without a second framework. What you leave out
-matters as much as what you ship.
+The same process boundary must be usable for interactive and headless modes.
+CortexFS should host the CLI's existing text, JSON/JSONL, RPC, resume, MCP, and
+approval capabilities instead of normalizing them into a new CortexFS wire
+protocol.
 
-### Two mental models
+## Responsibility split
 
-| Mental model | Owns | Must not own |
+| Layer | Owns | Must not own |
 | --- | --- | --- |
-| Agent core | model turn, tool calls/results, cancellation, run events, context projection | TUI layout, channel SDK, FUSE projection, provider wire dialects |
-| Interactive / host surfaces | `ctx` / `tsh` / `ctxchat` / `ctxterm`, channel adapters, web hosts | a second agent loop or parallel root ABI |
+| Hosted Agent CLI | model/provider selection, auth, Agent loop, context/session semantics, approval UX, CLI-native tools | host filesystem authority outside projected capabilities |
+| CortexFS execution boundary | identity, cwd/env, stdio/PTTY, signals, mounts, sockets, resource limits, FUSE projection, hard policy ceiling | provider-specific Agent intelligence or a duplicate loop |
+| FUSE `/ctx` | inspectable object classes and authorized read/write projection | provider or framework configuration mirrors |
+| Frontends / channels | presentation, transport adaptation, user input/output | a second process or Agent authority model |
 
-The same core must remain embeddable behind terminal, print, JSON/RPC-style
-socket clients, and channel bridges. A new frontend adapts the existing
-interaction contract; it does not fork the loop.
+Prompt text, skills, AGENTS.md, CLAUDE.md, and similar project rules may affect
+CLI behavior, but they never increase Linux or CortexFS authority.
 
-### Layered package map
+## Process shape
 
-Pi’s stack is `ai → agent-core → coding-agent (+ tui)`. CortexFS maps the same
-gravity onto Rust crates and processes:
-
-```text
-Application / UX     Channel Masters: ctx, terminals, IM/web hosts + adapters
-        ▲              cortexfs.interaction/v2 (v1 one-request compatibility)
-Agent core           Agent Session Slaves + object runner (loop, tools, policy)
-        ▲
-Protocol / AI        cortexfs-protocol, provider registry, model projections
-        ▲
-Foundation           abi types, support fs/jsonl/layout, module contract, paths
-```
-
-| CortexFS gravity | Pi analogue | One job |
-| --- | --- | --- |
-| `cortexfs-protocol` | `pi-ai` | provider-neutral request/event IR; no HTTP, secrets, or loop |
-| `cortexfs-module` + runner loop | `pi-agent-core` | lifecycle, capabilities, turn/tool mechanics |
-| `cortexfs-runtime-client` | agent event/API surface | multiplexed `cortexfs.interaction/v2`; compatible one-request v1 |
-| `ctx` / terminals / channels | `pi-coding-agent` / `pi-mom` | sessions, UX modes, platform adapters |
-| FUSE `/ctx` projection | *(CortexFS-specific)* | inspectable object classes; not an AI DB mirror |
-
-Lower layers never import upper ones. Protocol code must not know agents.
-Agent-core code must not know TUI widgets or Discord payloads. Channel
-adapters translate platform frames and stop at the interaction/channel
-socket boundary.
-
-### Minimal loop, durable facts
-
-The executable core stays the same small feedback loop:
+The target process graph is ordinary Unix composition:
 
 ```text
-build disposable context from durable session facts
-  → stream model turn
-  → collect tool calls
-  → authorize + execute tools
-  → append observations
-  → repeat until final answer or cancel
+user / frontend
+      |
+      v
+ctx launch / supervisor
+      |
+      +-- apply identity, policy, mounts, resources
+      |
+      +-- stdio or PTY via ctxterm when needed
+      |
+      v
+Codex | Claude Code | Pi | Antigravity | other compatible CLI
+      |
+      +-- reads/writes authorized workspace and /ctx paths
+      +-- connects to explicitly projected MCP/tools/sockets
+      +-- exits with ordinary process status
 ```
 
-That host loop is fixed and authoritative (`sdk-envelope-v1` steps, policy,
-sandbox, cancellation). Behavior customization stays outside the host:
+`ctxterm` is PTY mechanics, not an Agent runtime. `ctxmcp` is an explicit MCP
+adapter, not a `/ctx/mcp` root. systemd/user services and cgroups may supervise
+process lifetime without becoming a CortexFS orchestration DSL.
+
+## Omarchy and Linux
+
+Omarchy is the primary desktop/development validation environment, currently
+tracked from `omacom/omarchy`. Support should remain ordinary Arch/Linux
+support rather than a brand-specific branch in core.
+
+The important compatibility points are:
 
 ```text
-agent/<name>.d/loop              → CTX_AGENT_LOOP hint (chat/react/coding/planner/research/custom)
-agent/<name>.d/loop.d/<name>     → optional custom loop driver executable (Agent SDK ABI)
-agent/<name>.d/compact.strategy  → truncate | summarize | <object-name>
-agent/<name>.d/compact.d/<name>  → optional custom compaction executable (`cortexfs.compact/v1`)
-tool/<name>.d/invoke.strategy     → default | cli | sdk | <object-name>
-tool/<name>.d/invoke.d/<name>     → optional custom invoke executable (Tool SDK ABI)
-channel/<name>.d/adapter          → catalog family | <object-name> (optional; defaults to family)
-channel/<name>.d/adapter.d/<name> → optional custom socket driver (`cortexfs.channel.socket/v1`)
-Agent SDK executable             → custom step logic; yield one tool_call or complete
-Tool SDK executable              → CLI or JSONL invoke; host sets CTX_TOOL_MODE
-Channel SDK executable           → process-isolated adapter; DriverLaunchConfig from env
-hooks pre.d/post.d               → metadata-only gates around model actions
+PATH and shell discovery
+XDG config/data/cache directories
+mise or other CLI wrappers
+systemd --user
+Wayland terminal environment
+FUSE availability and permissions
+uid/gid/groups
+home/workspace visibility
+signals and PTY behavior
 ```
 
-`loop` never grants capability. A custom name selects `loop.d/<name>` when present;
-otherwise the hint is passed to the default agent executable through
-`CTX_AGENT_LOOP`. Compaction rebuilds prompt context only; durable
-`messages.jsonl` stays untouched. Rendering preserves the selected recent
-observations before assigning remaining UTF-8 byte budget to a summary,
-including output from a custom compactor. A summary may be omitted when no
-space remains. The delivery and replacement matrix is in [harness.md](harness.md).
+Do not solve Omarchy support by exposing the entire user home, trusting all of
+`~/.local/bin`, or inheriting every host environment variable into a sandbox.
+Project the minimum required executable/config paths with explicit policy.
 
-Everything else is layered outside that loop:
+## Open protocols first
+
+Prefer existing protocols and Unix behavior:
+
+- MCP for tool servers where MCP already fits.
+- OAuth 2.0 / OIDC for authentication flows owned by the hosted CLI/provider.
+- OpenTelemetry GenAI conventions for observable facts where applicable.
+- JSON Schema / OpenAPI / JSON-RPC only when an external boundary already uses them.
+- HTTP/SSE/WebSocket as transport, not as reasons to invent a new root ABI.
+- Unix files, sockets, process status, signals, uid/gid, and mount semantics for
+  local execution.
+
+A CortexFS-private ABI needs evidence that existing standards and Unix
+primitives cannot express the required behavior.
+
+## Compatibility surface during migration
+
+The repository still contains the former self-hosted Agent runtime:
+`cortexfs-protocol`, model/provider adapters, Agent SDK loop behavior,
+object-runner tool loops, session orchestration, compaction, and the
+`cortexfs.interaction/*` runtime path. These remain compatibility code until a
+safe migration removes or narrows them.
+
+They are not the target architecture for new Agent features.
+
+Rules during issue #318:
+
+1. Do not add new provider-specific core branches to the legacy runtime.
+2. Do not expand the legacy loop to match features already owned by hosted CLIs.
+3. Keep stable root/path ABI compatible unless a documented migration says otherwise.
+4. Identify real independent consumers before deleting a crate or public type.
+5. Prefer deleting wrappers, registries, parsers, and state machines that only
+   serve the obsolete self-hosted path.
+6. Keep backend adapters thin and process-shaped.
+
+## Durable state and observability
+
+CortexFS may persist facts it actually owns: object definitions, policy,
+receipts, process status, terminal replay, audit facts, and explicitly defined
+session compatibility state. It must not silently become the authoritative
+conversation database for hosted CLIs that already own their session format.
+
+Observable events should be facts about CortexFS-owned boundaries, for example:
 
 ```text
-skills / rules / templates     → context inputs, never authority
-extensions / modules / MCP     → tools or adapters, never root classes
-approvals / sandbox / policy   → gates around the same tool path
-compaction / summaries         → rebuild prompt; never rewrite raw history
-frontends                      → subscribe to events; never own the loop
+process requested / started / exited
+signal or cancellation sent
+mount or identity rejection
+resource-limit failure
+PTY attached/detached
+FUSE permission denial
 ```
 
-Session files answer “what happened?” Prompt context answers “what does the
-model need next?” Those objects stay separate, as in Pi’s session tree versus
-`convertToLlm` projection.
-
-### Events are facts
-
-Every layer emits typed, correlatable facts (`run`, `request_id`, tool id,
-status). Terminals render them, JSON clients serialize them, session recorders
-append them, tests assert order. Presentation never feeds back into authority
-or history schema. Interaction and channel sockets already follow this rule;
-new surfaces must reuse those event families instead of inventing parallel
-control planes.
-
-### Composability and omission
-
-Packages must stay independently useful:
-
-```text
-cortexfs-protocol alone     → transcode provider formats
-runtime-client alone        → speak interaction frames
-tool-sdk / agent-sdk alone  → implement one capability process
-channel-sdk alone           → isolate one platform transport
-```
-
-Deliberate omissions (the anti-framework):
-
-```text
-no workflow / hook / job / memory root
-no plan-mode product surface baked into the loop
-no provider dialect in /ctx paths or agent branches
-no in-process mega-harness that loads every channel SDK
-no background watchers or hot-reload control plane
-```
-
-Specialization belongs in objects, modules, skills, and adapters. The host
-keeps stable primitives: files, sockets, policy, atomic rename, and process
-restart.
-
-### Extension points (anti-framework)
-
-Pi extends at the AI, agent, and application layers without growing a plugin
-root. CortexFS uses the same idea with Unix boundaries:
-
-| Layer | Extend with | Must not become |
-| --- | --- | --- |
-| Protocol / AI | provider adapters, `cortexfs-protocol` routes, model `driver` / `cap` projections | `/ctx` provider dialect paths or agent `match` on vendor names |
-| Agent core | `cortexfs-module` lifecycle, Tool/Agent SDKs, policy evaluators, context transformers | in-loop plan boards, hook DAGs, or a second orchestration ABI |
-| Application | one-file packages ([extensions.md](extensions.md)), skills/rules files, channel adapters, terminal/web/IM clients | `/ctx/skill`, `/ctx/mcp`, `/ctx/workflow`, or resident plugin daemons |
-
-Concrete surfaces already in the tree:
-
-```text
-cortexfs.module.socket/v1     process-isolated module lifecycle
-Tool SDK / Agent SDK          one executable capability or agent step
-cortexfs.package/v1           authoring input → ordinary agent/tool objects
-cortexfs.interaction/v2       typed target contract; persistent runtime not activated
-cortexfs.interaction/v1       compatible one-request frontend mode
-cortexfs.channel.socket/v1    lower platform adapters stay outside the agent loop
-skills / AGENTS.md / rules    disposable context inputs, never authority
-MCP via ctxmcp                ordinary tools; never a root class
-```
-
-The structure ends at stable primitives and lifecycle edges. New behavior is a
-new object, module, skill, or adapter—not a new root directory and not a
-hot-loaded in-process extension host. See [module-abi.md](spec/module-abi.md)
-and [extensions.md](extensions.md).
-
-## Identity, lifetime, and transport
-
-CortexFS uses four different identities. They must not be collapsed into an
-"agent daemon" or duplicated in a second lifecycle tree:
-
-| Layer | Stable identity | Owner |
-| --- | --- | --- |
-| Definition | `agent/<name>` + `agent/<name>.d/` | reference tree |
-| Runtime instance | supervisor unit + invocation receipt | runtime/supervisor |
-| Session | `home/<uid>/agent/<name>/session/<session>/` | durable files; one active Session Slave writer |
-| Run | entropy-backed run id in session events | session recorder |
-
-The definition says how an Agent may run. A runtime instance says which
-processes currently realize that definition. A session owns durable human and
-Agent history. A run correlates one bounded execution inside that session.
-
-`agent/<name>.d/meta.json` may retain the latest receipt-bound supervisor facts
-needed for inspection and safe cleanup. `status`, `pid`, and `log` are summary
-projections. None of those files changes the Agent's definition identity, and
-none is an independent process supervisor.
-
-Do not add `instances/` merely to mirror process state already owned by systemd
-and receipt metadata. A future multi-instance feature must first define an
-identity that cannot be expressed by the existing agent/session/unit/run tuple,
-then nominate one authoritative lifecycle owner and migration path.
-
-Sockets are transports. Live sockets belong under `/run`; paths such as
-`agent/<name>.sock` and `session/<session>/terminal/main.sock` are stable ABI
-entries or aliases used to discover those transports. Socket presence does not
-define object identity, session durability, or process ownership.
-
-Frontend interaction uses the existing Agent/session socket as its canonical
-runtime boundary. Every terminal, web, or IM frontend has the process role
-Channel Master; each logical session has one active, single-writer Agent Session
-Slave. Multiple peer masters may attach to one slave, and one local Unix-stream
-connection may multiplex several logical attachments:
-
-```text
-platform adapter <-> cortexfs.channel.socket/v1 <-> Channel Master
-Channel Master   <-> cortexfs.interaction/v2    <-> Agent Session Slave
-                                                --> durable session files
-```
-
-`cortexfs-runtime-client` owns the neutral asynchronous request/event contract,
-handshake, correlations, attachment cursors, and replay. Version 1 remains the
-compatible one-request `send`/`resume`/`status`/`cancel` mode. Master and slave
-depend only on that protocol, never on each other's implementation, and the
-slave never reverse-dials a master. The current per-Agent runtime may host many
-isolated slaves; later process isolation does not change the ABI.
-
-The Agent Session Slave owns authorization, the bounded mailbox, ordering,
-idempotency, durable append, and observer fan-out. It holds an exclusive
-runtime-private session lock before writing, fails closed on conflicting
-ownership, and publishes durable events only after append. Live deltas and
-approval/input commands go only to the run's origin attachment; authorized
-observers receive durable sequenced facts. Unix peers authenticate with
-`SO_PEERCRED`, and reconnect resumes at the last processed sequence with
-at-least-once delivery.
-
-`cortexfs-channels` retains the independently versioned lower
-`cortexfs.channel.socket/v1` driver boundary for platform lifecycle, delivery,
-receipts, live effects, and tool control. The `/ctx/channel/<name>` tree exposes
-only generic channel state and tools; platform-specific message types do not
-cross the Agent boundary.
-
-Heavy or OS-specific transports remain external processes on that boundary.
-For example, `cortexfs-channel-nostr` owns relay WebSockets and NIP-04/NIP-17
-cryptography while the core runtime only sees provider-neutral channel frames.
-This keeps a small host from loading every platform SDK into one process and
-makes per-channel restart and memory limits explicit. Agent terminals and
-socket-activated runtimes likewise carry hard cgroup ceilings (`MemoryMax`,
-`CPUQuota`, `TasksMax`) so one sandboxed agent cannot exhaust the host.
-
-A terminal is a durable resource below a session. Its resource directory owns
-metadata and replayable events; a runtime PTY and socket are replaceable
-mechanisms for the process and attachments. The first terminal resource slice
-uses:
-
-~~~text
-home/<uid>/agent/<agent>/session/<session>/terminal/<terminal-id>/
-  meta.json  state  status  owner  cwd  events.jsonl
-~~~
-
-The root remains frozen: this session-local path does not add /ctx/terminal.
-A top-level terminal class requires a separately versioned root ABI decision.
-
-Interactive frontends use the same session-local discovery rule. Each durable
-terminal, web, or external channel is represented by a filename below
-`home/<uid>/agent/<agent>/session/index/channel/` (or the corresponding
-shared-space session index). The filename is the user-facing channel selector;
-its JSON content only maps a generic transport to an existing agent/session.
-This keeps `ctx attach` discoverable with `ls` while preserving the frozen root
-ABI and the existing interaction socket.
-
-The compact rule is:
-
-```text
-object defines identity
-supervisor receipt defines process lifetime
-ordinary files define durable state
-socket provides optional transport
-terminal resource owns PTY history; socket is only a live transport
-```
-
-Agent session runtime state has two compatible projections. The existing
-single-line `state` file remains the lifecycle compatibility surface; the
-optional `state.json` file is a structured, non-secret view of status, phase,
-run, step, selected model, context revision, and stable error code. Runtime
-transitions update both through the existing atomic file replacement helper.
-Clients inspect that projection through a v2 attachment's `status` request and
-replay durable facts from its `session_seq` cursor. Compatible v1 clients retain
-one-request `status` and `resume`; no watcher or second root control plane is
-introduced.
-
-During a hosted Agent step, `context_revision` is a length-delimited SHA-256
-digest of the bounded history, tool context, and previous observation inputs.
-It lets a status client detect a rebuilt working set without exposing prompt,
-message, tool-result, or credential contents.
-
-## Model and context boundary
-
-A model object is the stable provider/model identity. Its `driver` control
-selects replaceable adapters for each use case; `cap`, `limit`, `recommended`,
-and `compact` project only provider-neutral facts. Agents and context code
-consume those projections and must not branch on provider names, API formats,
-or model branding.
-
-Capability data is conservative. Hard limits use the precedence defined by the
-Model ABI: explicit per-model host configuration, then the validated catalog,
-then `unknown`. Stable `cap` words are adapter projections; unsupported or
-untrusted facts are omitted. A future per-model capability override or
-host-side probe requires a versioned Model ABI change. It must not become a
-model-call side effect, a background watcher, or a second configuration store;
-accepted evidence would enter the same validated `cap`/`limit` projection or
-remain diagnostic-only.
-
-Context construction uses the selected model's hard `limit`, metadata
-`recommended`/`compact` policy, and the Agent's attenuating `window`/`compact`
-controls. `window=auto` follows the model recommendation, not necessarily the
-maximum advertised window. Raw session history remains intact while the
-rendered prompt may use a recent tail, summaries, rules, skills, and loaded tool
-metadata. Changing models therefore rebuilds prompt context from durable facts;
-it does not rewrite history or teach each Agent a table of model-specific cases.
-
-## Runtime module boundary
-
-`cortexfs-module` is the shared static Rust module API plus the versioned
-external module wire contract. It defines provider-neutral metadata,
-capability declarations, executor-independent async lifecycle methods, and a
-deterministic static registry for Agent, Tool, Channel, Model, and Context
-modules. The crate is independent of FUSE, `/ctx`, provider protocols, and
-runtime storage; domain SDKs add their typed behavior above this boundary.
-
-The Rust trait API is intentionally statically composed. A Rust trait object is
-not promised as a `cdylib` ABI. The recommended third-party boundary is the
-`cortexfs.module.socket/v1` JSONL-over-Unix-socket contract, which preserves
-compiler and allocator independence and adds process isolation while keeping
-the same lifecycle and capability model.
-
-## Where things live
-
-The packaged host keeps versioned durable trees under
-`/var/lib/cortexfs/storage/generations/<generation>` and exposes the selected
-tree through the atomic `/var/lib/cortexfs/storage/current` symlink. On a
-systemd restart, `ctx storage update` clones the current generation, applies
-and validates the next `bin/cortexfs.bootstrap.json` `tree_version`, then
-switches `current`. A failed stage leaves `current` unchanged. This is a
-restart boundary, not a watcher, poller, or hot reload;
-the `/ctx` ABI shape remains unchanged. The package generates root files
-locally; generations are not distributed artifacts. The systemd restart path,
-after stopping consumers, explicitly uses `--prune` to remove non-current
-generations. There is no background generation GC.
-The mount and agent runtime resolve `current` once at process startup and keep
-that concrete generation for their full lifetime, including mount cache
-refresh. Short-lived object-runner invocations may resolve the then-current
-generation each time.
-
-| Place | Path shape | Role |
-| --- | --- | --- |
-| Control | `/ctx/agent/<name>.d/*` | policy, mount, cwd, system.md, loop |
-| Agent home | `/ctx/home/<uid>/agent/<name>/` | session, data, cache, log |
-| Session | `.../session/<session>/` | messages, events, state.json, context, load snapshots |
-| Runtime IPC | `/run/user/<uid>/cortexfs/...`, `/run/cortexfs/terminal/broker.sock` | Agent sockets and the root terminal broker |
-
-Sandbox mapping (typical):
-
-```text
-/ctx/home/<uid>/agent/<name>  →  HOME=/home/agent   (rw)
-caller project cwd            →  /workspace         (rw, default cwd)
-/ctx                          →  /ctx               (often ro)
-```
-
-`/run` holds sockets. The root-owned terminal broker authenticates operators
-and passes accepted descriptors to sandboxed supervisors; it does not relay
-PTY bytes. Agent cwd is usually `/workspace`. Private session files
-live under agent home, not under `/run`.
-
-## Prompt load observability
-
-When the object runner builds a run prompt, it best-effort writes:
-
-```text
-/ctx/home/<uid>/agent/<agent>/session/<session>/AGENTS.md
-/ctx/home/<uid>/agent/<agent>/session/<session>/SKILLS.md
-```
-
-```text
-AGENTS.md   merged rules snapshot (same text as {{rules}})
-SKILLS.md   skill metadata only (name, description, path)
-```
-
-Ordinary session files, not authority. Full skill bodies stay at listed
-`SKILL.md` paths. Implementation: `agent/prompt/snapshot.rs`.
-
-## Engineering taste
-
-Derived from the elegance bar above:
-
-```text
-short names over long phrases
-one clear job per module and per crate
-reuse before inventing helpers
-no parallel enums for Empty/Missing/Invalid
-no second root ABI for orchestration; channel state/tools use the explicit root
-no background watchers, polling, or hot-reload subcommands
-Git commit (or process restart) is the development refresh boundary
-atomic rename for control-plane writes
-ordinary files for history and snapshots
-lower layers never import upper layers
-events are facts; UIs only subscribe
-leave complexity out of the loop until a stable boundary requires it
-```
-
-Module naming: [naming-guide.md](naming-guide.md). Prefer single-token stems
-(`snapshot.rs`); no new `-` / `_` in module file stems.
-
-## Internal code architecture
-
-Product rules above freeze **what** `/ctx` is. How the Rust tree is layered
-(process roles, crate/feature splits, module dependency direction, error
-tiers, migration phases) lives in
-[internal-architecture.md](internal-architecture.md).
-
-Read that document before large refactors (crate splits, executor error
-migrations, FUSE vs object boundary changes). Do not “improve structure” by
-adding root ABI classes, workflow engines, or background watchers.
-
-## Read the specs in order
-
-```text
-architecture.md              # elegance bar, extension points
-internal-architecture.md     # crate/module layers
-spec/README.md
-spec/root-abi.md
-spec/fuse.md
-spec/object-abi.md
-spec/model-abi.md
-spec/session-abi.md
-spec/agent-tool-security.md
-spec/agent-runtime.md
-spec/module-abi.md
-spec/tool-policy-abi.md
-spec/ctx-coreutils.md
-spec/rolling-upgrades.md
-extensions.md
-```
-
-## Stable ABI red line
-
-```text
-Do not let /ctx become a directory mirror of an AI platform database.
-It should stay small, hard, boring, and scriptable.
-Match Pi’s elegance internally without importing Pi’s product surface as root ABI.
-```
+Do not translate every backend model/tool event into a new universal CortexFS
+event hierarchy unless a concrete external consumer requires that mapping.
+
+## Extension points
+
+Extend at edges, not in the root:
+
+| Need | Preferred mechanism |
+| --- | --- |
+| New Agent CLI | thin launch profile / executable selection |
+| Tool server | MCP or existing executable tool boundary |
+| Platform channel | process-isolated channel adapter |
+| Project guidance | ordinary visible rule/skill files |
+| New hard authority | Unix/FUSE policy with explicit ABI review |
+| Observability | boundary facts and standard telemetry |
+
+`agent.sh` remains a thin convenience entry point. It must not grow protocol,
+session, provider, or Agent-loop behavior.
+
+## Migration order
+
+Issue #318 proceeds in small slices:
+
+1. Remove outer sandbox behavior that breaks normal authorized workspace
+   semantics. #320 removed the implicit `.git` mask.
+2. Reuse the existing arbitrary-child PTY/process machinery instead of adding a
+   new runner.
+3. Add the smallest explicit executable/argv selection seam for hosted CLIs.
+4. Make `/ctx` writable through FUSE where the agent policy allows it; never by
+   writable-bypassing backing-store binds.
+5. Add backend launch profiles only when command-line differences require them.
+6. Retire legacy provider/model/tool/session runtime pieces as independent
+   consumers disappear.
+
+Each slice should reduce or preserve conceptual surface. A migration that adds
+more managers, registries, protocols, or persistent control state than it
+removes needs explicit justification.
+
+## Source of truth
+
+- [spec/](spec/) is normative ABI documentation.
+- `AGENTS.md` contains repository development constraints.
+- [internal-architecture.md](internal-architecture.md) defines Rust/process
+  layering for the migration.
+- Legacy self-hosted runtime behavior is documented for compatibility, not as a
+  mandate to extend it.
