@@ -117,6 +117,7 @@ pub(crate) struct AgentStartArgs {
     pub(crate) cwd: String,
     pub(crate) default_workspace: bool,
     pub(crate) mounts: Vec<AgentMount>,
+    pub(crate) command: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
