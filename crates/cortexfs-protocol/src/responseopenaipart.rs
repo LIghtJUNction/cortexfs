@@ -22,8 +22,10 @@ pub(super) fn text_events(events: &mut Vec<ModelEvent>, run: &str, value: Option
 
 pub(super) fn tool_call(run: &str, value: &Value) -> Result<ModelEvent, ConversionError> {
     let map = value.as_object().ok_or_else(|| invalid("tool_calls[]"))?;
-    if map.get("type").and_then(Value::as_str) != Some("function") {
-        return Err(invalid("tool_calls[].type"));
+    match map.get("type").and_then(Value::as_str) {
+        Some("function") => {}
+        Some(_) => return Err(crate::decodechoice::openai_unsupported("tool_calls[].type")),
+        None => return Err(invalid("tool_calls[].type")),
     }
     let function = crate::responseutil::object(map.get("function"))
         .ok_or_else(|| invalid("tool_calls[].function"))?;
