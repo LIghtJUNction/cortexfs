@@ -26,11 +26,29 @@ pub(crate) fn agent_start_systemd_command(
         default_workspace: args.default_workspace,
     };
     let mut command = terminal_command(&request, view, socket, unit);
+    make_fuse_ctx_writable(&mut command, root);
     if !args.command.is_empty() {
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
     command
+}
+
+fn make_fuse_ctx_writable(command: &mut AgentLaunchCommand, root: &Path) {
+    let fuse_root = read_xattr_string(root, "user.cortexfs.abi_path").as_deref() == Some("")
+        && open_plain_directory(root)
+            .and_then(|directory| cortexfs::support::plain::is_fuse(&directory))
+            .unwrap_or(false);
+    if !fuse_root {
+        return;
+    }
+    let source = root.display().to_string();
+    let target = cortexfs_paths::ctx_root().display().to_string();
+    if let Some(index) = command.args.windows(3).position(|args| {
+        args[0] == "--ro-bind" && args[1] == source && args[2] == target
+    }) {
+        command.args[index] = "--bind".to_owned();
+    }
 }
 
 #[cfg(test)]
