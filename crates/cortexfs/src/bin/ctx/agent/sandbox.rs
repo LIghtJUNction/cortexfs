@@ -88,15 +88,12 @@ pub(crate) fn agent_start_mounts_with_default_source(
 }
 
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    mounts
-        .iter()
-        .find_map(|mount| {
-            Path::new(&args.cwd)
-                .strip_prefix(&mount.source)
-                .ok()
-                .map(|relative| Path::new(&mount.target).join(relative).display().to_string())
-        })
-        .unwrap_or_else(|| args.cwd.clone())
+    for mount in mounts {
+        if let Ok(relative) = Path::new(&args.cwd).strip_prefix(&mount.source) {
+            return Path::new(&mount.target).join(relative).display().to_string();
+        }
+    }
+    args.cwd.clone()
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
