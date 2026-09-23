@@ -43,10 +43,9 @@ fn make_ctx_projection_writable(args: &mut [String], root: &Path, fuse_root: boo
         let source = root.display().to_string();
         let target = cortexfs_paths::ctx_root().display().to_string();
         let index = args.windows(3).position(|window| {
-            let [flag, bind_source, bind_target] = window else {
-                return false;
-            };
-            flag == "--ro-bind" && bind_source == &source && bind_target == &target
+            window.first().is_some_and(|flag| flag == "--ro-bind")
+                && window.get(1).is_some_and(|bind_source| bind_source == &source)
+                && window.get(2).is_some_and(|bind_target| bind_target == &target)
         });
         if let Some(flag) = index.and_then(|index| args.get_mut(index)) {
             flag.replace_range(.., "--bind");
