@@ -28,7 +28,7 @@ root contains stable object classes only
 /ctx is read-write; individual paths may be read-only by Unix/FUSE policy
 Agent CLIs own model/provider auth, session/context, approval UX, and tool loops
 CortexFS policy remains the hard authority ceiling for projected capabilities
-CortexFS owns process, path, mount, identity, policy, and FUSE boundaries
+CortexFS owns process, path, mount, identity, network, policy, and FUSE boundaries
 agent objects describe principals and executable boundaries, not a second AI runtime
 tools are executable capability endpoints
 prompt, skill, and project-rule text never grants authority
@@ -41,8 +41,9 @@ Execution boundary:
 ```text
 one backend-neutral process contract: executable/argv, cwd, env, stdio or PTY,
 uid, gid, supplementary groups, umask/mode policy, exit status,
-cancellation/signals, bounded resources, and authorized mounts
-identity and mount authority derive from the agent object plus CortexFS policy
+cancellation/signals, bounded resources, authorized mounts/sockets,
+and policy-derived network namespace / egress authorization
+identity, mount, socket, and network authority derive from the agent object plus CortexFS policy
 backend-specific spelling stays in thin launch profiles/adapters
 Codex CLI, Claude Code, and Pi are first-class target hosted CLIs
 Antigravity CLI is the current Google-side target extension
@@ -54,7 +55,9 @@ Implementation status:
 ```text
 target does not mean implemented: generic hosted-CLI launch profiles are still migrating under #318
 current executable agents may still use the legacy sdk-envelope-v1 runtime path
-new work must close that migration gap instead of presenting missing adapters as available
+current agent sandbox projection still exposes /ctx read-only even though the host FUSE mount is read-write
+agent-visible writable /ctx is a migration target until authorized writes flow through FUSE without a backing-store bypass
+new work must close these migration gaps instead of presenting missing adapters or write paths as available
 ```
 
 Compatibility boundary:
