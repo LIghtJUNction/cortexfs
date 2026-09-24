@@ -281,7 +281,7 @@ resolve_language_and_install_kind() {
 package_plan() {
     case "$1" in
     arch)
-        PACKAGES=(base-devel curl git ca-certificates pkgconf fuse3 bubblewrap util-linux libsecret)
+        PACKAGES=(base-devel curl git ca-certificates pkgconf fuse3 bubblewrap passt util-linux libsecret)
         ;;
     debian)
         PACKAGES=(build-essential curl git ca-certificates pkg-config fuse3 libfuse3-dev bubblewrap util-linux libsecret-tools)
