@@ -221,17 +221,6 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
     ))
 }
 
-pub(crate) fn reset_agent_chat_unit(unit: &str) {
-    for target in [format!("{unit}.service"), format!("{unit}.socket")] {
-        for verb in ["stop", "reset-failed"] {
-            let _ignored = systemctl_user_command([verb, target.as_str()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
-}
-
 pub(crate) fn stable_path_hash(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     let path = absolute_existing_path(path).unwrap_or_else(|_error| path.to_path_buf());
