@@ -71,7 +71,9 @@ pub(crate) fn agent_start_systemd_command(
         command
             .args
             .retain(|arg| !arg.starts_with("--property=Restart"));
-        if hosted_network_allowed(view) {
+        if hosted_network_allowed(view)
+            && is_executable_file(Path::new(cortexfs::support::command::PASTA))
+        {
             add_hosted_network_boundary(&mut command);
         }
         let _ = command.args.pop();
