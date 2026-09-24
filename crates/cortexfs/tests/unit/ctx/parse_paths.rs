@@ -15,9 +15,7 @@ include!("parse_paths/abi_detection.rs");
 
 #[test]
 fn agent_start_keeps_one_ctx_root_projection() {
-    let Ok(Command::Agent(AgentArgs::Start(args))) =
-        parse_agent_command(vec!["start".into(), "executor".into()])
-    else {
+    let Ok(Command::Agent(AgentArgs::Start(args))) = cmd!("agent", "start", "executor") else {
         return;
     };
     let Some(bwrap) = agent_bwrap_test_args(&args, &[]) else {
