@@ -99,12 +99,8 @@ pub(crate) fn pty_command_with_env(
 ) -> Result<CommandBuilder, CtxtermError> {
     let mut command = CommandBuilder::new(&config.program);
     command.env_clear();
-    command.env("PATH", cortexfs::support::command::TRUSTED_PATH);
-    command.env("TERM", "xterm-256color");
     for (key, value) in envs {
-        if preserved_pty_env_key(&key) {
-            command.env(key, value);
-        }
+        command.env(key, value);
     }
     let cwd = env::current_dir().map_err(|error| {
         CtxtermError::unavailable(format!("cannot read current directory: {error}"))
@@ -112,9 +108,4 @@ pub(crate) fn pty_command_with_env(
     command.cwd(cwd.as_os_str());
     command.args(config.args.clone());
     Ok(command)
-}
-
-pub(crate) fn preserved_pty_env_key(key: &OsStr) -> bool {
-    key.to_str()
-        .is_some_and(|key| PRESERVED_PTY_ENV.contains(&key))
 }
