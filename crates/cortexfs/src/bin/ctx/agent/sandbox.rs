@@ -30,8 +30,12 @@ pub(crate) fn agent_start_systemd_command(
         .args
         .windows(3)
         .enumerate()
-        .filter(|(_, window)| {
-            matches!(window[0].as_str(), "--bind" | "--ro-bind") && window[2] == "/ctx"
+        .filter(|&(_, window)| {
+            matches!(
+                window,
+                [kind, _, target]
+                    if matches!(kind.as_str(), "--bind" | "--ro-bind") && target == "/ctx"
+            )
         })
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
