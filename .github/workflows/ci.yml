@@ -90,6 +90,20 @@ jobs:
           meson setup /tmp/bwrap-build /tmp/bubblewrap-0.11.0 -Dprefix=/usr
           sudo ninja -C /tmp/bwrap-build install
 
+      - name: Smoke hosted CLI state mount destination
+        run: |
+          state=$(mktemp -d)
+          agent_home=$(mktemp -d)
+          trap 'rm -rf "$state" "$agent_home"' EXIT
+          touch "$state/marker"
+          ln -s /tmp/redirect "$agent_home/.codex"
+          /usr/bin/bwrap --ro-bind / / --proc /proc --dev /dev \
+            --unshare-pid --as-pid-1 --die-with-parent --tmpfs /home \
+            --bind "$agent_home" /home/agent \
+            --bind "$state" /home/cli-state \
+            /usr/bin/sh -c 'test -L /home/agent/.codex && test -e /home/cli-state/marker && touch /home/cli-state/written'
+          test -e "$state/written"
+
       - name: Smoke hosted network process boundary
         run: |
           set +e
