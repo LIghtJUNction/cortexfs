@@ -4,6 +4,7 @@ const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt 
 const PASTA_SANDBOX_ARGS: &str = "--dir /dev/net --dev-bind /dev/net/tun /dev/net/tun --dir /run/systemd --dir /run/systemd/resolve --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/resolv.conf --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/stub-resolv.conf";
 const PASTA_EGRESS_ARGS: &str =
     "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T none -U none --";
+pub(crate) const HOSTED_CLI_STATE_TARGET: &str = "/home/cli-state";
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -180,7 +181,7 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
-    if is_protected_agent_mount_target(&mount.target) {
+    if is_protected_agent_mount_target(&mount.target) && mount.target != HOSTED_CLI_STATE_TARGET {
         return Err(CliError::usage(
             "agent mount target cannot replace sandbox system paths",
         ));
@@ -196,9 +197,7 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
             normalized.push(part);
         }
     }
-    let top = normalized
-        .components()
-        .nth(1)
+    let top = normalized.components().nth(1)
         .and_then(|component| component.as_os_str().to_str());
     top.is_none_or(|top| {
         [
