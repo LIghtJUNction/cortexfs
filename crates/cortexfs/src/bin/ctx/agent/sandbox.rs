@@ -27,12 +27,14 @@ pub(crate) fn agent_start_systemd_command(
     };
     let mut command = terminal_command(&request, view, socket, unit);
     if !args.command.is_empty() {
+        command
+            .args
+            .retain(|arg| !arg.starts_with("--property=Restart"));
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
     command
 }
-
 #[cfg(test)]
 pub(crate) fn agent_chat_socket_systemd_command(
     root: &Path,
@@ -54,7 +56,6 @@ pub(crate) fn agent_chat_socket_systemd_command(
         Path::new(cortexfs::support::command::CORTEXFS_AGENT_RUNTIME),
     )
 }
-
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
     read_xattr_string(root, "user.cortexfs.abi_path")
         .filter(String::is_empty)
@@ -63,7 +64,6 @@ pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
         .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
         .unwrap_or_else(|| root.to_path_buf())
 }
-
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
     match lifecycle {
         cortexfs::ChildLifecycle::Owned => "owned",
