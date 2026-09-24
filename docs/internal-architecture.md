@@ -186,11 +186,12 @@ FUSE. That would make permission checks observational instead of authoritative.
 Writable Agent paths must remain writable through the FUSE boundary or another
 explicitly authorized Unix object.
 
-The migration is not complete yet: the current Agent sandbox still projects
-`/ctx` read-only even though the host FUSE mount is read-write. Agent-visible
-writable `/ctx` is therefore a target until the sandbox projection is changed
-to route authorized writes through FUSE without exposing writable backing
-storage.
+For explicit hosted commands using the canonical `/ctx` root, the launch
+boundary now exposes one writable `/ctx` projection only after a per-start
+condition confirms that the effective mount is the read-write CortexFS FUSE
+filesystem. The legacy no-command `/ctx/bin/tsh` path and noncanonical/custom
+roots remain read-only while migration continues. Backing storage is never
+writable-bound around FUSE.
 
 Atomic state updates use the repository's existing same-directory temporary
 file plus rename convention. Do not add a second commit/control protocol.
@@ -304,8 +305,9 @@ Prefer behavior at the real boundary:
 - unauthorized mounts fail closed;
 - network authority is policy-derived: denied launches remain isolated and
   explicitly authorized egress does not inherit broader host network access;
-- `/ctx` allows writes where policy allows and rejects only the intended
-  read-only paths once Agent-visible writable FUSE projection is migrated;
+- canonical explicit hosted commands receive writable `/ctx` only after the
+  effective read-write CortexFS FUSE mount is validated at process start;
+- `/ctx` rejects writes only where Unix/FUSE policy intentionally narrows them;
 - read-write workspaces preserve normal `.git` semantics;
 - out-of-tree linked-worktree metadata remains inaccessible without separate
   authorization;
@@ -339,16 +341,19 @@ requirement.
 Completed:
 
 - repository rules now define hosted CLIs as the target architecture;
-- #320 removed the implicit `.git` mask from authorized read-write workspaces.
+- #320 removed the implicit `.git` mask from authorized read-write workspaces;
+- #322 reused `ctxterm` and added exact hosted child program/argv selection;
+- #325 gave explicit hosted children ordinary one-shot Unix process lifetime;
+- #326 reduced `/ctx` to one effective root projection;
+- canonical explicit hosted commands now guard writable `/ctx` at process start.
 
 Next:
 
-- reuse existing `ctxterm` child execution;
-- add the smallest explicit child program/argv selection seam;
-- keep default `tsh` compatibility while migration proceeds;
-- then make authorized `/ctx` writes reach FUSE without exposing writable
-  backing storage;
 - carry policy-derived network authority through the generic launch boundary;
+- project the minimum executable/runtime/config material for Omarchy/mise and
+  generic Arch/Linux hosted CLIs without trusting full home or ambient PATH;
+- complete fake-executable process-contract tests for cwd/env, stdio/PTY, exit,
+  signals/cancel, identity, mounts/sockets, and network fail-closed behavior;
 - retire legacy provider/model/tool/session runtime pieces as their consumers
   disappear.
 
