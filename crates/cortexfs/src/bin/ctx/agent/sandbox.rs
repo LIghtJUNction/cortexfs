@@ -26,7 +26,19 @@ pub(crate) fn agent_start_systemd_command(
         default_workspace: args.default_workspace,
     };
     let mut command = terminal_command(&request, view, socket, unit);
-    keep_first_ctx_projection(&mut command.args);
+    let ctx_root = cortexfs_paths::ctx_root().display().to_string();
+    let root_mounts = command
+        .args
+        .windows(3)
+        .enumerate()
+        .filter(|(_, window)| {
+            matches!(window[0].as_str(), "--bind" | "--ro-bind") && window[2] == ctx_root
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    for index in root_mounts.into_iter().skip(1).rev() {
+        command.args.drain(index..index + 3);
+    }
     if !args.command.is_empty() {
         command
             .args
@@ -35,21 +47,6 @@ pub(crate) fn agent_start_systemd_command(
         command.args.extend_from_slice(&args.command);
     }
     command
-}
-
-fn keep_first_ctx_projection(args: &mut Vec<String>) {
-    let ctx = cortexfs_paths::ctx_root().display().to_string();
-    let mut seen = false;
-    let mut index = 0;
-    while index + 2 < args.len() {
-        let root_bind = matches!(args[index].as_str(), "--bind" | "--ro-bind")
-            && args[index + 2] == ctx;
-        if root_bind && std::mem::replace(&mut seen, true) {
-            args.drain(index..index + 3);
-        } else {
-            index += 1;
-        }
-    }
 }
 
 #[cfg(test)]
