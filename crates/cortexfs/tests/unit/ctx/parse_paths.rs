@@ -29,6 +29,7 @@ fn explicit_hosted_child_disables_systemd_restart() {
         mounts: Vec::new(),
         command: vec!["/workspace/fake-agent".to_owned()],
     };
+    assert!(agent_bwrap_test_args(&args, &[]).is_some_and(|argv| argv.last() == args.command.first()));
     let command = agent_start_systemd_command(
         &root,
         &args,
