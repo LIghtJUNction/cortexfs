@@ -3,7 +3,7 @@ use std::path::Component::{Normal, ParentDir};
 use crate::*;
 
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
-const PASTA_EGRESS_ARGS: &str = "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T 53 -U 53 --";
+const PASTA_EGRESS_ARGS: &str = "-f -q --config-net --no-map-gw --map-guest-addr none --no-icmp -t none -u none -T 53 -U 53 --";
 
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
@@ -55,30 +55,20 @@ pub(crate) fn agent_start_systemd_command(
         command
             .args
             .retain(|arg| !arg.starts_with("--property=Restart"));
+        let authority = cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
+        let bwrap = command
+            .args
+            .iter()
+            .position(|arg| arg == cortexfs::support::command::BWRAP);
         if is_executable_file(Path::new(cortexfs::support::command::PASTA))
-            && cortexfs::authorize_network_connect(
-                "default",
-                cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
-            )
-            .is_ok()
-            && let Some(bwrap) = command
-                .args
-                .iter()
-                .position(|arg| arg == cortexfs::support::command::BWRAP)
-            && let Some(network) = command
-                .args
-                .iter()
-                .enumerate()
-                .skip(bwrap + 1)
-                .find_map(|(index, arg)| (arg == "--unshare-net").then_some(index))
+            && cortexfs::authorize_network_connect("default", authority).is_ok()
+            && let Some(bwrap) = bwrap
         {
-            command.args.remove(network);
-            command.args.splice(
-                bwrap..bwrap,
-                std::iter::once(cortexfs::support::command::PASTA)
-                    .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
-                    .map(str::to_owned),
-            );
+            command.args.retain(|arg| arg != "--unshare-net");
+            let pasta = std::iter::once(cortexfs::support::command::PASTA)
+                .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
+                .map(str::to_owned);
+            command.args.splice(bwrap..bwrap, pasta);
         }
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
@@ -217,13 +207,10 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
-    if Path::new(cwd).is_absolute() {
-        Ok(())
-    } else {
-        Err(CliError::usage(
-            "agent cwd must be absolute inside the sandbox",
-        ))
-    }
+    Path::new(cwd)
+        .is_absolute()
+        .then_some(())
+        .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
 }
 
 #[cfg(test)]
@@ -233,14 +220,12 @@ pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
 
 pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", name)?;
-    let runtime_root = env::var_os("XDG_RUNTIME_DIR").map_or_else(
-        || {
-            cortexfs_paths::system_run_root()
-                .join("user")
-                .join(current_uid_for_ctx(root).unwrap_or_default())
-        },
-        PathBuf::from,
-    );
+    let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => cortexfs_paths::system_run_root()
+            .join("user")
+            .join(current_uid_for_ctx(root)?),
+    };
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
         &stable_path_hash(root),
