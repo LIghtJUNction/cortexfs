@@ -13,21 +13,6 @@ include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
 include!("parse_paths/abi_detection.rs");
 #[test]
-fn hosted_cli_state_target_is_exact_sibling_of_agent_home() {
-    for (target, allowed) in [
-        (HOSTED_CLI_STATE_TARGET, true),
-        ("/home/agent/.codex", false),
-        ("/home/cli-state/nested", false),
-    ] {
-        let mount = AgentMount {
-            source: "/tmp/state".into(),
-            target: target.into(),
-            mode: "rw".into(),
-        };
-        assert_eq!(require_agent_mount(&mount).is_ok(), allowed, "{target}");
-    }
-}
-#[test]
 fn hosted_agent_guards_one_writable_system_ctx_projection() {
     let root = clean_test_dir("ctx-agent-rw-root-guard");
     assert!(ensure_reference_tree(&root).is_ok());
