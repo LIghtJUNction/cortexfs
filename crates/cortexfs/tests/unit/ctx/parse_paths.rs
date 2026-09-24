@@ -8,7 +8,6 @@ include!("parse_paths/agent_process.rs");
 include!("parse_paths/agent_profile.rs");
 include!("parse_paths/agent_status_validation.rs");
 include!("parse_paths/agent_start.rs");
-include!("parse_paths/agent_home_projection.rs");
 include!("parse_paths/chat.rs");
 include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
@@ -32,5 +31,5 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     assert!(!host_ready || matches!(order, [Some(bwrap), Some(pasta), Some(ctxterm)] if bwrap < pasta && pasta < ctxterm));
     assert!(!host_ready || (command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && command.args.iter().any(|arg| arg == "--no-map-gw") && !command.args.iter().any(|arg| arg == "--unshare-net") && command.args.iter().any(|arg| arg == "/dev/net/tun") && command.args.windows(3).any(|w| w == ["--ro-bind-try", "/run/systemd/resolve/resolv.conf", "/run/systemd/resolve/resolv.conf"]) && command.args.windows(3).any(|w| w == ["--ro-bind-try", "/run/systemd/resolve/resolv.conf", "/run/systemd/resolve/stub-resolv.conf"])));
     assert!((host_ready && [["-t", "none"], ["-u", "none"], ["-T", "none"], ["-U", "none"]].iter().all(|pair| command.args.windows(2).any(|w| w == pair))) || (!host_ready && command.args.iter().any(|arg| arg == "--unshare-net") && !command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA)));
-    write_text_file(&root.join("agent/executor.d/policy"), "allow executor_t tool:tsh execute\n"); let Ok(denied_view) = derive_agent_runtime_view(&root, "executor") else { return }; let denied = agent_start_systemd_command(Path::new("/ctx"), &args, &[], &denied_view, Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-network-denied-test"); assert!(denied.args.iter().any(|arg| arg == "--unshare-net") && !denied.args.iter().any(|arg| arg == cortexfs::support::command::PASTA));
+    write_text_file(&root.join("agent/executor.d/policy"), "allow executor_t tool:tsh execute\n"); let Ok(denied_view) = derive_agent_runtime_view(&root, "executor") else { return }; let denied = agent_start_systemd_command(Path::new("/ctx"), &args, &[], &denied_view, Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-network-denied-test"); assert!(denied.args.iter().any(|arg| arg == "--unshare-net") && !denied.args.iter().any(|arg| arg == cortexfs::support::command::PASTA)); assert!(!is_protected_agent_mount_target("/home/agent/.codex/config.toml", "ro") && is_protected_agent_mount_target("/home/agent/.codex/config.toml", "rw") && is_protected_agent_mount_target("/home/agent", "ro") && is_protected_agent_mount_target("/home/agent/../other/.config", "ro"));
 }
