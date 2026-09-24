@@ -53,11 +53,12 @@ MCP and other open protocols are reused directly instead of wrapped in a new wir
 Implementation status:
 
 ```text
-target does not mean implemented: generic hosted-CLI launch profiles are still migrating under #318
+target does not mean fully implemented: generic hosted-CLI launch profiles are still migrating under #318
 current executable agents may still use the legacy sdk-envelope-v1 runtime path
-current agent sandbox projection still exposes /ctx read-only even though the host FUSE mount is read-write
-agent-visible writable /ctx is a migration target until authorized writes flow through FUSE without a backing-store bypass
-new work must close these migration gaps instead of presenting missing adapters or write paths as available
+explicit hosted commands using canonical /ctx receive one writable FUSE projection only after launch-time validation confirms the effective /ctx mount is read-write CortexFS
+legacy no-command /ctx/bin/tsh launches and noncanonical/custom roots remain read-only during migration
+backing storage is never exposed as a writable bind; individual /ctx paths remain attenuated by Unix/FUSE policy
+new work must close the remaining migration gaps instead of presenting missing adapters as available
 ```
 
 Compatibility boundary:
