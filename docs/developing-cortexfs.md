@@ -75,10 +75,12 @@ The host FUSE filesystem is read-write overall. Individual files or directories
 may be read-only by Unix/FUSE policy. Backing storage must never be exposed as a
 writable bind that lets a hosted CLI bypass FUSE enforcement.
 
-Current migration status matters: the legacy Agent sandbox still projects
-`/ctx` read-only even though the host FUSE mount is read-write. Agent-visible
-writable `/ctx` is therefore a migration target under #318, not a capability to
-assume in new launch-profile tests yet.
+Explicit hosted commands using the canonical `/ctx` root receive a single
+writable `/ctx` projection only after process-start validation confirms the
+effective mount is the read-write CortexFS FUSE filesystem. The legacy
+no-command `/ctx/bin/tsh` path and noncanonical/custom roots remain read-only
+during migration. Tests must not assume writable `/ctx` outside that guarded
+hosted-command boundary.
 
 A read-write `/workspace` follows normal Unix subtree semantics. CortexFS does
 not implicitly hide `.git`; explicit path policy may still make
@@ -157,9 +159,8 @@ child process
 ```
 
 `ctxterm` owns PTY mechanics, attach/watch, child lifetime, and exit status. It
-is not an Agent runtime. Phase 2 of #318 should reuse this machinery and add the
-smallest explicit child program/argv selection seam rather than create a new
-runner or backend registry.
+is not an Agent runtime. Hosted commands reuse this machinery through exact
+child program/argv selection rather than a second runner or backend registry.
 
 `tsh` remains a compatibility tool shell. New hosted CLI integrations should not
 require CortexFS to absorb the CLI's native model/session/tool loop into `tsh`.
