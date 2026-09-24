@@ -12,7 +12,7 @@
 #![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::env;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
@@ -28,18 +28,6 @@ const DEFAULT_COLS: u16 = 80;
 const DEFAULT_SHELL: &str = cortexfs::support::command::TSH;
 const MAX_CLIENTS: usize = 16;
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
-const PRESERVED_PTY_ENV: &[&str] = &[
-    "CTX_ROOT",
-    "CTX_HOME",
-    "CTX_AGENT",
-    "CTX_AGENT_SUBJECT",
-    "CTX_PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "LANG",
-];
 
 type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type Client = Arc<Mutex<UnixStream>>;
