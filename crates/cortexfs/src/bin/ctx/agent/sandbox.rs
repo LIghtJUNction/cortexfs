@@ -56,7 +56,6 @@ pub(crate) fn agent_chat_socket_systemd_command(
         Path::new(cortexfs::support::command::CORTEXFS_AGENT_RUNTIME),
     )
 }
-
 pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
     read_xattr_string(root, "user.cortexfs.abi_path")
         .filter(String::is_empty)
@@ -65,7 +64,6 @@ pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
         .filter(|backing| backing.is_absolute() && open_plain_directory(backing).is_ok())
         .unwrap_or_else(|| root.to_path_buf())
 }
-
 pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
     match lifecycle {
         cortexfs::ChildLifecycle::Owned => "owned",
@@ -160,7 +158,10 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
             normalized.push(part);
         }
     }
-    let top = normalized.components().nth(1).and_then(|component| component.as_os_str().to_str());
+    let top = normalized
+        .components()
+        .nth(1)
+        .and_then(|component| component.as_os_str().to_str());
     top.is_none_or(|top| {
         [
             "bin", "ctx", "dev", "etc", "home", "lib", "lib64", "proc", "run", "usr",
