@@ -27,5 +27,5 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     );
     assert_eq!(command.args.windows(3).filter(|w| w[0] == "--bind" && w[2] == "/ctx").count(), 1);
     assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
-    assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && contains_arg_pair(&command.args, "--map-guest-addr", "none") && !command.args.iter().any(|arg| arg == "--unshare-net"));
+    assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && command.args.iter().any(|arg| arg == "--no-map-gw") && !command.args.iter().any(|arg| arg == "--unshare-net"));
 }
