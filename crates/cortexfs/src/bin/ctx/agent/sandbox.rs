@@ -26,6 +26,21 @@ pub(crate) fn agent_start_systemd_command(
         default_workspace: args.default_workspace,
     };
     let mut command = terminal_command(&request, view, socket, unit);
+    let root_mounts = command
+        .args
+        .windows(3)
+        .enumerate()
+        .filter(|&(_, window)| {
+            window
+                .first()
+                .is_some_and(|kind| matches!(kind.as_str(), "--bind" | "--ro-bind"))
+                && window.get(2).is_some_and(|target| target == "/ctx")
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    for index in root_mounts.into_iter().skip(1).rev() {
+        command.args.drain(index..index + 3);
+    }
     if !args.command.is_empty() {
         command
             .args
