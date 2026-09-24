@@ -18,9 +18,7 @@ fn agent_start_keeps_one_ctx_root_projection() {
     let Ok(Command::Agent(AgentArgs::Start(args))) = cmd!("agent", "start", "executor") else {
         return;
     };
-    let Some(bwrap) = agent_bwrap_test_args(&args, &[]) else {
-        return;
-    };
+    let bwrap = agent_bwrap_test_args(&args, &[]).unwrap_or_default();
     assert_eq!(
         bwrap
             .windows(3)
