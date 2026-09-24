@@ -94,6 +94,7 @@ jobs:
         run: |
           set +e
           /usr/bin/bwrap --ro-bind / / --proc /proc --dev /dev \
+            --dir /dev/net --dev-bind /dev/net/tun /dev/net/tun \
             --unshare-pid --as-pid-1 --die-with-parent \
             /usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp \
             -t none -u none -T 53 -U 53 -- /bin/sh -c 'exit 23'
