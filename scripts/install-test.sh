@@ -70,6 +70,9 @@ assert_eq 'fedora|dnf|rocky' "$(detect_distro "$fedora" dnf)" "Fedora-family map
 assert_eq 'suse|zypper|opensuse-tumbleweed' "$(detect_distro "$suse" zypper)" "SUSE-family mapping"
 assert_false "family is rejected without its real package manager" detect_distro "$debian" pacman
 assert_false "unknown distro is rejected" detect_distro "$unknown" "pacman apt-get dnf zypper"
+package_plan arch
+assert_true "Arch package plan installs passt for hosted CLI egress" \
+    grep -Fxq passt < <(printf '%s\n' "${PACKAGES[@]}")
 
 good_state=$(fixture good-state 'schema=1' 'language=zh')
 # shellcheck disable=SC2016 # Deliberately hostile literal state content.
