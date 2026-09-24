@@ -8,6 +8,7 @@ include!("parse_paths/agent_process.rs");
 include!("parse_paths/agent_profile.rs");
 include!("parse_paths/agent_status_validation.rs");
 include!("parse_paths/agent_start.rs");
+include!("parse_paths/agent_home_projection.rs");
 include!("parse_paths/chat.rs");
 include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
