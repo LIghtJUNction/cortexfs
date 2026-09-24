@@ -26,7 +26,7 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
         Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-rw-test",
     );
     assert_eq!(command.args.windows(3).filter(|w| w.first().is_some_and(|v| v == "--bind") && w.get(2).is_some_and(|v| v == "/ctx")).count(), 1);
-    assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
+    assert!(agent_bwrap_test_args(&args, &[]).is_some() && command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
     let host_ready = cortexfs::is_executable_file(Path::new(cortexfs::support::command::PASTA)) && Path::new("/dev/net/tun").exists();
     let order = [cortexfs::support::command::BWRAP, cortexfs::support::command::PASTA, cortexfs::support::command::CTXTERM].map(|arg| command.args.iter().position(|value| value == arg));
     assert!(!host_ready || matches!(order, [Some(bwrap), Some(pasta), Some(ctxterm)] if bwrap < pasta && pasta < ctxterm));
