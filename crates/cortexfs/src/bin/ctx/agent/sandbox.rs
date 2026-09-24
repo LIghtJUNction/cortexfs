@@ -26,13 +26,12 @@ pub(crate) fn agent_start_systemd_command(
         default_workspace: args.default_workspace,
     };
     let mut command = terminal_command(&request, view, socket, unit);
-    let ctx_root = cortexfs_paths::ctx_root().display().to_string();
     let root_mounts = command
         .args
         .windows(3)
         .enumerate()
         .filter(|(_, window)| {
-            matches!(window[0].as_str(), "--bind" | "--ro-bind") && window[2] == ctx_root
+            matches!(window[0].as_str(), "--bind" | "--ro-bind") && window[2] == "/ctx"
         })
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
@@ -200,9 +199,7 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
         Some(path) => PathBuf::from(path),
-        None => cortexfs_paths::system_run_root()
-            .join("user")
-            .join(current_uid_for_ctx(root)?),
+        None => cortexfs_paths::system_run_root().join("user").join(current_uid_for_ctx(root)?),
     };
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
