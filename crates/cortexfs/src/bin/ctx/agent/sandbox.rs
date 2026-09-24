@@ -27,12 +27,12 @@ pub(crate) fn agent_start_systemd_command(
     };
     let mut command = terminal_command(&request, view, socket, unit);
     if !args.command.is_empty() {
+        command.args.retain(|arg| !arg.starts_with("--property=Restart"));
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
     command
 }
-
 #[cfg(test)]
 pub(crate) fn agent_chat_socket_systemd_command(
     root: &Path,
