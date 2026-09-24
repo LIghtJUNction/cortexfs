@@ -199,7 +199,9 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
         Some(path) => PathBuf::from(path),
-        None => cortexfs_paths::system_run_root().join("user").join(current_uid_for_ctx(root)?),
+        None => cortexfs_paths::system_run_root()
+            .join("user")
+            .join(current_uid_for_ctx(root)?),
     };
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
