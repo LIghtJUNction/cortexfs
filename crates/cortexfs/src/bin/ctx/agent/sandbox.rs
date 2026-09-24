@@ -55,19 +55,19 @@ pub(crate) fn agent_start_systemd_command(
             .retain(|arg| !arg.starts_with("--property=Restart"));
         let authority =
             cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
-        let bwrap = command
+        let ctxterm = command
             .args
             .iter()
-            .position(|arg| arg == cortexfs::support::command::BWRAP);
+            .position(|arg| arg == cortexfs::support::command::CTXTERM);
         if is_executable_file(Path::new(cortexfs::support::command::PASTA))
             && cortexfs::authorize_network_connect("default", authority).is_ok()
-            && let Some(bwrap) = bwrap
+            && let Some(ctxterm) = ctxterm
         {
-            command.args.retain(|arg| arg != "--unshare-net");
             let pasta = std::iter::once(cortexfs::support::command::PASTA)
                 .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
                 .map(str::to_owned);
-            command.args.splice(bwrap..bwrap, pasta);
+            command.args.splice(ctxterm..ctxterm, pasta);
+            command.args.retain(|arg| arg != "--unshare-net");
         }
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
