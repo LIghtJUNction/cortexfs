@@ -22,9 +22,7 @@ fn agent_start_keeps_one_ctx_root_projection() {
         bwrap
             .windows(3)
             .filter(|window| {
-                window
-                    .first()
-                    .is_some_and(|kind| matches!(kind.as_str(), "--bind" | "--ro-bind"))
+                matches!(window.first().map(String::as_str), Some("--bind" | "--ro-bind"))
                     && window.get(2).is_some_and(|target| target == "/ctx")
             })
             .count(),
