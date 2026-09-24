@@ -27,7 +27,9 @@ pub(crate) fn agent_start_systemd_command(
     };
     let mut command = terminal_command(&request, view, socket, unit);
     if !args.command.is_empty() {
-        command.args.retain(|arg| !arg.starts_with("--property=Restart"));
+        command
+            .args
+            .retain(|arg| !arg.starts_with("--property=Restart"));
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
@@ -158,10 +160,7 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
             normalized.push(part);
         }
     }
-    let top = normalized
-        .components()
-        .nth(1)
-        .and_then(|component| component.as_os_str().to_str());
+    let top = normalized.components().nth(1).and_then(|component| component.as_os_str().to_str());
     top.is_none_or(|top| {
         [
             "bin", "ctx", "dev", "etc", "home", "lib", "lib64", "proc", "run", "usr",
