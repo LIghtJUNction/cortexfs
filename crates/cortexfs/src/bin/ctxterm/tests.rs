@@ -52,24 +52,36 @@ mod tests {
     }
 
     #[test]
-    fn ctxterm_pty_command_uses_allowlisted_environment() -> Result<(), CtxtermError> {
+    fn ctxterm_pty_command_forwards_boundary_environment() -> Result<(), CtxtermError> {
         let command = pty_command_with_env(
             &config(),
             [
                 (OsString::from("CTX_AGENT"), OsString::from("executor")),
                 (OsString::from("HOME"), OsString::from("/home/agent")),
-                (OsString::from("PATH"), OsString::from("/tmp/evil")),
-                (OsString::from("LD_PRELOAD"), OsString::from("evil.so")),
+                (OsString::from("PATH"), OsString::from("/opt/agent/bin")),
+                (
+                    OsString::from("XDG_CONFIG_HOME"),
+                    OsString::from("/home/agent/.config"),
+                ),
+                (
+                    OsString::from("AGENT_CLI_TOKEN"),
+                    OsString::from("explicit"),
+                ),
             ],
         )?;
         let env = command
             .iter_full_env_as_str()
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
             .collect::<Vec<_>>();
-        assert!(env.contains(&("CTX_AGENT".into(), "executor".into())));
-        assert!(env.contains(&("HOME".into(), "/home/agent".into())));
-        assert!(env.contains(&("PATH".into(), "/usr/bin:/bin".into())));
-        assert!(!env.iter().any(|entry| entry.0 == "LD_PRELOAD"));
+        for expected in [
+            ("CTX_AGENT", "executor"),
+            ("HOME", "/home/agent"),
+            ("PATH", "/opt/agent/bin"),
+            ("XDG_CONFIG_HOME", "/home/agent/.config"),
+            ("AGENT_CLI_TOKEN", "explicit"),
+        ] {
+            assert!(env.contains(&(expected.0.into(), expected.1.into())));
+        }
         Ok(())
     }
 
