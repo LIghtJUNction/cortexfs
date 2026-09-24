@@ -125,35 +125,31 @@ pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
 ) -> Vec<AgentMount> {
-    let mut mounts = Vec::with_capacity(args.mounts.len() + 1);
-    if args.default_workspace {
-        mounts.push(AgentMount {
+    args.default_workspace
+        .then(|| AgentMount {
             source: default_source.display().to_string(),
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
-        });
-    }
-    mounts.extend(args.mounts.iter().cloned());
-    mounts
+        })
+        .into_iter()
+        .chain(args.mounts.iter().cloned())
+        .collect()
 }
 
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    for mount in mounts {
-        if let Ok(relative) = Path::new(&args.cwd).strip_prefix(&mount.source) {
-            return Path::new(&mount.target)
-                .join(relative)
-                .display()
-                .to_string();
-        }
-    }
-    args.cwd.clone()
+    mounts
+        .iter()
+        .find_map(|mount| {
+            let relative = Path::new(&args.cwd).strip_prefix(&mount.source).ok()?;
+            Some(Path::new(&mount.target).join(relative).display().to_string())
+        })
+        .unwrap_or_else(|| args.cwd.clone())
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
     mounts
         .iter()
-        .rev()
-        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
+        .rfind(|mount| mount.target == "/workspace" && mount.mode == "rw")
         .map(|mount| mount.source.clone())
 }
 
@@ -221,10 +217,13 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
 }
 
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
-    Path::new(cwd)
-        .is_absolute()
-        .then_some(())
-        .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
+    if Path::new(cwd).is_absolute() {
+        Ok(())
+    } else {
+        Err(CliError::usage(
+            "agent cwd must be absolute inside the sandbox",
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -234,12 +233,14 @@ pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
 
 pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", name)?;
-    let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
-        Some(path) => PathBuf::from(path),
-        None => cortexfs_paths::system_run_root()
-            .join("user")
-            .join(current_uid_for_ctx(root)?),
-    };
+    let runtime_root = env::var_os("XDG_RUNTIME_DIR").map_or_else(
+        || {
+            cortexfs_paths::system_run_root()
+                .join("user")
+                .join(current_uid_for_ctx(root).unwrap_or_default())
+        },
+        PathBuf::from,
+    );
     Ok(cortexfs_paths::user_agent_runtime_socket(
         &runtime_root,
         &stable_path_hash(root),
