@@ -29,3 +29,55 @@ fn agent_start_keeps_one_ctx_root_projection() {
         1
     );
 }
+
+#[test]
+fn hosted_agent_guards_writable_system_ctx_at_unit_start() {
+    let root = clean_test_dir("ctx-agent-rw-root-guard");
+    assert!(ensure_reference_tree(&root).is_ok());
+    ensure_runtime_model_fixture(&root);
+    let Ok(view) = derive_agent_runtime_view(&root, "executor") else {
+        return;
+    };
+    let args = AgentStartArgs {
+        name: "executor".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: Vec::new(),
+        command: vec!["/bin/true".to_owned()],
+    };
+    let command = agent_start_systemd_command(
+        Path::new("/ctx"),
+        &args,
+        &[],
+        &view,
+        Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET),
+        "cortexfs-agent-executor-test-terminal",
+    );
+    assert!(contains_arg_triplet(&command.args, "--bind", "/ctx", "/ctx"));
+    assert!(command.args.iter().any(|arg| {
+        arg.starts_with("--property=ExecCondition=/usr/bin/findmnt ")
+            && arg.contains("--mountpoint /ctx")
+            && arg.contains("--source cortexfs")
+            && arg.contains("--options rw")
+    }));
+
+    let fallback = agent_start_systemd_command(
+        &root,
+        &args,
+        &[],
+        &view,
+        Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET),
+        "cortexfs-agent-executor-test-terminal",
+    );
+    assert!(contains_arg_triplet(
+        &fallback.args,
+        "--ro-bind",
+        &root.display().to_string(),
+        "/ctx"
+    ));
+    assert!(!fallback
+        .args
+        .iter()
+        .any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt")));
+}
