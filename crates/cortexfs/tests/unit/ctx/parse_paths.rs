@@ -25,7 +25,8 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
         Path::new("/ctx"), &args, &[], &view,
         Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-rw-test",
     );
-    assert_eq!(command.args.windows(3).filter(|w| w[0] == "--bind" && w[2] == "/ctx").count(), 1);
+    assert_eq!(command.args.windows(3).filter(|w| w.first().is_some_and(|v| v == "--bind") && w.get(2).is_some_and(|v| v == "/ctx")).count(), 1);
+    assert!(agent_bwrap_test_args(&args, &[]).is_some());
     assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
     assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && command.args.iter().any(|arg| arg == "--no-map-gw") && !command.args.iter().any(|arg| arg == "--unshare-net"));
 }
