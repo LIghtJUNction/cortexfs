@@ -26,6 +26,7 @@ pub(crate) fn agent_start_systemd_command(
         default_workspace: args.default_workspace,
     };
     let mut command = terminal_command(&request, view, socket, unit);
+    keep_first_ctx_projection(&mut command.args);
     if !args.command.is_empty() {
         command
             .args
@@ -35,6 +36,22 @@ pub(crate) fn agent_start_systemd_command(
     }
     command
 }
+
+fn keep_first_ctx_projection(args: &mut Vec<String>) {
+    let ctx = cortexfs_paths::ctx_root().display().to_string();
+    let mut seen = false;
+    let mut index = 0;
+    while index + 2 < args.len() {
+        let root_bind = matches!(args[index].as_str(), "--bind" | "--ro-bind")
+            && args[index + 2] == ctx;
+        if root_bind && std::mem::replace(&mut seen, true) {
+            args.drain(index..index + 3);
+        } else {
+            index += 1;
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn agent_chat_socket_systemd_command(
     root: &Path,
