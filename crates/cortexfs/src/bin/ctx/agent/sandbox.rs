@@ -3,23 +3,7 @@ use std::path::Component::{Normal, ParentDir};
 use crate::*;
 
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
-const PASTA_EGRESS_ARGS: [&str; 15] = [
-    cortexfs::support::command::PASTA,
-    "-f",
-    "-q",
-    "--config-net",
-    "--no-map-gw",
-    "--no-icmp",
-    "-t",
-    "none",
-    "-u",
-    "none",
-    "-T",
-    "53",
-    "-U",
-    "53",
-    "--",
-];
+const PASTA_EGRESS_ARGS: &str = "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T 53 -U 53 --";
 
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
@@ -71,48 +55,36 @@ pub(crate) fn agent_start_systemd_command(
         command
             .args
             .retain(|arg| !arg.starts_with("--property=Restart"));
-        if hosted_network_allowed(view)
-            && is_executable_file(Path::new(cortexfs::support::command::PASTA))
+        if is_executable_file(Path::new(cortexfs::support::command::PASTA))
+            && cortexfs::authorize_network_connect(
+                "default",
+                cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
+            )
+            .is_ok()
+            && let Some(bwrap) = command
+                .args
+                .iter()
+                .position(|arg| arg == cortexfs::support::command::BWRAP)
+            && let Some(network) = command
+                .args
+                .iter()
+                .enumerate()
+                .skip(bwrap + 1)
+                .find_map(|(index, arg)| (arg == "--unshare-net").then_some(index))
         {
-            add_hosted_network_boundary(&mut command);
+            command.args.remove(network);
+            command.args.splice(
+                bwrap..bwrap,
+                std::iter::once(cortexfs::support::command::PASTA)
+                    .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
+                    .map(str::to_owned),
+            );
         }
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
     command
 }
-
-fn hosted_network_allowed(view: &AgentRuntimeView) -> bool {
-    cortexfs::authorize_network_connect(
-        "default",
-        cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
-    )
-    .is_ok()
-}
-
-fn add_hosted_network_boundary(command: &mut AgentLaunchCommand) {
-    let Some(bwrap) = command
-        .args
-        .iter()
-        .position(|arg| arg == cortexfs::support::command::BWRAP)
-    else {
-        return;
-    };
-    let Some(network_isolation) = command
-        .args
-        .iter()
-        .enumerate()
-        .skip(bwrap + 1)
-        .find_map(|(index, arg)| (arg == "--unshare-net").then_some(index))
-    else {
-        return;
-    };
-    command.args.remove(network_isolation);
-    command
-        .args
-        .splice(bwrap..bwrap, PASTA_EGRESS_ARGS.map(str::to_owned));
-}
-
 #[cfg(test)]
 pub(crate) fn agent_chat_socket_systemd_command(
     root: &Path,
