@@ -12,7 +12,6 @@ include!("parse_paths/chat.rs");
 include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
 include!("parse_paths/abi_detection.rs");
-
 #[test]
 fn agent_start_keeps_one_ctx_root_projection() {
     let Ok(Command::Agent(AgentArgs::Start(args))) = cmd!("agent", "start", "executor") else {
@@ -23,7 +22,10 @@ fn agent_start_keeps_one_ctx_root_projection() {
         bwrap
             .windows(3)
             .filter(|window| {
-                matches!(window[0].as_str(), "--bind" | "--ro-bind") && window[2] == "/ctx"
+                window
+                    .first()
+                    .is_some_and(|kind| matches!(kind.as_str(), "--bind" | "--ro-bind"))
+                    && window.get(2).is_some_and(|target| target == "/ctx")
             })
             .count(),
         1
