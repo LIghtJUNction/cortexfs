@@ -31,9 +31,7 @@ pub(crate) fn agent_start_systemd_command(
         .windows(3)
         .enumerate()
         .filter(|&(_, window)| {
-            window
-                .first()
-                .is_some_and(|kind| matches!(kind.as_str(), "--bind" | "--ro-bind"))
+            window.first().is_some_and(|kind| matches!(kind.as_str(), "--bind" | "--ro-bind"))
                 && window.get(2).is_some_and(|target| target == "/ctx")
         })
         .map(|(index, _)| index)
