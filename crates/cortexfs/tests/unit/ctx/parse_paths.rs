@@ -43,3 +43,37 @@ fn writable_workspace_bwrap_does_not_invent_git_mask() {
         "/workspace/.git"
     ));
 }
+
+#[test]
+fn explicit_hosted_child_disables_systemd_restart() {
+    let root = clean_test_dir("ctx-agent-hosted-child-restart");
+    assert!(ensure_reference_tree(&root).is_ok());
+    ensure_runtime_model_fixture(&root);
+    let Ok(view) = derive_agent_runtime_view(&root, "executor") else {
+        return;
+    };
+    let args = AgentStartArgs {
+        name: "executor".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: Vec::new(),
+        command: vec!["/workspace/fake-agent".to_owned(), "--json".to_owned()],
+    };
+    let command = agent_start_systemd_command(
+        &root,
+        &args,
+        &[],
+        &view,
+        Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET),
+        "cortexfs-agent-executor-test-terminal",
+    );
+
+    assert!(
+        !command
+            .args
+            .iter()
+            .any(|arg| arg.starts_with("--property=Restart")),
+        "explicit hosted children must use one-shot systemd lifetime: {command:?}"
+    );
+}
