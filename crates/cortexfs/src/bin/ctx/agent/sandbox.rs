@@ -1,10 +1,8 @@
 use std::path::Component::{Normal, ParentDir};
-
 use crate::*;
-
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
-const PASTA_EGRESS_ARGS: &str = "-f -q --config-net --no-map-gw --map-guest-addr none --no-icmp -t none -u none -T 53 -U 53 --";
-
+const PASTA_EGRESS_ARGS: &str =
+    "-f -q --config-net --no-map-gw --map-guest-addr none --no-icmp -t none -u none -T 53 -U 53 --";
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -55,7 +53,8 @@ pub(crate) fn agent_start_systemd_command(
         command
             .args
             .retain(|arg| !arg.starts_with("--property=Restart"));
-        let authority = cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
+        let authority =
+            cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
         let bwrap = command
             .args
             .iter()
@@ -129,7 +128,12 @@ pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMoun
         .iter()
         .find_map(|mount| {
             let relative = Path::new(&args.cwd).strip_prefix(&mount.source).ok()?;
-            Some(Path::new(&mount.target).join(relative).display().to_string())
+            Some(
+                Path::new(&mount.target)
+                    .join(relative)
+                    .display()
+                    .to_string(),
+            )
         })
         .unwrap_or_else(|| args.cwd.clone())
 }
@@ -209,7 +213,6 @@ pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
 pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
     format!("cortexfs-agent-{name}-{}-chat", stable_path_hash(root))
 }
-
 pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
@@ -224,7 +227,6 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
         name,
     ))
 }
-
 pub(crate) fn reset_agent_chat_unit(unit: &str) {
     for target in [format!("{unit}.service"), format!("{unit}.socket")] {
         for verb in ["stop", "reset-failed"] {
@@ -235,7 +237,6 @@ pub(crate) fn reset_agent_chat_unit(unit: &str) {
         }
     }
 }
-
 pub(crate) fn stable_path_hash(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     let path = absolute_existing_path(path).unwrap_or_else(|_error| path.to_path_buf());
