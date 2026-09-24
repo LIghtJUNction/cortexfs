@@ -13,5 +13,33 @@ include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
 include!("parse_paths/abi_detection.rs");
 
-#[allow(clippy::type_complexity, reason = "keeps the legacy test helper compiled")]
-const _: fn(&AgentStartArgs, &[AgentMount]) -> Option<Vec<String>> = agent_bwrap_test_args;
+#[test]
+fn writable_workspace_bwrap_does_not_invent_git_mask() {
+    let source = clean_test_dir("ctx-agent-git-bwrap-args-source");
+    assert!(fs::create_dir_all(source.join(".git")).is_ok());
+    let args = AgentStartArgs {
+        name: "executor".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+        command: Vec::new(),
+    };
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+    let Some(bwrap) = agent_bwrap_test_args(&args, &mounts) else {
+        return;
+    };
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--bind",
+        source.to_str().unwrap_or_default(),
+        "/workspace"
+    ));
+    assert!(!contains_arg_pair(&bwrap, "--tmpfs", "/workspace/.git"));
+    assert!(!contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        "/dev/null",
+        "/workspace/.git"
+    ));
+}
