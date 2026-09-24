@@ -48,7 +48,7 @@ pub(crate) fn agent_start_systemd_command(
         if root == cortexfs_paths::ctx_root()
             && let Some(kind) = root_mount.and_then(|index| command.args.get_mut(index))
         {
-            *kind = "--bind".to_owned();
+            "--bind".clone_into(kind);
             command.args.insert(0, CTX_RW_MOUNT_CONDITION.to_owned());
         }
         command
