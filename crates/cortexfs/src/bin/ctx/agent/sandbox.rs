@@ -2,7 +2,7 @@ use crate::*;
 use std::path::Component::{Normal, ParentDir};
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
 const PASTA_EGRESS_ARGS: &str =
-    "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T none -U none --";
+    "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T 53 -U 53 --";
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -55,19 +55,27 @@ pub(crate) fn agent_start_systemd_command(
             .retain(|arg| !arg.starts_with("--property=Restart"));
         let authority =
             cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
-        let bwrap = command
+        let ctxterm = command
             .args
             .iter()
-            .position(|arg| arg == cortexfs::support::command::BWRAP);
+            .position(|arg| arg == cortexfs::support::command::CTXTERM);
         if is_executable_file(Path::new(cortexfs::support::command::PASTA))
             && Path::new("/dev/net/tun").exists()
             && cortexfs::authorize_network_connect("default", authority).is_ok()
-            && let Some(bwrap) = bwrap
+            && let Some(ctxterm) = ctxterm
         {
-            let pasta = std::iter::once(cortexfs::support::command::PASTA)
-                .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
-                .map(str::to_owned);
-            command.args.splice(bwrap..bwrap, pasta);
+            let pasta = [
+                "--dir",
+                "/dev/net",
+                "--dev-bind",
+                "/dev/net/tun",
+                "/dev/net/tun",
+                cortexfs::support::command::PASTA,
+            ]
+            .into_iter()
+            .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
+            .map(str::to_owned);
+            command.args.splice(ctxterm..ctxterm, pasta);
             command.args.retain(|arg| arg != "--unshare-net");
         }
         let _ = command.args.pop();
