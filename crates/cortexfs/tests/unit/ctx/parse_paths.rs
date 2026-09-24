@@ -8,7 +8,6 @@ include!("parse_paths/agent_process.rs");
 include!("parse_paths/agent_profile.rs");
 include!("parse_paths/agent_status_validation.rs");
 include!("parse_paths/agent_start.rs");
-include!("parse_paths/agent_start_network.rs");
 include!("parse_paths/chat.rs");
 include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
@@ -33,4 +32,6 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     assert!(contains_arg_triplet(&command.args, "--bind", "/ctx", "/ctx"));
     assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt")
         && arg.contains("--source cortexfs") && arg.contains("--options rw")));
+    assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA));
+    assert!(!command.args.iter().any(|arg| arg == "--unshare-net"));
 }
