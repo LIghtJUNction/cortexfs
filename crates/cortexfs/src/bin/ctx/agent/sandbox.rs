@@ -64,10 +64,17 @@ pub(crate) fn agent_start_systemd_command(
             && cortexfs::authorize_network_connect("default", authority).is_ok()
             && let Some(ctxterm) = ctxterm
         {
-            let pasta = ["--dir", "/dev/net", "--dev-bind", "/dev/net/tun", "/dev/net/tun", cortexfs::support::command::PASTA]
-                .into_iter()
-                .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
-                .map(str::to_owned);
+            let pasta = [
+                "--dir",
+                "/dev/net",
+                "--dev-bind",
+                "/dev/net/tun",
+                "/dev/net/tun",
+                cortexfs::support::command::PASTA,
+            ]
+            .into_iter()
+            .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
+            .map(str::to_owned);
             command.args.splice(ctxterm..ctxterm, pasta);
             command.args.retain(|arg| arg != "--unshare-net");
         }
