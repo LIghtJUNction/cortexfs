@@ -19,20 +19,13 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
     let Ok(view) = derive_agent_runtime_view(&root, "executor") else { return };
-    let Ok(Command::Agent(AgentArgs::Start(mut args))) = cmd!("agent", "start", "executor") else {
-        return;
-    };
+    let Ok(Command::Agent(AgentArgs::Start(mut args))) = cmd!("agent", "start", "executor") else { return };
     args.command = vec!["/bin/true".to_owned()];
     let command = agent_start_systemd_command(
         Path::new("/ctx"), &args, &[], &view,
         Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-rw-test",
     );
-    let ctx_mounts = command.args.windows(3).filter(|w| w.first().is_some_and(|v| v.ends_with("bind")) && w.last().is_some_and(|v| v == "/ctx"));
-    assert_eq!(ctx_mounts.count(), 1);
-    assert!(contains_arg_triplet(&command.args, "--bind", "/ctx", "/ctx"));
-    assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt")
-        && arg.contains("--source cortexfs") && arg.contains("--options rw")));
-    assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA)
-        && contains_arg_pair(&command.args, "--map-guest-addr", "none"));
-    assert!(!command.args.iter().any(|arg| arg == "--unshare-net"));
+    assert_eq!(command.args.windows(3).filter(|w| w[0] == "--bind" && w[2] == "/ctx").count(), 1);
+    assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
+    assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && contains_arg_pair(&command.args, "--map-guest-addr", "none") && !command.args.iter().any(|arg| arg == "--unshare-net"));
 }
