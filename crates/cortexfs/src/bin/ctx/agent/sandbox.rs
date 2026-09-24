@@ -60,10 +60,12 @@ pub(crate) fn agent_start_systemd_command(
             .iter()
             .position(|arg| arg == cortexfs::support::command::CTXTERM);
         if is_executable_file(Path::new(cortexfs::support::command::PASTA))
+            && Path::new("/dev/net/tun").exists()
             && cortexfs::authorize_network_connect("default", authority).is_ok()
             && let Some(ctxterm) = ctxterm
         {
-            let pasta = std::iter::once(cortexfs::support::command::PASTA)
+            let pasta = ["--dir", "/dev/net", "--dev-bind", "/dev/net/tun", "/dev/net/tun", cortexfs::support::command::PASTA]
+                .into_iter()
                 .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
                 .map(str::to_owned);
             command.args.splice(ctxterm..ctxterm, pasta);
