@@ -110,7 +110,6 @@ pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'sta
         cortexfs::ChildLifecycle::Temp => "temp",
     }
 }
-
 pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
@@ -125,7 +124,6 @@ pub(crate) fn agent_start_mounts_with_default_source(
         .chain(args.mounts.iter().cloned())
         .collect()
 }
-
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
     mounts
         .iter()
@@ -135,14 +133,12 @@ pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMoun
         })
         .unwrap_or_else(|| args.cwd.clone())
 }
-
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
     mounts
         .iter()
         .rfind(|mount| mount.target == "/workspace" && mount.mode == "rw")
         .map(|mount| mount.source.clone())
 }
-
 pub(crate) fn validate_agent_start_mounts(
     view: &AgentRuntimeView,
     mounts: &[AgentMount],
@@ -160,7 +156,6 @@ pub(crate) fn validate_agent_start_mounts(
         .then_some(())
         .ok_or_else(|| CliError::usage("mount exceeds agent mount policy"))
 }
-
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     for (value, label) in [(&mount.source, "source"), (&mount.target, "target")] {
         if value.bytes().any(|byte| byte.is_ascii_control()) {
@@ -184,7 +179,6 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     }
     Ok(())
 }
-
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
     let mut normalized = PathBuf::from("/");
     for component in Path::new(target).components() {
@@ -205,14 +199,12 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
         .contains(&top)
     })
 }
-
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
     Path::new(cwd)
         .is_absolute()
         .then_some(())
         .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
 }
-
 #[cfg(test)]
 pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
     format!("cortexfs-agent-{name}-{}-chat", stable_path_hash(root))
