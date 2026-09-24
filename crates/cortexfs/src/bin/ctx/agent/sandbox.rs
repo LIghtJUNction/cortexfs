@@ -1,9 +1,9 @@
-use std::path::Component::{Normal, ParentDir};
-
 use crate::*;
-
+use std::path::Component::{Normal, ParentDir};
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
-
+const PASTA_SANDBOX_ARGS: &str = "--dir /dev/net --dev-bind /dev/net/tun /dev/net/tun --dir /run/systemd --dir /run/systemd/resolve --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/resolv.conf --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/stub-resolv.conf";
+const PASTA_EGRESS_ARGS: &str =
+    "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T none -U none --";
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -54,6 +54,25 @@ pub(crate) fn agent_start_systemd_command(
         command
             .args
             .retain(|arg| !arg.starts_with("--property=Restart"));
+        let authority =
+            cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
+        let ctxterm = command
+            .args
+            .iter()
+            .position(|arg| arg == cortexfs::support::command::CTXTERM);
+        if is_executable_file(Path::new(cortexfs::support::command::PASTA))
+            && Path::new("/dev/net/tun").exists()
+            && cortexfs::authorize_network_connect("default", authority).is_ok()
+            && let Some(ctxterm) = ctxterm
+        {
+            let pasta = PASTA_SANDBOX_ARGS
+                .split_ascii_whitespace()
+                .chain(std::iter::once(cortexfs::support::command::PASTA))
+                .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
+                .map(str::to_owned);
+            command.args.splice(ctxterm..ctxterm, pasta);
+            command.args.retain(|arg| arg != "--unshare-net");
+        }
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);
     }
@@ -94,43 +113,40 @@ pub(crate) fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'sta
         cortexfs::ChildLifecycle::Temp => "temp",
     }
 }
-
 pub(crate) fn agent_start_mounts_with_default_source(
     args: &AgentStartArgs,
     default_source: &Path,
 ) -> Vec<AgentMount> {
-    let mut mounts = Vec::with_capacity(args.mounts.len() + 1);
-    if args.default_workspace {
-        mounts.push(AgentMount {
+    args.default_workspace
+        .then(|| AgentMount {
             source: default_source.display().to_string(),
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
-        });
-    }
-    mounts.extend(args.mounts.iter().cloned());
-    mounts
+        })
+        .into_iter()
+        .chain(args.mounts.iter().cloned())
+        .collect()
 }
-
 pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
-    for mount in mounts {
-        if let Ok(relative) = Path::new(&args.cwd).strip_prefix(&mount.source) {
-            return Path::new(&mount.target)
-                .join(relative)
-                .display()
-                .to_string();
-        }
-    }
-    args.cwd.clone()
+    mounts
+        .iter()
+        .find_map(|mount| {
+            let relative = Path::new(&args.cwd).strip_prefix(&mount.source).ok()?;
+            Some(
+                Path::new(&mount.target)
+                    .join(relative)
+                    .display()
+                    .to_string(),
+            )
+        })
+        .unwrap_or_else(|| args.cwd.clone())
 }
-
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
     mounts
         .iter()
-        .rev()
-        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
+        .rfind(|mount| mount.target == "/workspace" && mount.mode == "rw")
         .map(|mount| mount.source.clone())
 }
-
 pub(crate) fn validate_agent_start_mounts(
     view: &AgentRuntimeView,
     mounts: &[AgentMount],
@@ -148,7 +164,6 @@ pub(crate) fn validate_agent_start_mounts(
         .then_some(())
         .ok_or_else(|| CliError::usage("mount exceeds agent mount policy"))
 }
-
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     for (value, label) in [(&mount.source, "source"), (&mount.target, "target")] {
         if value.bytes().any(|byte| byte.is_ascii_control()) {
@@ -172,7 +187,6 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     }
     Ok(())
 }
-
 pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
     let mut normalized = PathBuf::from("/");
     for component in Path::new(target).components() {
@@ -193,19 +207,16 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
         .contains(&top)
     })
 }
-
 pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
     Path::new(cwd)
         .is_absolute()
         .then_some(())
         .ok_or_else(|| CliError::usage("agent cwd must be absolute inside the sandbox"))
 }
-
 #[cfg(test)]
 pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
     format!("cortexfs-agent-{name}-{}-chat", stable_path_hash(root))
 }
-
 pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", name)?;
     let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
@@ -220,7 +231,6 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
         name,
     ))
 }
-
 pub(crate) fn reset_agent_chat_unit(unit: &str) {
     for target in [format!("{unit}.service"), format!("{unit}.socket")] {
         for verb in ["stop", "reset-failed"] {
@@ -231,7 +241,6 @@ pub(crate) fn reset_agent_chat_unit(unit: &str) {
         }
     }
 }
-
 pub(crate) fn stable_path_hash(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     let path = absolute_existing_path(path).unwrap_or_else(|_error| path.to_path_buf());

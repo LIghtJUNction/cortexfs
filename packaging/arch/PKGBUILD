@@ -5,7 +5,7 @@ pkgdesc='FUSE filesystem interface for agent runtimes'
 arch=('x86_64' 'aarch64')
 url='https://github.com/LIghtJUNction/cortexfs'
 license=('MIT')
-depends=('bubblewrap>=0.10.0' 'ca-certificates' 'curl' 'fuse3' 'libsecret' 'systemd' 'util-linux')
+depends=('bubblewrap>=0.10.0' 'ca-certificates' 'curl' 'fuse3' 'libsecret' 'passt' 'systemd' 'util-linux')
 makedepends=('pkgconf' 'rust')
 provides=('cortexfs')
 conflicts=('cortexfs-git' 'cortex-cli')

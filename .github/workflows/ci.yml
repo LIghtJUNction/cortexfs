@@ -84,11 +84,24 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends meson ninja-build libcap-dev
+          sudo apt-get install -y --no-install-recommends meson ninja-build libcap-dev passt
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           curl -sSfL https://github.com/containers/bubblewrap/releases/download/v0.11.0/bubblewrap-0.11.0.tar.xz | sudo tar -xJ -C /tmp
           meson setup /tmp/bwrap-build /tmp/bubblewrap-0.11.0 -Dprefix=/usr
           sudo ninja -C /tmp/bwrap-build install
+
+      - name: Smoke hosted network process boundary
+        run: |
+          set +e
+          /usr/bin/bwrap --ro-bind / / --proc /proc --dev /dev \
+            --unshare-pid --as-pid-1 --die-with-parent \
+            --dir /dev/net --dev-bind /dev/net/tun /dev/net/tun \
+            /usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp \
+            -t none -u none -T none -U none -- \
+            /bin/sh -c 'exit 23'
+          status=$?
+          set -e
+          test "$status" -eq 23
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1

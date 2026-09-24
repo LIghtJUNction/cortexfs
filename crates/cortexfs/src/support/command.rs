@@ -1,10 +1,3 @@
-//! Trusted host command locations shared by `CortexFS` process boundaries.
-//!
-//! These are policy defaults rather than caller-controlled configuration:
-//! commands using them clear the inherited environment to prevent `PATH`
-//! substitution. Keeping the platform layout here makes that assumption
-//! explicit and gives non-FHS packaging one place to patch.
-
 pub const TRUSTED_PATH: &str = "/usr/bin:/bin";
 pub const SH: &str = "/bin/sh";
 pub const BASH: &str = "/usr/bin/bash";
@@ -17,6 +10,7 @@ pub const CURL: &str = "/usr/bin/curl";
 pub const ENV: &str = "/usr/bin/env";
 pub const FALSE: &str = "/bin/false";
 pub const ID: &str = "/usr/bin/id";
+pub const PASTA: &str = "/usr/bin/pasta";
 pub const SETSID: &str = "/usr/bin/setsid";
 pub const SETPRIV: &str = "/usr/bin/setpriv";
 pub const SECRET_TOOL: &str = "/usr/bin/secret-tool";
