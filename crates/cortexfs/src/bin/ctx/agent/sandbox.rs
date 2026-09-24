@@ -2,6 +2,8 @@ use std::path::Component::{Normal, ParentDir};
 
 use crate::*;
 
+const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
+
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -38,10 +40,17 @@ pub(crate) fn agent_start_systemd_command(
         })
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
+    let root_mount = root_mounts.first().copied();
     for index in root_mounts.into_iter().skip(1).rev() {
         command.args.drain(index..index + 3);
     }
     if !args.command.is_empty() {
+        if root == cortexfs_paths::ctx_root()
+            && let Some(index) = root_mount
+        {
+            command.args[index] = "--bind".to_owned();
+            command.args.insert(0, CTX_RW_MOUNT_CONDITION.to_owned());
+        }
         command
             .args
             .retain(|arg| !arg.starts_with("--property=Restart"));
