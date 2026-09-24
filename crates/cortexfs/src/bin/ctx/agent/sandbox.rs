@@ -1,6 +1,7 @@
 use crate::*;
 use std::path::Component::{Normal, ParentDir};
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
+const PASTA_SANDBOX_ARGS: &str = "--dir /dev/net --dev-bind /dev/net/tun /dev/net/tun --dir /run/systemd --dir /run/systemd/resolve --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/resolv.conf --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/stub-resolv.conf";
 const PASTA_EGRESS_ARGS: &str =
     "-f -q --config-net --no-map-gw --no-icmp -t none -u none -T none -U none --";
 pub(crate) fn agent_start_systemd_command(
@@ -64,17 +65,11 @@ pub(crate) fn agent_start_systemd_command(
             && cortexfs::authorize_network_connect("default", authority).is_ok()
             && let Some(ctxterm) = ctxterm
         {
-            let pasta = [
-                "--dir",
-                "/dev/net",
-                "--dev-bind",
-                "/dev/net/tun",
-                "/dev/net/tun",
-                cortexfs::support::command::PASTA,
-            ]
-            .into_iter()
-            .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
-            .map(str::to_owned);
+            let pasta = PASTA_SANDBOX_ARGS
+                .split_ascii_whitespace()
+                .chain(std::iter::once(cortexfs::support::command::PASTA))
+                .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
+                .map(str::to_owned);
             command.args.splice(ctxterm..ctxterm, pasta);
             command.args.retain(|arg| arg != "--unshare-net");
         }
