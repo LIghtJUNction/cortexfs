@@ -1,4 +1,3 @@
-//! Trusted host command paths; callers clear inherited `PATH` before using these policy defaults.
 pub const TRUSTED_PATH: &str = "/usr/bin:/bin";
 pub const SH: &str = "/bin/sh";
 pub const BASH: &str = "/usr/bin/bash";
