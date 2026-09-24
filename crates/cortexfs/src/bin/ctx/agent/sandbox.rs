@@ -180,14 +180,14 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
-    if is_protected_agent_mount_target(&mount.target) {
+    if is_protected_agent_mount_target(&mount.target, &mount.mode) {
         return Err(CliError::usage(
             "agent mount target cannot replace sandbox system paths",
         ));
     }
     Ok(())
 }
-pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
+pub(crate) fn is_protected_agent_mount_target(target: &str, mode: &str) -> bool {
     let mut normalized = PathBuf::from("/");
     for component in Path::new(target).components() {
         if component == ParentDir {
@@ -195,6 +195,10 @@ pub(crate) fn is_protected_agent_mount_target(target: &str) -> bool {
         } else if let Normal(part) = component {
             normalized.push(part);
         }
+    }
+    let agent_home = Path::new("/home/agent");
+    if mode == "ro" && normalized.starts_with(agent_home) && normalized != agent_home {
+        return false;
     }
     let top = normalized
         .components()
