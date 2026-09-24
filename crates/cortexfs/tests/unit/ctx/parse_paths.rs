@@ -31,5 +31,5 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     assert!(matches!(order, [Some(bwrap), Some(pasta), Some(ctxterm)] if bwrap < pasta && pasta < ctxterm));
     assert!(command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
     assert!(command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && command.args.iter().any(|arg| arg == "--no-map-gw") && !command.args.iter().any(|arg| arg == "--unshare-net") && command.args.iter().any(|arg| arg == "/dev/net/tun"));
-    assert!(command.args.windows(2).any(|w| w == ["-T", "53"]) && command.args.windows(2).any(|w| w == ["-U", "53"]));
+    assert!(command.args.windows(2).any(|w| w == ["-T", "none"]) && command.args.windows(2).any(|w| w == ["-U", "none"]));
 }
