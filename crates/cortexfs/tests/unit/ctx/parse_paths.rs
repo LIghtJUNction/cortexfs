@@ -42,4 +42,14 @@ fn explicit_hosted_child_disables_systemd_restart() {
         .args
         .iter()
         .any(|arg| arg.starts_with("--property=Restart")));
+    assert_eq!(
+        command
+            .args
+            .windows(3)
+            .filter(|window| {
+                matches!(window[0].as_str(), "--bind" | "--ro-bind") && window[2] == "/ctx"
+            })
+            .count(),
+        1
+    );
 }
