@@ -93,10 +93,11 @@ jobs:
       - name: Smoke hosted network process boundary
         run: |
           set +e
-          /usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp \
-            -t none -u none -T none -U none -- \
-            /usr/bin/bwrap --ro-bind / / --proc /proc --dev /dev \
+          /usr/bin/bwrap --ro-bind / / --proc /proc --dev /dev \
             --unshare-pid --as-pid-1 --die-with-parent \
+            --dir /dev/net --dev-bind /dev/net/tun /dev/net/tun \
+            /usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp \
+            -t none -u none -T none -U none -- \
             /bin/sh -c 'exit 23'
           status=$?
           set -e
