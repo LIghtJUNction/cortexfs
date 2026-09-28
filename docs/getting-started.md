@@ -136,12 +136,16 @@ for confirming that local installation and ABI paths work.
 
 `ctx agent start` uses `systemd-run --user` to start `ctxterm -> tsh` inside a
 bwrap sandbox. By default, it mounts the caller's current directory read-write
-at `/workspace`. If the current directory contains `.git`, it is additionally
-over-mounted read-only at `/workspace/.git`. The agent starts with `pwd` set to
-`/workspace`, while `HOME` is the sandbox's own `/home/agent`:
+at `/workspace`. Ordinary Git metadata stays writable with that workspace;
+CortexFS does not implicitly over-mount `.git` read-only. Explicit path policy
+may still make `/workspace/.git` read-only, and an out-of-tree linked-worktree
+gitdir still needs its own mount. The agent starts with `pwd` set to
+`/workspace`, while `HOME` is the sandbox's own `/home/agent`. Pass `-- COMMAND`
+to replace `tsh` with a hosted Agent CLI:
 
 ```bash
 ctx agent start executor --session default
+ctx agent start executor --session default -- /usr/bin/codex
 ctx agent watch executor --session default
 ctx agent attach executor --session default
 ```
@@ -180,6 +184,8 @@ missing bootstrap state (run ctx bootstrap)
 | `missing root /ctx` or `ctx status` fails | Start the mount: `sudo systemctl start cortexfs.service`. Native packages enable the unit but do not start it on first install. |
 | FUSE / `fusermount3` / `/dev/fuse` errors | Load the kernel module (`sudo modprobe fuse`) and install `fuse3` plus `pkg-config fuse3`. Containers need the FUSE device. |
 | bubblewrap too old | The installer and updater require `/usr/bin/bwrap` 0.10+. Upgrade through the distribution; CortexFS does not overwrite host `bwrap`. |
+| Hosted CLI has no network | Default sandbox is `--unshare-net`. Explicit `ctx agent start NAME -- COMMAND` enables pasta egress only when policy allows `network:default connect`, `/usr/bin/pasta` exists, and `/dev/net/tun` exists. Arch packages `passt`; Debian/RPM metadata currently omit it. Missing pasta or tun stays isolated. |
+| Hosted CLI cannot write `/ctx` | Writable `/ctx` is only for explicit hosted commands using the canonical `/ctx` root after `findmnt` confirms a read-write `fuse`/`fuse.cortexfs` CortexFS mount. Legacy no-command `tsh` launches stay read-only. |
 | `stale` / `stale-user` `agent/coder` or `agent/worker` | Those names are retired leftovers. The managed tree is `architect`, `executor`, and `product-manager`. `agent/main` aliases `executor`. Run `ctx bootstrap --check`, then `ctx bootstrap` if you want the current tree. Do not set `agent/coder.d/model`. |
 | An older installer stops at `agent/coder.d/model` | Older revisions targeted retired `coder` during optional onboarding and could stop before verification on a clean install. The current installer uses `executor`. Rerun the current installer, bind the configured model with `ctx set agent/executor.d/model PROVIDER/MODEL`, and run `ctx doctor`. Existing channels should point at `/ctx/agent/main.sock` or `/ctx/agent/executor.sock`. |
 | `/ctx` is missing after `ctx update` | The updater restarts only units that were active, including the exact `cortexfs.service` name. If the mount was inactive before the transaction, start it: `sudo systemctl start cortexfs.service`. |

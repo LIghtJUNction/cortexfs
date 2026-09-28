@@ -57,6 +57,7 @@ target does not mean fully implemented: generic hosted-CLI launch profiles are s
 current executable agents may still use the legacy sdk-envelope-v1 runtime path
 explicit hosted commands using canonical /ctx receive one writable FUSE projection only after launch-time validation confirms the effective /ctx mount is read-write CortexFS
 legacy no-command /ctx/bin/tsh launches and noncanonical/custom roots remain read-only during migration
+explicit hosted commands keep --unshare-net unless policy allows network:default connect and pasta plus /dev/net/tun are present
 backing storage is never exposed as a writable bind; individual /ctx paths remain attenuated by Unix/FUSE policy
 new work must close the remaining migration gaps instead of presenting missing adapters as available
 ```

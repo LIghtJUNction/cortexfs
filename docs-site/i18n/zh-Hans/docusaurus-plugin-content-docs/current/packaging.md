@@ -65,6 +65,12 @@ ctx doctor
 `cortexfs-agent@.socket` 实例。终端会话使用 root 所有、socket 激活的 broker，
 包升级只在新文件安装完成后重启已运行的挂载服务。
 
+Hosted CLI egress 使用 `passt` 包提供的 `/usr/bin/pasta` 以及 `/dev/net/tun`。
+Arch `PKGBUILD` 与 Arch 源码安装器软件包计划包含 `passt`。Debian 与 RPM 包元数据
+目前没有 Depend/Require 它。缺少 pasta 或 tun 时，即使 policy 允许
+`network:default connect`，显式 hosted 命令仍保持 `--unshare-net`。无命令的
+`tsh` 路径从不启用 pasta。
+
 打包的 systemd 单元钉死硬 cgroup 上限，避免单个 agent 耗尽主机。
 `cortexfs.service` 使用 `MemoryMax=512M`、`CPUQuota=100%`、`TasksMax=64`。
 `cortexfs-agent@.service` 使用 `MemoryMax=512M`、`CPUQuota=100%`、`TasksMax=128`。
@@ -90,7 +96,9 @@ ctx update --ref main --yes    # 构建、安装、验证或回滚
 它拒绝以 root 运行。已安装 helper 是 `/usr/lib/cortexfs/update-linux`；当该路径就是
 正在运行的脚本时，它必须是 root 所有、非符号链接、且不可被组/其他人写。
 apply 会从钉死检出中 source `scripts/install-linux.sh`，因此 helper 不需要第二份
-打包的安装器副本。预检仍要求 FUSE 与 bubblewrap 0.10+ 才开始构建。
+打包的安装器副本。预检仍要求 FUSE 与 bubblewrap 0.10+ 才开始构建。Hosted CLI pasta
+egress 还需要 `/usr/bin/pasta` 与 `/dev/net/tun`；这两项目前不是 Debian 或 RPM
+包依赖。
 
 对于仅源代码部署且缺少原生打包构建环境，仍可使用现有安装脚本：
 

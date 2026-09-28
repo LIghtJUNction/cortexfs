@@ -197,10 +197,11 @@ ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
 
 ## 观察并连接终端
 
-`ctx agent start` 默认会将调用者当前目录以只读方式挂载到沙箱内的 `/workspace`，随后从 `/workspace` 启动 `ctxterm -> tsh`。若调用目录包含 `.git`，额外以只读方式覆盖挂载到 `/workspace/.git`。代理的 `HOME` 是沙箱自身的 `/home/agent`，因此 shell 配置和缓存不会写入项目目录：
+`ctx agent start` 默认会将调用者当前目录以读写方式挂载到沙箱内的 `/workspace`，随后从 `/workspace` 启动 `ctxterm -> tsh`。RW workspace 保留普通 Git 元数据可写；CortexFS 不再隐式把 `.git` 只读覆盖挂载。显式 path policy 仍可把 `/workspace/.git` 收窄为只读。代理的 `HOME` 是沙箱自身的 `/home/agent`，因此 shell 配置和缓存不会写入项目目录。托管外部 Agent CLI 时在 `--` 后传精确 child：
 
 ```bash
 ctx agent start executor --session default
+ctx agent start executor --session default -- /usr/bin/codex
 ctx agent watch executor --session default
 ctx agent attach executor --session default
 ```

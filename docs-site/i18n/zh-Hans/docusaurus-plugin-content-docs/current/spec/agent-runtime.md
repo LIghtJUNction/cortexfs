@@ -147,7 +147,7 @@ ctx agent start
   -> tsh
 ```
 
-`ctxterm` 持有伪终端。root broker 认证 `watch` 与 `attach` 客户端，并把已接受的描述符直接传给 `ctxterm`；broker 不中继 PTY 字节。
+`ctxterm` 持有伪终端。`ctx agent start NAME -- COMMAND...` 用精确 hosted argv 替换默认 `tsh`，去掉 `Restart=`，并在 `findmnt` 确认读写 CortexFS 后给规范 `/ctx` 一个可写投影。网络默认 `--unshare-net`，仅当 policy 允许 `network:default connect` 且 host 可运行 pasta 时才启用；见 [tool-policy-abi.md](tool-policy-abi.md)。root broker 认证 `watch` 与 `attach` 客户端，并把已接受的描述符直接传给 `ctxterm`；broker 不中继 PTY 字节。
 
 会话终端 socket 可通过以下 ABI 路径访问：
 
@@ -165,7 +165,7 @@ ctx agent start
 
 ## 沙箱约定
 
-`ctx agent start` 创建默认交互式终端沙箱。默认情况下将调用者当前工作目录以可写方式绑定到 `/workspace` 并在此启动终端。如果宿主目录包含 `.git`，则将该 `.git` 只读再挂载到 `/workspace/.git`。
+`ctx agent start` 创建默认交互式终端沙箱。默认情况下将调用者当前工作目录以可写方式绑定到 `/workspace` 并在此启动终端。RW workspace 保留普通 Git 元数据可写；CortexFS 不再隐式把 `.git` 只读再挂载。显式 `/workspace/.git` policy mount 仍可收窄，工作区外 linked-worktree metadata 仍需独立授权。
 
 沙箱 home：
 
@@ -377,7 +377,7 @@ ctx agent attach 是可写进入 ctxterm -> tsh 的人类路径
 tsh 永不回退到 host PATH
 默认终端 cwd 为 /workspace
 默认终端 HOME 为 /home/agent
-.git 在默认工作区挂载里为只读
+授权 rw /workspace 保留普通 Git 元数据，除非 path policy 收窄
 service/provider secrets 不会被可执行代理继承
 prompt 文本不能授予工具、模型、文件系统、网络或会话权限
 ```

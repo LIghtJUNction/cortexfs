@@ -122,12 +122,14 @@ ctx file tool/fs.read
 ## 启动代理终端
 
 `ctx agent start` 用 `systemd-run --user` 在 bwrap 沙箱里启动 `ctxterm -> tsh`。
-默认把调用者当前目录以读写方式挂到 `/workspace`。若当前目录包含 `.git`，还会把
-`.git` 只读叠挂到 `/workspace/.git`。代理的 `pwd` 是 `/workspace`，`HOME` 是沙箱自己的
-`/home/agent`：
+默认把调用者当前目录以读写方式挂到 `/workspace`。普通 Git 元数据随该 workspace 保持可写；
+CortexFS 不再隐式把 `.git` 只读叠挂。显式 path policy 仍可把 `/workspace/.git` 收窄为只读，
+工作区外 linked-worktree gitdir 仍需单独挂载。代理的 `pwd` 是 `/workspace`，`HOME` 是沙箱自己的
+`/home/agent`。`-- COMMAND` 可把 `tsh` 换成托管 Agent CLI：
 
 ```bash
 ctx agent start executor --session default
+ctx agent start executor --session default -- /usr/bin/codex
 ctx agent watch executor --session default
 ctx agent attach executor --session default
 ```
@@ -163,6 +165,8 @@ missing bootstrap state (run ctx bootstrap)
 | `missing root /ctx` 或 `ctx status` 失败 | 启动挂载：`sudo systemctl start cortexfs.service`。原生包会启用该单元，但首次安装不会启动它。 |
 | FUSE / `fusermount3` / `/dev/fuse` 错误 | 加载内核模块（`sudo modprobe fuse`），并安装 `fuse3` 与 `pkg-config fuse3`。容器需要 FUSE 设备。 |
 | bubblewrap 过旧 | 安装器与更新器要求 `/usr/bin/bwrap` 0.10+。通过发行版升级；CortexFS 不会覆盖主机 `bwrap`。 |
+| Hosted CLI 没有网络 | 默认沙箱是 `--unshare-net`。显式 `ctx agent start NAME -- COMMAND` 仅在 policy 允许 `network:default connect`、存在 `/usr/bin/pasta` 与 `/dev/net/tun` 时启用 pasta。Arch 包装 `passt`；Debian/RPM 元数据目前没有。缺少 pasta 或 tun 则保持隔离。 |
+| Hosted CLI 不能写 `/ctx` | 可写 `/ctx` 仅适用于规范 `/ctx` 根上的显式 hosted 命令，且 `findmnt` 确认读写 `fuse`/`fuse.cortexfs` CortexFS 挂载。无命令的 `tsh` 启动仍只读。 |
 | `stale` / `stale-user` 的 `agent/coder` 或 `agent/worker` | 这些名字是退役残留。受管树是 `architect`、`executor`、`product-manager`。`agent/main` 别名指向 `executor`。先 `ctx bootstrap --check`，需要当前树时再 `ctx bootstrap`。不要设置 `agent/coder.d/model`。 |
 | 旧版安装器在 `agent/coder.d/model` 处退出 | 旧版可选引导使用已退役的 `coder`，全新安装时可能在验证前退出。当前安装器已使用 `executor`。重新运行当前安装器，用 `ctx set agent/executor.d/model PROVIDER/MODEL` 绑定已配置的模型，再执行 `ctx doctor`。已有频道应指向 `/ctx/agent/main.sock` 或 `/ctx/agent/executor.sock`。 |
 | `ctx update` 之后缺少 `/ctx` | 更新器只重启事务前已活动的单元，并包含精确的 `cortexfs.service` 名字。如果挂载在事务前就是未活动，请执行 `sudo systemctl start cortexfs.service`。 |

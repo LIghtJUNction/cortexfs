@@ -229,7 +229,8 @@ Only I/O transport differs.
 
 `ctxterm` already provides the reusable PTY child boundary. Hosted CLI support
 should extend explicit program/argv selection around that machinery rather than
-inventing a second runner.
+inventing a second runner. `ctxterm` forwards the environment it received from
+the launch boundary; filtering stays in bwrap `--clearenv` / `--setenv`.
 
 Cancellation must reach the owned child/process group and produce an auditable
 CortexFS boundary result. Exit status remains the child's ordinary process
@@ -345,11 +346,13 @@ Completed:
 - #322 reused `ctxterm` and added exact hosted child program/argv selection;
 - #325 gave explicit hosted children ordinary one-shot Unix process lifetime;
 - #326 reduced `/ctx` to one effective root projection;
-- canonical explicit hosted commands now guard writable `/ctx` at process start.
+- canonical explicit hosted commands now guard writable `/ctx` at process start;
+- #328 made `ctxterm` forward the curated launch environment to the child;
+- #330 gates hosted pasta egress on `network:default connect`, `/usr/bin/pasta`,
+  and `/dev/net/tun`; otherwise the sandbox keeps `--unshare-net`.
 
 Next:
 
-- carry policy-derived network authority through the generic launch boundary;
 - project the minimum executable/runtime/config material for Omarchy/mise and
   generic Arch/Linux hosted CLIs without trusting full home or ambient PATH;
 - complete fake-executable process-contract tests for cwd/env, stdio/PTY, exit,

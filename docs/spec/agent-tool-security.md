@@ -453,7 +453,7 @@ The agent terminal path is:
 ```text
 ctx agent start launches bwrap
 bwrap starts ctxterm
-ctxterm starts tsh
+ctxterm starts tsh, or the exact argv after --
 tsh resolves tool names through CTX_PATH
 humans observe through ctx agent watch
 humans join through ctx agent attach
@@ -461,9 +461,11 @@ humans join through ctx agent attach
 
 By default, `ctx agent start` binds the caller's current directory to
 `/workspace` with read-write access and starts the agent terminal there. The
-agent sees the project through the sandbox path, not the host path. Additional
-host paths must be declared as sandbox mounts; paths that are not mounted are
-not visible to the agent at the Linux filesystem layer.
+agent sees the project through the sandbox path, not the host path. Ordinary
+Git metadata stays writable with that workspace unless an explicit
+`/workspace/.git` policy mount narrows it. Additional host paths must be
+declared as sandbox mounts; paths that are not mounted are not visible to the
+agent at the Linux filesystem layer.
 
 Filesystem access is granted only when both layers allow it:
 

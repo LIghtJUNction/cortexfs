@@ -50,8 +50,11 @@ Codex CLI、Claude Code 与 Pi 是首批目标托管 CLI；Antigravity CLI 是�
 ```text
 目标不等于已经实现：通用 hosted-CLI launch profile 仍在 #318 迁移
 当前 executable agent 仍可能使用旧 sdk-envelope-v1 runtime
-宿主 FUSE `/ctx` 整体 RW，但当前旧 Agent sandbox 仍把 `/ctx` 投影为 RO
-Agent 可见的 writable `/ctx` 仍是迁移目标，授权写入必须经过 FUSE
+规范 `/ctx` 上的显式 hosted 命令仅在启动时确认读写 CortexFS FUSE 后得到一个可写投影
+无命令 `/ctx/bin/tsh` 与非规范根在迁移期间仍只读
+显式 hosted 命令默认 `--unshare-net`；仅当 policy 允许 network:default connect 且 pasta 与 /dev/net/tun 可用时才插入 pasta
+backing storage 从不以 writable bind 暴露；单独 `/ctx` 路径仍由 Unix/FUSE policy 收窄
+新工作必须补齐剩余迁移缺口，而不是把尚未提供的 adapter 写成已可用
 ```
 
 旧 CortexFS model/tool/session/provider runtime 只在兼容需要时保留。新工作不得继续扩大与托管 CLI 重复的 provider/model/tool-loop/session authority。

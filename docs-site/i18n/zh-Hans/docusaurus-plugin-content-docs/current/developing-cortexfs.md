@@ -64,7 +64,7 @@ Codex CLI、Claude Code、Pi、Antigravity 已经提供 text/JSON/JSONL/RPC/resu
 
 宿主 FUSE `/ctx` 整体 RW，具体文件和目录可按 Unix/FUSE policy 收窄为只读。禁止以 writable bind 暴露 backing storage 绕过 FUSE。
 
-当前旧 Agent sandbox 仍把 `/ctx` 投影为只读，因此 Agent 可见 writable `/ctx` 是 #318 的迁移目标，而不是当前 launch profile 可以假设的能力。
+显式 hosted 命令使用规范 `/ctx` 根时，仅在 process-start 确认有效挂载是读写 CortexFS FUSE 后，才得到一个可写 `/ctx` 投影。无命令的 `tsh` 路径与非规范根在迁移期间仍只读。
 
 RW `/workspace` 遵循普通 Unix 子树语义；CortexFS 不再默认隐藏 `.git`。显式 policy 可将 `/workspace/.git` 设为 RO；工作区外 linked-worktree metadata 需要独立授权。
 
@@ -113,11 +113,18 @@ Agent object 是受 policy 约束的执行 principal，不是 CortexFS-owned AI 
 ```text
 systemd-run --user
 bwrap sandbox
+optional pasta（仅 hosted 命令，且受 policy 门控）
 ctxterm
 child process
 ```
 
-`ctxterm` 负责 PTY、attach/watch、child lifecycle 与 exit status，不是 Agent runtime。#318 Phase 2 应复用它，仅增加最小显式 child program/argv seam，不新增 runner 或 backend registry。
+`ctxterm` 负责 PTY、attach/watch、child lifecycle 与 exit status，不是 Agent runtime。Hosted 命令通过精确 child program/argv 复用该链路，不新增 runner：
+
+```bash
+ctx agent start executor --session default -- /usr/bin/codex
+```
+
+`-- COMMAND` 路径会去掉 `Restart=`（一次性进程）；规范 `/ctx` 仅在 `findmnt` 确认读写 CortexFS FUSE 后变为单个 `--bind`；网络默认 `--unshare-net`，仅当 policy 允许 `network:default connect` 且存在 `/usr/bin/pasta` 与 `/dev/net/tun` 时才插入 pasta。启动器 `--clearenv`/`--setenv` 负责环境过滤；`ctxterm` 把收到的环境转发给 child，不是第二层过滤器。
 
 `tsh` 继续作为兼容 tool shell；新的 hosted CLI 集成不应要求 CortexFS 把 CLI 自己的 model/session/tool loop 吞进 `tsh`。
 
@@ -161,6 +168,7 @@ npm --prefix docs-site run build
 - 不要重造第二套 Agent runtime。
 - 不要继承操作者完整权限、home、credential 或 host network。
 - 不要用 writable backing bind 绕过 FUSE。
+- 不要假设 pasta 一定存在。Arch 包装 `passt`；Debian/RPM 元数据目前没有。缺少 `/usr/bin/pasta` 或 `/dev/net/tun` 时，即便 policy 允许 `network:default connect`，hosted 命令仍保持隔离。
 - Git commit 是唯一开发/配置激活边界；restart 只是生命周期动作。
 - Core 不增加 backend enum；差异留在薄 launch profile。
 - 禁止 `mod.rs` 与 `unsafe`；遵守 `AGENTS.md` 的分层、命名和 source-budget。

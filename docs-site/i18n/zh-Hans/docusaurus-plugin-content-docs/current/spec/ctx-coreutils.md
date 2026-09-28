@@ -318,9 +318,11 @@ runtime ABI helper     /ctx/bin
 
 `ctxterm` 是代理终端模拟器。它持有伪终端并默认启动 `tsh`。`tsh` 是在该终端中运行的工具 shell，通过 `CTX_PATH` 解析命令，不直接执行任意 host command。像 `bash` 这类命令只有在 `CTX_PATH` 可见并授权为 tool 时才可运行。
 
-`ctx agent start <agent> --session <session>` 在 sandbox 中启动默认代理终端。默认将调用者当前目录以 rw 挂载到 `/workspace`；若该目录含 `.git`，将 `.git` 只读覆盖挂载到 `/workspace/.git`。代理进程启动目录为 `/workspace`，因此宿主路径不是 agent 的 `pwd`，代理看到的是 sandbox 映射。沙箱 home 为 `/home/agent`，后备于 `/ctx/home/<uid>/agent/<agent>`，因此 `.config`、`.cache`、`.bash_history` 不应写入项目工作区。
+`ctx agent start <agent> --session <session>` 在 sandbox 中启动默认代理终端。默认将调用者当前目录以 rw 挂载到 `/workspace`。RW workspace 保留普通 Git 元数据可写；CortexFS 不再隐式把 `.git` 只读覆盖挂载。显式 path policy 仍可收窄 `/workspace/.git`，工作区外 linked-worktree metadata 仍需独立授权。代理进程启动目录为 `/workspace`，因此宿主路径不是 agent 的 `pwd`，代理看到的是 sandbox 映射。沙箱 home 为 `/home/agent`，后备于 `/ctx/home/<uid>/agent/<agent>`，因此 `.config`、`.cache`、`.bash_history` 不应写入项目工作区。
 
-终端进程从空环境启动，allowlist 如 `CTX_ROOT`、`CTX_HOME`、`HOME=/home/agent`、`PATH=/usr/bin:/bin`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`。主机会话变量和 secrets 不默认继承。
+无 `-- COMMAND` 时 child 是 `/ctx/bin/tsh`，`/ctx` 保持只读 bind，网络保持 `--unshare-net`。`ctx agent start <agent> --session <session> -- COMMAND...` 用精确 argv 替换 `tsh`，去掉 `Restart=`，并在 `findmnt` 确认读写 CortexFS 后给规范 `/ctx` 一个可写投影；pasta egress 仅在 policy 允许 `network:default connect` 且存在 `/usr/bin/pasta` 与 `/dev/net/tun` 时启用。
+
+启动器从 `--clearenv` 注入 curated allowlist；`ctxterm` 把收到的环境转发给 child。主机会话变量和 secrets 不默认继承。
 
 可显式追加 mounts：
 
