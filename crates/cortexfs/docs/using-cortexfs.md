@@ -324,15 +324,27 @@ or calling a vision model happens lazily through a visible tool.
 ## Watch And Attach Terminals
 
 `ctx agent start` mounts the caller's current directory at `/workspace` inside
-the sandbox by default, then starts `ctxterm -> tsh` from `/workspace`. If the
-caller directory contains `.git`, `.git` is additionally over-mounted read-only
-at `/workspace/.git`. The agent's `HOME` is the sandbox's own `/home/agent`, so
-shell configuration and caches are not written into the project directory:
+the sandbox by default, then starts `ctxterm -> tsh` from `/workspace`. A
+read-write `/workspace` keeps ordinary Git metadata writable; CortexFS does not
+implicitly over-mount `.git` read-only. Path-level policy may still make
+`/workspace/.git` read-only. Linked-worktree metadata outside the authorized
+workspace needs a separate mount. The agent's `HOME` is the sandbox's own
+`/home/agent`, so shell configuration and caches are not written into the
+project directory:
 
 ```bash
 ctx agent start executor --session default
 ctx agent watch executor --session default
 ctx agent attach executor --session default
+```
+
+To host an external Agent CLI instead of `tsh`, pass the exact child after
+`--`. That path is one-shot, may receive a writable `/ctx` after FUSE
+validation, and may receive policy-gated pasta egress. See
+[Extending CortexFS](developing-cortexfs.md):
+
+```bash
+ctx agent start executor --session default -- /usr/bin/codex
 ```
 
 The terminal socket lives at:

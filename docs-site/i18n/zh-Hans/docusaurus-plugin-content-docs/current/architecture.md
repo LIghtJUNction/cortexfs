@@ -62,7 +62,7 @@ signal + cancellation
 
 托管 CLI 之间的差异只应留在薄 launch profile / adapter。核心不应出现 provider registry、backend enum、model router、session manager 或第二套 workflow engine。
 
-`/ctx` 宿主 FUSE 整体为 RW；单个文件或目录可以只读。禁止把 backing storage 以可写 bind 暴露给 Agent 来绕过 FUSE。当前旧 Agent sandbox 仍把 `/ctx` 投影为只读，因此 Agent 可写 `/ctx` 仍是 #318 的迁移目标。
+`/ctx` 宿主 FUSE 整体为 RW；单个文件或目录可以只读。禁止把 backing storage 以可写 bind 暴露给 Agent 来绕过 FUSE。显式 hosted 命令在规范 `/ctx` 根上、且 `findmnt` 确认读写 CortexFS FUSE 挂载后，才得到一个可写 `/ctx` 投影；无命令的 `tsh` 路径在迁移期间仍只读。
 
 RW `/workspace` 遵循正常 Unix 子树语义；CortexFS 不再隐式隐藏 `.git`。显式 policy 仍可把 `/workspace/.git` 收窄为只读；linked worktree 指向工作区外部的 gitdir 需要独立授权。
 
@@ -98,9 +98,10 @@ Git commit 是唯一开发/配置激活边界。进程 restart 只是生命周�
 
 1. #320 已移除 RW workspace 上的隐式 `.git` 遮罩。
 2. 复用现有 `ctxterm` 子进程/PTY 机制，不新增 runner。
-3. 增加最小显式 executable/argv 选择入口。
-4. 让被授权的 Agent 写入通过 FUSE 抵达 `/ctx`，禁止 writable backing bind。
-5. 仅在 CLI 命令行差异确有必要时增加薄 launch profile。
-6. 随真实消费者消失逐步删除旧 provider/model/tool/session runtime。
+3. #322 增加 `-- COMMAND` 显式 argv；#325 让该 child 一次性退出。
+4. 规范 hosted 命令在 process start 校验后通过 FUSE 得到一个可写 `/ctx` 投影，禁止 writable backing bind。
+5. #330 把 hosted pasta egress 门控在 `network:default connect`。
+6. 仅在 CLI 命令行差异确有必要时增加薄 launch profile。
+7. 随真实消费者消失逐步删除旧 provider/model/tool/session runtime。
 
 规范以 [spec/](spec/) 为准；开发约束以仓库 `AGENTS.md` 为准；Rust/进程分层见 [internal-architecture.md](internal-architecture.md)。

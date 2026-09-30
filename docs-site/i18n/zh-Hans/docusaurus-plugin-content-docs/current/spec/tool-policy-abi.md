@@ -550,6 +550,16 @@ allow executor_t network:default connect
 
 没有 `allow executor_t network:default connect`，则没有网络访问。
 
+`ctx agent start` 启动时始终带 bwrap `--unshare-net`。显式 hosted 命令（`ctx agent start NAME -- COMMAND`）仅在同时满足以下条件时，才用 pasta 用户态网络替换该隔离：
+
+```text
+policy 允许 <subject> network:default connect
+/usr/bin/pasta 是可执行文件
+/dev/net/tun 存在
+```
+
+pasta 以 `/usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp` 启动，且不映射 TCP/UDP 端口（`-t none -u none -T none -U none`）。沙箱会 bind-try `/run/systemd/resolve/resolv.conf`。policy 拒绝、缺少 pasta 或缺少 tun 时保持 `--unshare-net`。无命令的 `tsh` 路径从不启用 pasta。通过 `authorize_network_connect` 的 tool sandbox 是省略 `--unshare-net`，而不是插入 pasta。
+
 权限检查顺序：
 
 ```text

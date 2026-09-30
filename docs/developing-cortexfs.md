@@ -154,13 +154,37 @@ The current interactive path reuses ordinary process machinery:
 ```text
 systemd-run --user
 bwrap sandbox
+optional pasta (hosted command only, policy-gated)
 ctxterm
 child process
 ```
 
 `ctxterm` owns PTY mechanics, attach/watch, child lifetime, and exit status. It
 is not an Agent runtime. Hosted commands reuse this machinery through exact
-child program/argv selection rather than a second runner or backend registry.
+child program/argv selection rather than a second runner or backend registry:
+
+```bash
+ctx agent start executor --session default -- /usr/bin/codex
+```
+
+Constraints for that `-- COMMAND` path, verified in
+`crates/cortexfs/src/bin/ctx/agent/sandbox.rs`:
+
+```text
+Restart= properties are stripped; the child is one-shot
+canonical /ctx is a single --bind only after ExecCondition findmnt confirms
+  a read-write fuse/fuse.cortexfs CortexFS mount
+legacy no-command tsh and noncanonical roots stay --ro-bind /ctx
+network starts as --unshare-net
+pasta replaces --unshare-net only when policy allows network:default connect
+  and /usr/bin/pasta plus /dev/net/tun exist
+pasta uses --config-net --no-map-gw --no-icmp and maps no TCP/UDP ports
+```
+
+The sandbox launcher `--clearenv`s and `--setenv`s the derived allowlist.
+`ctxterm` then `env_clear()`s and forwards that received environment to the
+child. Do not treat `ctxterm` as a second env filter, and do not inherit the
+operator shell to make a CLI start.
 
 `tsh` remains a compatibility tool shell. New hosted CLI integrations should not
 require CortexFS to absorb the CLI's native model/session/tool loop into `tsh`.
@@ -238,6 +262,9 @@ were fixture-based and which were live.
   resources derive from the Agent object plus CortexFS policy before spawn.
 - **Do not bypass FUSE.** Writable backing-store binds are not an acceptable way
   to make `/ctx` writable to a hosted CLI.
+- **Do not assume pasta is present.** Arch packages `passt`; Debian/RPM
+  metadata currently do not. Missing `/usr/bin/pasta` or `/dev/net/tun` keeps
+  hosted commands isolated even when policy allows `network:default connect`.
 - **Git commit is the development/config activation boundary.** Process restart
   is lifecycle only and must not activate uncommitted development/config changes.
 - **No backend enum in core.** Backend differences stay in thin launch profiles.

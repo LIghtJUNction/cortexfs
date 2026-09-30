@@ -706,6 +706,24 @@ allow executor_t network:default connect
 
 Without `allow executor_t network:default connect`, there is no network access.
 
+For `ctx agent start`, the launch boundary always begins with bwrap
+`--unshare-net`. Explicit hosted commands (`ctx agent start NAME -- COMMAND`)
+replace that isolation with pasta userspace networking only when all of these
+hold:
+
+```text
+policy allows <subject> network:default connect
+/usr/bin/pasta is an executable file
+/dev/net/tun exists
+```
+
+Pasta is invoked as `/usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp`
+with no TCP/UDP port mapping (`-t none -u none -T none -U none`). The sandbox
+bind-tries host resolver files from `/run/systemd/resolve/resolv.conf`. Denied
+policy, missing pasta, or missing tun keep `--unshare-net`. The legacy
+no-command `tsh` path never enables pasta. Tool-sandbox launches that pass
+`authorize_network_connect` omit `--unshare-net` rather than inserting pasta.
+
 Permission check order:
 
 ```text

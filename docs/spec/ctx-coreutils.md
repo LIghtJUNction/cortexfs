@@ -399,7 +399,7 @@ directory path, device, inode, and plain-directory type before writing.
 ctx agent new NAME [--temp] [--parent PARENT] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]
 ctx agent new [NAME] --from PROFILE
 ctx agent apply NAME --from PROFILE
-ctx agent start NAME
+ctx agent start NAME [--session SESSION] [--cwd PATH] [--mount SOURCE TARGET ro|rw] [--no-default-workspace] [-- COMMAND...]
 ctx agent stop NAME
 ctx agent status NAME
 ctx agent env NAME
@@ -566,19 +566,31 @@ tool named `bash` is visible through `CTX_PATH`.
 
 `ctx agent start <agent> --session <session>` starts the default agent
 terminal in a sandbox. Unless overridden, the caller's current working
-directory is bind-mounted at `/workspace` with read-write access. If that
-directory contains `.git`, `.git` is over-mounted at `/workspace/.git` with
-read-only access. The agent process starts with `/workspace` as its current
+directory is bind-mounted at `/workspace` with read-write access. Ordinary Git
+metadata stays writable with that workspace. CortexFS does not implicitly
+over-mount `.git` read-only; path-level policy may still add a
+`/workspace/.git` mount, and out-of-tree linked-worktree metadata still needs
+separate authority. The agent process starts with `/workspace` as its current
 directory. The host path is therefore not exposed as the agent's `pwd`; the
 agent sees the authorized project mount through the sandbox path. The sandbox
 home is `/home/agent`, backed by `/ctx/home/<uid>/agent/<agent>`, so shell
 state such as `.config`, `.cache`, and `.bash_history` does not land in the
 project workspace.
 
-The terminal process starts from an empty environment with a small allowlist
-such as `CTX_ROOT`, `CTX_HOME`, `HOME=/home/agent`, `PATH=/usr/bin:/bin`,
-`USER`, `LOGNAME`, `SHELL`, `TERM`, and `LANG`. Host session variables and
-secrets are not inherited by default.
+With no `-- COMMAND`, the child is `/ctx/bin/tsh`, `/ctx` stays the legacy
+read-only bind, the unit may restart, and the network namespace stays
+`--unshare-net`. `ctx agent start <agent> --session <session> -- COMMAND...`
+replaces `tsh` with that exact argv, drops `Restart=`, and is the hosted CLI
+path: canonical `/ctx` becomes one writable FUSE projection only after
+`findmnt` confirms a read-write CortexFS mount, and pasta egress is added only
+when policy allows `network:default connect` and `/usr/bin/pasta` plus
+`/dev/net/tun` are present.
+
+The sandbox launcher starts from `--clearenv` and injects a curated allowlist
+(`CTX_ROOT`, `CTX_HOME`, `CTX_AGENT*`, `HOME=/home/agent`, `PATH=/usr/bin:/bin`,
+`GIT_OPTIONAL_LOCKS=0`, and non-colliding `agent/<name>.d/env` pairs).
+`ctxterm` forwards that received environment to the child. Host session
+variables and secrets are not inherited by default.
 
 Additional mounts can be supplied explicitly:
 
@@ -587,6 +599,8 @@ ctx agent start <agent> --session <session> \
   --mount /host/path /workspace rw \
   --mount /host/input /input ro \
   --cwd /workspace
+
+ctx agent start <agent> --session <session> -- /usr/bin/codex
 ```
 
 `ctxterm --broker AGENT SESSION UNIT` registers the PTY supervisor before

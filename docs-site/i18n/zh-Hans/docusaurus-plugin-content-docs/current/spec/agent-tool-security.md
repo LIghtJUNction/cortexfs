@@ -373,13 +373,13 @@ shared/session/mount policy（相关时）
 ```text
 ctx agent start 启动 bwrap
 bwrap 启动 ctxterm
-ctxterm 启动 tsh
+ctxterm 启动 tsh，或 `--` 后的精确 argv
 tsh 通过 CTX_PATH 解析工具名
 人类通过 ctx agent watch 观察
 人类通过 ctx agent attach 加入
 ```
 
-默认 `ctx agent start` 将调用者当前目录以读写挂载到 `/workspace`，并在此启动 agent 终端。代理看到的是 sandbox 路径，不是宿主路径。其他宿主路径必须作为 sandbox 挂载声明；未挂载路径在 Linux 文件系统层不可见。
+默认 `ctx agent start` 将调用者当前目录以读写挂载到 `/workspace`，并在此启动 agent 终端。代理看到的是 sandbox 路径，不是宿主路径。普通 Git 元数据随该 workspace 保持可写，除非显式 `/workspace/.git` policy mount 收窄。其他宿主路径必须作为 sandbox 挂载声明；未挂载路径在 Linux 文件系统层不可见。
 
 文件系统访问只有在两层都允许时才会授予：
 

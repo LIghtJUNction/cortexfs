@@ -48,13 +48,13 @@ CLI 自己拥有：model/provider 选择与认证、session/context、compaction
 
 宿主 `/ctx` FUSE 整体为 RW，并通过 Unix mode/uid/gid 与 CortexFS policy 对具体路径收窄。不可变事实、派生状态或内核独占维护的路径可以单独只读。
 
-当前旧 Agent sandbox 仍将 `/ctx` 投影为只读；这是 #318 的已知迁移缺口。修复必须让授权写入经过 FUSE，不能把 backing storage 以 writable bind 暴露进 sandbox。
+显式 hosted 命令使用规范 `/ctx` 根时，仅在 process-start 确认有效挂载是读写 CortexFS FUSE 后，才暴露一个可写 `/ctx` 投影。无命令 `tsh` 路径仍只读。修复必须让授权写入经过 FUSE，不能把 backing storage 以 writable bind 暴露进 sandbox。
 
 ## 进程、PTY 与取消
 
-`ctxterm` 负责 PTY、attach/watch、子进程生命周期与 exit status，不负责 Agent intelligence。新的 hosted-CLI seam 应优先复用 `ctxterm` 的已有 child-process 机制。
+`ctxterm` 负责 PTY、attach/watch、子进程生命周期与 exit status，不负责 Agent intelligence。新的 hosted-CLI seam 应优先复用 `ctxterm` 的已有 child-process 机制。`ctxterm` 转发启动边界已经筛选过的环境，过滤仍在 bwrap `--clearenv` / `--setenv`。
 
-测试应覆盖 exact argv、cwd/env、identity/groups、umask、mount/socket 可见性、network default-deny 与显式 egress、stdio/PTY、exit status、signal/cancel/timeout 和无孤儿子进程。
+测试应覆盖 exact argv、cwd/env、identity/groups、umask、mount/socket 可见性、network default-deny 与显式 pasta egress、stdio/PTY、exit status、signal/cancel/timeout 和无孤儿子进程。#330 已把 hosted pasta 门控在 `network:default connect`、`/usr/bin/pasta` 与 `/dev/net/tun`；否则保持 `--unshare-net`。
 
 ## Git 与激活语义
 

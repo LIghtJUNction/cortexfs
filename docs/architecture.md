@@ -231,10 +231,14 @@ Issue #318 proceeds in small slices:
 2. Reuse the existing arbitrary-child PTY/process machinery instead of adding a
    new runner.
 3. Add the smallest explicit executable/argv selection seam for hosted CLIs.
+   #322 added `-- COMMAND`; #325 made that child one-shot.
 4. Make `/ctx` writable through FUSE where the agent policy allows it; never by
-   writable-bypassing backing-store binds.
-5. Add backend launch profiles only when command-line differences require them.
-6. Retire legacy provider/model/tool/session runtime pieces as independent
+   writable-bypassing backing-store binds. Canonical explicit hosted commands
+   now guard one writable `/ctx` projection at process start.
+5. Carry policy-derived network authority through the generic launch boundary.
+   #330 gates hosted pasta egress on `network:default connect`.
+6. Add backend launch profiles only when command-line differences require them.
+7. Retire legacy provider/model/tool/session runtime pieces as independent
    consumers disappear.
 
 Each slice should reduce or preserve conceptual surface. A migration that adds
