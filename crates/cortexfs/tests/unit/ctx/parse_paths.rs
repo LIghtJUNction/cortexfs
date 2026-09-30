@@ -18,7 +18,8 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
     write_text_file(&root.join("agent/executor.d/env"), "HOSTED_VALUE=--property=Restart=never\n");
-    let Ok(view) = derive_agent_runtime_view(&root, "executor") else { return };
+    let view = derive_agent_runtime_view(&root, "executor"); assert!(view.is_ok(), "hosted fixture: {view:?}");
+    let Ok(view) = view else { return };
     let Ok(Command::Agent(AgentArgs::Start(mut args))) = cmd!("agent", "start", "executor") else { return };
     args.command = vec!["/bin/true".to_owned()];
     let command = agent_start_systemd_command(
