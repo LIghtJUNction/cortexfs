@@ -1,4 +1,5 @@
 use crate::*;
+use cortexfs::support::command::{CTXTERM, ENV, PASTA};
 use std::path::Component::{Normal, ParentDir};
 const CTX_RW_MOUNT_CONDITION: &str = "--property=ExecCondition=/usr/bin/findmnt --noheadings --mountpoint /ctx --types fuse,fuse.cortexfs --source cortexfs --options rw";
 const PASTA_SANDBOX_ARGS: &str = "--dir /dev/net --dev-bind /dev/net/tun /dev/net/tun --dir /run/systemd --dir /run/systemd/resolve --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/resolv.conf --ro-bind-try /run/systemd/resolve/resolv.conf /run/systemd/resolve/stub-resolv.conf";
@@ -32,45 +33,42 @@ pub(crate) fn agent_start_systemd_command(
         .args
         .windows(3)
         .enumerate()
-        .filter(|&(_, window)| {
-            matches!(window, [kind, _, target] if matches!(kind.as_str(), "--bind" | "--ro-bind") && target == "/ctx")
+        .filter_map(|(index, window)| {
+            matches!(window, [kind, _, target] if matches!(kind.as_str(), "--bind" | "--ro-bind") && target == "/ctx").then_some(index)
         })
-        .map(|(index, _)| index)
         .collect::<Vec<_>>();
-    let root_mount = root_mounts.first().copied();
-    for index in root_mounts.into_iter().skip(1).rev() {
+    for &index in root_mounts.iter().skip(1).rev() {
         command.args.drain(index..index + 3);
     }
     if !args.command.is_empty() {
         if root == cortexfs_paths::ctx_root()
-            && let Some(kind) = root_mount.and_then(|index| command.args.get_mut(index))
+            && let Some(kind) = root_mounts.first().and_then(|&i| command.args.get_mut(i))
         {
             "--bind".clone_into(kind);
             command.args.insert(0, CTX_RW_MOUNT_CONDITION.to_owned());
         }
         let mut supervisor = true;
         command.args.retain(|arg| {
-            supervisor &= arg != cortexfs::support::command::ENV;
+            supervisor &= arg != ENV;
             !supervisor || !arg.starts_with("--property=Restart")
         });
         let authority =
             cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
-        let ctxterm = command
-            .args
-            .iter()
-            .position(|arg| arg == cortexfs::support::command::CTXTERM);
-        if is_executable_file(Path::new(cortexfs::support::command::PASTA))
+        let ctxterm = command.args.iter().rposition(|arg| arg == CTXTERM);
+        if is_executable_file(Path::new(PASTA))
             && Path::new("/dev/net/tun").exists()
             && cortexfs::authorize_network_connect("default", authority).is_ok()
             && let Some(ctxterm) = ctxterm
         {
             let pasta = PASTA_SANDBOX_ARGS
                 .split_ascii_whitespace()
-                .chain(std::iter::once(cortexfs::support::command::PASTA))
+                .chain(std::iter::once(PASTA))
                 .chain(PASTA_EGRESS_ARGS.split_ascii_whitespace())
                 .map(str::to_owned);
             command.args.splice(ctxterm..ctxterm, pasta);
-            command.args.retain(|arg| arg != "--unshare-net");
+            if let Some(index) = command.args.iter().rposition(|arg| arg == "--unshare-net") {
+                command.args.remove(index);
+            }
         }
         let _ = command.args.pop();
         command.args.extend_from_slice(&args.command);

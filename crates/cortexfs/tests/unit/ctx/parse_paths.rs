@@ -17,7 +17,7 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     let root = clean_test_dir("ctx-agent-rw-root-guard");
     assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
-    write_text_file(&root.join("agent/executor.d/env"), "HOSTED_VALUE=--property=Restart=never\n");
+    write_text_file(&root.join("agent/executor.d/env"), "HOSTED_VALUE=--property=Restart=never\nNET_LITERAL=--unshare-net\nPROGRAM_LITERAL=/usr/bin/ctxterm\n");
     let view = derive_agent_runtime_view(&root, "executor"); assert!(view.is_ok(), "hosted fixture: {view:?}");
     let Ok(view) = view else { return };
     let Ok(Command::Agent(AgentArgs::Start(mut args))) = cmd!("agent", "start", "executor") else { return };
@@ -28,12 +28,14 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     );
     assert_eq!(command.args.windows(3).filter(|w| w.first().is_some_and(|v| v == "--bind") && w.get(2).is_some_and(|v| v == "/ctx")).count(), 1);
     assert!(agent_bwrap_test_args(&args, &[]).is_some() && command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
-    assert!(contains_arg_triplet(&command.args, "--setenv", "HOSTED_VALUE", "--property=Restart=never"));
+    for (key, value) in [("HOSTED_VALUE", "--property=Restart=never"), ("NET_LITERAL", "--unshare-net"), ("PROGRAM_LITERAL", cortexfs::support::command::CTXTERM)] {
+        assert!(contains_arg_triplet(&command.args, "--setenv", key, value), "lost explicit {key}");
+    }
     assert!(!command.args.iter().take_while(|arg| arg.as_str() != cortexfs::support::command::ENV).any(|arg| arg.starts_with("--property=Restart")));
     let host_ready = cortexfs::is_executable_file(Path::new(cortexfs::support::command::PASTA)) && Path::new("/dev/net/tun").exists();
-    let order = [cortexfs::support::command::BWRAP, cortexfs::support::command::PASTA, cortexfs::support::command::CTXTERM].map(|arg| command.args.iter().position(|value| value == arg));
+    let order = [cortexfs::support::command::BWRAP, cortexfs::support::command::PASTA, cortexfs::support::command::CTXTERM].map(|arg| command.args.iter().rposition(|value| value == arg));
     assert!(!host_ready || matches!(order, [Some(bwrap), Some(pasta), Some(ctxterm)] if bwrap < pasta && pasta < ctxterm));
-    assert!(!host_ready || (command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && command.args.iter().any(|arg| arg == "--no-map-gw") && !command.args.iter().any(|arg| arg == "--unshare-net") && command.args.iter().any(|arg| arg == "/dev/net/tun") && command.args.windows(3).any(|w| w == ["--ro-bind-try", "/run/systemd/resolve/resolv.conf", "/run/systemd/resolve/resolv.conf"]) && command.args.windows(3).any(|w| w == ["--ro-bind-try", "/run/systemd/resolve/resolv.conf", "/run/systemd/resolve/stub-resolv.conf"])));
-    assert!((host_ready && [["-t", "none"], ["-u", "none"], ["-T", "none"], ["-U", "none"]].iter().all(|pair| command.args.windows(2).any(|w| w == pair))) || (!host_ready && command.args.iter().any(|arg| arg == "--unshare-net") && !command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA)));
-    write_text_file(&root.join("agent/executor.d/policy"), "allow executor_t tool:tsh execute\n"); let Ok(denied_view) = derive_agent_runtime_view(&root, "executor") else { return }; let denied = agent_start_systemd_command(Path::new("/ctx"), &args, &[], &denied_view, Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-network-denied-test"); assert!(denied.args.iter().any(|arg| arg == "--unshare-net") && !denied.args.iter().any(|arg| arg == cortexfs::support::command::PASTA));
+    assert!(!host_ready || (command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA) && command.args.iter().any(|arg| arg == "--no-map-gw") && command.args.iter().filter(|arg| *arg == "--unshare-net").count() == 1 && command.args.iter().any(|arg| arg == "/dev/net/tun") && command.args.windows(3).any(|w| w == ["--ro-bind-try", "/run/systemd/resolve/resolv.conf", "/run/systemd/resolve/resolv.conf"]) && command.args.windows(3).any(|w| w == ["--ro-bind-try", "/run/systemd/resolve/resolv.conf", "/run/systemd/resolve/stub-resolv.conf"])));
+    assert!((host_ready && [["-t", "none"], ["-u", "none"], ["-T", "none"], ["-U", "none"]].iter().all(|pair| command.args.windows(2).any(|w| w == pair))) || (!host_ready && command.args.iter().filter(|arg| *arg == "--unshare-net").count() == 2 && !command.args.iter().any(|arg| arg == cortexfs::support::command::PASTA)));
+    write_text_file(&root.join("agent/executor.d/policy"), "allow executor_t tool:tsh execute\n"); let Ok(denied_view) = derive_agent_runtime_view(&root, "executor") else { return }; let denied = agent_start_systemd_command(Path::new("/ctx"), &args, &[], &denied_view, Path::new(cortexfs::runtime::terminal::broker::BROKER_SOCKET), "ctx-agent-network-denied-test"); assert!(denied.args.iter().filter(|arg| *arg == "--unshare-net").count() == 2 && !denied.args.iter().any(|arg| arg == cortexfs::support::command::PASTA));
 }
