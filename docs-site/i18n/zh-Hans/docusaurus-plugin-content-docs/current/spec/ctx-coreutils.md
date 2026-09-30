@@ -322,7 +322,7 @@ runtime ABI helper     /ctx/bin
 
 无 `-- COMMAND` 时 child 是 `/ctx/bin/tsh`，`/ctx` 保持只读 bind，网络保持 `--unshare-net`。`ctx agent start <agent> --session <session> -- COMMAND...` 用精确 argv 替换 `tsh`，去掉 `Restart=`，并在 `findmnt` 确认读写 CortexFS 后给规范 `/ctx` 一个可写投影；pasta egress 仅在 policy 允许 `network:default connect` 且存在 `/usr/bin/pasta` 与 `/dev/net/tun` 时启用。
 
-启动器从 `--clearenv` 注入 curated allowlist；`ctxterm` 把收到的环境转发给 child。主机会话变量和 secrets 不默认继承。
+启动器从 `--clearenv` 注入运行时派生的受控环境；`ctxterm` 把收到的环境转发给 child。`agent/<name>.d/env` 是经过校验的控制数据，当前运行时派生仅消费其中的正数 `CTX_AGENT_STEPS`，不会把其他配置键注入进程环境。主机会话变量和 secrets 不默认继承。
 
 可显式追加 mounts：
 

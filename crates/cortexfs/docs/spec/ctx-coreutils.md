@@ -588,9 +588,12 @@ when policy allows `network:default connect` and `/usr/bin/pasta` plus
 
 The sandbox launcher starts from `--clearenv` and injects a curated allowlist
 (`CTX_ROOT`, `CTX_HOME`, `CTX_AGENT*`, `HOME=/home/agent`, `PATH=/usr/bin:/bin`,
-`GIT_OPTIONAL_LOCKS=0`, and non-colliding `agent/<name>.d/env` pairs).
-`ctxterm` forwards that received environment to the child. Host session
-variables and secrets are not inherited by default.
+`GIT_OPTIONAL_LOCKS=0`, and additional runtime-derived entries).
+`agent/<name>.d/env` is validated control data; only its positive
+`CTX_AGENT_STEPS` value is consumed by the current runtime derivation.
+Arbitrary configured keys are not injected into the process environment.
+`ctxterm` forwards the derived environment it receives to the child. Host
+session variables and secrets are not inherited by default.
 
 Additional mounts can be supplied explicitly:
 
