@@ -426,11 +426,17 @@ GIT_OPTIONAL_LOCKS=0
 PATH=/usr/bin:/bin
 ```
 
-Non-colliding `agent/<name>.d/env` pairs are appended. A default workspace also
-sets `CTX_WORKSPACE`. Host session variables and provider secrets must not be
-inherited by default. Executable agents launched from the socket runtime also
-start with `env_clear()` and receive only the derived agent environment plus
-runtime-owned `CTX_*` values.
+Additional non-colliding entries come from the derived runtime view, not
+arbitrary `agent/<name>.d/env` pairs. That control file is validated as data;
+the current derivation consumes only its positive `CTX_AGENT_STEPS` value.
+Other configured keys do not become process environment variables. This is an
+intentional authority boundary in `derive_agent_runtime_env`, not a second
+filter inside `ctxterm`.
+
+A writable `/workspace` request also sets `CTX_WORKSPACE`. Host session
+variables and provider secrets must not be inherited by default. Executable
+agents launched from the socket runtime also start with `env_clear()` and
+receive only the derived agent environment plus runtime-owned `CTX_*` values.
 
 ## Tool Workspace Overlay
 

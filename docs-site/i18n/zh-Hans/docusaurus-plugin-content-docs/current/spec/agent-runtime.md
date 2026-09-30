@@ -204,7 +204,9 @@ TERM
 LANG
 ```
 
-主机会话变量与 provider secrets 默认不继承。由 socket runtime 启动的可执行代理也以 `env_clear()` 起始，仅接收派生的代理环境和运行时持有的 `CTX_*`。
+额外的非冲突环境项来自派生的运行时视图，并非任意 `agent/<name>.d/env` 配置。该文件作为控制数据接受校验；当前派生仅消费其中的正数 `CTX_AGENT_STEPS`，其他配置键不会成为进程环境变量。这是 `derive_agent_runtime_env` 有意设置的权限边界，而不是 `ctxterm` 内的第二次过滤。
+
+可写的 `/workspace` 挂载请求还会设置 `CTX_WORKSPACE`。主机会话变量与 provider secrets 默认不继承。由 socket runtime 启动的可执行代理也以 `env_clear()` 起始，仅接收派生的代理环境和运行时持有的 `CTX_*`。
 
 ## 代理视图与权限
 
