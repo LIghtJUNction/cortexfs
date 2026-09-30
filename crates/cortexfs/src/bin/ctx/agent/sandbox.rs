@@ -180,7 +180,7 @@ pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
-    if is_protected_agent_mount_target(&mount.target) {
+    if is_protected_agent_mount_target(&mount.target) && mount.target != "/home/cli-state" {
         return Err(CliError::usage(
             "agent mount target cannot replace sandbox system paths",
         ));
