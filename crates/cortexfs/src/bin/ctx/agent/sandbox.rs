@@ -59,7 +59,7 @@ pub(crate) fn agent_start_systemd_command(
         let ctxterm = command
             .args
             .iter()
-            .position(|arg| arg == cortexfs::support::command::CTXTERM);
+            .rposition(|arg| arg == cortexfs::support::command::CTXTERM);
         if is_executable_file(Path::new(cortexfs::support::command::PASTA))
             && Path::new("/dev/net/tun").exists()
             && cortexfs::authorize_network_connect("default", authority).is_ok()
