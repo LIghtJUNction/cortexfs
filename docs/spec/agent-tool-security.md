@@ -194,9 +194,23 @@ formats, or prompt package formats. Those are ordinary files.
 Examples:
 
 ```text
-/home/alex/.codex/config.toml  /home/agent/.codex/config.toml  ro  bind,nosuid,nodev,noexec
+/ctx/home/1000/agent/executor/cli-state  /home/cli-state  rw  bind,nosuid,nodev,noexec
 /home/alex/project/.mcp.json   /work/.mcp.json                 ro  bind,nosuid,nodev,noexec
 ```
+
+For hosted CLI state, `/home/cli-state` is the only exact exception to the
+protected `/home` mount targets. It is a fresh sibling of persistent
+`/home/agent`, so an Agent-controlled symlink inside its home cannot redirect
+the mount destination. Nested targets such as `/home/agent/.codex` and
+`/home/cli-state/config` remain rejected, as do alternate path spellings.
+
+The example source must already exist, be owned by the Agent identity, and be
+explicitly authorized by its effective mount policy. Writable state should use
+an Agent-owned CortexFS/FUSE source, so writes retain FUSE enforcement; use `ro`
+when only read access is authorized. Do not project the operator's whole home
+or copy ambient credentials as a convenience. A thin launch profile can point
+`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `PI_CODING_AGENT_DIR` at `/home/cli-state`.
+Each hosted CLI still owns its native state/auth format and persistence.
 
 An agent may read those files only if they are visible inside its chroot or
 mount namespace and allowed by Linux permissions. Executing any capability

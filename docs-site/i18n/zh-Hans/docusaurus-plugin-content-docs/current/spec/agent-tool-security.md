@@ -156,9 +156,13 @@ CortexFS 不定义 MCP 配置格式、skill 格式、project 规则格式、或 
 示例：
 
 ```text
-/home/alex/.codex/config.toml  /home/agent/.codex/config.toml  ro  bind,nosuid,nodev,noexec
+/ctx/home/1000/agent/executor/cli-state  /home/cli-state  rw  bind,nosuid,nodev,noexec
 /home/alex/project/.mcp.json   /work/.mcp.json                 ro  bind,nosuid,nodev,noexec
 ```
+
+托管 CLI 状态挂载仅允许精确的 `/home/cli-state` 作为受保护 `/home` 目标的例外。该目录是持久化 `/home/agent` 的新建同级挂载点，因此代理主目录内受代理控制的符号链接不能重定向挂载目标。`/home/agent/.codex`、`/home/cli-state/config` 等嵌套目标以及其他路径拼写仍被拒绝。
+
+示例源目录必须已存在、归代理身份所有，并由其有效挂载策略明确授权。可写状态应使用代理拥有的 CortexFS/FUSE 源，使写入继续受 FUSE 强制检查；只授权读取时使用 `ro`。不要为了方便投影操作员的整个主目录或复制环境中的凭据。薄启动配置可将 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 或 `PI_CODING_AGENT_DIR` 指向 `/home/cli-state`。各托管 CLI 仍负责自身的原生状态、认证格式和持久化。
 
 代理仅当文件在其 chroot 或 mount namespace 内可见，且被 Linux 权限允许时可读取。由这些文件派生的任何 capability 仍需经 CortexFS 工具策略授权执行。
 
