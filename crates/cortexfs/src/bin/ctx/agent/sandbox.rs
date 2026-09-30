@@ -33,10 +33,7 @@ pub(crate) fn agent_start_systemd_command(
         .windows(3)
         .enumerate()
         .filter(|&(_, window)| {
-            window
-                .first()
-                .is_some_and(|kind| matches!(kind.as_str(), "--bind" | "--ro-bind"))
-                && window.get(2).is_some_and(|target| target == "/ctx")
+            matches!(window, [kind, _, target] if matches!(kind.as_str(), "--bind" | "--ro-bind") && target == "/ctx")
         })
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
@@ -51,9 +48,11 @@ pub(crate) fn agent_start_systemd_command(
             "--bind".clone_into(kind);
             command.args.insert(0, CTX_RW_MOUNT_CONDITION.to_owned());
         }
-        command
-            .args
-            .retain(|arg| !arg.starts_with("--property=Restart"));
+        let mut supervisor = true;
+        command.args.retain(|arg| {
+            supervisor &= arg != cortexfs::support::command::ENV;
+            !supervisor || !arg.starts_with("--property=Restart")
+        });
         let authority =
             cortexfs::NetworkConnectAuthority::new(view.policy_subject(), view.policy());
         let ctxterm = command

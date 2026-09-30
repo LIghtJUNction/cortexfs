@@ -17,6 +17,7 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     let root = clean_test_dir("ctx-agent-rw-root-guard");
     assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
+    write_text_file(&root.join("agent/executor.d/env"), "HOSTED_VALUE=--property=Restart=never\n");
     let Ok(view) = derive_agent_runtime_view(&root, "executor") else { return };
     let Ok(Command::Agent(AgentArgs::Start(mut args))) = cmd!("agent", "start", "executor") else { return };
     args.command = vec!["/bin/true".to_owned()];
@@ -26,6 +27,8 @@ fn hosted_agent_guards_one_writable_system_ctx_projection() {
     );
     assert_eq!(command.args.windows(3).filter(|w| w.first().is_some_and(|v| v == "--bind") && w.get(2).is_some_and(|v| v == "/ctx")).count(), 1);
     assert!(agent_bwrap_test_args(&args, &[]).is_some() && command.args.iter().any(|arg| arg.contains("ExecCondition=/usr/bin/findmnt") && arg.contains("--source cortexfs") && arg.contains("--options rw")));
+    assert!(contains_arg_triplet(&command.args, "--setenv", "HOSTED_VALUE", "--property=Restart=never"));
+    assert!(!command.args.iter().take_while(|arg| arg.as_str() != cortexfs::support::command::ENV).any(|arg| arg.starts_with("--property=Restart")));
     let host_ready = cortexfs::is_executable_file(Path::new(cortexfs::support::command::PASTA)) && Path::new("/dev/net/tun").exists();
     let order = [cortexfs::support::command::BWRAP, cortexfs::support::command::PASTA, cortexfs::support::command::CTXTERM].map(|arg| command.args.iter().position(|value| value == arg));
     assert!(!host_ready || matches!(order, [Some(bwrap), Some(pasta), Some(ctxterm)] if bwrap < pasta && pasta < ctxterm));
