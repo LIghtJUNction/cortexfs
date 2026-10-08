@@ -41,6 +41,103 @@ assert_eq() {
     printf 'ok - %s\n' "$label"
 }
 
+manifest_case() (
+    failure=$1
+    UPDATE_TEMP=$TEST_TEMP/manifest-$failure
+    mkdir -p "$UPDATE_TEMP"
+    manifest=$UPDATE_TEMP/list
+    {
+        [[ $failure == missing-ctx ]] || printf '/usr/bin/ctx\n'
+        [[ $failure == missing-updater ]] || printf './usr/lib/cortexfs/update-linux\n'
+        [[ $failure != valid ]] || printf 'usr/share/doc/cortexfs/%s\n' {1..4096}
+        [[ $failure != unmanaged ]] || printf '/etc/passwd\n'
+    } >"$manifest"
+    update_package_paths() { cat "$manifest"; [[ $failure != list-error ]]; }
+    update_verify_package fixture
+)
+
+rollback_case() (
+    failure=$1
+    UPDATE_TEMP=$TEST_TEMP/rollback-$failure
+    UPDATE_TXN=$UPDATE_TEMP/transaction
+    UPDATE_OWNER=deb
+    UPDATE_BACKEND=deb
+    [[ $failure != remove && $failure != unpack ]] || UPDATE_OWNER=source
+    UPDATE_SWITCHED=1
+    mkdir -p "$UPDATE_TXN"
+    printf 'cortexfs.service\n' >"$UPDATE_TEMP/active-units"
+    touch "$UPDATE_TXN/pending" "$UPDATE_TXN/rollback.deb"
+    printf 'installing\n' >"$UPDATE_TXN/phase"
+    update_restore_storage() { [[ $failure != storage ]]; }
+    update_install_package() { [[ $2 == "$UPDATE_TXN/rollback.deb" && $failure != install ]]; }
+    update_restart_units() { [[ $failure != restart ]]; }
+    update_write_txn_state() { [[ $failure != state ]] && printf '%s\n' "$1" >"$UPDATE_TXN/phase"; }
+    sudo() {
+        case "$1" in
+        find) [[ $failure != find ]] && printf '%s\n' "$UPDATE_TXN/rollback.deb" ;;
+        systemctl) [[ $failure != "$2" && ( $failure != reload || $2 != daemon-reload ) ]] ;;
+        env) [[ $failure != remove ]] ;;
+        tar) [[ $failure != unpack ]] ;;
+        rm) [[ $failure != unlink ]] && rm -f "$UPDATE_TXN/pending" ;;
+        *) return 1 ;;
+        esac
+    }
+    if update_rollback; then
+        [[ $failure == ok && ! -e $UPDATE_TXN/pending && $(<"$UPDATE_TXN/phase") == rolled-back ]] || return 1
+    else
+        [[ $failure != ok && -e $UPDATE_TXN/pending ]] || return 1
+        [[ $failure == unlink || $(<"$UPDATE_TXN/phase") == installing ]] || return 1
+    fi
+    [[ $UPDATE_SWITCHED == 0 ]] || return 1
+    failure=ok
+    UPDATE_SWITCHED=1
+    update_rollback && [[ $UPDATE_SWITCHED == 0 && ! -e $UPDATE_TXN/pending && $(<"$UPDATE_TXN/phase") == rolled-back ]]
+)
+
+extraction_failure_case() (
+    UPDATE_TEMP=$TEST_TEMP/extraction
+    UPDATE_OWNER=deb
+    mkdir -p "$UPDATE_TEMP"
+    dpkg-deb() { return 1; }
+    update_package_matches_install missing.deb
+)
+
+helper_failure_case() (
+    failure=$1
+    UPDATE_TEMP=$TEST_TEMP/helper-$failure
+    UPDATE_TXN=$UPDATE_TEMP/transaction
+    UPDATE_OWNER=deb
+    UPDATE_BACKEND=deb
+    UPDATE_STORAGE_TARGET=generations/old
+    mkdir -p "$UPDATE_TXN"
+    : >"$UPDATE_TEMP/active-units"
+    sudo() { [[ $1 != "$failure" && $2 != "$failure" ]]; }
+    case "$failure" in
+    ln) update_restore_storage ;;
+    install) update_write_txn_state rolled-back ;;
+    discovery)
+        update_active_units() { return 1; }
+        update_restart_units
+        ;;
+    stop)
+        update_active_units() { printf 'cortexfs-extra.service\n'; }
+        update_restart_units
+        ;;
+    esac
+)
+
+assert_true 'large package manifest is normalized and checked completely' manifest_case valid
+for scenario in missing-ctx missing-updater unmanaged list-error; do
+    assert_false "invalid package manifest: $scenario" manifest_case "$scenario"
+done
+for scenario in ok stop storage find install remove unpack restart reload state unlink; do
+    assert_true "rollback preserves recovery until success: $scenario" rollback_case "$scenario"
+done
+assert_false 'rollback package extraction failure is rejected' extraction_failure_case
+for scenario in ln install discovery stop; do
+    assert_false "rollback helper propagates failure: $scenario" helper_failure_case "$scenario"
+done
+
 assert_true 'branch ref is accepted' update_valid_ref main
 assert_true 'tag ref is accepted' update_valid_ref v0.1.20
 assert_true 'full commit is accepted' update_valid_ref 0123456789012345678901234567890123456789
