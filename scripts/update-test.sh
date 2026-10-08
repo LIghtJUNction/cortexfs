@@ -198,17 +198,15 @@ git -C "$fixture" config user.email test@example.invalid
 git -C "$fixture" add .
 git -C "$fixture" commit --quiet -m fixture
 revision=$(git -C "$fixture" rev-parse HEAD)
-# shellcheck disable=SC2030
 resolved=$(
-    export UPDATE_SOURCE=$fixture UPDATE_REF='' UPDATE_TEMP=$TEST_TEMP/resolve
+    UPDATE_SOURCE=$fixture UPDATE_REF='' UPDATE_TEMP=$TEST_TEMP/resolve
     update_resolve_target
     printf '%s' "$UPDATE_REVISION"
 )
 assert_eq "$revision" "$resolved" 'clean source resolves exactly HEAD'
 printf 'dirty\n' >"$fixture/untracked"
 dirty_source_is_rejected() (
-    # shellcheck disable=SC2031
-    export UPDATE_SOURCE=$fixture UPDATE_TEMP=$TEST_TEMP/dirty
+    UPDATE_SOURCE=$fixture UPDATE_TEMP=$TEST_TEMP/dirty
     update_resolve_target
 )
 assert_false 'dirty source is rejected' dirty_source_is_rejected
