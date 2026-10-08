@@ -42,10 +42,10 @@ assert_eq() {
 }
 
 manifest_case() (
-    failure=$1
-    UPDATE_TEMP=$TEST_TEMP/manifest-$failure
+    local failure=$1
+    local UPDATE_TEMP=$TEST_TEMP/manifest-$failure
     mkdir -p "$UPDATE_TEMP"
-    manifest=$UPDATE_TEMP/list
+    local manifest=$UPDATE_TEMP/list
     {
         [[ $failure == missing-ctx ]] || printf '/usr/bin/ctx\n'
         [[ $failure == missing-updater ]] || printf './usr/lib/cortexfs/update-linux\n'
@@ -57,13 +57,13 @@ manifest_case() (
 )
 
 rollback_case() (
-    failure=$1
-    UPDATE_TEMP=$TEST_TEMP/rollback-$failure
-    UPDATE_TXN=$UPDATE_TEMP/transaction
-    UPDATE_OWNER=deb
-    UPDATE_BACKEND=deb
+    local failure=$1
+    local UPDATE_TEMP=$TEST_TEMP/rollback-$failure
+    local UPDATE_TXN=$UPDATE_TEMP/transaction
+    local UPDATE_OWNER=deb
+    local UPDATE_BACKEND=deb
     [[ $failure != remove && $failure != unpack ]] || UPDATE_OWNER=source
-    UPDATE_SWITCHED=1
+    local UPDATE_SWITCHED=1
     mkdir -p "$UPDATE_TXN"
     printf 'cortexfs.service\n' >"$UPDATE_TEMP/active-units"
     touch "$UPDATE_TXN/pending" "$UPDATE_TXN/rollback.deb"
@@ -95,20 +95,20 @@ rollback_case() (
 )
 
 extraction_failure_case() (
-    UPDATE_TEMP=$TEST_TEMP/extraction
-    UPDATE_OWNER=deb
+    local UPDATE_TEMP=$TEST_TEMP/extraction
+    local UPDATE_OWNER=deb
     mkdir -p "$UPDATE_TEMP"
     dpkg-deb() { return 1; }
     update_package_matches_install missing.deb
 )
 
 helper_failure_case() (
-    failure=$1
-    UPDATE_TEMP=$TEST_TEMP/helper-$failure
-    UPDATE_TXN=$UPDATE_TEMP/transaction
-    UPDATE_OWNER=deb
-    UPDATE_BACKEND=deb
-    UPDATE_STORAGE_TARGET=generations/old
+    local failure=$1
+    local UPDATE_TEMP=$TEST_TEMP/helper-$failure
+    local UPDATE_TXN=$UPDATE_TEMP/transaction
+    local UPDATE_OWNER=deb
+    local UPDATE_BACKEND=deb
+    local UPDATE_STORAGE_TARGET=generations/old
     mkdir -p "$UPDATE_TXN"
     : >"$UPDATE_TEMP/active-units"
     sudo() { [[ $1 != "$failure" && $2 != "$failure" ]]; }
