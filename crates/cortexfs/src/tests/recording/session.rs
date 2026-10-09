@@ -49,7 +49,7 @@ fn socket_session_recorder_cancels_without_deleting_history() {
     let request = ok!(request);
     let recorded = record_unindexed_socket_request_for_test(&session, &request);
     let recorded = ok!(recorded);
-    assert!(recorded.messages().is_empty());
+    assert_eq!(recorded.messages(), Vec::<String>::new());
     assert_eq!(recorded.events().len(), 1);
 
     let events = fs::read_to_string(session.join("events.jsonl"));

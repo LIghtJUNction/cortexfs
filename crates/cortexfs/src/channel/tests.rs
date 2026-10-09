@@ -235,7 +235,7 @@ fn bridge_returns_safe_progress_error_without_provider_details()
     };
     assert!(!message.contains("sk-secret-provider-detail"));
     assert!(message.contains("model/tool loop"));
-    assert!(probe.deltas.is_empty());
+    assert_eq!(probe.deltas, Vec::<String>::new());
     Ok(())
 }
 

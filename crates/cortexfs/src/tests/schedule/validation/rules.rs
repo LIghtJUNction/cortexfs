@@ -306,7 +306,7 @@ allow planner_t agent:executor create
     assert_eq!(first.kind(), AgentScheduleNodeKind::Dag);
     assert_eq!(first.agent(), "planner");
     assert_eq!(first.child(), None);
-    assert!(first.deps().is_empty());
+    assert_eq!(first.deps(), Vec::<String>::new());
 
     let ready = ok!(ready_agent_schedule_nodes(
         &schedule,

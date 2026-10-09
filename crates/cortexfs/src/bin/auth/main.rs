@@ -90,6 +90,6 @@ mod tests {
         );
         let mut output = Vec::new();
         assert_eq!(run(input, &mut output), Err(()));
-        assert!(output.is_empty());
+        assert_eq!(output, Vec::<u8>::new());
     }
 }

@@ -114,7 +114,7 @@ fn streamed_invalid_events_fail_before_emission() {
     assert!(
         streaming::emit_openai_stream_tool_call(&mut output, &mut emitter, &mut stream).is_err()
     );
-    assert!(output.is_empty());
+    assert_eq!(output, Vec::<u8>::new());
 }
 
 #[test]

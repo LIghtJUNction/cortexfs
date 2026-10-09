@@ -143,7 +143,7 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(output.stdout, b"approved\n");
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, b"");
 
         let request: Value = serde_json::from_str(&request)?;
         assert_eq!(request.get("op"), Some(&json!("send")));

@@ -214,8 +214,8 @@ fn agent_prompt_snapshot_writes_agents_and_skills() {
 #[test]
 fn agent_prompt_snapshot_dirs_reject_invalid_agent() {
     let root = clean_test_dir("agent-prompt-snapshot-dirs");
-    assert!(snapshot_dirs(&root, "../escape").is_empty());
-    assert!(snapshot_dirs(&root, "bad/name").is_empty());
+    assert_eq!(snapshot_dirs(&root, "../escape"), Vec::<PathBuf>::new());
+    assert_eq!(snapshot_dirs(&root, "bad/name"), Vec::<PathBuf>::new());
 }
 
 #[test]

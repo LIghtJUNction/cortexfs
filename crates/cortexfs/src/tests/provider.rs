@@ -220,7 +220,7 @@ fn codex_device_flow_keeps_legacy_challenge_contract() -> Result<(), AuthProvide
         challenges.first().map(|value| value.user_code.as_str()),
         Some("ABCD-1234")
     );
-    assert!(pauses.is_empty());
+    assert_eq!(pauses, Vec::<u64>::new());
     assert_eq!(transport.posts.len(), 3);
     Ok(())
 }

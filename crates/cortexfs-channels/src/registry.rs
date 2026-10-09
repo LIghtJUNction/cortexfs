@@ -67,7 +67,6 @@ impl ChannelRegistry {
             .receive_incoming()
     }
 
-    #[must_use]
     pub fn start(&self, id: &ChannelId) -> ChannelFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
@@ -78,7 +77,6 @@ impl ChannelRegistry {
         })
     }
 
-    #[must_use]
     pub fn connect(&self, id: &ChannelId) -> ChannelFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
@@ -89,7 +87,6 @@ impl ChannelRegistry {
         })
     }
 
-    #[must_use]
     pub fn send(&self, message: OutboundMessage) -> ChannelFuture<'_, DeliveryReceipt> {
         Box::pin(async move {
             let id = message.target.channel.clone();
@@ -100,7 +97,6 @@ impl ChannelRegistry {
         })
     }
 
-    #[must_use]
     pub fn send_effect(
         &self,
         target: MessageTarget,
@@ -115,7 +111,6 @@ impl ChannelRegistry {
         })
     }
 
-    #[must_use]
     pub fn health(&self, id: &ChannelId) -> ChannelFuture<'_, ChannelHealth> {
         let id = id.clone();
         Box::pin(async move {
@@ -126,7 +121,6 @@ impl ChannelRegistry {
         })
     }
 
-    #[must_use]
     pub fn stop(&self, id: &ChannelId) -> ChannelFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
@@ -137,7 +131,6 @@ impl ChannelRegistry {
         })
     }
 
-    #[must_use]
     pub fn reconnect(&self, id: &ChannelId) -> ChannelFuture<'_, ()> {
         let id = id.clone();
         Box::pin(async move {
@@ -160,7 +153,6 @@ impl ChannelRegistry {
         Box::pin(async move { self.send(handler(inbound).await?).await })
     }
 
-    #[must_use]
     pub fn dispatch_incoming<F, Fut>(
         &self,
         incoming: ChannelIncoming,

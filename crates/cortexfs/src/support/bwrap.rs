@@ -56,8 +56,8 @@ mod tests {
                 "/a/b".to_owned()
             ]
         );
-        assert!(dir_args_for_chdir("relative").is_empty());
-        assert!(dir_args_for_parent("/leaf").is_empty());
+        assert_eq!(dir_args_for_chdir("relative"), Vec::<String>::new());
+        assert_eq!(dir_args_for_parent("/leaf"), Vec::<String>::new());
         assert_eq!(dir_args_for_parent("/a/b/c"), dir_args_for_chdir("/a/b"));
     }
 }

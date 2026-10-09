@@ -203,18 +203,17 @@ update_path_allowed() {
 }
 
 update_verify_package() {
-    local package=$1 paths=$UPDATE_TEMP/package-paths path normalized
-    update_package_paths "$UPDATE_BACKEND" "$package" >"$paths"
+    local package=$1 paths=$UPDATE_TEMP/package-paths path
+    update_package_paths "$UPDATE_BACKEND" "$package" |
+        sed -e 's#^\./##' -e 's#^/##' -e 's#/$##' >"$paths" ||
+        update_fail 'cannot read package paths'
     while IFS= read -r path; do
-        normalized=${path#./}
-        normalized=${normalized#/}
-        normalized=${normalized%/}
-        update_path_allowed "${normalized:-.}" ||
+        update_path_allowed "${path:-.}" ||
             update_fail "package contains an unmanaged path: $path"
     done <"$paths"
-    sed -e 's#^\./##' -e 's#^/##' -e 's#/$##' "$paths" | grep -Fxq usr/bin/ctx ||
+    grep -Fxq usr/bin/ctx "$paths" ||
         update_fail 'package does not contain /usr/bin/ctx'
-    sed -e 's#^\./##' -e 's#^/##' -e 's#/$##' "$paths" | grep -Fxq usr/lib/cortexfs/update-linux ||
+    grep -Fxq usr/lib/cortexfs/update-linux "$paths" ||
         update_fail 'package does not contain the updater'
 }
 
@@ -267,13 +266,12 @@ update_package_version() {
 
 update_package_matches_install() {
     local package=$1 extracted=$UPDATE_TEMP/rollback-extracted path relative
-    rm -rf -- "$extracted"
-    mkdir -p "$extracted"
+    rm -rf -- "$extracted" && mkdir -p "$extracted" || return 1
     case "$UPDATE_OWNER" in
     deb) dpkg-deb -x "$package" "$extracted" ;;
     rpm) (cd "$extracted" && rpm2cpio "$package" | cpio -idm --quiet) ;;
     arch) bsdtar -xf "$package" -C "$extracted" ;;
-    esac
+    esac || return 1
     rm -f -- "$extracted"/.BUILDINFO "$extracted"/.INSTALL "$extracted"/.MTREE "$extracted"/.PKGINFO
     while IFS= read -r path; do
         relative=${path#"$extracted"/}
@@ -332,9 +330,9 @@ update_source_artifacts() {
 update_write_txn_state() {
     local phase=$1 local_state=$UPDATE_TEMP/transaction-state staged=$UPDATE_TXN/.state-new
     printf 'schema=1\nphase=%s\nowner=%s\nbackend=%s\nstorage_target=%s\n' \
-        "$phase" "$UPDATE_OWNER" "$UPDATE_BACKEND" "$UPDATE_STORAGE_TARGET" >"$local_state"
-    sudo install -m 0600 "$local_state" "$staged"
-    sudo mv -f "$staged" "$UPDATE_TXN/state"
+        "$phase" "$UPDATE_OWNER" "$UPDATE_BACKEND" "$UPDATE_STORAGE_TARGET" >"$local_state" &&
+        sudo install -m 0600 "$local_state" "$staged" &&
+        sudo mv -f "$staged" "$UPDATE_TXN/state"
 }
 
 update_state_field() {
@@ -430,12 +428,13 @@ update_install_package() {
 }
 
 update_restart_units() {
-    local unit
-    local -a units current_units
-    mapfile -t units <"$UPDATE_TEMP/active-units"
-    mapfile -t current_units < <(update_active_units)
-    for unit in "${current_units[@]}"; do
-        grep -Fxq "$unit" "$UPDATE_TEMP/active-units" || sudo systemctl stop "$unit"
+    local unit current_units
+    local -a units
+    mapfile -t units <"$UPDATE_TEMP/active-units" || return 1
+    current_units=$(update_active_units) || return 1
+    # Discovery emits validated unit names without whitespace or glob characters.
+    for unit in $current_units; do
+        grep -Fxq "$unit" "$UPDATE_TEMP/active-units" || sudo systemctl stop "$unit" || return 1
     done
     ((${#units[@]} == 0)) || sudo systemctl restart "${units[@]}"
 }
@@ -445,8 +444,8 @@ update_restore_storage() {
     if [[ $UPDATE_STORAGE_TARGET == - ]]; then
         sudo rm -f /var/lib/cortexfs/storage/current
     else
-        sudo ln -s "$UPDATE_STORAGE_TARGET" "$temporary"
-        sudo mv -Tf "$temporary" /var/lib/cortexfs/storage/current
+        sudo ln -s "$UPDATE_STORAGE_TARGET" "$temporary" &&
+            sudo mv -Tf "$temporary" /var/lib/cortexfs/storage/current
     fi
 }
 
@@ -472,33 +471,31 @@ update_write_state() {
 
 update_rollback() {
     local status=0 package
+    local -a units
     printf 'ctx update: health check failed; restoring the previous release\n' >&2
-    set +e
-    mapfile -t units <"$UPDATE_TEMP/active-units"
-    ((${#units[@]} == 0)) || sudo systemctl stop "${units[@]}"
+    UPDATE_SWITCHED=0
+    mapfile -t units <"$UPDATE_TEMP/active-units" || status=1
+    ((${#units[@]} == 0)) || sudo systemctl stop "${units[@]}" || status=1
     update_restore_storage || status=1
     if [[ $UPDATE_OWNER == source ]]; then
         case "$UPDATE_BACKEND" in
         deb) sudo env CORTEXFS_UPDATE_TRANSACTION=1 dpkg --remove cortexfs ;;
         rpm) sudo env CORTEXFS_UPDATE_TRANSACTION=1 rpm --erase cortexfs ;;
         arch) sudo env CORTEXFS_UPDATE_TRANSACTION=1 pacman --remove --noconfirm cortexfs ;;
-        esac
+        esac || status=1
         sudo tar -C / -xzf "$UPDATE_TXN/rollback.tar.gz" || status=1
     else
-        package=$(find "$UPDATE_TXN" -maxdepth 1 -type f -name 'rollback.*' -print -quit)
-        update_install_package "$UPDATE_OWNER" "$package" || status=1
+        package=$(sudo find "$UPDATE_TXN" -maxdepth 1 -type f -name 'rollback.*' -print -quit) &&
+            [[ -n $package ]] && update_install_package "$UPDATE_OWNER" "$package" || status=1
     fi
     sudo systemctl daemon-reload || status=1
     update_restart_units || status=1
-    update_write_txn_state rolled-back || status=1
-    sudo rm -f "$UPDATE_ROOT/current" || status=1
-    UPDATE_SWITCHED=0
-    set -e
-    if ((status)); then
-        printf 'ctx update: rollback incomplete; recovery files remain at %s\n' "$UPDATE_TXN" >&2
-        return 1
+    if ((status == 0)) && update_write_txn_state rolled-back && sudo rm -f "$UPDATE_ROOT/current"; then
+        printf 'ctx update: rollback completed from %s\n' "$UPDATE_TXN" >&2
+        return 0
     fi
-    printf 'ctx update: rollback completed from %s\n' "$UPDATE_TXN" >&2
+    printf 'ctx update: rollback incomplete; recovery files remain at %s\n' "$UPDATE_TXN" >&2
+    return 1
 }
 
 update_exit() {

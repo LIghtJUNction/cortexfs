@@ -210,7 +210,7 @@ mod tests {
             Err(ref error)
                 if error.code() == "EIO" && error.message().contains("missing field `content`")
         ));
-        assert!(frames.is_empty());
+        assert_eq!(frames, Vec::<Value>::new());
         Ok(())
     }
 }

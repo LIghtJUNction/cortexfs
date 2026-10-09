@@ -781,7 +781,7 @@ fn session_store_wal_staging_keeps_guard_append_and_claims_on_raw_history() {
     assert!(migration.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData));
     assert!(!session.join(".store/manifest.json").exists());
     let wal_before = fs::read(session.join(".store/wal.jsonl")).unwrap_or_default();
-    assert!(!wal_before.is_empty());
+    assert_ne!(wal_before, Vec::<u8>::new());
 
     let usage = r#"{"type":"usage","run":"first","input_tokens":1}"#;
     let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
@@ -1333,7 +1333,7 @@ fn session_store_fixed_index_offset_boundaries() {
     );
     assert!(start_counts.0 <= 3 && start_counts.1 == 1);
     assert!(next_counts.0 <= 3 && next_counts.1 == 1);
-    assert!(eof.is_empty());
+    assert_eq!(eof, Vec::<u8>::new());
     assert_eq!(eof_counts, (0, 0));
 }
 
