@@ -813,7 +813,7 @@ mod tests {
             &AgentInvocation::new("r1", ""),
             &mut bytes,
         ));
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, Vec::<u8>::new());
     }
 
     #[test]

@@ -89,7 +89,7 @@ fn tool_lookup_rejects_executable_symlink() {
 
     let tool_path = ToolPath::new([tools.clone()]);
     assert_eq!(tool_path.find("fs.read"), Ok(None));
-    assert!(ok!(tool_path.list()).is_empty());
+    assert_eq!(ok!(tool_path.list()), Vec::<ToolHit>::new());
 
     let identity = ok!(unix_identity_for(&outside.join("escape")));
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");

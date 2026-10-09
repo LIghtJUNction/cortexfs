@@ -949,7 +949,7 @@ fn provider_responses_pending_calls_require_completion() -> Result<(), Box<dyn s
         };
         assert_eq!(requests, 1);
         assert!(error.can_fallback, "{}", error.message);
-        assert!(output.is_empty());
+        assert_eq!(output, "");
     }
     Ok(())
 }

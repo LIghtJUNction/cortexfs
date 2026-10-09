@@ -636,7 +636,7 @@ esac
 }
 
 fn cwd_for_tool_context_len(target: usize, chunk: &str) -> String {
-    assert!(!chunk.is_empty());
+    assert_ne!(chunk, "");
     let mut cwd = "/".to_owned();
     let base = crate::runtime::socket::exec::agent_tool_context_for_request(Some(&cwd))
         .map(|context| context.len())

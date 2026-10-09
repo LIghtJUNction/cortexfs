@@ -145,7 +145,7 @@ mod tests {
         let (status, stdout, stderr) = run_ctx_single_line(&mut command)?;
         assert!(status.success(), "ctx object {action} failed: {stderr}");
         assert_eq!(stdout, expected);
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, "");
         Ok(())
     }
 
@@ -166,7 +166,7 @@ mod tests {
             "schema=cortexfs.object/v2 version={version} requires-cortexfs={requirement}"
         )));
         assert!(stdout.contains(&format!("sha256={}", sha256(artifact_bytes))));
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, "");
         Ok(())
     }
 
@@ -243,7 +243,7 @@ mod tests {
                 "residue kind=install path={relative} dev={dev} ino={ino} type=directory state=occupied cleanup=eligible\n"
             )
         );
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, "");
 
         let before = (dev, ino, state(&stage)?);
         let (status, stdout, stderr) = run_ctx_single_line(
@@ -263,7 +263,7 @@ mod tests {
             stdout,
             format!("would-clean path={relative} dev={dev} ino={ino} entries=2\n")
         );
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, "");
         let metadata = fs::symlink_metadata(&stage)?;
         assert_eq!((metadata.dev(), metadata.ino(), state(&stage)?), before);
 
@@ -285,7 +285,7 @@ mod tests {
             stdout,
             format!("cleaned path={relative} dev={dev} ino={ino} entries=2\n")
         );
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, "");
         let Err(error) = fs::symlink_metadata(&stage) else {
             return Err(io::Error::other("residue stage still exists after cleanup").into());
         };
@@ -300,8 +300,8 @@ mod tests {
             status.success(),
             "ctx object residue audit after cleanup failed: {stderr}"
         );
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, "");
+        assert_eq!(stderr, "");
         Ok(())
     }
 
@@ -531,7 +531,7 @@ mod tests {
         )?;
         assert!(status.success(), "ctx object install failed: {stderr}");
         assert_eq!(stdout, "installed tool/example.echo\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, "");
         for residue in audit_residue(&source)? {
             cleanup_residue(&source, &residue.path, residue.dev, residue.ino, true)?;
         }

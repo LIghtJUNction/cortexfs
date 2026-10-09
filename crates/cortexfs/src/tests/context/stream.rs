@@ -8,7 +8,7 @@ fn message_stream_accepts_canonical_role_content_frames() {
 "#,
     );
     assert!(report.is_ok());
-    assert!(report.issues().is_empty());
+    assert_eq!(report.issues(), []);
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn event_stream_accepts_canonical_model_jsonl() {
 "#,
     );
     assert!(report.is_ok());
-    assert!(report.issues().is_empty());
+    assert_eq!(report.issues(), []);
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn event_stream_accepts_child_lifecycle_frames() {
 "#,
     );
     assert!(report.is_ok());
-    assert!(report.issues().is_empty());
+    assert_eq!(report.issues(), []);
 }
 
 #[test]

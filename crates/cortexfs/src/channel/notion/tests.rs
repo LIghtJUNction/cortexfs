@@ -26,7 +26,10 @@ fn api_updates_status_and_outbound_page() -> Result<(), Box<dyn std::error::Erro
     let config = NotionConfig::new(base, "secret", "database")?;
     let client = Client::builder().build()?;
     assert_eq!(api::status_type(&client, &config)?, "select");
-    assert!(api::pending(&client, &config, "select")?.is_empty());
+    assert_eq!(
+        api::pending(&client, &config, "select")?,
+        Vec::<serde_json::Value>::new()
+    );
     let codec = cortexfs_channels::platform::notion::NotionCodec::default();
     api::mark_running(&client, &config, &codec, "page-1")?;
     let request = codec.encode(&OutboundMessage {

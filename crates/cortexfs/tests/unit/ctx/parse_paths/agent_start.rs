@@ -924,7 +924,7 @@ fn agent_start_no_default_workspace_does_not_guess_git_mount() {
     };
 
     let mounts = agent_start_mounts_with_default_source(&args, &source);
-    assert!(mounts.is_empty());
+    assert_eq!(mounts, Vec::<AgentMount>::new());
 }
 
 #[test]

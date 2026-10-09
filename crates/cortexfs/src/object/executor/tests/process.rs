@@ -253,7 +253,7 @@ fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), ExecError
             .iter()
             .any(|frame| frame.contains(r#""code":"E2BIG""#))
     );
-    assert!(output.is_empty());
+    assert_eq!(output, Vec::<u8>::new());
     Ok(())
 }
 

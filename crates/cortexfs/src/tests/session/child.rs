@@ -694,7 +694,7 @@ fn session_layout_inspector_accepts_transparent_context_tree() {
 
     let report = inspect_session_layout(&root);
     assert!(report.is_ok());
-    assert!(report.issues().is_empty());
+    assert_eq!(report.issues(), []);
 }
 
 #[test]

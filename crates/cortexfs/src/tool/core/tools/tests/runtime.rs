@@ -114,14 +114,14 @@ pub(crate) fn agent_create_is_consistent_across_public_dispatch() {
         run_core_tool("agent.create", &invocation, &mut output),
         Ok(true)
     ));
-    assert!(!output.is_empty());
+    assert_ne!(output, Vec::<u8>::new());
 
     output.clear();
     assert!(matches!(
         run_core_tool_cli_with_root(Path::new("/ctx"), "agent.create", &[], &mut output),
         Ok(Some(_))
     ));
-    assert!(!output.is_empty());
+    assert_ne!(output, Vec::<u8>::new());
 }
 
 /// agent.update 必须在 spec 列表、tool dispatch 与 CLI dispatch 三条公共路径上一致，
@@ -144,7 +144,7 @@ pub(crate) fn agent_update_is_consistent_across_public_dispatch() {
         run_core_tool("agent.update", &invocation, &mut output),
         Ok(true)
     ));
-    assert!(!output.is_empty());
+    assert_ne!(output, Vec::<u8>::new());
 
     let rejected = ToolInvocation::new("r1", r#"{"control":"policy","content":"allow"}"#);
     output.clear();
@@ -160,7 +160,7 @@ pub(crate) fn agent_update_is_consistent_across_public_dispatch() {
         run_core_tool_cli_with_root(Path::new("/ctx"), "agent.update", &[], &mut output),
         Ok(Some(_))
     ));
-    assert!(!output.is_empty());
+    assert_ne!(output, Vec::<u8>::new());
 }
 
 #[test]
@@ -330,7 +330,7 @@ pub(crate) fn live_withheld_agent_create_reaches_active_with_real_pid() {
     let Ok((session, pid)) = create_child(&name, "live P3 handoff", "owned") else {
         return;
     };
-    assert!(!session.is_empty());
+    assert_ne!(session, "");
     assert!(pid > 0);
     let Ok(source) = std::env::var("CTX_SOURCE") else {
         return;

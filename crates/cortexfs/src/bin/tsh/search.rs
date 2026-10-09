@@ -264,10 +264,10 @@ mod tests {
             .ok_or_else(|| io::Error::other("shadowed tool missing"))?;
         assert_eq!(found.path, first.join("demo.echo"));
         assert_eq!(found.description, "first tier");
-        assert!(
+        assert_eq!(
             find_in_path(&tools, &["lower-only-marker".to_owned()])
-                .map_err(|error| io::Error::other(error.message))?
-                .is_empty()
+                .map_err(|error| io::Error::other(error.message))?,
+            Vec::<FindEntry>::new()
         );
         Ok(())
     }

@@ -206,7 +206,7 @@ fn fuse_projection_exposes_object_hook_directories() {
             assert!(hook_entries.iter().any(|entry| entry.name() == *phase));
             let phase_entries =
                 ok!(projection.readdir(&format!("{path}/{OBJECT_HOOK_DIR}/{phase}")));
-            assert!(phase_entries.is_empty());
+            assert_eq!(phase_entries, Vec::new());
         }
     }
 }

@@ -66,7 +66,7 @@ fn provider_projection_fails_closed_for_unknown_provider_content()
     );
     assert!(root.join("model/local/old").is_file());
     assert!(!root.join("model/local/new").exists());
-    assert!(install_residues(&root)?.is_empty());
+    assert_eq!(install_residues(&root)?, Vec::<String>::new());
     Ok(())
 }
 
@@ -132,7 +132,7 @@ fn malformed_former_active_provider_preserves_projection_without_residue() -> st
 
     assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_err());
     assert!(root.join("model/local/old").is_file());
-    assert!(install_residues(&root)?.is_empty());
+    assert_eq!(install_residues(&root)?, Vec::<String>::new());
     Ok(())
 }
 
@@ -148,7 +148,7 @@ fn inactive_unmanaged_provider_is_preserved() -> std::io::Result<()> {
     fs::remove_file(config)?;
     assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_ok());
     assert!(root.join("model/local/old").is_file());
-    assert!(install_residues(&root)?.is_empty());
+    assert_eq!(install_residues(&root)?, Vec::<String>::new());
     Ok(())
 }
 
@@ -191,7 +191,7 @@ fn reserved_receipted_provider_is_retired() -> std::io::Result<()> {
     fs::remove_file(config)?;
     assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_ok());
     assert!(!root.join("model/main").exists());
-    assert!(install_residues(&root)?.is_empty());
+    assert_eq!(install_residues(&root)?, Vec::<String>::new());
     Ok(())
 }
 
@@ -205,7 +205,7 @@ fn reserved_entries_require_their_canonical_kind_or_provenance() -> std::io::Res
 
         assert!(reconcile_provider_model_tree(&root, &providers, &cache).is_err());
         assert!(root.join("model").join(name).is_dir());
-        assert!(install_residues(&root)?.is_empty());
+        assert_eq!(install_residues(&root)?, Vec::<String>::new());
     }
     Ok(())
 }
@@ -226,7 +226,7 @@ fn canonical_debug_survives_provider_reconciliation_but_foreign_debug_blocks() -
         fs::read_to_string(root.join("model/debug/foreign"))?,
         "keep\n"
     );
-    assert!(install_residues(&root)?.is_empty());
+    assert_eq!(install_residues(&root)?, Vec::<String>::new());
     Ok(())
 }
 

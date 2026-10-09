@@ -136,7 +136,7 @@ fn mount_table_parses_fixed_v0_format() {
     let Some(last) = table.entries().last() else {
         return;
     };
-    assert!(last.options().is_empty());
+    assert_eq!(last.options(), []);
 }
 
 #[test]

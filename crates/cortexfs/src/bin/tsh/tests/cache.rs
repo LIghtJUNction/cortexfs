@@ -4,7 +4,7 @@ use crate::*;
 #[test]
 pub(crate) fn tool_context_evicts_oldest_unpinned_tool() {
     let mut context = ToolContext::new(1);
-    assert!(context.insert(test_loaded_tool("a", false)).is_empty());
+    assert_eq!(context.insert(test_loaded_tool("a", false)), Vec::new());
     let evicted = context.insert(test_loaded_tool("b", false));
     assert_eq!(
         evicted
@@ -19,8 +19,8 @@ pub(crate) fn tool_context_evicts_oldest_unpinned_tool() {
 #[test]
 pub(crate) fn tool_context_touch_preserves_recently_used_tool() {
     let mut context = ToolContext::new(2);
-    assert!(context.insert(test_loaded_tool("a", false)).is_empty());
-    assert!(context.insert(test_loaded_tool("b", false)).is_empty());
+    assert_eq!(context.insert(test_loaded_tool("a", false)), Vec::new());
+    assert_eq!(context.insert(test_loaded_tool("b", false)), Vec::new());
     context.touch("a");
 
     let evicted = context.insert(test_loaded_tool("c", false));
@@ -39,8 +39,8 @@ pub(crate) fn tool_context_touch_preserves_recently_used_tool() {
 #[test]
 pub(crate) fn tool_context_keeps_pinned_tools_over_limit() {
     let mut context = ToolContext::new(1);
-    assert!(context.insert(test_loaded_tool("a", true)).is_empty());
-    assert!(context.insert(test_loaded_tool("b", false)).is_empty());
+    assert_eq!(context.insert(test_loaded_tool("a", true)), Vec::new());
+    assert_eq!(context.insert(test_loaded_tool("b", false)), Vec::new());
     assert!(context.tools.contains_key("a"));
     assert!(context.tools.contains_key("b"));
 }
@@ -48,12 +48,12 @@ pub(crate) fn tool_context_keeps_pinned_tools_over_limit() {
 #[test]
 pub(crate) fn tool_context_reload_preserves_existing_pin() {
     let mut context = ToolContext::new(1);
-    assert!(context.insert(test_loaded_tool("a", true)).is_empty());
-    assert!(context.insert(test_loaded_tool("a", false)).is_empty());
+    assert_eq!(context.insert(test_loaded_tool("a", true)), Vec::new());
+    assert_eq!(context.insert(test_loaded_tool("a", false)), Vec::new());
 
     let evicted = context.insert(test_loaded_tool("b", false));
 
-    assert!(evicted.is_empty());
+    assert_eq!(evicted, Vec::new());
     assert!(context.tools.get("a").is_some_and(|tool| tool.pinned));
     assert!(context.tools.contains_key("b"));
 }
@@ -61,8 +61,8 @@ pub(crate) fn tool_context_reload_preserves_existing_pin() {
 #[test]
 pub(crate) fn tool_context_unload_removes_only_unpinned_tools() {
     let mut context = ToolContext::new(2);
-    assert!(context.insert(test_loaded_tool("a", true)).is_empty());
-    assert!(context.insert(test_loaded_tool("b", false)).is_empty());
+    assert_eq!(context.insert(test_loaded_tool("a", true)), Vec::new());
+    assert_eq!(context.insert(test_loaded_tool("b", false)), Vec::new());
 
     assert!(context.remove_unpinned("a").is_err());
     assert!(context.tools.contains_key("a"));

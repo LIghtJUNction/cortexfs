@@ -112,11 +112,7 @@ mod tests {
         let history = History::from_jsonl(&jsonl);
         assert_eq!(history, original);
         let oversized = serde_json::json!({"role": "tool", "content": "x".repeat(64 * 1024)});
-        assert!(
-            History::from_jsonl(&oversized.to_string())
-                .messages()
-                .is_empty()
-        );
+        assert_eq!(History::from_jsonl(&oversized.to_string()).messages(), []);
         for budget in 80..128 {
             let compacted = compact_history(&history, budget, Some(&DefaultSummarizer))
                 .unwrap_or_else(|error| match error {});

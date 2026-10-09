@@ -235,10 +235,10 @@ mod tests {
         }
         executable(&second.join("later"))?;
         let path = ToolPath::new([first, second]);
-        assert!(
+        assert_eq!(
             path.list_limited(8, 64)
-                .map_err(|error| { io::Error::other(format!("cannot list tools: {error:?}")) })?
-                .is_empty()
+                .map_err(|error| { io::Error::other(format!("cannot list tools: {error:?}")) })?,
+            Vec::<ToolHit>::new()
         );
 
         let tier = root.path().join("tier");

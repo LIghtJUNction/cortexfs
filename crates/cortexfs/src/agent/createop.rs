@@ -1442,7 +1442,7 @@ allow executor_t agent:window-child start\n",
         let mut ops = TestOps::default();
         assert!(coordinate_authorized_child(false, &mut ops).is_err());
         assert!(ops.resources.is_empty());
-        assert!(ops.compensation.is_empty());
+        assert_eq!(ops.compensation, Vec::<&str>::new());
     }
 
     #[test]
@@ -1457,7 +1457,7 @@ allow executor_t agent:window-child start\n",
             ops.resources,
             BTreeSet::from(["agent", "channel", "unit", "socket", "request"])
         );
-        assert!(ops.compensation.is_empty());
+        assert_eq!(ops.compensation, Vec::<&str>::new());
     }
 
     #[test]

@@ -149,7 +149,7 @@ fn tool_schema_accepts_json_schema_shape_without_authority() {
         r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#,
     );
     assert!(report.is_ok());
-    assert!(report.issues().is_empty());
+    assert_eq!(report.issues(), []);
 }
 
 #[test]

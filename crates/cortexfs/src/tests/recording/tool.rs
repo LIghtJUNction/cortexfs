@@ -16,7 +16,7 @@ fn tool_denial_recorder_makes_permission_failure_inspectable() {
         ToolExecutionDenial::AgentPolicy,
     );
     let recorded = ok!(recorded);
-    assert!(recorded.messages().is_empty());
+    assert_eq!(recorded.messages(), Vec::<String>::new());
     assert_eq!(recorded.events().len(), 2);
 
     let events = fs::read_to_string(session.join("events.jsonl"));
