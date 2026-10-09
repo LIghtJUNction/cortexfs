@@ -35,14 +35,12 @@ pub(super) fn one(
     let mut metadata = BTreeMap::new();
     metadata.insert("twitter.tweet_id".to_owned(), id.clone());
     metadata.insert("twitter.author_id".to_owned(), author_id.clone());
-    for (key, field) in [("twitter.username", "username")] {
-        if let Some(value) = users
-            .get(&author_id)
-            .and_then(|user| user.get(field))
-            .and_then(Value::as_str)
-        {
-            metadata.insert(key.to_owned(), value.to_owned());
-        }
+    if let Some(value) = users
+        .get(&author_id)
+        .and_then(|user| user.get("username"))
+        .and_then(Value::as_str)
+    {
+        metadata.insert("twitter.username".to_owned(), value.to_owned());
     }
     if let Some(created_at) = value.get("created_at").and_then(Value::as_str) {
         metadata.insert("twitter.created_at".to_owned(), created_at.to_owned());
