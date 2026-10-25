@@ -106,13 +106,6 @@ CLI integrations. Hosted CLIs should keep their own supported authentication
 and provider behavior unless a concrete compatibility requirement proves a
 CortexFS boundary is necessary.
 
-## Evaluation
-
-The optional `cortexfs-futureagi` adapter turns a validated CortexFS ATIF
-trajectory into Future AGI evaluation inputs or submits it to a compatible
-Future AGI endpoint. It is explicit and one-shot: no background uploader and
-no additional filesystem ABI. See [Future AGI evaluation](docs/futureagi.md).
-
 ## Install and develop
 
 ```bash

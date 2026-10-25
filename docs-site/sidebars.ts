@@ -12,7 +12,6 @@ const sidebars: SidebarsConfig = {
       items: [
         'developing-cortexfs', 'extensions', 'channels', 'evaluation',
         {type: 'doc', id: 'aimock-testing', label: 'Provider Mock Tests'},
-        'futureagi',
       ],
     },
     {

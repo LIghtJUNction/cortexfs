@@ -1106,16 +1106,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cortexfs-futureagi"
-version = "0.1.21"
-dependencies = [
- "cortexfs",
- "reqwest",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "cortexfs-mcp"
 version = "0.1.21"
 dependencies = [

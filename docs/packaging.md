@@ -14,10 +14,11 @@ The release payload also includes `cortexfs-channel` for the multi-IM bridge;
 configure it through the [channel guide](channels.md) after installation.
 Optional packaged adapters include the official Agent SDK role binaries
 (`cortexfs-agent-architect`, `cortexfs-agent-executor`,
-`cortexfs-agent-product-manager`) and the one-shot
-[`cortexfs-futureagi`](futureagi.md) evaluator. Those binaries are not extra
+`cortexfs-agent-product-manager`). Those binaries are not extra
 `/ctx` roots. The source installer and the RPM spec both build
 `-p cortexfs-agents`, matching the Debian, Arch, and tar payloads.
+
+The former evaluation executable is [no longer shipped](futureagi.md).
 
 Build packages from a checkout with the host's native package tools:
 

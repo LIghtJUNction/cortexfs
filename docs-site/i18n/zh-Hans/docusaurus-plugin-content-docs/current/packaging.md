@@ -13,8 +13,7 @@ Fedora/RHEL 与 openSUSE/SLES。安装包包含发布二进制文件、systemd �
 [通道文档](channels.md) 配置。
 可选打包适配器还包括官方 Agent SDK 角色二进制
 （`cortexfs-agent-architect`、`cortexfs-agent-executor`、
-`cortexfs-agent-product-manager`）以及一次性
-[`cortexfs-futureagi`](futureagi.md) 评估器。它们不是额外的 `/ctx` 根。
+`cortexfs-agent-product-manager`）。它们不是额外的 `/ctx` 根。
 源码安装器与 RPM spec 都会构建 `-p cortexfs-agents`，与 Debian、Arch、tar
 负载一致。
 

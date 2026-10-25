@@ -252,6 +252,30 @@ package_payload_lists_match() (
     diff -u <(printf '%s\n' "${UNITS[@]}" | sort) <(expected_units | sort)
 )
 assert_true "source and native package payload lists agree" package_payload_lists_match
+assert_false "source payload no longer requires an evaluator" \
+    grep -Fxq cortexfs-futureagi < <(expected_binaries)
+package_mapping_payload() (
+    export CORTEXFS_PACKAGE_LIB=1
+    # shellcheck disable=SC1090,SC1091 # Package library, isolated from installer globals.
+    source "$ROOT/packaging/build.sh"
+    local release="$TEST_TEMP/release" stage="$TEST_TEMP/package" binary
+    mkdir -p "$release"
+    for binary in "${BINARIES[@]}"; do
+        [[ $binary == cortexfs-futureagi ]] && continue
+        printf '#!/bin/sh\nexit 0\n' >"$release/$binary"
+        chmod 0755 "$release/$binary"
+    done
+    RELEASE_DIR=$release
+    verify_release || return
+    copy_payload "$stage" "$release" || return
+    [[ -x $stage/usr/bin/cortexfs-mount && -x $stage/usr/bin/ctx ]] &&
+    [[ ! -e $stage/usr/bin/cortexfs-futureagi ]] &&
+    cmp "$ROOT/packaging/systemd/cortexfs.service" \
+        "$stage/usr/lib/systemd/system/cortexfs.service" &&
+    cmp "$ROOT/docs/spec/fuse.md" "$stage/usr/share/doc/cortexfs/docs/spec/fuse.md" &&
+    cmp "$ROOT/docs/spec/root-abi.md" "$stage/usr/share/doc/cortexfs/docs/spec/root-abi.md"
+)
+assert_true "package stages retained FUSE interface without evaluator artifact" package_mapping_payload
 assert_true "source build includes official role agents" \
     grep -Fq -- '-p cortexfs-agents' "$ROOT/scripts/install-linux.sh"
 assert_true "RPM build includes official role agents" \
