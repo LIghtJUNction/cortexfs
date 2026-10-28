@@ -1,5 +1,7 @@
 # CortexFS
 
+![软件与依赖汇聚为可重建的配方](https://raw.githubusercontent.com/recipkg/recipkg/main/assets/recipkg-cover.png)
+
 [English](README.en.md)
 
 CortexFS 通过 Linux `/ctx` 文件系统公开 Agent 运行时行为。本仓库现以

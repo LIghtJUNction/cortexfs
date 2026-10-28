@@ -1,5 +1,7 @@
 # CortexFS
 
+![Software and dependencies become a recipe for rebuilding software](https://raw.githubusercontent.com/recipkg/recipkg/main/assets/recipkg-cover.png)
+
 [简体中文](README.zh-CN.md)
 
 CortexFS exposes Linux agent runtime behavior through the `/ctx` filesystem.
