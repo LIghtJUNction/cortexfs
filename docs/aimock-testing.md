@@ -1,5 +1,9 @@
 # AIMock Testing
 
+> 存档说明：本文描述 CortexFS `v0.1.21` 的本地测试流程；测试源码与脚本已移除，
+> 本文不是当前验证结果。重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 CortexFS can use `@copilotkit/aimock` as a local OpenAI-compatible provider
 for provider-path tests that should not call a real cloud API.
 

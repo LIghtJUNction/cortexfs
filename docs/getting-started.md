@@ -4,6 +4,10 @@ title: Start With Installation
 sidebar_label: Start With Installation
 ---
 
+> 存档说明：本文描述 CortexFS `v0.1.21` 源码快照。当前仓库已移除实现与安装器，
+> 以下命令不能从此 checkout 执行。重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 # Start With Installation
 
 CortexFS is a Linux filesystem ABI. Install it first, confirm `/ctx` is usable,

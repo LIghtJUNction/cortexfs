@@ -1,5 +1,8 @@
 # Chat UI ABI
 
+> 存档说明：本文描述 CortexFS `v0.1.21` 的终端聊天界面契约；界面实现已从当前
+> 仓库移除。重建入口见 [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 `ctxchat` is the reference terminal UI. It is separate from the runtime: it
 reads documented `/ctx` files and exchanges newline-delimited JSON with
 `/ctx/agent/<agent>.sock`. UI settings and themes belong in plain files or

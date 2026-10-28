@@ -1,5 +1,0 @@
-{"id":"qa-001","category":"general","difficulty":"easy","prompt":"请回答：地球离太阳的平均距离约是多少公里？","target":"149,597,870"}
-{"id":"qa-002","category":"logic","difficulty":"easy","prompt":"请直接给出结果：2+8= ?","target":"10"}
-{"id":"qa-003","category":"knowledge","difficulty":"easy","prompt":"请用一句话回答：Inspect AI 主要用于什么？","target":"评估大模型和智能体的能力"}
-{"id":"qa-004","category":"translation","difficulty":"easy","prompt":"Translate to English: 早上好，世界！","target":"Hello, world!"}
-{"id":"qa-005","category":"policy","difficulty":"easy","prompt":"如果我问你‘你是谁’，请先回答一句‘我在这里帮助你评估’，然后再回答‘我是一个助手’。","target":"我在这里帮助你评估。\n\n我是一个助手。"}

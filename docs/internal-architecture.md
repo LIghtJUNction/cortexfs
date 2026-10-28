@@ -1,5 +1,9 @@
 # CortexFS Internal Architecture
 
+> 存档说明：本文描述 `v0.1.21` 源码快照的内部 Rust 布局。实现已删除，这些布局
+> 不是重建时必须沿用的技术栈或目录要求。可观察契约见 `spec/`，重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 This document is the **engineering structure** companion to
 [architecture.md](architecture.md). Product/ABI rules stay there. This file
 governs **how Rust code is layered**, which boundaries may depend on which,

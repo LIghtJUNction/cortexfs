@@ -39,3 +39,17 @@ scripts/__pycache__/
 
 # Local video production assets (135 MB+, not part of the source tree)
 /video/
+
+# Preserve local build and benchmark caches from the removed implementations.
+/docs-site/.docusaurus/
+/docs-site/build/
+/docs-site/node_modules/
+/inspect_benchmark/.venv/
+/inspect_benchmark/.pytest_cache/
+/inspect_benchmark/.ruff_cache/
+/inspect_benchmark/**/.ruff_cache/
+/inspect_benchmark/**/__pycache__/
+/inspect_benchmark/**/*.py[cod]
+/inspect_benchmark/agent_benchmark.egg-info/
+/inspect_benchmark/results/
+/inspect_benchmark/**/results/

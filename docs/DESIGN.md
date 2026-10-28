@@ -167,6 +167,10 @@ components:
 
 # CortexFS DESIGN.md
 
+> Snapshot note: the original documentation-site implementation has been
+> removed. These visual tokens remain reference material for rebuilding the
+> documentation surface; see [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md).
+
 Visual identity for CortexFS surfaces (docs-site, landing, demos). This file
 follows the [DESIGN.md format](https://github.com/google-labs-code/design.md)
 (`version: alpha`): YAML tokens are normative; prose explains how to apply them.

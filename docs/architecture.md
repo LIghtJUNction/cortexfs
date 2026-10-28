@@ -1,5 +1,10 @@
 # CortexFS Architecture
 
+> Snapshot note: this describes the `v0.1.21` implementation's product boundaries.
+> Product source has been removed from this repository. Rebuild from the external
+> [`cortexfs-prompts` package](cortexfs-prompts/BUILD_PROMPT.md); the architecture
+> below is evidence, not a required internal implementation layout.
+
 Normative ABI detail lives under [spec/](spec/). Visual identity lives in
 [DESIGN.md](DESIGN.md) (Google Labs DESIGN.md format). This file is the
 engineering design entry: what CortexFS is, where state lives, and what must

@@ -1,4 +1,3 @@
-[submodule "agent.sh"]
-	path = agent.sh
-	url = https://github.com/LIghtJUNction/agent.sh.git
-	branch = main
+[submodule "docs/cortexfs-prompts"]
+	path = docs/cortexfs-prompts
+	url = https://github.com/LIghtJUNction/cortexfs-prompts.git
