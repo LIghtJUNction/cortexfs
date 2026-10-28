@@ -1,6 +1,6 @@
 # Tool, Shared, Policy, and Logs ABI
 
-This file continues [agent-tool-security.md](./agent-tool-security). It keeps
+This file continues [agent-tool-security.md](./agent-tool-security.md). It keeps
 the tool ABI, MCP projection rules, shared-space rules, policy v0, and log
 placement separate from agent identity and mount setup.
 
@@ -81,9 +81,19 @@ MCP servers are tool sources, not CortexFS root objects. Do not expose:
 tools. Projection writes v2 manifest candidates only; it does not install,
 grant policy, or write `/ctx`:
 
-`ctxmcp` advertises stable MCP `2025-11-25` and accepts only the negotiated
-stable versions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
-Draft, unknown, and future versions are rejected.
+`ctxmcp` first speaks final MCP `2026-07-28` over stdio: it probes
+`server/discover`; a successful discovery or a recognized modern protocol
+error (`-32020`, `-32021`, or `-32022`) stays on the modern path, and every
+modern request carries the standard request `_meta`. Only an unrecognized
+discovery error or a bounded timeout falls back on the same process to the
+legacy `initialize` lifecycle. That legacy path accepts only the stable
+versions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`; draft,
+unknown, and future versions are rejected. Modern `2026-07-28` results must
+include `resultType="complete"`; the missing-field compatibility rule applies
+only to responses from earlier protocol versions. Unsupported values, including
+`input_required`, fail closed until MRTR continuation is implemented. Modern
+server-initiated requests are rejected; legacy `ping` handling remains on the
+legacy path only.
 
 ```text
 /ctx/tool/github.search_issues
@@ -228,7 +238,6 @@ Tool execution has two caller-facing modes:
 terminal CLI     tsh TOOL ARG...
 agent native     in-process/runtime tool call with structured input/output
 ```
-
 The terminal CLI mode should behave like a normal command line program: argv is
 preserved, stdin/stdout/stderr are inherited, and output is plain command
 output. A tool may decide that empty argv is invalid, but `tsh` must not reject
@@ -696,6 +705,24 @@ allow executor_t network:default connect
 ```
 
 Without `allow executor_t network:default connect`, there is no network access.
+
+For `ctx agent start`, the launch boundary always begins with bwrap
+`--unshare-net`. Explicit hosted commands (`ctx agent start NAME -- COMMAND`)
+replace that isolation with pasta userspace networking only when all of these
+hold:
+
+```text
+policy allows <subject> network:default connect
+/usr/bin/pasta is an executable file
+/dev/net/tun exists
+```
+
+Pasta is invoked as `/usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp`
+with no TCP/UDP port mapping (`-t none -u none -T none -U none`). The sandbox
+bind-tries host resolver files from `/run/systemd/resolve/resolv.conf`. Denied
+policy, missing pasta, or missing tun keep `--unshare-net`. The legacy
+no-command `tsh` path never enables pasta. Tool-sandbox launches that pass
+`authorize_network_connect` omit `--unshare-net` rather than inserting pasta.
 
 Permission check order:
 

@@ -54,10 +54,14 @@ attachment   零个或多个 watch/attach 客户端
   "cwd": "/workspace",
   "command": ["/ctx/bin/tsh"],
   "state": "running",
-  "socket": "/run/user/1000/cortexfs/terminal/executor/default/main.sock",
+  "socket": "/run/cortexfs/terminal/broker.sock",
   "created_at": 1735689600
 }
 ~~~
+
+`socket` 是定位器，不是身份。`ctx agent start` 之后记录的是
+`runtime/terminal/broker.rs` 中的 root 所有 broker 路径。会话可见别名是
+`/ctx/home/<uid>/agent/executor/session/default/terminal/main.sock`。
 
 `state` 是规范的短文本投影；`status` 是兼容别名。实现可以使用 `created`、`running`、`exited` 或 `error`。`owner` 和 `cwd` 是记录的文本投影。所有元数据写入都使用普通的“临时文件写入后在同目录原子 rename”规则。
 

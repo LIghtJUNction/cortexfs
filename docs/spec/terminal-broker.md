@@ -20,10 +20,10 @@ MUST authenticate the server with `SO_PEERCRED` and reject a non-root peer. The
 broker MUST authenticate every client with `SO_PEERCRED` plus `/proc` cgroup and
 process-generation metadata.
 
-The projected agent entry remains:
+The projected terminal entry belongs to the operator's durable agent session:
 
 ```text
-/ctx/agents/<agent>/<session>/terminal/main.sock
+/ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
 Its backing alias targets the broker endpoint. The old per-user listener and

@@ -1,7 +1,7 @@
 # Session ABI
 
 V2 ownership/replay requirements below are not yet activated in the socket
-runtime; see [Interaction ABI implementation status](interaction-abi.md#implementation-status).
+runtime; see [Interaction ABI implementation status](https://lightjunction.github.io/cortexfs/docs/spec/interaction-abi#implementation-status).
 
 Socket requests must include `session`. If the client omits it, runtime uses
 `default`.
@@ -62,7 +62,7 @@ temp     no durable path required
 Each logical Agent Session has one active **Agent Session Slave**. It is the
 single writer for that session's messages, events, request claims, state, and
 indexes. Multiple Channel Masters may attach through
-[`cortexfs.interaction/v2`](interaction-abi.md), but they never acquire the
+[`cortexfs.interaction/v2`](https://lightjunction.github.io/cortexfs/docs/spec/interaction-abi), but they never acquire the
 session write lock and never append session files directly.
 
 A slave is an independent protocol, state, and lifecycle boundary, not
@@ -146,8 +146,8 @@ shared   /ctx/shared/<name>/agent/<agent>/session/index/channel/<channel_name>
 ```
 
 `<channel_name>` is normalized as `transport[_instance]_<agent>_<session>`
-with underscores only, for example `terminal_coder_default` or
-`discord_primary_coder_discord_deadbeef`. A shared entry is prefixed with
+with underscores only, for example `terminal_executor_default` or
+`discord_primary_executor_discord_deadbeef`. A shared entry is prefixed with
 `shared_`. The file contains provider-neutral JSON describing the target
 agent/session and transport; credentials and external identities are never
 stored there. `ctx attach` reads this index, accepts an exact name or unique

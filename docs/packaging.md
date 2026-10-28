@@ -20,7 +20,8 @@ Optional packaged adapters include the official Agent SDK role binaries
 (`cortexfs-agent-architect`, `cortexfs-agent-executor`,
 `cortexfs-agent-product-manager`) and the one-shot
 [`cortexfs-futureagi`](futureagi.md) evaluator. Those binaries are not extra
-`/ctx` roots.
+`/ctx` roots. The source installer and the RPM spec both build
+`-p cortexfs-agents`, matching the Debian, Arch, and tar payloads.
 
 Build packages from a checkout with the host's native package tools:
 
@@ -75,6 +76,13 @@ instances. Terminal sessions use the root-owned socket-activated broker, and
 package upgrades restart an already active mount service only after the new
 files have been installed.
 
+Hosted CLI egress uses `/usr/bin/pasta` from the `passt` package plus
+`/dev/net/tun`. The Arch `PKGBUILD` and the Arch source-installer package plan
+include `passt`. Debian and RPM package metadata currently do not Depend or
+Require it. Without pasta or tun, an explicit hosted command stays
+`--unshare-net` even when policy allows `network:default connect`. The
+no-command `tsh` path never enables pasta.
+
 Packaged systemd units pin hard cgroup ceilings so one agent cannot exhaust the
 host. `cortexfs.service` uses `MemoryMax=512M`, `CPUQuota=100%`, and
 `TasksMax=64`. `cortexfs-agent@.service` uses `MemoryMax=512M`, `CPUQuota=100%`,
@@ -95,7 +103,10 @@ A successful ref update records its tracking ref, so later plans may use
 `ctx update` without repeating `--ref`. Use `--source /clean/git/checkout` for
 a pinned local commit. The updater preserves configuration, storage, secrets,
 and inactive unit state; a package-owned install applies only when its exact
-current package is available for rollback.
+current package is available for rollback. Active-unit discovery matches the
+exact `cortexfs.service` mount unit as well as hyphenated names such as
+`cortexfs-agent@executor.service`. Units that were inactive before the transaction stay
+inactive.
 
 `ctx update` must run as a normal user with `sudo`, `flock`, and a controlling
 terminal (`/dev/tty`). It refuses to run as root. The installed helper is
@@ -103,7 +114,9 @@ terminal (`/dev/tty`). It refuses to run as root. The installed helper is
 be a root-owned, non-symlink, non-group-writable file. Apply then sources
 `scripts/install-linux.sh` from the pinned checkout, so the helper does not
 need a second packaged copy of the installer. Preflight still requires FUSE
-and bubblewrap 0.10+ before building.
+and bubblewrap 0.10+ before building. Hosted CLI pasta egress additionally
+needs `/usr/bin/pasta` and `/dev/net/tun`; those are not currently a Debian or
+RPM package requirement.
 
 For a source-only deployment with no native package builder, the existing
 installer remains available:

@@ -24,7 +24,7 @@
 /tmp/
 /ctx
 /dist/
-/inspect_benchmark/tmp/
+/evals/harness/__pycache__/
 *.log
 *.pid
 .codegraph

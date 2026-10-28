@@ -2,29 +2,22 @@
 
 [English](README.en.md)
 
-本仓库现作为 CortexFS 的文档与 ABI 参考。产品实现、测试、示例、构建/安装
-脚本和文档站点实现已从当前源码树移除。保留的操作指南描述 `v0.1.21` 源码
-快照，只作为参考，不能在当前 checkout 中照着构建或安装。
+本仓库现只保留文档与 ABI 参考。产品源码、测试、示例、构建/安装代码、评估运行器和
+文档站点实现已从跟踪树中移除。
 
 ## 重建提示词
 
-完整、自包含的重建提示词由
-[`cortexfs-prompts` 子模块](docs/cortexfs-prompts/README.md)维护，入口是
-[`BUILD_PROMPT.md`](docs/cortexfs-prompts/BUILD_PROMPT.md)。提示词包记录了源版本、
-证据、文档冲突和文件哈希；它尚未经过独立重建验证。
+重建包位于 [`cortexfs-prompts` 子模块](docs/cortexfs-prompts/README.md)，入口是
+[`BUILD_PROMPT.md`](docs/cortexfs-prompts/BUILD_PROMPT.md)。它提取自任务开始时的干净本地
+checkout：`84f349c97bc2f6a611109686a02e21de3800042a`（`v0.1.21-10-g84f349c9`），描述的是
+该版本；尚未通过独立重建验证。
 
-## 规范文档
+## 文档版本
 
-- [规范性 ABI 索引](docs/spec/README.md)
-- [系统架构与产品边界](docs/architecture.md)
-- [文档状态与来源](docs/README.md)
-- [视觉设计规范](docs/DESIGN.md)
-- [简体中文翻译](docs/translations/zh-Hans/)
+当前 `docs/` 保留的 canonical 文档已更新到上游提交
+`7261cb399ba1f8efa387736938ea3d8eec1a0acb`（2026-09-30），描述了更新后的 hosted Agent CLI
+方向，与提示词包提取的源码快照不同。重建 `84f349c` 时以提示词包内的规范快照为准；了解
+后续文档和迁移状态时查看 [`docs/spec/README.md`](docs/spec/README.md)。
 
-详细根 ABI 定义 8 个稳定条目，其中包括 `/ctx/channel/`。旧版宣传文案仍可能写
-“7 个根目录”；差异见提示词包的证据记录。
-
-## 历史产物
-
-若 `dist/` 中仍保留旧发布包，它们不是从当前文档仓库构建的版本。本仓库不再
-提供受支持的源码构建或安装器。
+详细根 ABI 定义 8 个稳定条目，包括 `/ctx/channel/`。例如
+[`docs/evaluation.md`](docs/evaluation.md) 的历史指南可能引用已从跟踪树删除的工具。

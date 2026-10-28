@@ -46,9 +46,11 @@ Their stable `/ctx` paths may be aliases to endpoints under `/run`, and their
 absence never deletes the Agent definition or a private/shared session.
 
 The packaged `cortexfs-agent@.socket` is ordered after and restart-coupled to
-`cortexfs.service`. Package upgrades also start only the agent socket instances
-explicitly enabled through `sockets.target.wants`; an upgrade therefore does
-not leave an enabled chat endpoint inactive after the FUSE mount restarts.
+`cortexfs.service`. `ctx update` restores `cortexfs.service` itself when that
+unit was active before the transaction. Package upgrades also start only the
+agent socket instances explicitly enabled through `sockets.target.wants`; an
+upgrade therefore does not leave an enabled chat endpoint inactive after the
+FUSE mount restarts.
 
 ## Runtime Surfaces
 
@@ -289,6 +291,14 @@ ctx agent start
   -> tsh
 ```
 
+`ctx agent start NAME -- COMMAND...` replaces the default `tsh` child with the
+exact hosted argv. That launch drops `Restart=`, so the hosted child is a
+one-shot Unix process. Canonical `/ctx` becomes one writable FUSE bind only
+after process-start `findmnt` confirms a read-write `fuse`/`fuse.cortexfs`
+CortexFS mount. Network stays `--unshare-net` unless policy allows
+`network:default connect` and the host can run pasta; see
+[tool-policy-abi.md](tool-policy-abi.md).
+
 `ctxterm` owns the pseudo-terminal. The root broker authenticates `watch` and
 `attach` clients and passes accepted descriptors directly to `ctxterm`; it does
 not relay PTY bytes.
@@ -309,8 +319,10 @@ NOT fall back to a per-user socket or the legacy line protocol. See
 
 `ctx agent start` creates the default interactive terminal sandbox. Unless
 overridden, it binds the caller's current working directory at `/workspace` with
-read-write access and starts the terminal there. If the host directory contains
-`.git`, `.git` is over-mounted at `/workspace/.git` read-only.
+read-write access and starts the terminal there. A read-write workspace keeps
+ordinary Git metadata writable. CortexFS does not implicitly over-mount `.git`
+read-only; an explicit `/workspace/.git` policy mount may still narrow it, and
+out-of-tree linked-worktree metadata still needs separate authority.
 
 Host-native terminals are rejected before session or launch state changes.
 A same-UID native agent cannot be distinguished reliably from its operator at
@@ -386,27 +398,39 @@ to those ceilings. They do not set `CPUAccounting=yes` because systemd turns
 CPU accounting on when `CPUQuota=` is present. Transient `systemd-run --user`
 terminals still pass `--property=CPUAccounting=yes` from `support::quota`.
 
-The terminal process starts from an empty environment. CortexFS injects only a
-small allowlist through the sandbox launcher:
+The sandbox launcher starts from `--clearenv` and injects a curated allowlist.
+`ctxterm` then `env_clear()`s and forwards that received environment to the
+child; it is not a second filter and does not inherit the operator shell.
 
 ```text
 CTX_ROOT
+CTX_PROVIDER_CONFIG_DIR
 CTX_HOME
 CTX_AGENT
+CTX_AGENT_ROLE
+CTX_AGENT_MODEL
+CTX_AGENT_LIFE
+CTX_AGENT_ROOT_PATH
+CTX_AGENT_CWD
 CTX_AGENT_SUBJECT
-CTX_PATH
+CTX_AGENT_UID
+CTX_AGENT_GID
+CTX_AGENT_GROUPS
 HOME=/home/agent
 USER
 LOGNAME
-SHELL
-TERM
-LANG
+SHELL=/usr/bin/bash
+TERM=xterm-256color
+LANG=C.UTF-8
+GIT_OPTIONAL_LOCKS=0
+PATH=/usr/bin:/bin
 ```
 
-Host session variables and provider secrets must not be inherited by default.
-Executable agents launched from the socket runtime also start with
-`env_clear()` and receive only the derived agent environment plus runtime-owned
-`CTX_*` values.
+Non-colliding `agent/<name>.d/env` pairs are appended. A default workspace also
+sets `CTX_WORKSPACE`. Host session variables and provider secrets must not be
+inherited by default. Executable agents launched from the socket runtime also
+start with `env_clear()` and receive only the derived agent environment plus
+runtime-owned `CTX_*` values.
 
 ## Tool Workspace Overlay
 
@@ -691,9 +715,19 @@ Context compaction for prompt history uses `agent/<name>.d/compact.strategy`:
 
 ```text
 truncate   keep the newest messages and drop older ones (default)
-summarize  summarize omitted messages with the built-in provider-neutral summarizer
+summarize  add bounded excerpts from omitted messages using the built-in summarizer
 <name>     run agent/<name>.d/compact.d/<name> as an external summarizer
 ```
+
+If the newest message alone exceeds the history byte budget, the host retains
+a UTF-8-safe excerpt with a `[truncated]` marker when the budget can hold it.
+The built-in `summarize` strategy joins older message text into bullet excerpts;
+it does not call a model or generate a semantic summary. Recent messages take
+priority over both built-in excerpts and custom summaries. Each pass rebuilds
+from durable history, so repeated compaction does not recursively summarize a
+previous lossy result.
+History JSONL parsing accepts individual lines up to 64 KiB, matching the host
+history-read cap; larger or invalid lines are ignored in the disposable view.
 
 Custom compaction executables receive one bounded JSONL frame on stdin:
 
@@ -702,9 +736,11 @@ Custom compaction executables receive one bounded JSONL frame on stdin:
 ```
 
 Exit zero with bounded stdout text continues the run; the host inserts that text
-as `Summary of earlier context:` above the retained recent messages. Non-zero
-exit, timeout, or oversize output falls back to the truncate strategy for that
-run. Compaction never rewrites durable `messages.jsonl`.
+as `Summary of earlier context:` above the retained recent messages. Empty
+output, non-zero exit, timeout, or oversize output falls back to the truncate
+strategy for that run. The five-second deadline also bounds a compactor that
+does not read its input; stdin and output are serviced concurrently. Compaction
+never rewrites durable `messages.jsonl`.
 
 Agent-local hooks use the existing `agent/<name>.d/hooks/pre.d/` and
 `post.d/` directories. The runtime runs them in lexical order immediately
@@ -753,7 +789,7 @@ ctx agent attach is the writable human path into ctxterm -> tsh
 tsh never falls back to host PATH
 default terminal cwd is /workspace
 default terminal HOME is /home/agent
-.git is read-only inside the default workspace mount
+authorized rw /workspace keeps ordinary Git metadata unless path policy narrows it
 service/provider secrets are not inherited by executable agents
 prompt text cannot grant tool, model, filesystem, network, or session authority
 ```

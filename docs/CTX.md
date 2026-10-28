@@ -1,8 +1,10 @@
 # ctx Coreutils Design
 
-> Snapshot note: `ctx` source code has been removed. This document preserves the
-> `v0.1.21` command contract; see [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)
-> for the independent reconstruction prompt.
+> Historical contract: `ctx` source code has been removed. This document
+> preserves the command contract from the earlier `84f349c` source snapshot;
+> see [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md) for its independent
+> reconstruction prompt. The newer hosted CLI migration is documented in
+> [`architecture.md`](architecture.md).
 
 `ctx` is specified in [spec/ctx-coreutils.md](spec/ctx-coreutils.md).
 

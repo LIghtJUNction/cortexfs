@@ -1,8 +1,10 @@
 # CortexFS 规范
 
-本目录是 CortexFS ABI 的规范文档，描述 `v0.1.21` 源码快照。产品实现已从当前
-仓库移除，规范和详细提取证据位于
-[`cortexfs-prompts`](https://github.com/LIghtJUNction/cortexfs-prompts) 提示词包。
+> 历史译文：本页保留的是 `84f349c` 源码快照对应的中文规范摘要。当前 `docs/spec/`
+> 文档更新到上游 commit `7261cb3`，描述后续 hosted Agent CLI 迁移；两个快照有差异。
+> 重建旧快照时请使用 [`cortexfs-prompts`](../../../cortexfs-prompts/README.md) 中的完整规范。
+
+本目录是 CortexFS ABI 的规范文档。产品实现已从当前仓库移除。
 
 CortexFS 通过小型 Linux 文件系统接口暴露 agent runtime。路径、对象执行、持久
 session 事实、权限和带版本的 socket 帧属于可观察契约。只要不改变这些契约，

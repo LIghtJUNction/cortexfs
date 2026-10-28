@@ -89,15 +89,14 @@ next `--check` clean.
 The default `executor.d/system.md` treats `executor` as the implementation and
 verification agent:
 independent implementation work should be a delegated `react` node in
-`context/plan.json`. Name `agent` explicitly (`"agent": "executor"`) on those
-nodes. A delegated node that omits `agent` still defaults to `worker`
-(`DEFAULT_DELEGATED_AGENT` in `agent/schedule`); a node that omits `session`
-uses the current parent session name.
+`context/plan.json`. A delegated node that omits `agent` uses `executor`,
+matching the managed reference tree. A node that omits `session` uses the
+current parent session name. The parent policy must still permit
+`agent:executor create`; choosing the default never grants authority.
 
-`worker` is retired from the managed reference tree. Fresh bootstrap does not
-create `/ctx/agent/worker`. An implicit `worker` handoff therefore fails unless
-that leftover object still exists and the parent policy allows
-`agent:worker create`. Prefer naming `executor` in new plans.
+Explicit agent names remain unchanged. Existing plans naming retired `worker`
+continue to require that object and its matching create permission. Update those
+plans to `"agent": "executor"` when migrating a fresh installation.
 Advance one schedule step with:
 
 ```bash
@@ -329,15 +328,27 @@ or calling a vision model happens lazily through a visible tool.
 ## Watch And Attach Terminals
 
 `ctx agent start` mounts the caller's current directory at `/workspace` inside
-the sandbox by default, then starts `ctxterm -> tsh` from `/workspace`. If the
-caller directory contains `.git`, `.git` is additionally over-mounted read-only
-at `/workspace/.git`. The agent's `HOME` is the sandbox's own `/home/agent`, so
-shell configuration and caches are not written into the project directory:
+the sandbox by default, then starts `ctxterm -> tsh` from `/workspace`. A
+read-write `/workspace` keeps ordinary Git metadata writable; CortexFS does not
+implicitly over-mount `.git` read-only. Path-level policy may still make
+`/workspace/.git` read-only. Linked-worktree metadata outside the authorized
+workspace needs a separate mount. The agent's `HOME` is the sandbox's own
+`/home/agent`, so shell configuration and caches are not written into the
+project directory:
 
 ```bash
 ctx agent start executor --session default
 ctx agent watch executor --session default
 ctx agent attach executor --session default
+```
+
+To host an external Agent CLI instead of `tsh`, pass the exact child after
+`--`. That path is one-shot, may receive a writable `/ctx` after FUSE
+validation, and may receive policy-gated pasta egress. See
+[Extending CortexFS](developing-cortexfs.md):
+
+```bash
+ctx agent start executor --session default -- /usr/bin/codex
 ```
 
 The terminal socket lives at:

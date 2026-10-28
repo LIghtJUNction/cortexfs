@@ -28,6 +28,30 @@ Telegram、Discord、Slack 会话还接受 `/help`、`/models`、`/model`、
 `/model PROVIDER/MODEL` 与 `/new`；由 channel bridge 直接回答，不引入平台
 专有 ABI。
 
+### 先授权发送者
+
+所有 IM bridge 默认拒绝消息和事件；必须显式填写可信用户 ID。
+配置缺失或为空时拒绝所有人，包括斜杠命令；`*` 不会开放公共访问。
+获授权的用户可以使用目标 agent 的能力，请仅添加可信账号。
+不同用户的会话历史保持隔离，工具执行权限继续由 agent policy 限定。
+
+| 通道 | 配置位置与示例 | ID 类型 |
+| --- | --- | --- |
+| Telegram | `telegram.env`：`CORTEXFS_CHANNEL_ALLOWED_SENDERS=123456789,987654321` | 自己的 bot 收到的更新中 `message.from.id` 数字用户 ID |
+| Discord Gateway | `discord.toml`：`allowed_senders = ["123456789012345678"]` | 开发者模式下「复制用户 ID」 |
+| Slack Socket Mode | **`slack-driver.env`**：`CORTEXFS_CHANNEL_ALLOWED_SENDERS=U0123456789,W0123456789` | 成员资料中的「复制成员 ID」 |
+| 其他原生通道、webhook、外部 driver | host 环境文件中的 `CORTEXFS_CHANNEL_ALLOWED_SENDERS` | 已认证适配器提供的准确发送者 ID |
+
+请勿填写显示名称、bot ID、应用 ID、聊天 ID 或群组 ID。
+Linux 安装器会在启动通道前询问 ID；留空后服务可以启动，所有 agent 请求均被拒绝。
+已有部署升级后必须补充白名单。配置文件保持 `0600` 权限，修改后重启对应通道；
+Slack 需要重启 driver unit。
+
+授权检查位于进度提示、斜杠命令、会话修改和 agent socket 提交之前。
+获授权用户继续按通道实例、会话、线程、发送者隔离历史。
+无法确认操作者的事件会被拒绝。平台凭据用于认证传输，发送者白名单用于限定调用权限。
+通用 webhook 必须置于已认证的验签代理后并配置 host token，避免接受伪造身份字段。
+
 安装正常的 CortexFS 包后，启动一个 agent 并将 Discord 适配器配置写入一个仅
 所有者可读写的文件：
 
@@ -47,6 +71,8 @@ bot_token = "DISCORD_BOT_TOKEN"
 agent_socket = "/ctx/agent/executor.sock"
 agent = "executor"
 session_prefix = "discord"
+# 必填：可信 Discord 用户 ID；省略或空列表拒绝所有人。
+allowed_senders = ["123456789012345678"]
 ```
 
 在 Discord 开发者门户开启 `MESSAGE_CONTENT` 特权权限后，启动低内存的同步

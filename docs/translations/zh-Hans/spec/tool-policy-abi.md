@@ -1,6 +1,6 @@
 # 工具、共享、策略与日志 ABI
 
-本文件接续 [agent-tool-security.md](./agent-tool-security)。它将工具 ABI、MCP 投影规则、共享空间规则、policy v0 与日志布局与对象放置与 agent 身份、mount 设计分离。
+本文件接续 [agent-tool-security.md](./agent-tool-security.md)。它将工具 ABI、MCP 投影规则、共享空间规则、policy v0 与日志布局与对象放置与 agent 身份、mount 设计分离。
 
 ## 工具作为文件
 
@@ -77,7 +77,7 @@ MCP server 只是工具来源，不是 CortexFS 根对象。不应暴露：
 
 `ctxmcp` 将显式选择的外部 stdio server 投影为普通工具。投影仅写入 v2 manifest 候选；不会安装权限、也不会授予 policy，不会写入 `/ctx`：
 
-`ctxmcp` 宣告稳定 MCP 版本 `2025-11-25`，并仅接受协商后稳定版本 `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`。草案/未知/未来版本拒绝。
+`ctxmcp` 在 stdio 上优先使用最终版 MCP `2026-07-28`：先探测 `server/discover`；成功发现或 `-32022` 响应都保持在 modern 路径，并在每个 modern 请求中发送标准 `_meta`。其他发现错误或有界超时会在同一进程上回退到旧版 `initialize` 生命周期。旧版路径仅接受稳定版本 `2025-11-25`、`2025-06-18`、`2025-03-26` 和 `2024-11-05`；草案、未知及未来版本拒绝。modern 结果必须带 `resultType=complete`；当前未实现 input-required continuation，因此会 fail closed。
 
 ```text
 /ctx/tool/github.search_issues
@@ -549,6 +549,16 @@ allow executor_t network:default connect
 ```
 
 没有 `allow executor_t network:default connect`，则没有网络访问。
+
+`ctx agent start` 启动时始终带 bwrap `--unshare-net`。显式 hosted 命令（`ctx agent start NAME -- COMMAND`）仅在同时满足以下条件时，才用 pasta 用户态网络替换该隔离：
+
+```text
+policy 允许 <subject> network:default connect
+/usr/bin/pasta 是可执行文件
+/dev/net/tun 存在
+```
+
+pasta 以 `/usr/bin/pasta -f -q --config-net --no-map-gw --no-icmp` 启动，且不映射 TCP/UDP 端口（`-t none -u none -T none -U none`）。沙箱会 bind-try `/run/systemd/resolve/resolv.conf`。policy 拒绝、缺少 pasta 或缺少 tun 时保持 `--unshare-net`。无命令的 `tsh` 路径从不启用 pasta。通过 `authorize_network_connect` 的 tool sandbox 是省略 `--unshare-net`，而不是插入 pasta。
 
 权限检查顺序：
 
