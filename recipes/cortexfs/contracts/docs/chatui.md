@@ -1,0 +1,50 @@
+# Chat UI ABI
+
+`ctxchat` is the reference terminal UI. It is separate from the runtime: it
+reads documented `/ctx` files and exchanges newline-delimited JSON with
+`/ctx/agent/<agent>.sock`. UI settings and themes belong in plain files or
+environment variables; the runtime does not require a UI database.
+
+`/ctx/agent/<agent>.sock` may be an owner-authorized runtime symlink or a direct
+socket node depending on deployment. Probe the mounted tree before assuming one
+implementation form; use `readlink -f`/`nc -U` as runtime-sensitive probes.
+
+Durable history lives below
+`/ctx/home/<uid>/agent/<agent>/session/<session>/`: `messages.jsonl` contains
+messages, `events.jsonl` contains events, `latest.md` is a convenience view,
+and `state` is the terminal state.
+
+Minimal Bash clients:
+
+```bash
+printf '%s\n' '{"op":"send","id":"ui-1","session":"default","input":"hello"}' |
+  socat - UNIX-CONNECT:/ctx/agent/executor.sock
+printf '%s\n' '{"op":"tsh","id":"ui-tool-1","session":"default","args":["load","bash"]}' |
+  socat - UNIX-CONNECT:/ctx/agent/executor.sock
+```
+
+Minimal Python client:
+
+```python
+import json, socket
+s = socket.socket(socket.AF_UNIX)
+s.connect("/ctx/agent/executor.sock")
+s.sendall((json.dumps({"op": "send", "id": "py-1", "session": "default",
+                       "input": "hello"}) + "\n").encode())
+s.shutdown(socket.SHUT_WR)
+for line in s.makefile():
+    frame = json.loads(line)
+    print(frame)
+    if frame.get("type") == "done":
+        break
+```
+
+`ctxchat` adds completion, multiline paste, `:tsh` commands, bounded `@path`
+and `@history:N` references, clipboard adapters, and an interactive raw mode.
+Enter `/raw` to toggle JSONL event output, or use `/raw on` and `/raw off` to
+select it explicitly; the same mode is available at startup with `--raw`.
+`/login [provider]` and `/logout [provider]` delegate to the sibling `ctx auth`
+client; without a provider they resolve the provider selected by the agent model.
+Credentials remain in the host credential store and are never written below
+`/ctx`. References are prompt context only and never grant filesystem or tool
+authority.

@@ -2,7 +2,7 @@
 
 > 历史译文：本页保留的是 `84f349c` 源码快照对应的中文规范摘要。当前 `docs/spec/`
 > 文档更新到上游 commit `7261cb3`，描述后续 hosted Agent CLI 迁移；两个快照有差异。
-> 重建旧快照时请使用 [`cortexfs-prompts`](../../../cortexfs-prompts/README.md) 中的完整规范。
+> 重建旧快照时请使用 [CortexFS Recipkg recipe](../../../../recipes/cortexfs/RECIPE.md) 中的完整规范。
 
 本目录是 CortexFS ABI 的规范文档。产品实现已从当前仓库移除。
 

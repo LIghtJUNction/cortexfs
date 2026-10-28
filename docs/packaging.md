@@ -6,7 +6,7 @@ sidebar_label: Linux Packages
 
 > 存档说明：本文描述 CortexFS `v0.1.21` 源码快照中的包格式与安装行为。
 > 当前仓库不再包含构建或安装脚本。重建入口见
-> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
 
 # Linux Packages
 
