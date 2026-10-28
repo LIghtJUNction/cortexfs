@@ -28,3 +28,19 @@ clean state、可读 SKILL/资源，并在推送后验证递归克隆。产品 F
 
 最终检查额外确认：全部 recipe 相对 Markdown 链接可解析，归档文件无执行权限；
 11 个官方技能的 gitlink/remote/HEAD/clean state 一致，原有自定义技能与起始提交逐字一致。
+
+## 新工作区与远程边界
+
+任务分支 `e90302251977335266a630d7fbbc40dc83497b70` 已推送并创建 PR #342。GitHub recipkg topic 已读回，
+原 agent/fuse/linux topics 保留。首次远程递归 clone 连接停滞；改用 HTTP/1.1 后
+仍在 discover-dependencies 子模块遇到 curl 28/expected packfile，在限时内中止。
+因此不宣称完整 GitHub 递归克隆通过。两个失败尝试的临时目录均已删除。
+
+随后从本地固定分支浅克隆到全新临时工作区，使用本次已从 canonical GitHub 取得并
+核对的 11 个技能 checkout 作本地传输镜像，验证全部 gitlink 可初始化、固定提交
+一致、checkout 干净，三个 recipe check 均通过。镜像仅用于该临时工作区传输，
+提交中的 .gitmodules 仍为 canonical GitHub URL。该结果验证隔离克隆与 pin 完整性，
+不替代成功的全远程网络下载。临时镜像 checkout 已删除。
+
+克隆均设置 GIT_LFS_SKIP_SMUDGE=1；媒体不在配方内，未验证媒体下载/播放。
+旧本地观察目录和原 .git/modules 恢复材料保留。
