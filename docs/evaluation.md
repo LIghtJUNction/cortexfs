@@ -5,6 +5,11 @@ description: Run deterministic agent harness contracts and inspect reproducible 
 
 # Evaluate the harness
 
+> Historical instructions: this page describes the harness from the retained
+> `7261cb3` documentation snapshot. The harness, Rust fixtures, and scripts
+> were removed from this docs-only branch, so the commands below cannot run
+> here. The independent prompt targets the earlier `84f349c` source snapshot.
+
 Start with the contracts that make an agent run trustworthy: ordered events,
 bounded context, tool authorization, cancellation, durable history and process
 boundaries. The evaluation environment runs the existing Rust implementations

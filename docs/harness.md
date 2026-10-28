@@ -1,5 +1,9 @@
 # FUSE-first replaceable harness
 
+> 存档说明：本文描述 CortexFS `v0.1.21` 的测试 harness；测试实现已从当前仓库
+> 移除，本文不表示当前测试通过。重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 This is the delivery map for the default harness, not a second filesystem ABI.
 The architectural layers remain those in [architecture.md](architecture.md).
 Normative contracts live in [spec/](spec/README.md).

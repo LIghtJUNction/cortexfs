@@ -1,46 +1,28 @@
-不要使用mod.rs
-请使用cargo add新增依赖，不要手动编辑文件添加依赖
-先去阅读规范（如有）：docs/DESIGN.md（Google Labs visual design system 格式）、docs/architecture.md（工程架构入口）、docs/internal-architecture.md（内部层/crate/错误/迁移）、docs/spec/（规范性 ABI）。
-文件 / 模块 / 函数命名约定见 docs/naming-guide.md（`crates/cortexfs/src` 新模块用内核风格单 token 文件名，禁止 `-`/`_` 作模块 stem，禁止 `mod.rs`；函数仍 `snake_case` 且宜短）。
-模块依赖只允许同层或向下（见 internal-architecture.md §4）；禁止 fuse→executor、support→agent/runtime、library→bin。库内新增错误不要用 `Result<_, String>`；进程本地可用 `ExecError` 一类 shell，稳定领域失败用 enum + Display + Error。
-开发触发事件以 Git commit 为唯一边界；不要新增后台监听、轮询或热加载子命令。
-Git 分支约定：`main` 是默认集成分支；代码修改通常在描述任务的独立分支上完成，并通过 PR 交付。用户授权修改代码后，可按任务需要创建或切换工作分支、提交修改、推送该分支并创建 PR，无需重复确认这些常规步骤；用户另有明确指示时遵从其要求。操作前检查工作区，保留用户已有修改，不覆盖或丢弃无关工作。任务结束时可留在交付分支，并报告分支及 PR 链接，无需强制切回 `main`。直接推送 `main`、强制推送或合并 PR 须获得用户对该动作的明确授权；本约定不替代工具和平台的权限或审批要求。
-文件系统 ABI 只使用当前规范里的短单数顶层目录；不要新增 chan/job/hook/workflow 这类第二套提交或编排入口。
-统一提交语义是：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读取结果，向 audit 追加事实。
+# CortexFS 文档仓库说明
 
-Agent CLI 方向：
+本分支是文档与 ABI 参考仓库；产品源码、测试、示例、构建/安装代码、评估运行器和
+文档站点实现已从跟踪树删除。历史指南中出现的源码路径和命令只描述对应快照，不代表
+当前可执行。
 
-- CortexFS 不再以自研完整 Agent Runtime / Agent Loop 为目标；核心职责收缩为 Unix/FUSE execution boundary。优先复用现成 Agent CLI 自带的 model/tool loop、context compaction、session、provider/auth、streaming 与 approvals，不在 CortexFS 内再造第二套。
-- 一等 CLI 后端至少包括 OpenAI Codex CLI、Anthropic Claude Code 与 `earendil-works/pi`；Google 路线以 Antigravity CLI 为当前扩展目标。Pi 同时是“小核心、可组合、清晰边界”的设计参考，但不是功能清单。
-- 后端差异只能停留在薄 launch profile / adapter；核心优先依赖 Unix/POSIX 进程、cwd、stdio/PTTY、signal、exit status、uid/gid/mode、mount/socket 语义，以及 MCP、OAuth/OIDC、OpenTelemetry 等公开协议。能直接映射就不要新增 CortexFS 私有 wire protocol、manager、registry 或 provider-specific core branch。
-- `cortexfs-protocol`、provider/model adapter、Agent SDK loop、runner/tool loop、compaction/session orchestration 等旧自研 runtime 代码，修改前必须先判断是否仍有独立消费者；只服务旧 runtime 且现成 CLI 已覆盖的部分优先迁移、弃用和删除，不继续补功能。
-- `/ctx` 的 FUSE 挂载整体必须保持正常可读可写，并由 Unix/POSIX 权限与 CortexFS policy 对具体路径收窄；只有语义上不可变或内核独占维护的具体文件/路径才只读。禁止把 backing store 直接以可写 bind 暴露给 Agent 来绕过 FUSE enforcement。
-- Agent 的授权 `rw` workspace 应遵循普通 Unix 子路径语义；不要在通用 execution boundary 中私自隐藏 `.git` 等 CLI 工作所需的项目元数据。需要只读时使用明确的路径级 policy/mount；外部路径（例如 linked worktree 的 out-of-tree gitdir）仍需单独授权。
-- Omarchy 以当前官方 `omacom/omarchy` 为首要桌面/开发环境验证目标，同时保持通用 Arch/Linux 兼容；不要为 Omarchy 品牌本身写特殊核心分支。
-- `agent.sh` 只在新的 CLI harness / integration 边界确实需要时维护，不得演变为第二套 Agent runtime。
+## 文档来源
 
-文档单一真相：`docs/` 是 canonical 源；`docs-site/i18n/en/` 只保留与 canonical 内容不同的真实翻译。禁止复制逐字相同的英文占位文件，缺失条目由 Docusaurus locale fallback 提供。
-Rust 规模统一由 `scripts/source-budget.sh` 门控：新增/变更需遵守 120 行上限、测试底线与 all/prod 预算。
-性能改动必须使用 `.agents/skills/cortexfs-performance`：先建立可复现 release 基线与噪声，收益须超过 `max(3%, 2×noise)` 且满足任务的 p95/RSS 门槛；禁止 `unsafe`、`target-cpu=native`、全局 `target-feature` 和默认 CUDA，任何可选加速都必须保留等价 CPU fallback 与缓存一致性，并由独立 reviewer 审核原始数据和 diff。
+- `docs/` 是 canonical 源。详细 ABI 以 `docs/spec/` 为准；稳定根目录有八项，包含
+  `/ctx/channel/`。
+- 当前保留的文档截至上游 commit `7261cb399ba1f8efa387736938ea3d8eec1a0acb`，记录
+  hosted Agent CLI 迁移方向。
+- `docs/cortexfs-prompts/` 是独立提示词仓库的 Git 子模块。它提取自本任务开始时的本地
+  commit `84f349c97bc2f6a611109686a02e21de3800042a`；它的规范快照描述该版本，不要把后续
+  hosted CLI 文档混进这个重建目标。
+- `docs/translations/zh-Hans/` 只保留真实中文译文。英文 canonical 文档缺少译文时直接引用
+  `docs/` 对应页面，不增加相同英文占位文件。
+- 标注为历史的评估、安装和开发文档可能引用已经删除的程序。不要把它们写成当前可运行或
+  已重新验证的说明。
 
-去重与复用约定：
+## 协作与 Git
 
-- 新增或修改 Rust 逻辑前，先查已有 helper、模块和相邻实现；有 `.codegraph/` 时先用 CodeGraph 定位同义实现，再决定是否写新代码。
-- 新增函数前必须确认没有同义函数；若只是为改名、换错误包装或迁移位置而新增 helper，优先改调用点复用现有实现。
-- 不要复制一段逻辑后只改变量名、错误包装或所在模块；存在等价逻辑时优先复用，确实需要抽取时只抽窄边界 helper。
-- 需要继续减少重复代码时，先使用 `.agents/skills/cortexfs-dry-refactor` 恢复现场、跑 jscpd、统计函数数量，再改代码。
-- 优先复用已有公共 helper：`support::plain`（`support/plain.rs`，含 `create_plain_dir_with`）、`support::path`（`support/path.rs`）、`support::process`（`support/process.rs`，含 `read_limited_bytes`/`read_limited_text`/`terminate_process_group`）、`ControlLineIssue`/`inspect_control_line`（`support/control.rs`）、`PathLayoutIssue`/`LayoutPathRole`/`require_plain`（`support/layout.rs`；共享队列目录用 `require_symlink_dir`）、`support::jsonl`（`support/jsonl.rs`，含 `for_each_jsonl_line`/`parse_jsonl_line`）、`cli/*`、provider registry/route/secret/model alias 相关路径。
-- 领域 report 可用 type alias（如 `AgentControlIssue`/`ToolSchemaIssue` = `ControlLineIssue`，`ObjectLayoutIssue` = `PathLayoutIssue`），不要再复制 EmptyValue/MissingFile/InvalidJson 一类枚举；不要再加 `require_*` 同义薄包装。
-- 只有语义、错误类型、用户可见错误文本、超时/终端/进程行为一致时才合并；否则保留重复实现并说明原因。
-- 不要为了少量重复引入带大量 flag、闭包或泛型的过度抽象；合并后代码必须更短或更容易审计。
-- 禁止新增 `#[path]`、测试 `include!` 模块绕行、兼容模块别名、调用方/领域前缀的共享 helper `use ... as ...`、生产代码 glob import，以及只改名或透传的薄 wrapper。仅允许构建脚本生成的 `OUT_DIR` `include!`、解决 trait/type 名称冲突所必需的别名、为保持旧 flat-suite 共享夹具而冻结在 `src/tests/**` 与 `object/executor/tests/**` 内的测试父模块 glob，以及尚待独立重构且必须保持测试全名和共享词法作用域的既有 `tests/unit/ctx*` flat harness；不得扩大这些例外。
-
-测试约定：
-
-- 构建与测试必须串行：使用 `scripts/serialize-cargo.sh` 或 `scripts/test.sh`；`.cargo/config.toml` 已通过共享 `flock` 锁串行化 `rustc`。禁止同时启动多个 Cargo、Clippy 或测试命令，先等待当前命令结束。
-- FUSE 集成测试挂载点固定使用 `tests/mounts/cortexfs`。
-- 该目录只作为本地测试挂载点，不要在其中放源码、fixture 或持久化数据。
-- provider/model 设计必须保持中立；不要把 Ollama 写成核心默认路径、核心能力或特殊分支。
-- 需要调用真实本地模型做 live test 时，当前测试 fixture 使用 Ollama 模型 `smollm2:135m`。
-- 除本地轻量模型 fixture 外，用户也会使用自己配置的 provider/本地聚合 API 做 live test；这类测试必须走现有 provider registry、route、secret 状态和统一提交语义，不要把具体供应商写成核心默认路径或特殊分支。
-- 默认 live test 不依赖外部云 API；如果 `smollm2:135m` 不存在，先提示用户安装/拉取，不要静默换模型。只有用户明确要求测试自己配置的供应商/聚合 API 时，才使用该已有配置。
+- 文档修改在任务分支完成并通过 PR 交付。不要直接推送 `main`、强制推送或合并 PR，除非
+  用户明确授权。
+- 操作前检查工作区与子模块状态，保留已有改动；不要重置、清理或覆盖无关文件、缓存和
+  本地媒体素材。
+- 更新提示词时在 `docs/cortexfs-prompts/` 子模块自己的仓库中提交，再更新父仓库 gitlink。
+- 新增代码前先确认用户希望恢复实现源码；当前仓库不包含可构建的产品实现。

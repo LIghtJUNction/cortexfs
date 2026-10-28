@@ -1,12 +1,17 @@
 # CortexFS Specification
 
-This directory is the normative CortexFS ABI specification.
+This directory contains the normative ABI documentation retained through
+upstream commit `7261cb399ba1f8efa387736938ea3d8eec1a0acb`. The product
+implementation has been removed from this repository tree. The independent
+reconstruction prompt targets the earlier local source snapshot
+`84f349c97bc2f6a611109686a02e21de3800042a`; see [`../README.md`](../README.md)
+for the distinction.
 
 CortexFS exposes a small Linux filesystem and execution boundary to existing
 Agent CLIs. Paths are ABI. Executable things are files. Control state lives
 next to the object in `<name>.d/`. Stateful interaction uses `<name>.sock`.
 
-The stable shape is:
+The stable root contains exactly these eight entries:
 
 ```text
 /ctx/
@@ -20,7 +25,7 @@ The stable shape is:
   shared/
 ```
 
-Core principles:
+Core boundaries:
 
 ```text
 root is frozen
@@ -132,7 +137,6 @@ implementation take precedence until those sections are removed.
 
 ## External references
 
-- CortexFS normative docs and implementation in this repository.
 - [Model Context Protocol](https://modelcontextprotocol.io/specification/)
 - [Linux FUSE project docs](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
 - [mcp-filesystem implementations](https://github.com/search?q=mcp-filesystem)

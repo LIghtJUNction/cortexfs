@@ -1,6 +1,6 @@
 # Tool, Shared, Policy, and Logs ABI
 
-This file continues [agent-tool-security.md](./agent-tool-security). It keeps
+This file continues [agent-tool-security.md](./agent-tool-security.md). It keeps
 the tool ABI, MCP projection rules, shared-space rules, policy v0, and log
 placement separate from agent identity and mount setup.
 

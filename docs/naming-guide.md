@@ -1,5 +1,9 @@
 # CortexFS Naming Guide
 
+> 存档说明：本文约定适用于已移除的 `v0.1.21` Rust 源码树，不构成提示词重建的
+> 语言或文件布局要求。重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 Durable convention for files, modules, and functions under
 `crates/cortexfs/src`. Taste target: **Linux kernel source style** — short,
 lowercase, single-token module stems; no ornamental separators.

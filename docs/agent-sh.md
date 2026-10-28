@@ -1,5 +1,9 @@
 # agent.sh
 
+> 存档说明：本文描述独立 `agent.sh` 子模块在 CortexFS `v0.1.21` 快照中的行为。
+> 子模块源码已从当前工作树移除；重建提示词见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 `agent.sh` is a tiny Linux defaults frontend for the Rust-owned
 `ctx agent` commands. It is not the CortexFS runtime, a socket protocol
 implementation, a provider SDK, a scheduler, or a private chat database.

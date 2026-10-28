@@ -4,6 +4,10 @@ title: Extending CortexFS
 sidebar_label: Extending CortexFS
 ---
 
+> 存档说明：本文反映 CortexFS `v0.1.21` 源码快照的开发流程。实现、测试和构建
+> 脚本已从当前仓库移除；请将本文作为行为背景。重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 # Extending CortexFS
 
 Start with one rule: CortexFS is a Unix/FUSE execution substrate, not a second

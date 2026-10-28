@@ -2,6 +2,10 @@
 sidebar_position: 5
 ---
 
+> 存档说明：本文描述 CortexFS `v0.1.21` 的渠道行为。渠道实现、安装单元和示例
+> 已从当前仓库移除；重建入口见
+> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+
 # Multi-IM channels
 
 CortexFS exposes IM as a transport around the existing agent session, not as a
