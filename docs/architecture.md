@@ -3,7 +3,7 @@
 > Documentation snapshot: this architecture entry was retained from upstream
 > commit `7261cb3` and describes the hosted Agent CLI migration. Product source
 > has been removed from this repository. The separate
-> [`cortexfs-prompts` package](cortexfs-prompts/BUILD_PROMPT.md) targets the
+> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md) targets the
 > earlier local source commit `84f349c` and does not describe this migration.
 
 Normative ABI detail lives under [spec/](spec/). Visual identity lives in

@@ -6,7 +6,7 @@ sidebar_label: Daily Usage
 
 > 存档说明：本文描述 CortexFS `v0.1.21` 源码快照。当前仓库不含可运行实现；
 > 命令只适用于已安装的历史版本或独立重建环境。重建入口见
-> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
 
 # Daily Usage
 

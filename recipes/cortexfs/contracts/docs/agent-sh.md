@@ -1,0 +1,146 @@
+# agent.sh
+
+`agent.sh` is a tiny Linux defaults frontend for the Rust-owned
+`ctx agent` commands. It is not the CortexFS runtime, a socket protocol
+implementation, a provider SDK, a scheduler, or a private chat database.
+
+It depends on Bash and one `ctx` binary. It does not use `nc`, `jq`, Python,
+Node, npm, Cargo, cloud SDKs, provider clients, package managers, or direct
+provider APIs. All agent protocol behavior stays inside `ctx`.
+
+## Install
+
+Install the repository copy somewhere on `PATH`:
+
+```bash
+install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
+```
+
+Check the installed frontend:
+
+```bash
+agent.sh --help
+```
+
+## Boundary
+
+`agent.sh` is a small defaults wrapper, not an ABI reader. It resolves `ctx`
+and then execs `ctx agent ...` with common defaults such as `--session default`.
+The stable paths below are the CortexFS state that `ctx` reads and writes:
+
+```text
+/ctx/agent/<agent>.sock
+/ctx/agent/<agent>.d/
+/ctx/home/<uid>/agent/<agent>/session/
+/ctx/tool
+/ctx/home/<uid>/tool
+/ctx/shared
+```
+
+In some deployments, `/ctx/agent/<agent>.sock` is an owner-authorized symlink to
+a user runtime socket, and in some deployments it may be a direct socket node.
+Probe the live mount before assuming one implementation form.
+
+`/ctx/tool` is the system tool tier. `/ctx/home/<uid>/tool` is the user's own
+tool tier, not a place for default symlink copies of system tools. An actual
+agent runtime may see a filtered in-memory FUSE projection of these tiers.
+
+It does not use root namespaces such as `provider`, `format`, `cluster`,
+`control`, `thread`, `workflow`, `mcp`, or `skill`.
+## Environment
+
+```bash
+export CTX_ROOT=/ctx
+export CTX_HOME="$CTX_ROOT/home/$(id -u)"
+export CTX_PATH="$CTX_ROOT/tool:$CTX_HOME/tool"
+```
+
+Defaults are derived from the same values when these variables are not set.
+`CTX_PATH` is a list of source tiers; policy, mounts, uid/gid, and mode bits
+still decide what a specific agent may execute.
+
+## Usage
+
+```bash
+agent.sh executor
+agent.sh executor "fix tests"
+agent.sh --chat executor
+agent.sh --attach executor
+agent.sh --watch executor
+agent.sh --session default executor
+agent.sh --resume executor
+agent.sh --history executor
+agent.sh --pack executor
+agent.sh --tools executor
+agent.sh --children executor
+agent.sh --cancel executor
+agent.sh --status executor
+agent.sh --raw executor "prompt"
+```
+
+With no prompt, `agent.sh AGENT` opens the agent chat UI through
+`ctx agent chat AGENT --session default`. With a prompt, it dispatches to
+`ctx agent send AGENT --session default`.
+
+Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
+`agent.sh --attach AGENT` only when you want to join the terminal and see
+`ctxterm -> tsh`.
+
+## Chat And Terminal
+
+`ctxchat` owns line editing, references, clipboard adapters, socket requests,
+and response rendering through the documented file/socket ABI. `ctx agent
+chat` execs `ctxchat`.
+
+Inside the chat shell, `/workspace` prints the host checkout mounted at
+`/workspace`; `/status` prints agent model, lifecycle, role, and workspace;
+`/tools` lists visible CortexFS tools.
+
+`ctx agent send` is the non-interactive path and may stream assistant deltas as
+they arrive.
+
+`ctx agent attach` is a different workflow: it joins the persistent agent PTY.
+That PTY runs `ctxterm -> tsh`; `tsh` is the agent-facing tool shell, not the
+human chat UI.
+
+The socket request shape used by `ctx` is newline-delimited JSON:
+
+```json
+{"op":"send","id":"ctx-...","session":"default","scope":"private","cwd":"/workspace","input":"fix tests"}
+{"op":"tsh","id":"tool-...","session":"default","args":["load","bash"]}
+{"op":"resume","session":"default"}
+{"op":"cancel","id":"run-1"}
+```
+
+Responses are rendered by `ctx agent` as assistant text by default. Pass `--raw`
+to print raw JSONL events.
+
+## Sessions
+
+`agent.sh` never stores private history. It reads the stable session tree:
+
+```text
+$CTX_HOME/agent/<agent>/session/index/current
+$CTX_HOME/agent/<agent>/session/<session>/messages.jsonl
+$CTX_HOME/agent/<agent>/session/<session>/events.jsonl
+$CTX_HOME/agent/<agent>/session/<session>/latest.md
+$CTX_HOME/agent/<agent>/session/<session>/context/
+```
+
+If no session is selected, `index/current` is used when present, otherwise the
+session name is `default`.
+
+Use `ctx agent output <agent>` to print the latest assistant output for the
+selected session. Omitting `--session` follows the same `index/current`, then
+`default` rule.
+
+## Tools And Children
+
+`--tools` lists executable files found through `CTX_PATH` and
+`agent/<agent>.d/path`. It does not decide policy locally.
+
+`--children` reads child task state from:
+
+```text
+$CTX_HOME/agent/<agent>/session/<session>/context/child/
+```

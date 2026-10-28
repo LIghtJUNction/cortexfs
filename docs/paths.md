@@ -6,7 +6,7 @@ sidebar_position: 6
 
 > Snapshot note: path implementation code has been removed. This document
 > preserves the `v0.1.21` path contract; see
-> [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md) for reconstruction.
+> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md) for reconstruction.
 
 cortexfs-paths is the single path-layout crate for CortexFS integrations. It
 is published independently so channel hosts, agent runtimes, SDK extensions,

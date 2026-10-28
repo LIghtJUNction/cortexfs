@@ -5,7 +5,7 @@ sidebar_label: One-file Extensions
 ---
 
 > 存档说明：本文描述 CortexFS `v0.1.21` 的扩展行为。当前仓库不含示例源码或
-> SDK 实现；重建入口见 [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+> SDK 实现；重建入口见 [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
 
 # One-file Extensions
 

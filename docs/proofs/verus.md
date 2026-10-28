@@ -2,7 +2,7 @@
 
 > 存档说明：本文描述 `v0.1.21` 的源码证明与验证命令；证明源码和脚本已移除，
 > 不能据此声称当前仓库完成了证明验证。重建入口见
-> [`cortexfs-prompts`](../cortexfs-prompts/BUILD_PROMPT.md)。
+> [CortexFS Recipkg recipe](../../recipes/cortexfs/BUILD_PROMPT.md)。
 
 CortexFS keeps Verus proofs outside the runtime Cargo workspace. Verus is a
 static verifier distributed as a separate `verus` binary, so normal `cargo

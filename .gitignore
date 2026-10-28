@@ -53,3 +53,6 @@ scripts/__pycache__/
 /inspect_benchmark/agent_benchmark.egg-info/
 /inspect_benchmark/results/
 /inspect_benchmark/**/results/
+
+# Preserved local observation checkout; its deleted remote is no longer a submodule.
+/docs/cortexfs-prompts/

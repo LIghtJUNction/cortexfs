@@ -1,7 +1,7 @@
 # Future AGI evaluation
 
 > 存档说明：本文描述 CortexFS `v0.1.21` 的一次性评估适配器。适配器源码已移除；
-> 重建入口见 [`cortexfs-prompts`](cortexfs-prompts/BUILD_PROMPT.md)。
+> 重建入口见 [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
 
 CortexFS keeps agent execution provider-neutral and records completed sessions
 as ATIF trajectories. The optional `cortexfs-futureagi` adapter connects that
