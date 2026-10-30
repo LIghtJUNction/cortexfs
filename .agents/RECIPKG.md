@@ -15,7 +15,7 @@
 | [build-software-package](skills/build-software-package/SKILL.md) | `ae331d94efddfb3c3caec9761785bbfa5606b3cd` |
 | [discover-dependencies](skills/discover-dependencies/SKILL.md) | `7276d82058494a2d7a012b3d831b2eef36d04f09` |
 | [manage-git-repository](skills/manage-git-repository/SKILL.md) | `96cd5fa8240b193cf077e778e97e8b7323e6e4ff` |
-| [migrate-to-recipkg](skills/migrate-to-recipkg/SKILL.md) | `b120b393696e512e67451c63c40b6925f98c565c` |
+| [migrate-to-recipkg](skills/migrate-to-recipkg/SKILL.md) | `1feb414e49f49cecd7b44edc22b5025bf653ec85` |
 | [prompt-to-software](skills/prompt-to-software/SKILL.md) | `05f6687288e18272391765d0d6b393fc6684aa18` |
 | [rewrite-software](skills/rewrite-software/SKILL.md) | `e8916e28b0748c71c7dec1f78c38351b4f16fb9e` |
 | [rewrite-to-recipkg](skills/rewrite-to-recipkg/SKILL.md) | `51ad3642d6cbf220dd6fd325de0efed979ff20a1` |
