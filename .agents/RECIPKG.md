@@ -11,7 +11,7 @@
 
 | 技能 | 固定 commit |
 | --- | --- |
-| [add-dependency](skills/add-dependency/SKILL.md) | `372ccd8bb4c6e5b35ebefbad41a513e8217527c6` |
+| [add-dependency](skills/add-dependency/SKILL.md) | `bdf96c92bba5c6262e609c506e69e558ecbc8c0e` |
 | [build-software-package](skills/build-software-package/SKILL.md) | `ae331d94efddfb3c3caec9761785bbfa5606b3cd` |
 | [discover-dependencies](skills/discover-dependencies/SKILL.md) | `7276d82058494a2d7a012b3d831b2eef36d04f09` |
 | [manage-git-repository](skills/manage-git-repository/SKILL.md) | `96cd5fa8240b193cf077e778e97e8b7323e6e4ff` |
