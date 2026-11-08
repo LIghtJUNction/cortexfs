@@ -44,8 +44,8 @@ product. Read each page's scope before using an example.
 
 | Source | Use |
 | --- | --- |
-| [`84f349c97bc2f6a611109686a02e21de3800042a`](https://github.com/LIghtJUNction/cortexfs/tree/84f349c97bc2f6a611109686a02e21de3800042a) | Reconstruction baseline (`v0.1.21-10-g84f349c9`). The recipe's [bundled contracts](../recipes/cortexfs/contracts/docs/README.md) define that target. |
-| [`7261cb399ba1f8efa387736938ea3d8eec1a0acb`](https://github.com/LIghtJUNction/cortexfs/tree/7261cb399ba1f8efa387736938ea3d8eec1a0acb) | Last upstream source snapshot represented by `docs/`; it includes the later hosted CLI migration. |
+| [`84f349c`](https://github.com/LIghtJUNction/cortexfs/tree/84f349c97bc2f6a611109686a02e21de3800042a) | Reconstruction baseline (`v0.1.21-10-g84f349c9`). The recipe's [bundled contracts](../recipes/cortexfs/contracts/docs/README.md) define that target. |
+| [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/tree/7261cb399ba1f8efa387736938ea3d8eec1a0acb) | Last upstream source snapshot represented by `docs/`; it includes the later hosted CLI migration. |
 
 Within `docs/`, the detailed English [specification](spec/README.md) takes
 precedence over summaries and older translations. For the current checkout's

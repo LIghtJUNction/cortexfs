@@ -4,47 +4,43 @@ title: 从安装开始
 sidebar_label: 从安装开始
 ---
 
+> 历史操作参考 · 文档截至 [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb)。
+> 产品命令需要对应的历史源码或已安装版本；当前检出只包含文档与配方。
+> [文档目录](README.md) · [重建任务](../../../recipes/cortexfs/BUILD_PROMPT.md)
+
 # 从安装开始
 
-CortexFS 是一个 Linux 文件系统 ABI。先安装它，确认 `/ctx` 可用，
-再转向代理、工具和扩展点。
+本文保留历史版本的安装与首次检查流程。使用当前仓库时，请从
+[重建配方](../../../recipes/cortexfs/RECIPE.md) 开始。
 
 ## 安装
 
-一键安装程序支持当前 Arch、Debian/Ubuntu、Fedora/RHEL 与
-openSUSE/SLES 系列、以 systemd 启动且仓库能提供所需软件包的 Linux：
+源码安装器面向使用 systemd、且发行版仓库提供所需依赖的 Arch、Debian/Ubuntu、
+Fedora/RHEL 与 openSUSE/SLES。它检查 FUSE、bubblewrap 0.10+、Rust 1.91+，
+再按 `Cargo.lock` 构建。安装器及其下载的源码都固定到本文快照：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
+cortexfs_ref=7261cb399ba1f8efa387736938ea3d8eec1a0acb
+curl -fsSL "https://raw.githubusercontent.com/LIghtJUNction/cortexfs/$cortexfs_ref/scripts/install.sh" \
+  | CORTEXFS_REF="$cortexfs_ref" sh
 ```
 
-原生 `.deb`、`.rpm`、Arch 或便携 tar 包见 [Linux 安装包](packaging.md)。
+持久变更需要输入指定文字确认。重复运行会更新程序和单元，保留存储、密钥、
+provider 配置、环境文件及 `/ctx` 用户状态。首次引导可通过已有 provider 命令
+配置模型服务。
 
-要把代理接到 Telegram、Discord、Slack 或飞书/Lark，见
-[多 IM 通道指南](channels.md)。该指南使用现有 agent socket 与耐久会话 ABI，
-因此每次对话仍是多轮的。
-
-安装器会检查发行版、systemd、FUSE、bubblewrap 0.10+ 和 Rust MSRV，
-再用 `Cargo.lock` 在本地构建下载的源码快照。
-每次持久变更都需要精确的类型确认。重复运行是幂等的：更新程序与单元文件，
-同时保留存储、密钥、provider 配置、已有环境文件和 `/ctx` 用户状态。
-真正的首次安装会按系统 locale 选语言，并可通过现有 provider 命令可选接入
-OpenAI、Codex、Anthropic、Google、OpenRouter、DeepSeek、Groq 或任意
-OpenAI 兼容端点。也可用 `cortexfs-channel list|show|preset` 打印 IM 宿主模板。
-
-Arch 用户也可以从 AUR 安装 `cortexfs-git`，启用 `cortexfs.service`，再运行
-`ctx doctor`。
-
-`ctx doctor` 应报告挂载点、基础目录、默认模型别名和代理运行时状态是否可用。
-`ctx --help` 列出当前构建支持的子命令。默认 live test 不依赖外部云 API。
+用 `ctx doctor` 检查挂载、基础目录、默认模型别名及运行时状态；`ctx --help`
+列出已安装版本的命令。原生包见 [Linux 安装包](packaging.md)，IM 接入见
+[多平台通道](channels.md)。
 
 ## 更新主机
 
-先对某个分支、标签或提交做计划，再应用同一钉死修订：
+先检查计划，再应用同一历史源码修订：
 
 ```bash
-ctx update --ref main
-ctx update --ref main --yes
+cortexfs_ref=7261cb399ba1f8efa387736938ea3d8eec1a0acb
+ctx update --ref "$cortexfs_ref"
+ctx update --ref "$cortexfs_ref" --yes
 ```
 
 更新器会构建原生包、保留配置与数据、只重启此前已处于活动状态的 CortexFS 单元，
@@ -72,14 +68,7 @@ ctx help            # 显示简洁 CLI 帮助
 
 ## 认识 `/ctx`
 
-安装后检查根目录：
-
-```bash
-ctx status
-ctx ls
-```
-
-应看到一小组合稳定条目：
+用 `ctx status` 和 `ctx ls` 检查挂载。[根 ABI](spec/root-abi.md) 恰好有八项：
 
 ```text
 status
@@ -87,12 +76,12 @@ bin/
 model/
 agent/
 tool/
+channel/
 home/
 shared/
 ```
 
-这就是核心权衡：根只保留稳定对象类。provider、workflow、数据库、MCP 注册表和
-技能注册表细节不会成为新的顶级 ABI 条目。
+Provider 配置、工作流、数据库、MCP 注册表和技能保留在根命名空间之外。
 
 ## 设置 Shell 环境
 
@@ -148,17 +137,8 @@ ctx agent start executor --session docs \
 
 ## 排查安装问题
 
-`ctx doctor` 为每项 ABI 检查打印一行状态，任一失败则以非零退出。常见行：
-
-```text
-ok root /ctx
-ok status
-ok agent
-ok agent/executor
-ok bootstrap tree_version=9 migrations=retired-agents,rolling-tree,agent-update,current-models,agent-permissions,initial-agents
-stale agent/coder (retired reference agent; run ctx bootstrap --check)
-missing bootstrap state (run ctx bootstrap)
-```
+`ctx doctor` 报告每项 ABI 检查，失败时以非零状态退出。根据报错路径或组件
+选择下一项检查：
 
 | 现象 | 处理 |
 | --- | --- |
@@ -168,7 +148,7 @@ missing bootstrap state (run ctx bootstrap)
 | Hosted CLI 没有网络 | 默认沙箱是 `--unshare-net`。显式 `ctx agent start NAME -- COMMAND` 仅在 policy 允许 `network:default connect`、存在 `/usr/bin/pasta` 与 `/dev/net/tun` 时启用 pasta。Arch 包装 `passt`；Debian/RPM 元数据目前没有。缺少 pasta 或 tun 则保持隔离。 |
 | Hosted CLI 不能写 `/ctx` | 可写 `/ctx` 仅适用于规范 `/ctx` 根上的显式 hosted 命令，且 `findmnt` 确认读写 `fuse`/`fuse.cortexfs` CortexFS 挂载。无命令的 `tsh` 启动仍只读。 |
 | `stale` / `stale-user` 的 `agent/coder` 或 `agent/worker` | 这些名字是退役残留。受管树是 `architect`、`executor`、`product-manager`。`agent/main` 别名指向 `executor`。先 `ctx bootstrap --check`，需要当前树时再 `ctx bootstrap`。不要设置 `agent/coder.d/model`。 |
-| 旧版安装器在 `agent/coder.d/model` 处退出 | 旧版可选引导使用已退役的 `coder`，全新安装时可能在验证前退出。当前安装器已使用 `executor`。重新运行当前安装器，用 `ctx set agent/executor.d/model PROVIDER/MODEL` 绑定已配置的模型，再执行 `ctx doctor`。已有频道应指向 `/ctx/agent/main.sock` 或 `/ctx/agent/executor.sock`。 |
+| 旧版安装器在 `agent/coder.d/model` 处退出 | 旧版可选引导使用已退役的 `coder`，全新安装时可能在验证前退出。固定快照的安装器使用 `executor`。重新运行该安装器，用 `ctx set agent/executor.d/model PROVIDER/MODEL` 绑定已配置的模型，再执行 `ctx doctor`。已有频道应指向 `/ctx/agent/main.sock` 或 `/ctx/agent/executor.sock`。 |
 | `ctx update` 之后缺少 `/ctx` | 更新器只重启事务前已活动的单元，并包含精确的 `cortexfs.service` 名字。如果挂载在事务前就是未活动，请执行 `sudo systemctl start cortexfs.service`。 |
 | `ctx agent start` 连不上 user systemd | 终端路径使用 `systemd-run --user`。请登录到有 user bus 的用户会话；linger 是主机策略，不是 CortexFS ABI。 |
 | `ctx update` 拒绝运行 | 用非 root 登录，并具备 `sudo`、`/dev/tty` 和 `flock`。已安装 helper 是 `/usr/lib/cortexfs/update-linux`，必须保持 root 所有。 |
@@ -180,4 +160,5 @@ missing bootstrap state (run ctx bootstrap)
 
 ## 下一步
 
-继续看 [日常使用](using-cortexfs.md)：`ctx`、`agent.sh`、共享目录和会话历史。
+[日常使用](using-cortexfs.md) 介绍 `ctx`、`agent.sh`、共享目录与会话历史；
+其他主题见 [文档目录](README.md)。

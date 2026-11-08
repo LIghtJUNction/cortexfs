@@ -41,8 +41,8 @@ CortexFS 用 Linux 文件系统接口描述 Agent 的执行边界。本仓库保
 
 | 来源 | 用途 |
 | --- | --- |
-| [`84f349c97bc2f6a611109686a02e21de3800042a`](https://github.com/LIghtJUNction/cortexfs/tree/84f349c97bc2f6a611109686a02e21de3800042a) | 重建基线（`v0.1.21-10-g84f349c9`），以配方的[包内契约](../../../recipes/cortexfs/contracts/docs/README.md)为准。 |
-| [`7261cb399ba1f8efa387736938ea3d8eec1a0acb`](https://github.com/LIghtJUNction/cortexfs/tree/7261cb399ba1f8efa387736938ea3d8eec1a0acb) | `docs/` 所保留的最后上游源码快照，包含后续托管 CLI 迁移。 |
+| [`84f349c`](https://github.com/LIghtJUNction/cortexfs/tree/84f349c97bc2f6a611109686a02e21de3800042a) | 重建基线（`v0.1.21-10-g84f349c9`），以配方的[包内契约](../../../recipes/cortexfs/contracts/docs/README.md)为准。 |
+| [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/tree/7261cb399ba1f8efa387736938ea3d8eec1a0acb) | `docs/` 所保留的最后上游源码快照，包含后续托管 CLI 迁移。 |
 
 `docs/` 内的详细[英文规范](../../spec/README.md)优先于摘要和较早译文。
 当前仓库的工作规则见 [AGENTS.md](../../../AGENTS.md)。配方检查和历史报告分别有

@@ -1,142 +1,73 @@
-# CortexFS Specification
+# ABI specification
 
-This directory contains the normative ABI documentation retained through
-upstream commit `7261cb399ba1f8efa387736938ea3d8eec1a0acb`. The product
-implementation has been removed from this repository tree. The independent
-reconstruction prompt targets the earlier local source snapshot
-`84f349c97bc2f6a611109686a02e21de3800042a`; see [`../README.md`](../README.md)
-for the distinction.
+[Documentation](../README.md) · [简体中文目录](../translations/zh-Hans/spec/README.md) · [Architecture](../architecture.md)
 
-CortexFS exposes a small Linux filesystem and execution boundary to existing
-Agent CLIs. Paths are ABI. Executable things are files. Control state lives
-next to the object in `<name>.d/`. Stateful interaction uses `<name>.sock`.
+These contracts are retained through source snapshot `7261cb3`. Product
+implementation code is absent from this checkout. To reconstruct the earlier
+`84f349c` baseline, use the recipe's [bundled specification](../../recipes/cortexfs/contracts/docs/spec/README.md).
+The [version guide](../README.md#versions-and-authority) identifies both sources.
 
-The stable root contains exactly these eight entries:
+## Read the interface
 
-```text
-/ctx/
-  status
-  bin/
-  model/
-  agent/
-  tool/
-  channel/
-  home/
-  shared/
-```
+An ABI is the observable contract between a client and the runtime: paths,
+file operations, permissions, and message formats. CortexFS exposes executable
+objects as `<name>`, their controls as `<name>.d/`, and stateful interaction as
+`<name>.sock`. Start with [Root ABI](root-abi.md) and [Object ABI](object-abi.md).
 
-Core boundaries:
+The `/ctx` root contains exactly eight entries: `status`, `bin/`, `model/`,
+`agent/`, `tool/`, `channel/`, `home/`, and `shared/`. New provider names,
+protocols, and internal storage choices belong within existing interfaces.
 
-```text
-root is frozen
-root contains stable object classes only
-/ctx is read-write; individual paths may be read-only by Unix/FUSE policy
-Agent CLIs own model/provider auth, session/context, approval UX, and tool loops
-CortexFS policy remains the hard authority ceiling for projected capabilities
-CortexFS owns process, path, mount, identity, network, policy, and FUSE boundaries
-agent objects describe principals and executable boundaries, not a second AI runtime
-tools are executable capability endpoints
-prompt, skill, and project-rule text never grants authority
-provider/API format details do not enter root ABI
-backing storage must never be exposed as a writable bind that bypasses FUSE
-```
+Three rules connect the contracts:
 
-Execution boundary:
+- Unix identity, permissions, mount visibility, and CortexFS policy bound
+  authority. Prompt, skill, and project-rule text cannot expand it.
+- `/ctx` is a read-write FUSE filesystem with per-path restrictions. Writable
+  backing-store binds must never bypass its enforcement.
+- The hosted CLI design assigns model authentication, conversation state, and
+  the tool loop to the CLI. CortexFS owns the process and resource boundary;
+  the [launch contract](../internal-architecture.md) defines the details.
 
-```text
-one backend-neutral process contract: executable/argv, cwd, env, stdio or PTY,
-uid, gid, supplementary groups, umask/mode policy, exit status,
-cancellation/signals, bounded resources, authorized mounts/sockets,
-and policy-derived network namespace / egress authorization
-identity, mount, socket, and network authority derive from the agent object plus CortexFS policy
-backend-specific spelling stays in thin launch profiles/adapters
-Codex CLI, Claude Code, and Pi are first-class target hosted CLIs
-Antigravity CLI is the current Google-side target extension
-MCP and other open protocols are reused directly instead of wrapped in a new wire protocol
-```
+## Find a contract
 
-Implementation status:
+| Document | Contract |
+| --- | --- |
+| [Root ABI](root-abi.md) | Eight root entries, reference tree, and basic file rules |
+| [Paths](paths.md) | Public filesystem/socket names and host path roles |
+| [FUSE](fuse.md) | Filesystem projection and operations |
+| [Objects](object-abi.md) | Executable, socket, and control-directory interface |
+| [Models](model-abi.md) | Compatibility model objects and inference events |
+| [Sessions](session-abi.md) | Durable session facts and indexes |
+| [Agent security](agent-tool-security.md) | Identity, visibility, mounts, and creation |
+| [Agent runtime](agent-runtime.md) | Legacy runtime behavior and migration constraints |
+| [Tools and policy](tool-policy-abi.md) | Tools, MCP projection, permissions, shared state, and audit |
+| [Terminals](terminal-abi.md) | Terminal resources, PTY events, and attachment |
+| [Terminal broker](terminal-broker.md) | Broker authentication and descriptor grants |
+| [Interaction](interaction-abi.md) | Frontend/runtime frames and version compatibility |
+| [Channels](channel-abi.md) | Channel instances, routing, drivers, and host boundary |
+| [Modules](module-abi.md) | Module API and external wire contract |
+| [`ctx` coreutils](ctx-coreutils.md) | Command behavior and output |
+| [Rolling upgrades](rolling-upgrades.md) | Reference-tree updates and storage-generation switching |
 
-```text
-target does not mean fully implemented: generic hosted-CLI launch profiles are still migrating under #318
-current executable agents may still use the legacy sdk-envelope-v1 runtime path
-explicit hosted commands using canonical /ctx receive one writable FUSE projection only after launch-time validation confirms the effective /ctx mount is read-write CortexFS
-legacy no-command /ctx/bin/tsh launches and noncanonical/custom roots remain read-only during migration
-explicit hosted commands keep --unshare-net unless policy allows network:default connect and pasta plus /dev/net/tun are present
-backing storage is never exposed as a writable bind; individual /ctx paths remain attenuated by Unix/FUSE policy
-new work must close the remaining migration gaps instead of presenting missing adapters as available
-```
+## Compatibility and historical conflicts
 
-Compatibility boundary:
+The retained documents span the migration toward hosted Agent CLIs. Legacy
+model, tool, and session contracts record compatibility obligations. Target
+integrations and migration milestones are described in
+[Architecture](../architecture.md); they are not current checkout test results.
 
-```text
-legacy CortexFS model/tool/session runtime behavior remains only where compatibility requires it
-new work must not grow another provider/model/tool-loop/session authority beside hosted CLIs
-legacy runtime pieces are narrowed or retired behind explicit migrations
-stable root/path ABI remains compatible unless a migration spec says otherwise
-```
+One known conflict matters when reading [Agent runtime](agent-runtime.md): its
+implicit read-only `.git` over-mount was removed in the later source snapshot
+by [#320](https://github.com/LIghtJUNction/cortexfs/pull/320). An authorized
+read-write workspace follows ordinary Unix subtree permissions. Explicit
+policy can narrow `.git`, and linked-worktree metadata outside that subtree
+still needs separate authorization.
 
-CortexFS does not define these as root ABI:
-
-```text
-provider registry
-API format registry
-database backend
-vector database backend
-workflow/job/hook DSL
-spawn/factory/agent-template root
-cluster scheduler DSL
-MCP registry root; MCP servers are external config and may project ordinary tools
-skill registry root; skill files are ordinary visible files and grant no authority
-parallel channel alias root such as chan/
-audit root
-control root
-```
-
-Spec files:
-
-```text
-root-abi.md             frozen /ctx root, stable reference tree, and basic file rules
-fuse.md                 FUSE projection shape
-object-abi.md           executable, socket, and .d object triple
-model-abi.md            compatibility model object ABI and event stream
-session-abi.md          durable CortexFS session facts and indexes
-agent-tool-security.md  agent identity, view, mount, and creation
-agent-runtime.md        legacy hosted-runtime compatibility and migration boundary
-module-abi.md           static module API and stable external wire contract
-terminal-abi.md         durable terminal resources, PTY events, and attach
-terminal-broker.md      root broker authentication and descriptor grants
-tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
-ctx-coreutils.md        ctx command contract
-rolling-upgrades.md     rolling reference-tree update and storage switch rules
-channel-abi.md          multi-IM channel crate, routing, and host boundary
-interaction-abi.md      frontend/runtime bidirectional interaction frames
-paths.md                public path constants and filesystem/socket path ABI
-```
-
-`agent-runtime.md` documents compatibility behavior in the current
-implementation. It is not the target architecture for new Agent features.
-Migration toward hosted Agent CLIs is tracked in issue #318; changes to the
-legacy runtime should reduce or preserve its surface, not extend it.
-
-The legacy document still contains historical statements that have already
-been superseded by implementation migrations. In particular, the default
-workspace `.git` read-only over-mount described there was removed by #320: an
-explicitly authorized read-write workspace now keeps ordinary Git metadata
-writable, while path-level policy can still narrow `/workspace/.git` to
-read-only and out-of-tree linked-worktree metadata still requires separate
-authority. Such superseded statements are migration inventory, not preserved
-compatibility requirements.
-
-During #318, [architecture.md](../architecture.md) and
-[internal-architecture.md](../internal-architecture.md) are also being narrowed
-from the former self-hosted Agent-loop design. Any remaining text in those
-documents that assigns provider/model/tool-loop/session authority to CortexFS
-is legacy migration inventory. This specification, `AGENTS.md`, and the current
-implementation take precedence until those sections are removed.
+Detailed English contracts take precedence over summaries and older
+translations. Keep identified conflicts explicit and keep the recipe's fixed
+snapshot separate from later migration decisions.
 
 ## External references
 
-- [Model Context Protocol](https://modelcontextprotocol.io/specification/)
-- [Linux FUSE project docs](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
-- [mcp-filesystem implementations](https://github.com/search?q=mcp-filesystem)
+- [Model Context Protocol specification](https://modelcontextprotocol.io/specification/)
+- [Linux FUSE documentation](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)

@@ -4,57 +4,47 @@ title: Start With Installation
 sidebar_label: Start With Installation
 ---
 
-> 存档说明：本文描述 CortexFS `v0.1.21` 源码快照。当前仓库已移除实现与安装器，
-> 以下命令不能从此 checkout 执行。重建入口见
-> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
+> Historical guide · documentation through [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb).
+> Product commands require the corresponding historical source or installed build;
+> this checkout contains documentation and recipes.
+> [Documentation index](README.md) · [Reconstruction task](../recipes/cortexfs/BUILD_PROMPT.md)
 
 # Start With Installation
 
-CortexFS is a Linux filesystem ABI. Install it first, confirm `/ctx` is usable,
-then move on to agents, tools, and extension points.
+This guide records the historical installation and first checks. For the
+current repository, start with the [reconstruction recipe](../recipes/cortexfs/RECIPE.md).
 
 ## Install
 
-The one-command installer supports current Arch-, Debian/Ubuntu-, Fedora/RHEL-,
-and openSUSE/SLES-family Linux distributions booted with systemd when their
-enabled repositories supply the required packages:
+The source installer targets systemd-based Arch, Debian/Ubuntu, Fedora/RHEL,
+and openSUSE/SLES systems with the required distribution packages. It checks
+FUSE, bubblewrap 0.10+, and Rust 1.91+ before building with `Cargo.lock`.
+Pin both the installer and its source download to the documentation snapshot:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
+cortexfs_ref=7261cb399ba1f8efa387736938ea3d8eec1a0acb
+curl -fsSL "https://raw.githubusercontent.com/LIghtJUNction/cortexfs/$cortexfs_ref/scripts/install.sh" \
+  | CORTEXFS_REF="$cortexfs_ref" sh
 ```
 
-For native `.deb`, `.rpm`, Arch Linux, or portable tar packages, see the
-[Linux packages guide](packaging.md).
+The installer requests typed confirmation for persistent changes. Re-running
+updates programs and units while preserving storage, secrets, provider
+configuration, environment files, and `/ctx` user state. First-install
+onboarding can configure a provider through the existing provider commands.
 
-To connect an agent to Telegram, Discord, Slack, or Feishu/Lark, see the
-[multi-IM channel guide](channels.md). The guide uses the existing agent socket
-and durable session ABI, so each conversation remains multi-turn.
-
-It checks the distribution, systemd, FUSE, bubblewrap 0.10+, and Rust MSRV
-before building the downloaded source snapshot locally with `Cargo.lock`.
-Every persistent mutation has an exact typed confirmation. Re-running is
-idempotent: program and unit files are updated while storage, secrets, provider
-configuration, existing environment files, and `/ctx` user state are
-preserved. A genuine first install chooses a language from the system locale
-and offers optional OpenAI, Codex, Anthropic, Google, OpenRouter, DeepSeek,
-Groq, or OpenAI-compatible onboarding through the existing provider commands.
-It can also print an IM host template through `cortexfs-channel list|show|preset`.
-
-Arch users may alternatively install `cortexfs-git` from the AUR, enable
-`cortexfs.service`, and run `ctx doctor`.
-
-`ctx doctor` should report whether the mount, base directories, default model
-alias, and agent runtime state are available. `ctx --help` lists the
-subcommands supported by the current build. The default live test does not
-depend on an external cloud API.
+Use `ctx doctor` to inspect the mount, base directories, default model alias,
+and runtime state. `ctx --help` lists the installed build's commands.
+Native packages are covered in [Linux Packages](packaging.md); IM setup is in
+[Multi-IM channels](channels.md).
 
 ## Update The Host
 
-Plan against a branch, tag, or commit before applying the same pinned revision:
+Inspect a plan, then apply the same historical source revision:
 
 ```bash
-ctx update --ref main
-ctx update --ref main --yes
+cortexfs_ref=7261cb399ba1f8efa387736938ea3d8eec1a0acb
+ctx update --ref "$cortexfs_ref"
+ctx update --ref "$cortexfs_ref" --yes
 ```
 
 The updater builds a native package, preserves configuration and data, restarts
@@ -85,14 +75,8 @@ PTY, history, and diagnostic operations.
 
 ## Meet `/ctx`
 
-After installation, inspect the root:
-
-```bash
-ctx status
-ctx ls
-```
-
-You should see a small stable set of entries:
+Inspect the mount with `ctx status` and `ctx ls`. The
+[root ABI](spec/root-abi.md) has exactly eight entries:
 
 ```text
 status
@@ -100,13 +84,13 @@ bin/
 model/
 agent/
 tool/
+channel/
 home/
 shared/
 ```
 
-That is the core CortexFS tradeoff: the root keeps only stable object classes.
-Provider, workflow, database, MCP registry, and skill registry details do not
-become new top-level ABI entries.
+Provider configuration, workflows, databases, MCP registries, and skills stay
+outside the root namespace.
 
 ## Set Shell Environment
 
@@ -170,18 +154,8 @@ must also be visible as tools before they can run.
 
 ## Troubleshoot The Install
 
-`ctx doctor` prints one status line per ABI check and exits non-zero when any
-check fails. Typical lines:
-
-```text
-ok root /ctx
-ok status
-ok agent
-ok agent/executor
-ok bootstrap tree_version=9 migrations=retired-agents,rolling-tree,agent-update,current-models,agent-permissions,initial-agents
-stale agent/coder (retired reference agent; run ctx bootstrap --check)
-missing bootstrap state (run ctx bootstrap)
-```
+`ctx doctor` reports each ABI check and exits non-zero on failure. Use the
+reported path or component to choose the next check:
 
 | Symptom | What to do |
 | --- | --- |
@@ -191,7 +165,7 @@ missing bootstrap state (run ctx bootstrap)
 | Hosted CLI has no network | Default sandbox is `--unshare-net`. Explicit `ctx agent start NAME -- COMMAND` enables pasta egress only when policy allows `network:default connect`, `/usr/bin/pasta` exists, and `/dev/net/tun` exists. Arch packages `passt`; Debian/RPM metadata currently omit it. Missing pasta or tun stays isolated. |
 | Hosted CLI cannot write `/ctx` | Writable `/ctx` is only for explicit hosted commands using the canonical `/ctx` root after `findmnt` confirms a read-write `fuse`/`fuse.cortexfs` CortexFS mount. Legacy no-command `tsh` launches stay read-only. |
 | `stale` / `stale-user` `agent/coder` or `agent/worker` | Those names are retired leftovers. The managed tree is `architect`, `executor`, and `product-manager`. `agent/main` aliases `executor`. Run `ctx bootstrap --check`, then `ctx bootstrap` if you want the current tree. Do not set `agent/coder.d/model`. |
-| An older installer stops at `agent/coder.d/model` | Older revisions targeted retired `coder` during optional onboarding and could stop before verification on a clean install. The current installer uses `executor`. Rerun the current installer, bind the configured model with `ctx set agent/executor.d/model PROVIDER/MODEL`, and run `ctx doctor`. Existing channels should point at `/ctx/agent/main.sock` or `/ctx/agent/executor.sock`. |
+| An older installer stops at `agent/coder.d/model` | Older revisions targeted retired `coder` during optional onboarding and could stop before verification on a clean install. The pinned installer uses `executor`. Rerun that installer, bind the configured model with `ctx set agent/executor.d/model PROVIDER/MODEL`, and run `ctx doctor`. Existing channels should point at `/ctx/agent/main.sock` or `/ctx/agent/executor.sock`. |
 | `/ctx` is missing after `ctx update` | The updater restarts only units that were active, including the exact `cortexfs.service` name. If the mount was inactive before the transaction, start it: `sudo systemctl start cortexfs.service`. |
 | `ctx agent start` cannot talk to user systemd | The terminal path uses `systemd-run --user`. Log into a user session that has a user bus; lingering is a host policy, not a CortexFS ABI. |
 | `ctx update` refuses to run | Use a non-root login with `sudo`, `/dev/tty`, and `flock`. The installed helper is `/usr/lib/cortexfs/update-linux` and must stay root-owned. |
@@ -203,5 +177,5 @@ model still needs `ctx provider preset` and `ctx auth login`.
 
 ## Next Step
 
-Continue with [Daily Usage](using-cortexfs.md): `ctx`, `agent.sh`, shared
-directories, and session history.
+Continue with [Daily Usage](using-cortexfs.md) for `ctx`, `agent.sh`, shared
+directories, and session history, or return to the [documentation index](README.md).

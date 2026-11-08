@@ -4,6 +4,10 @@ title: 扩展 CortexFS
 sidebar_label: 扩展 CortexFS
 ---
 
+> 历史操作参考 · 文档截至 [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb)。
+> 产品命令需要对应的历史源码或已安装版本；当前检出只包含文档与配方。
+> [文档目录](README.md) · [重建任务](../../../recipes/cortexfs/BUILD_PROMPT.md)
+
 # 扩展 CortexFS
 
 先记住一条：CortexFS 是 Unix/FUSE 执行基底，不是第二套 Agent 框架。扩展稳定的文件、socket、进程、policy、channel 与 tool 边界；不要新增 root namespace、provider-specific Agent 分支或常驻编排层。
@@ -70,7 +74,9 @@ RW `/workspace` 遵循普通 Unix 子树语义；CortexFS 不再默认隐藏 `.g
 
 ## 托管 Agent CLI
 
-首批目标是 OpenAI Codex CLI、Anthropic Claude Code、`earendil-works/pi`；Antigravity CLI 是当前 Google 路线扩展目标。#318 完成前，这些是目标集成，不表示所有 profile 已随当前 release 提供。
+首批目标是 OpenAI Codex CLI、Anthropic Claude Code、`earendil-works/pi`；
+快照还将 Antigravity CLI 列为 Google 路线扩展目标。迁移记录在 #318，
+这些 launch profile 在本文快照中仍属于目标。
 
 Backend adapter 通常只应该描述：
 
@@ -108,7 +114,7 @@ Agent object 是受 policy 约束的执行 principal，不是 CortexFS-owned AI 
 
 其中一部分仍服务旧 runtime，直到迁移将其删除或收窄。
 
-当前交互式进程链路复用：
+本文快照中的交互式进程链路复用：
 
 ```text
 systemd-run --user
@@ -138,7 +144,8 @@ CortexFS 可以持久化自己真正拥有的事实：process receipt/status、t
 
 ## Provider 与认证
 
-Provider/model adapter、provider registry、CortexFS auth profile 与 `cortexfs-protocol` 是旧消费者的兼容代码，不是新 hosted CLI 的目标所有权模型。
+本文快照保留 Provider/model adapter、provider registry、CortexFS auth profile 与
+`cortexfs-protocol` 以兼容旧消费者。托管 CLI 集成将这些职责交给 CLI。
 
 Codex、Claude Code、Pi、Antigravity 及未来 CLI 应优先使用各自支持的 auth/provider 行为。只有明确集成需求无法通过 CLI 或 Unix/开放协议安全表达时，才新增 CortexFS 边界。
 
@@ -152,7 +159,7 @@ Codex、Claude Code、Pi、Antigravity 及未来 CLI 应优先使用各自支持
 
 ## 验证
 
-常用检查：
+历史源码检出使用的检查：
 
 ```bash
 scripts/test.sh cargo test --workspace
@@ -171,5 +178,6 @@ npm --prefix docs-site run build
 - 不要假设 pasta 一定存在。Arch 包装 `passt`；Debian/RPM 元数据目前没有。缺少 `/usr/bin/pasta` 或 `/dev/net/tun` 时，即便 policy 允许 `network:default connect`，hosted 命令仍保持隔离。
 - Git commit 是唯一开发/配置激活边界；restart 只是生命周期动作。
 - Core 不增加 backend enum；差异留在薄 launch profile。
-- 禁止 `mod.rs` 与 `unsafe`；遵守 `AGENTS.md` 的分层、命名和 source-budget。
+- 禁止 `mod.rs` 与 `unsafe`；分层、命名和 source-budget 见
+  [快照中的开发约束](https://github.com/LIghtJUNction/cortexfs/blob/7261cb399ba1f8efa387736938ea3d8eec1a0acb/AGENTS.md)。
 - FUSE 只能依赖 foundation object/path ABI，不能依赖 executor 或 runtime orchestration。

@@ -4,6 +4,10 @@ title: 日常使用
 sidebar_label: 日常使用
 ---
 
+> 历史操作参考 · 文档截至 [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb)。
+> 产品命令需要对应的历史源码或已安装版本；当前检出只包含文档与配方。
+> [文档目录](README.md) · [重建任务](../../../recipes/cortexfs/BUILD_PROMPT.md)
+
 # 日常使用
 
 CortexFS 的日常使用体验应当像 Unix 一样：先发现对象、读取状态，再在需要执行任务时运行文件或连接套接字。
@@ -258,7 +262,7 @@ tsh help fs.read
 
 ## 使用 agent.sh
 
-仓库仍保留 `agent.sh` 作为 shell 前端：
+历史源码检出中包含 `agent.sh` shell 前端：
 
 ```bash
 install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
