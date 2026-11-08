@@ -42,6 +42,7 @@ IM 适配器通常从 `agent_client_socket` 或显式配置的 runtime contract 
 /ctx/model
 /ctx/agent
 /ctx/tool
+/ctx/channel
 /ctx/home
 /ctx/shared
 ~~~

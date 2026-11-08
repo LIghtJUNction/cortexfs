@@ -4,6 +4,10 @@ title: Linux 安装包
 sidebar_label: Linux 安装包
 ---
 
+> 历史操作参考 · 文档截至 [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb)。
+> 产品命令需要对应的历史源码或已安装版本；当前检出只包含文档与配方。
+> [文档目录](README.md) · [重建任务](../../../recipes/cortexfs/BUILD_PROMPT.md)
+
 # Linux 安装包
 
 CortexFS 为源码安装器支持的 Linux 发行版提供原生包元数据：Arch、Debian/Ubuntu、
@@ -18,7 +22,7 @@ Fedora/RHEL 与 openSUSE/SLES。安装包包含发布二进制文件、systemd �
 源码安装器与 RPM spec 都会构建 `-p cortexfs-agents`，与 Debian、Arch、tar
 负载一致。
 
-使用宿主机原生打包工具从检出目录构建安装包：
+使用宿主机原生打包工具，从历史源码检出目录构建安装包：
 
 ```bash
 ./packaging/build.sh --format deb
@@ -32,7 +36,7 @@ Fedora/RHEL 与 openSUSE/SLES。安装包包含发布二进制文件、systemd �
 路径。
 
 使用系统原生包管理器安装生成的包。文件名使用 `Cargo.toml` 中的 workspace 版本
-（当前为 `0.1.21`）：
+（本文快照为 `0.1.21`）：
 
 ```bash
 # Debian 或 Ubuntu
@@ -82,8 +86,9 @@ Arch `PKGBUILD` 与 Arch 源码安装器软件包计划包含 `passt`。Debian �
 首次安装之后，主机更新使用同一套原生包后端：
 
 ```bash
-ctx update --ref main          # 解析并检查不可变计划
-ctx update --ref main --yes    # 构建、安装、验证或回滚
+cortexfs_ref=7261cb399ba1f8efa387736938ea3d8eec1a0acb
+ctx update --ref "$cortexfs_ref"
+ctx update --ref "$cortexfs_ref" --yes
 ```
 
 成功的 ref 更新会记录跟踪 ref，之后的计划可以省略 `--ref`。本地钉死提交用
@@ -100,8 +105,5 @@ apply 会从钉死检出中 source `scripts/install-linux.sh`，因此 helper �
 egress 还需要 `/usr/bin/pasta` 与 `/dev/net/tun`；这两项目前不是 Debian 或 RPM
 包依赖。
 
-对于仅源代码部署且缺少原生打包构建环境，仍可使用现有安装脚本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
-```
+源码安装见 [固定快照的历史安装器](getting-started.md#安装)。该指南将脚本及其
+下载的源码固定到同一修订。

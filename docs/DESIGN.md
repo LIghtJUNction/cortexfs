@@ -1,375 +1,128 @@
 ---
 version: alpha
-name: CortexFS
-description: >
-  Visual identity for CortexFS — a FUSE filesystem interface. Warm paper
-  surfaces, deep ink type, mint interaction accent, and monospace technical
-  instrumentation.
-  Applied to docs-site, marketing surfaces, and agent-facing HTML demos.
+name: CortexFS documentation
+description: Quiet technical documentation with clear navigation, generous space, and one blue link accent.
 colors:
-  primary: "#111312"
-  secondary: "#66716c"
-  tertiary: "#2A8F73"
-  neutral: "#F7F5F1"
-  surface: "#FFFDFA"
-  surface-panel: "#FFFFFF"
-  surface-coal: "#181B19"
-  on-primary: "#FFFDFA"
-  on-coal: "#FFFDFA"
-  on-coal-muted: "rgba(255, 253, 250, 0.68)"
-  line: "#DED8CA"
-  soft: "#8A948F"
-  amber: "#D28A28"
-  rose: "#B65348"
-  blue: "#3F6FA7"
-  signal: "#D8FF66"
-  ink-hover: "#000000"
+  dark:
+    background: "#0B0B0B"
+    surface: "#171717"
+    text: "#E8EAED"
+    muted: "#A1A1AA"
+    link: "#8AB4F8"
+    line: "#303030"
+  light:
+    background: "#FFFFFF"
+    surface: "#F6F8FA"
+    text: "#202124"
+    muted: "#5F6368"
+    link: "#1967D2"
+    line: "#DADCE0"
 typography:
-  display-lg:
-    fontFamily: Georgia, "Times New Roman", ui-serif, serif
-    fontSize: 72px
-    fontWeight: 600
-    lineHeight: 1.12
-    letterSpacing: 0em
-  headline-lg:
-    fontFamily: Georgia, "Times New Roman", ui-serif, serif
-    fontSize: 58px
-    fontWeight: 600
-    lineHeight: 0.98
-    letterSpacing: 0em
-  headline-md:
-    fontFamily: Georgia, "Times New Roman", ui-serif, serif
-    fontSize: 32px
-    fontWeight: 600
-    lineHeight: 1.1
-    letterSpacing: 0em
-  title-md:
-    fontFamily: Georgia, "Times New Roman", ui-serif, serif
-    fontSize: 22px
-    fontWeight: 600
-    lineHeight: 1.2
-    letterSpacing: 0em
-  body-md:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
-    fontSize: 15px
-    fontWeight: 400
-    lineHeight: 1.65
-  body-sm:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
-    fontSize: 14px
-    fontWeight: 400
-    lineHeight: 1.68
-  doc-body:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
+  body:
+    fontFamily: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
     fontSize: 16px
     fontWeight: 400
-    lineHeight: 1.8
-  doc-body-mobile:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
-    fontSize: 15px
-    fontWeight: 400
-    lineHeight: 1.8
-  label-caps:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
-    fontSize: 12px
-    fontWeight: 900
-    lineHeight: 1
-    letterSpacing: 0.12em
-  label-md:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
+    lineHeight: 1.75
+  heading:
+    fontFamily: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
+    fontSize: 32px
+    fontWeight: 600
+    lineHeight: 1.25
+  code:
+    fontFamily: ui-monospace, SFMono-Regular, Consolas, monospace
     fontSize: 14px
-    fontWeight: 750
-    lineHeight: 1.2
-  mono-md:
-    fontFamily: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace
-    fontSize: 13px
-    fontWeight: 800
-    lineHeight: 1.52
-  mono-sm:
-    fontFamily: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace
-    fontSize: 12px
-    fontWeight: 850
-    lineHeight: 1.4
-  brand-mark:
-    fontFamily: Georgia, "Times New Roman", ui-serif, serif
-    fontSize: 56px
-    fontWeight: 700
-    lineHeight: 1
-    letterSpacing: 0em
-rounded:
-  sm: 6px
-  md: 8px
-  lg: 12px
-  full: 999px
+    fontWeight: 400
+    lineHeight: 1.6
 spacing:
-  xs: 4px
-  sm: 8px
-  md: 16px
-  lg: 24px
-  xl: 32px
-  "2xl": 48px
-  "3xl": 72px
-  gutter: 54px
-  margin: 34px
-  band: 72px
-  content-max: 1320px
-components:
-  button-primary:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.on-primary}"
-    rounded: "{rounded.md}"
-    padding: 10px
-    height: 42px
-    typography: "{typography.label-md}"
-  button-primary-hover:
-    backgroundColor: "{colors.ink-hover}"
-    textColor: "#FFFFFF"
-  button-secondary:
-    backgroundColor: "{colors.surface-panel}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: 10px
-    height: 42px
-    typography: "{typography.label-md}"
-  button-secondary-hover:
-    backgroundColor: "{colors.surface-panel}"
-    textColor: "{colors.primary}"
-  chip-proof:
-    backgroundColor: "transparent"
-    textColor: "{colors.soft}"
-    rounded: "{rounded.md}"
-    padding: 8px
-    typography: "{typography.mono-sm}"
-  card-feature:
-    backgroundColor: "{colors.surface-panel}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: 18px
-  card-step:
-    backgroundColor: "{colors.surface-panel}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: 20px
-  terminal-frame:
-    backgroundColor: "{colors.surface-coal}"
-    textColor: "{colors.on-coal}"
-    rounded: "{rounded.md}"
-    padding: 24px
-  navbar-link:
-    backgroundColor: "transparent"
-    textColor: "{colors.secondary}"
-    rounded: "{rounded.full}"
-    padding: 8px
-    typography: "{typography.label-md}"
-  navbar-link-active:
-    backgroundColor: "color-mix(in srgb, #111312 8%, transparent)"
-    textColor: "{colors.primary}"
-  code-block:
-    backgroundColor: "{colors.surface-panel}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: 16px
-  manifest-band:
-    backgroundColor: "{colors.surface-coal}"
-    textColor: "{colors.on-coal}"
-    padding: 74px
+  unit: 8px
+  mobile-gutter: 20px
+  desktop-gutter: 40px
+  section-gap: 48px
+  reading-width: 76ch
+  page-max: 1120px
+rounded:
+  control: 6px
 ---
 
-# CortexFS DESIGN.md
+# Documentation design
 
-> Snapshot note: the original documentation-site implementation has been
-> removed. These visual tokens remain reference material for rebuilding the
-> documentation surface; see [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md).
+[Documentation](README.md) · [Architecture](architecture.md)
 
-Visual identity for CortexFS surfaces (docs-site, landing, demos). This file
-follows the [DESIGN.md format](https://github.com/google-labs-code/design.md)
-(`version: alpha`): YAML tokens are normative; prose explains how to apply them.
+This guide defines the presentation of the maintained documentation. The
+website implementation is absent; these tokens describe a future renderer.
+GitHub controls its own Markdown appearance. The recipe's
+[earlier visual contract](../recipes/cortexfs/contracts/docs/DESIGN.md) remains
+part of its fixed reconstruction snapshot.
 
-ABI and system architecture are **not** this document. See
-[architecture.md](architecture.md) and [spec/](spec/).
+## Reading comes first
 
-## Overview
+Use one content column, a system sans-serif face, and comfortable line spacing.
+Let headings and whitespace group information. Reserve background panels for
+code or a necessary notice; ordinary paragraphs and navigation need no cards.
 
-CortexFS should feel like a **precision instrument on warm paper** — closer to a
-typeset systems manual and a dark terminal than to a SaaS marketing gradient.
+Keep the opening short: title, one-sentence purpose, useful links, and any
+version boundary that changes how the page should be used. Omit cover art,
+badge walls, promotional slogans, and repeated feature lists from entry pages.
 
-Brand personality:
+## Navigation and content
 
-- **Engineered, not playful.** Kernel-adjacent seriousness; short words; no
-  mascot fluff.
-- **Warm substrate, cold tools.** Paper and limestone neutrals carry long-form
-  reading; coal terminal surfaces carry commands and runtime proof.
-- **One mint accent for life.** Interaction and status use mint; do not invent a
-  rainbow of brand colors.
-- **Type contrast.** Serif headlines for gravitas; Inter for UI and body;
-  monospace for paths, commands, and instrumentation.
+The [documentation index](README.md) groups pages by task: reconstruct,
+understand the design, inspect contracts, and consult historical operations.
+A page should link back to its index and to the next useful reference.
 
-Audience: Linux and systems engineers, agent runtime authors, people who already
-live in shells. UI density should favor scannable grids and readable code over
-illustration-first layouts.
+Give each subject one authoritative home. README introduces the project;
+architecture explains responsibilities; internal architecture records process
+boundaries; the specification owns paths and wire formats. Link to a detailed
+contract instead of copying it into every guide.
 
-Emotional target: calm confidence — “this ABI is small enough to trust.”
+Write one point per paragraph and state it in the first sentence. Use precise
+verbs and define terms before relying on them. Use tables for comparisons and
+lookups, numbered steps for ordered work, and code blocks for copyable commands
+or formats. Keep prose and navigation outside code blocks.
 
-## Colors
+English and Chinese entry pages should offer the same tasks. Translate content
+when a real translation is available; otherwise link to the English original
+and label its language. Preserve page names and heading anchors used by other
+pages, or update their incoming links in the same change.
 
-The palette is high-contrast ink on warm paper, with a single living accent.
+## Theme and layout
 
-- **Primary (#111312) — Ink:** Headlines, body emphasis, primary buttons, focus
-  borders. Maximum permanence on paper.
-- **Secondary (#66716C) — Moss slate:** Captions, secondary nav, muted lead
-  copy. Never competes with ink.
-- **Tertiary (#2A8F73) — Mint:** The sole interactive brand accent — eyebrows,
-  links that mean “live,” brand italic accent, success-adjacent signals.
-- **Neutral (#F7F5F1) — Paper:** Page foundation. Softer than pure white; pairs
-  with limestone lines.
-- **Surface (#FFFDFA) / panel (#FFFFFF):** Raised reading and card surfaces.
-- **Coal (#181B19):** Terminal, demo frames, manifest band. On-coal text is
-  warm off-white (#FFFDFA).
-- **Line (#DED8CA):** Hairline structure; prefer borders over shadows.
-- **Amber / Rose / Blue:** Semantic only (warning, danger, info) — not brand
-  decoration.
-- **Signal (#D8FF66):** Terminal highlight and “live rail” accents on coal only.
+Use the dark tokens for a near-black reading surface and the light tokens for
+white. Respect the reader's chosen theme. Blue identifies links and focus;
+status also needs a text label. Keep borders subtle and limited to places that
+need a separator. Avoid shadows, gradients, floating ornaments, and animated
+backgrounds.
 
-Dark theme inverts paper and ink while keeping mint, amber, rose, and blue as
-semantic accents (see `docs-site/src/css/custom.css`). Agents implementing dark
-mode should preserve token roles, not invent a second brand.
+Keep prose near 76 characters per line and the page within 1120px. Use 20px
+mobile gutters and 40px desktop gutters. Headings may scale from 28px on small
+screens to 32px on larger screens. Use the 8px spacing unit and 48px between
+major sections. Code stays regular weight.
 
-## Typography
+On narrow screens, stack navigation and content. Let wide code and tables
+scroll within their own region while the document stays inside the viewport.
+Use short link labels for commit hashes and paths; the link retains the exact
+reference.
 
-Two narrative voices plus one instrument face:
+## Commands and evidence
 
-- **Display / headlines — Georgia (serif):** Institutional, editorial, manual-
-  like. Large sizes stay semi-bold (600–700), tight line-height, no tracking
-  tricks.
-- **Body / UI — Inter (sans):** 14–15px body, comfortable 1.65–1.68 line-height.
-  Heavy weights (750–900) reserved for labels and nav, not body paragraphs.
-- **Labels — Inter caps:** 12px, weight 900, `0.12em` letter-spacing, uppercase
-  for section eyebrows only.
-- **Mono — system monospace:** Commands, paths, object names (`model`, `agent`,
-  `tool`, `session`), workbench chrome. Prefer weight 800–950 on coal so code
-  reads as instrumentation, not decoration.
+State whether an example applies to this checkout, a historical source
+snapshot, or a reconstruction target. Pin historical download URLs and any
+source revision selected by the downloaded script. Place prerequisites before
+a command and describe its result immediately after it.
 
-Do not introduce a third display family. Do not use monospace for marketing
-headlines.
+Tie product claims to a source contract or an executed result with its version
+and environment. A target, a historical result, and a result from this checkout
+each need their own label. Put that information near the relevant claim.
 
-## Layout
+## Accessibility and review
 
-Desktop is a **fluid grid capped near 1320px** content width with generous
-horizontal rhythm. Hero and band sections use large vertical padding
-(`band` ≈ 72px). Gutters between major columns are wide (`gutter` ≈ 54px).
+Use semantic headings without skipped levels, descriptive link text, and
+visible keyboard focus. Aim for at least 4.5:1 contrast for ordinary text and
+44px interactive targets in a website renderer. Underline links in prose;
+communicate status with words as well as color. Honor reduced-motion settings
+where interaction requires motion.
 
-Spacing scale is 4/8-based: `xs` 4 → `sm` 8 → `md` 16 → `lg` 24 → `xl` 32 →
-`2xl` 48 → `3xl` 72. Prefer these steps over arbitrary pixel values.
-
-Containment: related content lives in panel cards with `md` radius and internal
-padding 18–20px. Feature rails and step grids share the same card language.
-Avoid full-bleed colored hero washes; the page is paper first.
-
-Mobile collapses multi-column hero and feature rails to a single column; primary
-actions may shrink from the wide desktop CTA width.
-
-## Elevation & Depth
-
-Depth is **tonal and linear**, not skeuomorphic:
-
-- Paper vs panel vs coal layers define hierarchy.
-- Hairline borders (`line`) separate regions; shadows are rare and soft when
-  present (e.g. demo stage `0 24px 70px` translucent black).
-- Prefer border-color hover (ink) and 1–2px lift over heavy drop shadows.
-- Terminal and workbench use inset light edges on coal, not outer glow.
-
-Do not stack multiple competing elevations on one surface.
-
-## Shapes
-
-Shape language is **architectural soft-rect**:
-
-- Default containers, code blocks, demo frames, feature cards: **8px** (`md`).
-- Logo marks and tight chips: **6px** (`sm`).
-- Nav pills and flow tags: **full** pill radius.
-- No mixed “bubble UI” on the same screen as sharp engineering chrome.
-- Brand logo tile sits on white with `sm` radius; keep mark legible on paper and
-  coal.
-
-## Components
-
-### Buttons
-
-- **Primary:** Ink fill, warm on-primary text, `md` radius, min-height 42px,
-  heavy label weight. Optional diamond prefix (◆) on the home primary CTA only.
-  Hover → pure black fill / white text.
-- **Secondary / ghost panel:** Panel fill, ink text, line border. Hover
-  strengthens border to ink and lifts 1px. Do not use mint fills for primary
-  conversion actions.
-
-### Nav
-
-Navbar is frosted paper with a bottom line. Links are muted pills; active/hover
-uses a faint ink wash. Brand title may collapse CorTeXfs → CTX → mark; keep
-motion short and ease-out, respect `prefers-reduced-motion`.
-
-### Cards and steps
-
-Feature cards and developer steps share panel + line + `md` radius. Hover =
-ink border + slight lift. Step code regions sit under a hairline with mono
-type. Amber is allowed for step indices and feature codes, not for large fills.
-
-### Terminal / workbench
-
-Coal frames, mint/signal for prompts and live rails, mono instrumentation.
-Traffic-light dots (rose / amber / mint) are chrome only. Transcript labels use
-mint uppercase mono.
-
-### Chips and proof row
-
-Outline chips with soft mono text for object class names. Trust dots may use
-semantic gradients; they are proof ornaments, not a second palette.
-
-### Code blocks
-
-Line border, `md` radius, no heavy shadow. Dark theme code sits on coal with
-lighter border.
-
-### Manifest band
-
-Full coal band, large serif headline, muted on-coal supporting text, single
-underlined text link — the “closing argument” surface.
-
-### Documentation reading and discovery
-
-The handbook is the task directory: install, operate, extend/evaluate, and
-understand. Its search filters guide titles, summaries, paths, and keywords;
-do not imply full-text search. Keep both supported languages complete.
-Group the sidebar by the same user tasks and expose the handbook from every
-document. Keep the specification visible as a first-level category.
-
-Long-form documentation uses 16px body text (15px on narrow screens), 1.8
-line-height, and paragraphs near 76 characters. Technical tables and code
-retain horizontal scrolling on narrow screens. Links inside prose are
-underlined; the active sidebar item has a mint rule in addition to its fill.
-Use built-in copy controls for executable examples, and ensure installation
-and session commands match the current canonical guide. Historical recordings
-must identify retired commands instead of presenting them as current setup.
-
-The handbook uses existing paper/ink/panel tokens and 8px corners, with plain
-rows grouped by task. Search and filters have visible labels and focus states,
-44px minimum targets, a result count, and a recoverable empty state. Native
-links remain usable before client JavaScript is available.
-
-## Do's and Don'ts
-
-- **Do** treat YAML tokens as normative; change CSS only after tokens.
-- **Do** keep mint as the only brand interaction accent on paper surfaces.
-- **Do** put commands, paths, and ABI object names in monospace.
-- **Do** prefer borders and tonal layers over decorative shadows.
-- **Do** maintain WCAG AA contrast for body text on paper and on coal.
-- **Don't** introduce purple SaaS gradients, glassmorphism stacks, or neon
-  multi-accent dashboards.
-- **Don't** use mint or signal as large background fills on paper.
-- **Don't** set marketing headlines in monospace or body copy in Georgia at
-  small sizes.
-- **Don't** mix pill-everything with sharp-everything in one component group.
-- **Don't** put provider logos or API-format branding into the root visual
-  language — CortexFS is vendor-neutral.
-- **Don't** confuse this file with the ABI: system design lives in
-  [architecture.md](architecture.md) and [spec/](spec/).
+Before delivery, check local links and anchors, bilingual scope, readable code
+and tables, and the provenance of changed claims. For a website implementation,
+also inspect narrow and wide viewports in both themes and test keyboard
+navigation. Report only the surfaces that were actually rendered and checked.

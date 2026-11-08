@@ -52,6 +52,7 @@ The frozen top-level entries are exported as ROOT_ENTRIES:
 /ctx/model
 /ctx/agent
 /ctx/tool
+/ctx/channel
 /ctx/home
 /ctx/shared
 ~~~

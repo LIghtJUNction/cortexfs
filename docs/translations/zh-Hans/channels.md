@@ -2,6 +2,10 @@
 sidebar_position: 5
 ---
 
+> 历史操作参考 · 文档截至 [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb)。
+> 产品命令需要对应的历史源码或已安装版本；当前检出只包含文档与配方。
+> [文档目录](README.md) · [重建任务](../../../recipes/cortexfs/BUILD_PROMPT.md)
+
 # 多平台 IM 通道
 
 CortexFS 将 IM 视为现有 agent 会话之上的传输层，而不是新增文件系统命名空间。

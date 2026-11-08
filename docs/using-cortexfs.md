@@ -4,9 +4,10 @@ title: Daily Usage
 sidebar_label: Daily Usage
 ---
 
-> 存档说明：本文描述 CortexFS `v0.1.21` 源码快照。当前仓库不含可运行实现；
-> 命令只适用于已安装的历史版本或独立重建环境。重建入口见
-> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
+> Historical guide · documentation through [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb).
+> Product commands require the corresponding historical source or installed build;
+> this checkout contains documentation and recipes.
+> [Documentation index](README.md) · [Reconstruction task](../recipes/cortexfs/BUILD_PROMPT.md)
 
 # Daily Usage
 
@@ -413,7 +414,7 @@ see `docs/spec/tool-policy-abi.md` for the exact contract.
 
 ## Use agent.sh
 
-The repository still includes `agent.sh` as a shell frontend:
+The historical source checkout included `agent.sh` as a shell frontend:
 
 ```bash
 install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh

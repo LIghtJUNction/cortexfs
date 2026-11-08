@@ -4,9 +4,10 @@ title: Linux Packages
 sidebar_label: Linux Packages
 ---
 
-> 存档说明：本文描述 CortexFS `v0.1.21` 源码快照中的包格式与安装行为。
-> 当前仓库不再包含构建或安装脚本。重建入口见
-> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
+> Historical guide · documentation through [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb).
+> Product commands require the corresponding historical source or installed build;
+> this checkout contains documentation and recipes.
+> [Documentation index](README.md) · [Reconstruction task](../recipes/cortexfs/BUILD_PROMPT.md)
 
 # Linux Packages
 
@@ -23,7 +24,7 @@ Optional packaged adapters include the official Agent SDK role binaries
 `/ctx` roots. The source installer and the RPM spec both build
 `-p cortexfs-agents`, matching the Debian, Arch, and tar payloads.
 
-Build packages from a checkout with the host's native package tools:
+Build packages from the historical source checkout with the host's native tools:
 
 ```bash
 ./packaging/build.sh --format deb
@@ -38,7 +39,7 @@ spec and rebuild from the source archive, which keeps the RPM path suitable for
 Fedora/RHEL build services.
 
 Install the resulting package with the native package manager. Filenames use
-the workspace version from `Cargo.toml` (currently `0.1.21`):
+the workspace version from `Cargo.toml` (`0.1.21` in this snapshot):
 
 ```bash
 # Debian or Ubuntu
@@ -95,8 +96,9 @@ along with `MemoryMax=1G`, `CPUQuota=200%`, and `TasksMax=256`.
 After the first installation, host updates use the same native package backend:
 
 ```bash
-ctx update --ref main          # resolve and inspect the immutable plan
-ctx update --ref main --yes    # build, install, verify, or roll back
+cortexfs_ref=7261cb399ba1f8efa387736938ea3d8eec1a0acb
+ctx update --ref "$cortexfs_ref"
+ctx update --ref "$cortexfs_ref" --yes
 ```
 
 A successful ref update records its tracking ref, so later plans may use
@@ -118,9 +120,5 @@ and bubblewrap 0.10+ before building. Hosted CLI pasta egress additionally
 needs `/usr/bin/pasta` and `/dev/net/tun`; those are not currently a Debian or
 RPM package requirement.
 
-For a source-only deployment with no native package builder, the existing
-installer remains available:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
-```
+For source installation, use the [pinned historical installer](getting-started.md#install).
+That guide fixes both the script and the downloaded source to the same snapshot.

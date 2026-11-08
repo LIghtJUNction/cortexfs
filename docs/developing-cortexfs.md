@@ -4,9 +4,10 @@ title: Extending CortexFS
 sidebar_label: Extending CortexFS
 ---
 
-> 存档说明：本文反映 CortexFS `v0.1.21` 源码快照的开发流程。实现、测试和构建
-> 脚本已从当前仓库移除；请将本文作为行为背景。重建入口见
-> [CortexFS Recipkg recipe](../recipes/cortexfs/BUILD_PROMPT.md)。
+> Historical guide · documentation through [`7261cb3`](https://github.com/LIghtJUNction/cortexfs/commit/7261cb399ba1f8efa387736938ea3d8eec1a0acb).
+> Product commands require the corresponding historical source or installed build;
+> this checkout contains documentation and recipes.
+> [Documentation index](README.md) · [Reconstruction task](../recipes/cortexfs/BUILD_PROMPT.md)
 
 # Extending CortexFS
 
@@ -94,9 +95,9 @@ workspace needs separate authority.
 ## Hosted Agent CLIs
 
 The first target hosted CLIs are OpenAI Codex CLI, Anthropic Claude Code, and
-`earendil-works/pi`; Antigravity CLI is the current Google-side extension target.
-These are target integrations while #318 is in progress, not a claim that every
-launch profile already ships.
+`earendil-works/pi`; the snapshot also names Antigravity CLI as a Google-side
+extension target. Issue #318 records the migration; launch profiles remained
+targets at this snapshot.
 
 A backend adapter should usually be only a launch profile:
 
@@ -153,7 +154,7 @@ loop. Stable compatibility paths include:
 Some of these paths still serve the legacy runtime and remain compatibility
 surface until migration removes or narrows them.
 
-The current interactive path reuses ordinary process machinery:
+The snapshot's interactive path reused ordinary process machinery:
 
 ```text
 systemd-run --user
@@ -171,8 +172,8 @@ child program/argv selection rather than a second runner or backend registry:
 ctx agent start executor --session default -- /usr/bin/codex
 ```
 
-Constraints for that `-- COMMAND` path, verified in
-`crates/cortexfs/src/bin/ctx/agent/sandbox.rs`:
+The [snapshot's sandbox launcher](https://github.com/LIghtJUNction/cortexfs/blob/7261cb399ba1f8efa387736938ea3d8eec1a0acb/crates/cortexfs/src/bin/ctx/agent/sandbox.rs)
+defines these constraints for `-- COMMAND`:
 
 ```text
 Restart= properties are stripped; the child is one-shot
@@ -209,9 +210,9 @@ retire them when the hosted CLI already owns the equivalent state.
 
 ## Providers and authentication
 
-Provider/model adapters, provider registry state, CortexFS auth profiles, and
-`cortexfs-protocol` remain compatibility code for existing consumers. They are
-not the ownership model for new hosted CLI integrations.
+The snapshot retained provider/model adapters, provider registry state,
+CortexFS auth profiles, and `cortexfs-protocol` for compatibility. Hosted CLI
+integrations delegate those responsibilities to the CLI.
 
 For Codex, Claude Code, Pi, Antigravity, and future hosted CLIs, prefer the
 CLI's supported authentication and provider behavior. Only introduce a CortexFS
@@ -233,7 +234,7 @@ new Agent-loop features there when an external hosted CLI can own the behavior.
 
 ## Verification
 
-Common checks:
+Checks recorded for the historical source checkout:
 
 ```bash
 scripts/test.sh cargo test --workspace
@@ -272,8 +273,8 @@ were fixture-based and which were live.
 - **Git commit is the development/config activation boundary.** Process restart
   is lifecycle only and must not activate uncommitted development/config changes.
 - **No backend enum in core.** Backend differences stay in thin launch profiles.
-- **No `mod.rs`; no `unsafe`.** Follow repository naming, layer, source-budget,
-  and dependency rules in `AGENTS.md`.
+- **No `mod.rs`; no `unsafe`.** The [snapshot development rules](https://github.com/LIghtJUNction/cortexfs/blob/7261cb399ba1f8efa387736938ea3d8eec1a0acb/AGENTS.md)
+  record its naming, layering, source-budget, and dependency constraints.
 - **`fuse` must not depend on executors.** FUSE may use foundation object/path
   ABI types, not launch/runtime orchestration.
 - **Docs translations must not contradict canonical docs.** Remove a stale
