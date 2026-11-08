@@ -1,56 +1,42 @@
-# ABI 规范目录
+# ABI 规范归档（历史）
 
-[文档目录](../README.md) · [English](../../../spec/README.md) · [架构](../architecture.md)
+[历史文档目录](../README.md) · [English](../../../spec/README.md) · [当前范围](../../../../PROJECT_SCOPE.md)
 
-英文规范保留至源码快照 `7261cb3`。中文详细译文更新进度不一，部分仍保留较早行为。
-下表同时提供两者入口，查询后续契约时以英文为准。当前仓库没有产品实现。
-重建较早版本请使用配方的[包内规范](../../../../recipes/cortexfs/contracts/docs/spec/README.md)，
-来源与边界见[版本说明](../README.md#版本与依据)。
+> **已退役合同。** 本目录描述截至源码快照 7261cb3 的旧 CortexFS FUSE /ctx 和 Agent
+> runtime 设计，仅为历史追溯保留。它们不是当前接口，也不构成兼容性要求。
+> 早期 84f349c 重建快照有独立的包内规范。
 
-## 理解接口
+## 旧 ABI 描述的内容
 
-ABI 是客户端能够观察和依赖的约定，包括路径、文件操作、权限和消息格式。
-CortexFS 用 `<name>` 表示可执行对象，用 `<name>.d/` 保存控制文件，
-用 `<name>.sock` 处理有状态交互。从根 ABI 与对象 ABI 开始阅读即可。
+旧 ABI 定义路径、文件操作、权限、可执行对象、控制目录、socket 和消息格式。
+其 /ctx 根包含 status、bin、model、agent、tool、channel、home 和 shared 八项。
 
-`/ctx` 根固定为八项：`status`、`bin/`、`model/`、`agent/`、`tool/`、
-`channel/`、`home/`、`shared/`。Provider、协议和内部存储选择沿用现有接口。
+旧设计把模型认证、对话状态和工具循环交给托管 CLI，把进程/资源边界和 FUSE 投影交给
+CortexFS。这些职责均不是下一代产品的已批准要求。
 
-贯穿这些契约的三条规则：
+## 历史合同索引
 
-- Unix 身份、权限、挂载可见性和 CortexFS policy 限定有效权限；提示词、技能和项目规则文本不能增加权限。
-- `/ctx` 整体可读写，各路径可以进一步收窄。禁止通过可写 backing-store bind 绕过 FUSE 的权限检查。
-- 托管 CLI 设计把模型认证、对话状态和工具循环交给 CLI；CortexFS 负责进程与资源边界，细节见[内部架构](../internal-architecture.md)。
+| 历史文档 | 原有主题 |
+| --- | --- |
+| [Root ABI](../../../spec/root-abi.md) | 八项根目录与文件规则 |
+| [Paths](../../../spec/paths.md) | 文件系统/socket 名称与主机路径 |
+| [FUSE](../../../spec/fuse.md) | 文件系统投影与操作 |
+| [Objects](../../../spec/object-abi.md) | 可执行对象、socket 和控制目录 |
+| [Models](../../../spec/model-abi.md) | 模型对象与推理事件 |
+| [Sessions](../../../spec/session-abi.md) | 持久会话事实与索引 |
+| [Agent security](../../../spec/agent-tool-security.md) | 身份、可见性、挂载与创建 |
+| [Agent runtime](../../../spec/agent-runtime.md) | 旧运行时行为 |
+| [Tools and policy](../../../spec/tool-policy-abi.md) | 工具、MCP 投影、权限、共享状态与审计 |
+| [Terminals](../../../spec/terminal-abi.md)、[Terminal broker](../../../spec/terminal-broker.md) | PTY 事件、连接和文件描述符授权 |
+| [Interaction](../../../spec/interaction-abi.md) | 前端/运行时帧 |
+| [Channels](../../../spec/channel-abi.md) | 通道实例与路由 |
+| [Modules](../../../spec/module-abi.md) | 模块 API 与外部 wire 合同 |
+| [ctx coreutils](../../../spec/ctx-coreutils.md) | 旧命令行为与输出 |
+| [Rolling upgrades](../../../spec/rolling-upgrades.md) | 参考树和存储代际更新 |
 
-## 查找契约
+不要为了假设中的产品扩展这些接口。未来任务若确实需要协议，应为该任务编写新的最小合同。
 
-| 英文规范 | 内容 | 中文参考 |
-| --- | --- | --- |
-| [Root ABI](../../../spec/root-abi.md) | 八项根、参考树与文件规则 | [译文](root-abi.md) |
-| [Paths](../../../spec/paths.md) | 文件系统、socket 与主机路径 | [译文](paths.md) |
-| [FUSE](../../../spec/fuse.md) | 文件系统投影与操作 | [译文](fuse.md) |
-| [Objects](../../../spec/object-abi.md) | 可执行文件、socket 与控制目录 | [译文](object-abi.md) |
-| [Models](../../../spec/model-abi.md) | 兼容模型对象与推理事件 | [译文](model-abi.md) |
-| [Sessions](../../../spec/session-abi.md) | 持久会话事实与索引 | [译文](session-abi.md) |
-| [Agent security](../../../spec/agent-tool-security.md) | 身份、可见性、挂载与创建 | [译文](agent-tool-security.md) |
-| [Agent runtime](../../../spec/agent-runtime.md) | 旧运行时行为与迁移约束 | [译文](agent-runtime.md) |
-| [Tools and policy](../../../spec/tool-policy-abi.md) | 工具、MCP、权限与审计 | [译文](tool-policy-abi.md) |
-| [Terminals](../../../spec/terminal-abi.md) | 终端资源、PTY 与连接 | [译文](terminal-abi.md) |
-| [Terminal broker](../../../spec/terminal-broker.md) | broker 认证与描述符授权 | 暂无译文 |
-| [Interaction](../../../spec/interaction-abi.md) | 前端通信帧与兼容性 | [译文](interaction-abi.md) |
-| [Channels](../../../spec/channel-abi.md) | 通道实例、路由与主机边界 | [译文](channel-abi.md) |
-| [Modules](../../../spec/module-abi.md) | module API 与通信契约 | [译文](module-abi.md) |
-| [ctx coreutils](../../../spec/ctx-coreutils.md) | 命令行为与输出 | [译文](ctx-coreutils.md) |
-| [Rolling upgrades](../../../spec/rolling-upgrades.md) | 参考树更新与存储切换 | [译文](rolling-upgrades.md) |
+## 历史参考
 
-## 兼容性与历史差异
-
-旧的 model、tool、session 契约记录兼容义务。托管 CLI 的目标与历史迁移记录见
-[架构](../architecture.md)，产品当前状态需另行执行验证。
-
-阅读 Agent runtime 时注意已知差异：后续源码快照通过
-[#320](https://github.com/LIghtJUNction/cortexfs/pull/320)移除了隐式 `.git` 只读叠挂。
-已授权的可读写工作区遵循普通 Unix 子树权限；显式 policy 可以收窄 `.git`，
-指向工作区外的 linked-worktree 元数据仍需单独授权。
-
-保留已识别的历史差异，并始终区分配方的固定基线与后续迁移设计。
+- [MCP 规范](https://modelcontextprotocol.io/specification/)
+- [Linux FUSE 文档](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
