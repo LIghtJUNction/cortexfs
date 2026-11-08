@@ -1,12 +1,12 @@
 # CortexFS project scope reset
 
-**Status: product direction not selected.** The previous Agent-runtime and Linux /ctx filesystem designs are retired as active product plans. They remain in Git history and the documentation archive only.
+**Status: product direction not selected.** The previous Agent-runtime and Linux /ctx filesystem designs are retired as active product plans. Their documentation and implementation plans have been removed from the current tree; Git history preserves the earlier snapshots.
 
 This reset follows one rule: **do one thing, and do it well.** Do not preserve a feature merely because an earlier design specified it.
 
 ## What the repository contains today
 
-The current default branch contains documentation, ABI descriptions, and reconstruction recipes. It does not contain a buildable product implementation. Therefore, this pass can retire product promises and simplify the documentation entry points; it cannot honestly claim to have removed runtime code that is not present.
+The current default branch is a minimal project shell: scope, contribution rules, license, and entry-point documentation. It does not contain a buildable product implementation. This is intentional while the next user problem is being selected.
 
 ## Retired from the active scope
 
@@ -50,18 +50,18 @@ After the prototype, require real task trials from at least three people in the 
 
 ## Documentation and compatibility policy
 
-- The docs/ and recipes/ directories describe retired designs and historical snapshots. They are references, not active implementation requirements.
+- Previous docs/ and recipes/ contents were historical descriptions of retired designs. They are retained in Git history, not as current project files.
 - Existing ABI documents do not create a requirement to preserve or reimplement the old product.
 - Do not update old contracts to anticipate an unknown product. Write a new, short specification only after a problem passes the decision gates.
-- Keep the old documents available for provenance; do not expose them as the current product roadmap.
+- Keep historical source revisions available for provenance; do not expose them as the current product roadmap.
 - Keep the repository license and useful engineering history.
 
 ## Claim-evidence check
 
 | Claim | Evidence | Status |
 | --- | --- | --- |
-| The current checkout has no buildable product source | Current main README and repository instructions explicitly state that product source, installers, tests, and website implementation were removed | Supported by repository documentation |
-| The previous design is too broad to carry forward unchanged | It includes runtime, model, session, channel, process, FUSE, adapter, installation, and web documentation | Supported by the retained design documents |
+| The current checkout has no buildable product source | The former repository instructions and README explicitly stated that product source, installers, tests, and website implementation had been removed | Supported by repository history |
+| The previous design is too broad to carry forward unchanged | It included runtime, model, session, channel, process, FUSE, adapter, installation, and web subsystems | Supported by the archived tree |
 | A new product direction will have users | No user trials or adoption evidence yet | Not established |
 | A small, dependency-light prototype is feasible | Must be assessed for the specific problem after selection | Needs evidence |
 
