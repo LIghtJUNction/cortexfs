@@ -1,62 +1,25 @@
 # CortexFS
 
-An agent runtime exposed through the Linux filesystem at `/ctx`.
+**CortexFS is in a product reset.** No new product direction has been approved, and this repository contains no buildable product implementation.
 
-[简体中文](README.zh-CN.md) · [Documentation](docs/README.md) · [Reconstruction recipe](recipes/cortexfs/RECIPE.md)
+[简体中文](README.zh-CN.md) · [Project scope](PROJECT_SCOPE.md) · [Historical tree](https://github.com/LIghtJUNction/cortexfs/tree/9ffe10f2905ab13de6e8e2401ae38d499724f2b8)
 
-This repository contains **documentation, ABI contracts, and reconstruction
-recipes**. Product source, installers, tests, and the documentation website
-implementation have been removed. Product commands in the guides are historical
-references.
+The previous Agent runtime, Linux FUSE /ctx interface, process sandbox, model/session system, channels, and MCP infrastructure are retired. Their implementation plans and specifications have been removed from the current tree; Git history preserves the previous work.
 
-## Start here
+## Current work
 
-| I want to… | Read |
-| --- | --- |
-| Understand the interface | [Architecture](docs/architecture.md) |
-| Rebuild the product | [Recipe](recipes/cortexfs/RECIPE.md) → [Build task](recipes/cortexfs/BUILD_PROMPT.md) → [Acceptance](recipes/cortexfs/ACCEPTANCE.md) |
-| Look up a path or protocol | [ABI specification](docs/spec/README.md) |
-| Find a guide | [Documentation index](docs/README.md) |
+Only problem discovery and small feasibility tests are active. Before proposing code, identify one recurring user task, test existing tools, define a small first-use experience, and apply the stop/go gates in [PROJECT_SCOPE.md](PROJECT_SCOPE.md).
 
-## Use this checkout
+There are no product build or installation commands. Do not reconstruct the old product.
 
-After installing the [Recipkg CLI](https://github.com/recipkg/recipkg) separately,
-run these commands from the repository root:
+## Repository contents
 
-```sh
-recipkg check recipes/cortexfs
-recipkg build recipes/cortexfs --lang en
-```
-
-`check` validates recipe structure and references. `build` prints the recursive
-implementation task for a builder to carry out. Product compilation, runtime
-tests, and acceptance remain separate work.
-
-The recipe includes two local dependencies: `cortexfs-agent-shell`, an optional
-thin client, and `software-quality`, the shared engineering requirements.
-Host prerequisites, media, and performance targets are documented in
-[Environment](recipes/cortexfs/ENVIRONMENT.md),
-[Assets](recipes/cortexfs/ASSETS.md), and
-[Performance](recipes/cortexfs/PERFORMANCE.md).
-
-## Two documented versions
-
-| Material | Scope |
-| --- | --- |
-| [`recipes/cortexfs/`](recipes/cortexfs/RECIPE.md) | Reconstruct source snapshot `84f349c` using its bundled contracts. |
-| [`docs/`](docs/README.md) | Product documentation retained through `7261cb3`, including the later hosted Agent CLI design. |
-
-Keep these versions separate when rebuilding. The
-[documentation index](docs/README.md#versions-and-authority) records their full
-source references. [Research](recipes/cortexfs/RESEARCH.md) and
-[improvement requirements](recipes/cortexfs/IMPROVEMENTS.md) identify additional
-acceptance targets; they do not record completed product validation.
+- [PROJECT_SCOPE.md](PROJECT_SCOPE.md): active scope, non-goals, and decision gates.
+- [AGENTS.md](AGENTS.md): contribution rules during the reset.
+- [LICENSE](LICENSE): project license.
 
 ## Contribute
 
-Read [AGENTS.md](AGENTS.md) before editing. Keep ABI details in the specification,
-link to them from guides, and submit changes through a pull request. Shared
-skills and their pinned submodules are described in
-[Recipkg integration](.agents/RECIPKG.md).
+Keep changes small. Do not restore retired subsystems or add generic abstractions before a concrete problem is approved. Work on a branch and submit a pull request; do not push directly to main.
 
-[MIT license](LICENSE) · [Recipe attribution](recipes/cortexfs/LICENSE.md)
+[MIT license](LICENSE)

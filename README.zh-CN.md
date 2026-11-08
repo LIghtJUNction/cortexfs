@@ -1,52 +1,25 @@
 # CortexFS
 
-通过 Linux `/ctx` 文件系统访问 Agent 运行时。
+**CortexFS 正在重新确定产品方向。** 目前没有获批的新产品定位，当前仓库也不包含可构建的产品实现。
 
-[English](README.md) · [文档目录](docs/translations/zh-Hans/README.md) · [重建配方](recipes/cortexfs/RECIPE.md)
+[English](README.md) · [项目范围](PROJECT_SCOPE.md) · [历史版本](https://github.com/LIghtJUNction/cortexfs/tree/9ffe10f2905ab13de6e8e2401ae38d499724f2b8)
 
-本仓库保存**文档、ABI 契约和重建配方**。产品源码、安装器、测试和文档网站实现已移除；
-指南中的产品命令用于查阅历史行为。
+此前的 Agent 运行时、Linux FUSE /ctx 接口、进程沙箱、模型与会话系统、消息通道和 MCP 基础设施均已退役。旧实现方案和规范已从当前目录移除，Git 历史仍保留此前工作。
 
-## 从这里开始
+## 当前工作
 
-| 我想要…… | 阅读 |
-| --- | --- |
-| 理解接口如何工作 | [架构](docs/translations/zh-Hans/architecture.md) |
-| 重建产品 | [配方](recipes/cortexfs/RECIPE.md) → [构建任务](recipes/cortexfs/BUILD_PROMPT.md) → [验收要求](recipes/cortexfs/ACCEPTANCE.md) |
-| 查询路径或协议 | [ABI 规范目录](docs/translations/zh-Hans/spec/README.md) |
-| 查找使用指南 | [文档目录](docs/translations/zh-Hans/README.md) |
+目前只进行问题发现和小规模可行性验证。编写代码前，必须先确定一个反复发生的用户任务，试用现有工具，定义最小首次使用体验，并通过 [PROJECT_SCOPE.md](PROJECT_SCOPE.md) 中的继续/停止条件。
 
-## 使用当前仓库
+当前没有产品构建或安装命令。不要重建旧产品。
 
-单独安装 [Recipkg CLI](https://github.com/recipkg/recipkg) 后，在仓库根目录执行：
+## 仓库内容
 
-```sh
-recipkg check recipes/cortexfs
-recipkg build recipes/cortexfs --lang zh-CN
-```
-
-`check` 校验配方结构和引用；`build` 输出完整的递归实现任务，供构建者执行。
-产品编译、运行测试和验收需要另行完成。
-
-配方包含两个本地依赖：可选薄客户端 `cortexfs-agent-shell` 和共享工程要求
-`software-quality`。主机前提、媒体与性能目标分别见
-[环境](recipes/cortexfs/ENVIRONMENT.md)、[资产](recipes/cortexfs/ASSETS.md)和
-[性能](recipes/cortexfs/PERFORMANCE.md)。
-
-## 两个文档版本
-
-| 材料 | 范围 |
-| --- | --- |
-| [`recipes/cortexfs/`](recipes/cortexfs/RECIPE.md) | 使用包内契约重建源码快照 `84f349c`。 |
-| [`docs/`](docs/translations/zh-Hans/README.md) | 保留至 `7261cb3` 的产品文档，包含后续托管 Agent CLI 设计。 |
-
-重建时分别使用对应版本。[文档目录](docs/translations/zh-Hans/README.md#版本与依据)
-提供完整的来源引用。[研究记录](recipes/cortexfs/RESEARCH.md)和
-[改进要求](recipes/cortexfs/IMPROVEMENTS.md)列出新增验收目标；产品验证需另附执行结果。
+- [PROJECT_SCOPE.md](PROJECT_SCOPE.md)：当前范围、非目标和决策门槛。
+- [AGENTS.md](AGENTS.md)：产品重置期间的协作规则。
+- [LICENSE](LICENSE)：项目许可证。
 
 ## 参与维护
 
-修改前阅读 [AGENTS.md](AGENTS.md)。ABI 细节集中维护在规范中，指南通过链接引用，
-修改通过 PR 交付。共享技能及固定子模块见 [Recipkg 接入说明](.agents/RECIPKG.md)。
+保持改动小而明确。未经具体问题验证，不恢复已退役的子系统，也不增加通用抽象。所有改动在任务分支完成并通过 PR 交付，不直接推送 main。
 
-[MIT 许可](LICENSE) · [配方署名与许可](recipes/cortexfs/LICENSE.md)
+[MIT 许可证](LICENSE)
