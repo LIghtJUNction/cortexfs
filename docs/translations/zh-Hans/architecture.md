@@ -31,7 +31,7 @@ OAuth/OIDC、OpenTelemetry 与 JSON-RPC/SSE/WebSocket。模型认证、审批和
 由托管 CLI 负责。
 
 这些内容只记录旧设计，不是恢复它们的建议。来源见[历史内部架构](internal-architecture.md)
-和 [ABI 归档](../spec/README.md)。
+和 [ABI 归档](spec/README.md)。
 
 ## 状态
 
