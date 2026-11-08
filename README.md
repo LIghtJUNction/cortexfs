@@ -1,23 +1,22 @@
 # CortexFS
 
-**CortexFS is in a product reset.** No new product direction has been approved, and this checkout contains no buildable product implementation.
+**CortexFS is in a product reset.** No new product direction has been approved, and this repository contains no buildable product implementation.
 
-[简体中文](README.zh-CN.md) · [Project scope](PROJECT_SCOPE.md) · [Historical documentation](docs/README.md)
+[简体中文](README.zh-CN.md) · [Project scope](PROJECT_SCOPE.md) · [Historical tree](https://github.com/LIghtJUNction/cortexfs/tree/9ffe10f2905ab13de6e8e2401ae38d499724f2b8)
 
-The previous Agent runtime, Linux FUSE /ctx interface, process sandbox, model/session system, channels, and MCP infrastructure are retired as active plans. Their documents remain for historical reference only; they are not a roadmap or implementation requirements.
+The previous Agent runtime, Linux FUSE /ctx interface, process sandbox, model/session system, channels, and MCP infrastructure are retired. Their implementation plans and specifications have been removed from the current tree; Git history preserves the previous work.
 
 ## Current work
 
 Only problem discovery and small feasibility tests are active. Before proposing code, identify one recurring user task, test existing tools, define a small first-use experience, and apply the stop/go gates in [PROJECT_SCOPE.md](PROJECT_SCOPE.md).
 
-There are no current product build or installation commands. Do not use the old reconstruction recipe to infer the next product.
+There are no product build or installation commands. Do not reconstruct the old product.
 
 ## Repository contents
 
 - [PROJECT_SCOPE.md](PROJECT_SCOPE.md): active scope, non-goals, and decision gates.
-- [docs/](docs/README.md): archived design and ABI documentation.
-- [recipes/](recipes/cortexfs/RECIPE.md): historical reconstruction material for an earlier product snapshot.
 - [AGENTS.md](AGENTS.md): contribution rules during the reset.
+- [LICENSE](LICENSE): project license.
 
 ## Contribute
 
