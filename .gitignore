@@ -1,58 +1,11 @@
-# Rust build output
-/target/
-
-# Node test fixtures and local package installs
-/node_modules/
-
-# Local-only design notes
-/docs/DESIGN.md
-
-# Local FUSE integration-test mount tree.
-# Keep the mountpoint itself in git, but never upload files materialized by the
-# mounted filesystem.
-/tests/mounts/cortexfs/**
-!/tests/mounts/cortexfs/
-
-# Local test/runtime scratch data
-/.cortexfs/
-/.bash_history
-/.cache/
-/.config/
-/.env
-/.env.*
-!/.env.example
-/tmp/
-/ctx
-/dist/
-/evals/harness/__pycache__/
+# Local environment and generated output
+.env
+.env.*
+!.env.example
+.cache/
+.tmp/
+target/
+dist/
+node_modules/
 *.log
 *.pid
-.codegraph
-/.tokensave/
-/.omo/
-# Machine-local coding-agent state
-/.memsearch/
-/.pi/remote-pi/config.json
-/.codensity/
-SWAP.md
-scripts/__pycache__/
-
-# Local video production assets (135 MB+, not part of the source tree)
-/video/
-
-# Preserve local build and benchmark caches from the removed implementations.
-/docs-site/.docusaurus/
-/docs-site/build/
-/docs-site/node_modules/
-/inspect_benchmark/.venv/
-/inspect_benchmark/.pytest_cache/
-/inspect_benchmark/.ruff_cache/
-/inspect_benchmark/**/.ruff_cache/
-/inspect_benchmark/**/__pycache__/
-/inspect_benchmark/**/*.py[cod]
-/inspect_benchmark/agent_benchmark.egg-info/
-/inspect_benchmark/results/
-/inspect_benchmark/**/results/
-
-# Preserved local observation checkout; its deleted remote is no longer a submodule.
-/docs/cortexfs-prompts/
